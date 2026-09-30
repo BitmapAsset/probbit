@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/BitmapAsset/pbit/security/advisories/new
+    about: Report a security problem privately (see SECURITY.md).
+  - name: Questions and ideas
+    url: https://github.com/BitmapAsset/pbit/discussions
+    about: Ask how to model a problem, share results, or discuss the design.

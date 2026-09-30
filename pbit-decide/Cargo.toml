@@ -1,0 +1,11 @@
+[package]
+name = "pbit-decide"
+description = "Joint constrained decision engine: feasible plans, plan odds, marginals, what-if, calibrated refusal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pbit-core = { path = "../pbit-core" }
+pbit-ir = { path = "../pbit-ir" }

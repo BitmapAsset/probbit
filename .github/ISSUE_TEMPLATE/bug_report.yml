@@ -1,0 +1,39 @@
+name: Bug report
+description: A wrong answer, a crash or hang, a verdict that contradicts the docs, or a build failure
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The exact command and what it returned. If the problem JSON fits, paste it; otherwise the `pbit demo` flags and seed that produce it.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Output of `pbit version` and `pbit stats --pretty` (machine, build features, effective controls), plus the OS.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: gate
+    attributes:
+      label: Gate object (if the verdict surprised you)
+      description: The `gate` object from the decision says which check failed (`rhat`, `tv_bound`, `frozen_saturated_workers`, ...).
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I ran it with the default build (no `target-cpu=native`) or said so above.
+        - label: If timing is involved, I noted the machine load (`pbit stats` reports it) and whether other work was running.
