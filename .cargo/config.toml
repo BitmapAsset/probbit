@@ -1,0 +1,7 @@
+# Portable by default: no CPU pin, so a binary built here runs on any CPU of the same target triple
+# (x86_64: baseline x86-64; aarch64-apple-darwin: apple-m1 baseline).
+# Opt-in to the fastest build for THIS machine only (the binary may then crash with an illegal instruction elsewhere):
+#   RUSTFLAGS="-C target-cpu=native" cargo build --release
+# or uncomment the two lines below (they apply to every cargo command in this tree):
+# [build]
+# rustflags = ["-C", "target-cpu=native"]

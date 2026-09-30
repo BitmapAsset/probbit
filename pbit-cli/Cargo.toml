@@ -1,0 +1,16 @@
+[package]
+name = "pbit-cli"
+description = "pbit: a virtual probabilistic (p-bit) processor for certified joint decisions. JSON in, JSON out, zero dependencies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pbit"
+path = "src/main.rs"
+
+[dependencies]
+pbit-core = { path = "../pbit-core" }
+pbit-decide = { path = "../pbit-decide" }
+pbit-ir = { path = "../pbit-ir" }

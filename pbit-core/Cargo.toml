@@ -1,0 +1,9 @@
+[package]
+name = "pbit-core"
+description = "p-bit sampling kernels: bit-sliced multispin (64 lanes/u64) and SoA f32 heat-bath, Philox counter RNG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]

@@ -1,0 +1,31 @@
+name: Feature request
+description: A constraint type, instruction, control, front-end or integration pbit should have
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The decision you are trying to make
+      description: What is being assigned or chosen, what the hard rules are, what the scores mean, and what you need back (a plan, odds, a verdict, a what-if).
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What pbit does today on it
+      description: Where it falls short, with a command if you have one. `USE-CASES.md` lists what is and is not expressed in the current IR (cost budgets and overflow are known gaps).
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The change you have in mind, if any. Benchmarks or oracles that would show it working are a plus.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - pbit-ir (instruction set, exact tiers, sampler, gate)
+        - pbit-decide (router front-end, JSON contract)
+        - pbit CLI (flags, controls, telemetry)
+        - integrations (bindings, MCP, packaging)
+        - docs and benchmarks
