@@ -7,13 +7,15 @@
 //!   pbit demo   [--tasks N] [--seed N] [--hard] # emit an agent-routing problem as JSON; --hard = tight quotas + strong affinity
 //!   pbit ir [--max-input-mb N]                # emit the problem in pbit-ir v0 (the hardware-facing text form)
 //!   pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--pretty]  # a general pbit-ir JSON program
-//!   --progress [MS] (decide, run): one JSONL telemetry line on stderr every MS ms (default 100) while the decision runs
+//!   pbit evaluate [run's flags] [--program]  # the decision-API adapter: a System One request + the judge's answers + rules -> the joint answer
+//!   --progress [MS] (decide, run, evaluate): one JSONL telemetry line on stderr every MS ms (default 100) while the decision runs
 //!   pbit stats [--sweeps N]                  # the processor's spec sheet: machine, build, effective controls + source, measured updates/s
-//!   pbit mcp                                 # a Model Context Protocol server on stdio (tools pbit_decide, pbit_run, pbit_stats, pbit_demo)
+//!   pbit mcp                                 # a Model Context Protocol server on stdio (tools pbit_decide, pbit_run, pbit_stats, pbit_demo, pbit_evaluate)
 //!   pbit version
 //!   pbit <command> --help | -h               # usage, every flag with its default, exit codes
 //!   pbit --help | -h                          # the usage above (stdout, exit 0); at a terminal the hero screen
 //!   --top, --summary (decide, run), --live (demo), --plain: see `pbit <command> --help`; visuals go to stderr (theme.rs)
+mod evaluate;
 mod json;
 mod mcp;
 mod run;
@@ -231,6 +233,7 @@ fn flags_of(cmd: &str) -> (Vec<&'static str>, Vec<&'static str>) {
     match cmd {
         "decide" => ([&SEARCH[..], &CONTROLS[..], &["--mode", "--max-input-mb"]].concat(), vec!["--pretty", "--progress", "--summary", "--top", "--plain"]),
         "run" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms", "--max-input-mb"]].concat(), vec!["--pretty", "--progress", "--summary", "--top", "--plain"]),
+        "evaluate" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms", "--max-input-mb"]].concat(), vec!["--pretty", "--progress", "--summary", "--top", "--plain", "--program"]),
         "stats" => ([&CONTROLS[..], &["--sweeps"]].concat(), vec!["--pretty", "--plain"]),
         "demo" => (vec!["--tasks", "--seed"], vec!["--hard", "--live", "--plain"]),
         "ir" => (vec!["--max-input-mb"], vec!["--plain"]),
@@ -238,7 +241,7 @@ fn flags_of(cmd: &str) -> (Vec<&'static str>, Vec<&'static str>) {
     }
 }
 /// One line per flag for `help` (R19.8, P3.1); `help` panics on a flag without a line (test `every_command_has_help`).
-const FLAG_HELP: [(&str, &str); 28] = [
+const FLAG_HELP: [(&str, &str); 29] = [
     ("--budget-ms", "N    sampler wall-clock budget, ms (default 200)"), ("--seed", "N    random seed (default 7)"),
     ("--exact-limit", "N    plans the exact enumeration may count before it declines (default 2000000)"),
     ("--exact-ms", "N    wall-clock cap on the exact tiers that run before the sampler (opt-in; absent = no cap)"),
@@ -259,16 +262,18 @@ const FLAG_HELP: [(&str, &str); 28] = [
     ("--top", "live monitor on stderr while it runs (tier, sweeps, updates/s, CPU, peak RSS, gate; 10 Hz), erased at exit;\n      only with a terminal on stderr; stdout unchanged"),
     ("--live", "the router story on stderr: exact tiers, then a live field of p-bits from the real chains, the gate, the verdict\n      (default when stdout and stderr are both terminals; --tasks defaults to 300; stdout, if not a terminal, gets the JSON problem)"),
     ("--plain", "no colour, no animation (as NO_COLOR=1 or PBIT_THEME=plain); output otherwise unchanged"),
+    ("--program", "print the compiled pbit-ir program instead of running it (`pbit evaluate --program | pbit run` = the same answer)"),
 ];
 /// `pbit <command> --help` / `-h` (R19.8, P3.1): what it does, every flag it accepts, exit codes. None = not a command.
 fn help(cmd: &str) -> Option<String> {
     let (what, usage) = match cmd {
         "decide" => ("Route tasks to workers: a router document (workers + caps, tasks + allowed + scores, affinity; README) on stdin,\n  a JSON decision on stdout. Exact where structure allows, else sampled with the diagnostics gate.", "pbit decide [flags] < router.json"),
         "run" => ("Run a pbit-ir program (variables, values, scores, rules; docs/pbit-ir-json.md) on stdin; JSON answer on stdout.", "pbit run [flags] < program.json"),
+        "evaluate" => ("The decision-API adapter: a System One request (questions noul | choice | score) plus a \"pbit\" block (the judge's\n  answers, rules over question ids) on stdin; the rule-abiding joint answer in the judge's response shape, odds per question\n  and the gate's verdict on stdout. Every `pbit run` flag applies. docs/pbit-ir-json.md \"Decision API\".", "pbit evaluate [flags] < request.json"),
         "demo" => ("Emit a synthetic agent-routing document (JSON) for `pbit decide`.", "pbit demo [flags] > router.json"),
         "ir" => ("Print a router document as pbit-ir v0 text (the hardware-facing form).", "pbit ir < router.json"),
         "stats" => ("The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.", "pbit stats [flags]"),
-        "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools pbit_decide,\n  pbit_run, pbit_stats, pbit_demo: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "pbit mcp"),
+        "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools pbit_decide,\n  pbit_run, pbit_stats, pbit_demo, pbit_evaluate: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "pbit mcp"),
         "version" => ("Print the version.", "pbit version"), _ => return None };
     let (vals, sw) = flags_of(cmd); let mut h = format!("usage: {usage}\n  {what}\n");
     if !vals.is_empty() || !sw.is_empty() { h.push_str("flags:\n"); }
@@ -276,8 +281,8 @@ fn help(cmd: &str) -> Option<String> {
         let d = if cmd == "stats" && *f == "--sweeps" { "N    sweeps of the throughput measurement (default 2000)" }
             else { FLAG_HELP.iter().find(|(k, _)| k == f).unwrap_or_else(|| panic!("no help line for {f}")).1 };
         h.push_str(&format!("  {f} {d}\n")); }
-    if ["decide", "run", "stats"].contains(&cmd) { h.push_str("controls: flag > PBIT_* environment > pbit.json > default.\n"); }
-    if ["decide", "run"].contains(&cmd) { h.push_str("exit: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object\n  on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.\n"); }
+    if ["decide", "run", "evaluate", "stats"].contains(&cmd) { h.push_str("controls: flag > PBIT_* environment > pbit.json > default.\n"); }
+    if ["decide", "run", "evaluate"].contains(&cmd) { h.push_str("exit: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object\n  on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.\n"); }
     Some(h)
 }
 const SEARCH: [&str; 11] = ["--budget-ms", "--seed", "--exact-limit", "--exact-ms", "--frontier-states", "--polish-ms", "--polish-sweeps", "--sweeps", "--collective", "--cluster", "--cycles"];
@@ -609,6 +614,33 @@ pub(crate) fn demo_doc(n: usize, seed: u64, hard: bool) -> Json {
         ("affinity", num(if hard { 2.5 } else if n <= 12 { 0.8 } else { 1.2 })), ("workers", Json::Arr(workers)), ("tasks", Json::Arr(tasks))])
 }
 
+/// `pbit run` on a parsed program (also `pbit evaluate`'s compiled one): the flags, the instruction, `phases` appended.
+/// -> (document, exit code, per-variable error bars for `--summary`)
+fn run_program(args: &[String], mut p: run::Prog, cmd: &'static str, tp: std::time::Instant, parse_ms: f64, compile_ms: f64) -> (Json, i32, Vec<f64>) {
+    p.m.collective = collective_arg(args); p.m.cluster = cluster_arg(args); p.m.cycles = cycles_arg(args);
+    priority(args); let (chains, threads, cpu_pct) = controls(args); let top = top_wanted(args);
+    let op: String = arg(args, "--op", "decide".to_string()); if !["decide", "exact", "sample"].contains(&op.as_str()) { fail("--op must be decide, exact or sample"); }
+    let mon = monitor(args, p.m.n); let dl = deadline_ms(args);
+    if dl.is_some() && arg::<usize>(args, "--sweeps", 0) > 0 { fail("--deadline-ms needs a wall-clock budget: drop --sweeps"); }
+    if let Some(th) = top { tui::tier("exact tiers"); tui::top_start(th, tui::TopSpec { cmd, vars: p.m.n, chains, threads: threads.clamp(1, chains), budget_ms: budget_ms(args), sweeps: arg(args, "--sweeps", 0), deadline_ms: dl }); }
+    let mut bars = vec![];
+    let (mut doc, code) = run::run(&p, &op, budget_ms(args), arg(args, "--seed", 7), arg(args, "--exact-limit", 2_000_000), polish_ms_arg(args), arg(args, "--polish-sweeps", 0), arg(args, "--sweeps", 0), arg(args, "--frontier-states", pbit_ir::FRONTIER_MAX_STATES),
+        chains, threads, cpu_pct, mem_limit(args, chains, p.m.n), exact_ms(args), dl.map(|d| (tp, d, args.iter().any(|a| a == "--budget-ms"))), &mut bars); drop(mon); run::phases(&mut doc, parse_ms, compile_ms, dl);
+    (doc, code, bars)
+}
+/// `pbit evaluate`: a System One request + `pbit` block on stdin -> the compiled program (`evaluate::compile`) -> `pbit run`'s
+/// instruction with every `run` flag -> the System-One-shaped answer plus the pbit document (`evaluate::respond`). `--program`
+/// prints the compiled pbit-ir program instead (`pbit evaluate --program | pbit run` gives the same answer).
+fn evaluate_cmd(args: &[String]) {
+    let (v, w) = flags_of("evaluate"); check_flags(args, &v, &w); let tp = std::time::Instant::now(); let j = read_doc(args);
+    let tc = std::time::Instant::now(); let parse_ms = (tc - tp).as_secs_f64() * 1e3;
+    let r = evaluate::compile(&j).unwrap_or_else(|e| bad_input("bad request: ", e));
+    if args.iter().any(|a| a == "--program") { emit(&json::write(&r.program, args.iter().any(|a| a == "--pretty"))); return; }
+    let p = run::from_json(&r.program).unwrap_or_else(|e| bad_input("bad request: ", evaluate::locate(e))); let compile_ms = tc.elapsed().as_secs_f64() * 1e3;
+    let (doc, code, bars) = run_program(args, p, "evaluate", tp, parse_ms, compile_ms);
+    let c = finish(evaluate::respond(&r, doc), code, &View::new(args, "evaluate"), &bars); if c != 0 { std::process::exit(c); }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() >= 2 && args[1..].iter().any(|a| a == "--help" || a == "-h") { if let Some(h) = help(&args[0]) { emit_raw(&h); return; } }
@@ -623,16 +655,10 @@ fn main() {
             let n = from_json(&j).unwrap_or_else(|e| bad_input("bad problem: ", e)); emit_raw(&pbit_decide::ir::to_ir(&n.p)); }
         Some("run") => { let (v, w) = flags_of("run"); check_flags(&args, &v, &w); let tp = std::time::Instant::now(); let j = read_doc(&args);
             let tc = std::time::Instant::now(); let parse_ms = (tc - tp).as_secs_f64() * 1e3;
-            let mut p = run::from_json(&j).unwrap_or_else(|e| bad_input("bad program: ", e)); let compile_ms = tc.elapsed().as_secs_f64() * 1e3; p.m.collective = collective_arg(&args); p.m.cluster = cluster_arg(&args); p.m.cycles = cycles_arg(&args);
-            priority(&args); let (chains, threads, cpu_pct) = controls(&args); let top = top_wanted(&args);
-            let op: String = arg(&args, "--op", "decide".to_string()); if !["decide", "exact", "sample"].contains(&op.as_str()) { fail("--op must be decide, exact or sample"); }
-            let mon = monitor(&args, p.m.n); let dl = deadline_ms(&args);
-            if dl.is_some() && arg::<usize>(&args, "--sweeps", 0) > 0 { fail("--deadline-ms needs a wall-clock budget: drop --sweeps"); }
-            if let Some(th) = top { tui::tier("exact tiers"); tui::top_start(th, tui::TopSpec { cmd: "run", vars: p.m.n, chains, threads: threads.clamp(1, chains), budget_ms: budget_ms(&args), sweeps: arg(&args, "--sweeps", 0), deadline_ms: dl }); }
-            let mut bars = vec![];
-            let (mut doc, code) = run::run(&p, &op, budget_ms(&args), arg(&args, "--seed", 7), arg(&args, "--exact-limit", 2_000_000), polish_ms_arg(&args), arg(&args, "--polish-sweeps", 0), arg(&args, "--sweeps", 0), arg(&args, "--frontier-states", pbit_ir::FRONTIER_MAX_STATES),
-                chains, threads, cpu_pct, mem_limit(&args, chains, p.m.n), exact_ms(&args), dl.map(|d| (tp, d, args.iter().any(|a| a == "--budget-ms"))), &mut bars); drop(mon); run::phases(&mut doc, parse_ms, compile_ms, dl);
+            let p = run::from_json(&j).unwrap_or_else(|e| bad_input("bad program: ", e)); let compile_ms = tc.elapsed().as_secs_f64() * 1e3;
+            let (doc, code, bars) = run_program(&args, p, "run", tp, parse_ms, compile_ms);
             let c = finish(doc, code, &View::new(&args, "run"), &bars); if c != 0 { std::process::exit(c); } }
+        Some("evaluate") => evaluate_cmd(&args),
         Some("stats") => stats_cmd(&args),
         Some("mcp") => { check_flags(&args, &[], &[]); mcp::serve() }
         Some("version") | Some("--version") | Some("-V") => { check_flags(&args, &[], &[]); emit(&format!("pbit {VERSION}")) }
@@ -641,4 +667,4 @@ fn main() {
         _ => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
     }
 }
-const USAGE: &str = "usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard] [--live]\n       pbit ir [--max-input-mb N] < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit mcp   (Model Context Protocol server on stdio)\n       pbit version\n       pbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";
+const USAGE: &str = "usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard] [--live]\n       pbit ir [--max-input-mb N] < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit mcp   (Model Context Protocol server on stdio)\n       pbit version\n       pbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";

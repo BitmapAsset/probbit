@@ -1,0 +1,58 @@
+{
+  "model": "jev-latest",
+  "state": {"subject": "Checkout down, charged twice", "message": "Your checkout has failed for an hour and I was charged twice. Refund me now or I cancel. Card ending 4242."},
+  "questions": {
+    "urgent": {"type": "noul", "instructions": "Is this request urgent?"},
+    "team": {"type": "choice", "instructions": "Which team owns it?", "criteria": {"billing": "Payments, invoices, refunds", "technical": "Outages, errors, configuration", "sales": "Plans and upgrades", "security": "Account takeover, fraud, data exposure"}},
+    "severity": {"type": "score", "instructions": "How severe is the customer impact?", "criteria": ["No impact", "Minor", "Major", "Critical"]},
+    "refund_requested": {"type": "noul", "instructions": "Does the customer ask for a refund?"},
+    "refund_action": {"type": "choice", "instructions": "Which refund do we issue?", "criteria": {"none": null, "partial": "Refund the duplicate charge", "full": "Refund the whole order"}},
+    "escalate_to_human": {"type": "noul", "instructions": "Should a human take over?"},
+    "sentiment": {"type": "choice", "instructions": "Customer sentiment?", "criteria": {"angry": null, "neutral": null, "happy": null}},
+    "churn_risk": {"type": "score", "instructions": "How likely is the customer to leave?", "criteria": ["Low", "Medium", "High"]},
+    "reply_channel": {"type": "choice", "instructions": "How do we reply?", "criteria": {"email": null, "phone": null, "chat": null}},
+    "pii_present": {"type": "noul", "instructions": "Does the message contain personal or payment data?"},
+    "reply_template": {"type": "choice", "instructions": "Which reply template?", "criteria": {"apology": null, "howto": null, "outage": "Known incident notice", "upsell": "Offer a higher plan"}},
+    "sla": {"type": "choice", "instructions": "Response time target?", "criteria": {"4h": null, "24h": null, "72h": null}}
+  },
+  "pbit": {
+    "judge": {
+      "model": "jev-latest",
+      "usage": {"input_tokens": 412, "output_tokens": 24},
+      "answers": {
+        "urgent": {"type": "noul", "noul": 0.41},
+        "team": {"type": "choice", "choice": "billing", "confidence": 0.48, "probabilities": {"billing": 0.48, "technical": 0.44, "sales": 0.03, "security": 0.05}},
+        "severity": {"type": "score", "score": 2.27, "confidence": 0.46, "legend": {"0": "No impact", "1": "Minor", "2": "Major", "3": "Critical"}, "probabilities": {"0": 0.02, "1": 0.12, "2": 0.4, "3": 0.46}},
+        "refund_requested": {"type": "noul", "noul": 0.93},
+        "refund_action": {"type": "choice", "choice": "full", "confidence": 0.47, "probabilities": {"none": 0.08, "partial": 0.45, "full": 0.47}},
+        "escalate_to_human": {"type": "noul", "noul": 0.38},
+        "sentiment": {"type": "choice", "choice": "angry", "confidence": 0.86, "probabilities": {"angry": 0.86, "neutral": 0.12, "happy": 0.02}},
+        "churn_risk": {"type": "score", "score": 1.64, "confidence": 0.7, "legend": {"0": "Low", "1": "Medium", "2": "High"}, "probabilities": {"0": 0.06, "1": 0.24, "2": 0.7}},
+        "reply_channel": {"type": "choice", "choice": "chat", "confidence": 0.51, "probabilities": {"email": 0.3, "phone": 0.19, "chat": 0.51}},
+        "pii_present": {"type": "noul", "noul": 0.88},
+        "reply_template": {"type": "choice", "choice": "outage", "confidence": 0.52, "probabilities": {"apology": 0.36, "howto": 0.04, "outage": 0.52, "upsell": 0.08}},
+        "sla": {"type": "choice", "choice": "24h", "confidence": 0.55, "probabilities": {"4h": 0.4, "24h": 0.55, "72h": 0.05}}
+      }
+    },
+    "rules": {
+      "implies": [
+        {"if": {"var": "severity", "value": "3"}, "then": {"var": "urgent", "in": ["true"]}},
+        {"if": {"var": "urgent", "value": "true"}, "then": {"var": "sla", "in": ["4h"]}},
+        {"if": {"var": "refund_action", "value": "partial"}, "then": {"var": "refund_requested", "in": ["true"]}},
+        {"if": {"var": "refund_action", "value": "full"}, "then": {"var": "refund_requested", "in": ["true"]}},
+        {"if": {"var": "refund_action", "value": "full"}, "then": {"var": "escalate_to_human", "in": ["true"]}},
+        {"if": {"var": "team", "value": "security"}, "then": {"var": "escalate_to_human", "in": ["true"]}},
+        {"if": {"var": "churn_risk", "value": "2"}, "then": {"var": "escalate_to_human", "in": ["true"]}},
+        {"if": {"var": "pii_present", "value": "true"}, "then": {"var": "reply_channel", "in": ["email", "phone"]}},
+        {"if": {"var": "reply_template", "value": "outage"}, "then": {"var": "team", "in": ["technical"]}},
+        {"if": {"var": "reply_template", "value": "upsell"}, "then": {"var": "team", "in": ["sales"]}}
+      ],
+      "tables": [
+        {"vars": ["sentiment", "reply_template"], "forbid": [["angry", "upsell"]]}
+      ],
+      "linear": [
+        {"terms": [["refund_action", "partial", 1], ["refund_action", "full", 3], ["escalate_to_human", "true", 2], ["reply_channel", "phone", 1]], "limit": 4}
+      ]
+    }
+  }
+}

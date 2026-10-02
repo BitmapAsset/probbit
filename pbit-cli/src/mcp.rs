@@ -8,7 +8,7 @@
 //! identity); a client that opens with `initialize` (the handshake revisions 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05) is
 //! served by the revision negotiated there. An unknown revision gets `UnsupportedProtocolVersion` (-32022) with the list.
 //!
-//! Tools: `pbit_decide`, `pbit_run`, `pbit_stats`, `pbit_demo`. Each runs this binary's own command in a child process (the
+//! Tools: `pbit_decide`, `pbit_run`, `pbit_stats`, `pbit_demo`, `pbit_evaluate`. Each runs this binary's own command in a child process (the
 //! document on its stdin, the `flags` object as command-line flags) and returns the command's stdout JSON unchanged, as text and
 //! as `structuredContent`: a tool answer is the CLI's answer byte for byte. Exit 2 (bad input or flag) and error objects come back
 //! as tool errors (`isError`); `infeasible` (exit 1), `refused` / `declined` (exit 3) are answers.
@@ -38,7 +38,7 @@ fn result(id: Json, era: &Era, mut r: Vec<(&str, Json)>) -> Json {
     obj(vec![("jsonrpc", jstr("2.0")), ("id", id), ("result", obj(r))])
 }
 fn server_info() -> Json { obj(vec![("name", jstr("pbit")), ("title", jstr("pbit virtual p-bit processor")), ("version", jstr(VERSION))]) }
-const INSTRUCTIONS: &str = "pbit is a virtual p-bit processor for joint decisions under hard rules. pbit_decide routes tasks to workers (allowed sets, quotas, clamps, affinity) and returns a plan that obeys every rule, odds per task and a verdict: exact, diagnostics_passed, partial (act on `released`, escalate `escalated`), refused or infeasible. pbit_run does the same for a general pbit-ir program. Pass \"flags\": {\"summary\": true} for a compact answer. pbit_demo makes a sample routing document; pbit_stats measures the machine.";
+const INSTRUCTIONS: &str = "pbit is a virtual p-bit processor for joint decisions under hard rules. pbit_decide routes tasks to workers (allowed sets, quotas, clamps, affinity) and returns a plan that obeys every rule, odds per task and a verdict: exact, diagnostics_passed, partial (act on `released`, escalate `escalated`), refused or infeasible. pbit_run does the same for a general pbit-ir program. pbit_evaluate takes a decision model's System One request and the judge's per-question probabilities plus rules over question ids, and returns the most likely answer set that obeys every rule in the judge's response shape, with odds and the gate's verdict. Pass \"flags\": {\"summary\": true} for a compact answer. pbit_demo makes a sample routing document; pbit_stats measures the machine.";
 
 /// Serve until stdin closes.
 pub fn serve() {
@@ -104,9 +104,9 @@ fn handle(msg: &Json, session: &mut Option<String>) -> Option<Json> {
 fn call(name: &str, args: Option<&Json>) -> Result<(String, Option<Json>, bool), String> {
     let args: Vec<(String, Json)> = match args { None | Some(Json::Null) => vec![], Some(Json::Obj(v)) => v.clone(), Some(_) => return Err("invalid params: \"arguments\" must be an object".into()) };
     let (cmd, doc, flags) = match name {
-        "pbit_decide" | "pbit_run" => { let (f, d): (Vec<_>, Vec<_>) = args.into_iter().partition(|(k, _)| k == "flags");
+        "pbit_decide" | "pbit_run" | "pbit_evaluate" => { let (f, d): (Vec<_>, Vec<_>) = args.into_iter().partition(|(k, _)| k == "flags");
             let flags = match f.into_iter().next().map(|(_, x)| x) { None | Some(Json::Null) => vec![], Some(Json::Obj(v)) => v, Some(_) => return Ok(("\"flags\" must be an object".into(), None, true)) };
-            (if name == "pbit_decide" { "decide" } else { "run" }, Some(Json::Obj(d)), flags) }
+            (match name { "pbit_decide" => "decide", "pbit_run" => "run", _ => "evaluate" }, Some(Json::Obj(d)), flags) }
         "pbit_stats" => ("stats", None, args), "pbit_demo" => ("demo", None, args),
         _ => return Err(format!("Unknown tool: {name}")) };
     let mut argv = vec![cmd.to_string()];
@@ -158,6 +158,9 @@ fn tools() -> Json {
               "group": {{"type": ["string", "number"]}}, "clamp": {{"type": "string"}}, "text": {{"type": "string"}}}}}}}},
           "affinity": {{"type": "number", "minimum": 0}}, "comment": {{"type": "string"}}, "flags": {decide_flags}}}}}"#);
     let mut ir = p(include_str!("pbit-ir.schema.json"));
+    let evaluate = evaluate_schema(&ir, &format!(r#"{{"type": "object", "additionalProperties": false, "description": "pbit evaluate flags without the dashes (pbit evaluate --help): the pbit run flags, plus program",
+        "properties": {{{flags_common}, "op": {{"enum": ["decide", "exact", "sample"]}}, "deadline_ms": {{"type": "number", "exclusiveMinimum": 0}},
+          "program": {{"type": "boolean", "description": "return the compiled pbit-ir program instead of running it"}}}}}}"#));
     if let Json::Obj(v) = &mut ir { v.retain(|(k, _)| k != "$id" && k != "examples");
         for (k, x) in v.iter_mut() { if k == "description" { *x = jstr("A pbit-ir v1 program (docs/pbit-ir-json.md): variables over named values, scores, pairs, caps and the v2 constructs, plus optional flags."); }
             if k == "properties" { if let Json::Obj(pr) = x { pr.push(("flags".into(), p(&run_flags))); } } } }
@@ -170,5 +173,37 @@ fn tools() -> Json {
             p(r#"{"type": "object", "additionalProperties": false, "properties": {"sweeps": {"type": "integer", "minimum": 1}, "chains": {"type": "integer", "minimum": 1}, "threads": {"type": "integer", "minimum": 1}}}"#)),
         tool("pbit_demo", "Sample routing document", "pbit demo: a seeded synthetic agent-routing document (PII and prod-DB rules, quotas, workflow affinity) to pass to pbit_decide.",
             p(r#"{"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "integer", "minimum": 1, "description": "tasks to generate (default 12)"}, "seed": {"type": "integer", "minimum": 0}, "hard": {"type": "boolean", "description": "tight quotas + strong affinity"}}}"#)),
+        tool("pbit_evaluate", "Decide after a judge", "pbit evaluate: a decision model's System One request (questions noul | choice | score keyed by id) with the judge's answers or per-question weights and rules over question ids (caps, implies, tables, precedes, linear, all_different, pairs). Returns the judge's response shape (model, answers keyed by question id, usage) filled with the most likely answer set that obeys every rule, odds per option under the rules and a pbit object per answer (value, p, judge, changed, released), plus the pbit run document (verdict, gate, violations, plan_logw, released / escalated, telemetry). Without rules the answers are the judge's own.", evaluate),
     ])
+}
+
+fn get_mut<'a>(j: &'a mut Json, k: &str) -> Option<&'a mut Json> { match j { Json::Obj(v) => v.iter_mut().find(|(x, _)| x == k).map(|(_, x)| x), _ => None } }
+/// `pbit_evaluate`'s input schema: the System One request (TypeSafe OpenAPI 0.2.0 and the Workers AI clef schema: `model`,
+/// `state`, `questions`, `images`) plus the `pbit` block, whose `rules` are the pbit-ir schema's own rule definitions.
+fn evaluate_schema(ir: &Json, flags: &str) -> Json {
+    let p = |s: &str| json::parse(s).expect("tool schema");
+    let mut s = p(&format!(r#"{{"type": "object", "additionalProperties": false, "required": ["questions"],
+        "description": "A System One request plus an optional pbit block (docs/pbit-ir-json.md, Decision API). state, instructions, criteria texts and images are carried, never read: pbit reads the judge's numbers and the rules.",
+        "properties": {{
+          "model": {{"type": "string", "description": "the judge's model name (echoed when pbit.judge has none)"}},
+          "state": {{"description": "the content the questions are about (string, object or array); never read by pbit"}},
+          "images": {{"type": "array", "description": "images for the judge; never read by pbit"}},
+          "questions": {{"type": "object", "minProperties": 1, "description": "questions keyed by id; each becomes one pbit variable whose values are its options",
+            "additionalProperties": {{"type": "object", "additionalProperties": false, "required": ["type"], "properties": {{
+              "type": {{"enum": ["noul", "choice", "score"], "description": "noul: yes / no (values false, true); choice: one of the criteria keys; score: a level 0..L-1 of the criteria array"}},
+              "instructions": {{"description": "the question for the judge; never read by pbit"}},
+              "criteria": {{"description": "choice: object option -> description; score: array of level descriptions, lowest first; noul: optional object with true / false"}}}}}}}},
+          "pbit": {{"type": "object", "additionalProperties": false, "description": "where the weights come from (one source per question; none = uniform) and the rules", "properties": {{
+            "judge": {{"type": "object", "description": "the judge's System One response: answers keyed by question id (noul: noul = P(yes); choice and score: probabilities per option / level); model and usage are echoed"}},
+            "weights": {{"type": "object", "description": "per question id: noul = P(true); choice / score = probabilities keyed by option / level", "additionalProperties": {{"type": ["number", "object"]}}}},
+            "logw": {{"type": "object", "description": "per question id: natural-log weights keyed by option / level", "additionalProperties": {{"type": "object"}}}},
+            "floor": {{"type": "number", "exclusiveMinimum": 0, "maximum": 1, "description": "probability floor: p becomes ln max(p, floor) (default 1e-6)"}},
+            "rules": {{"type": "object", "additionalProperties": false, "description": "hard rules (and soft pairs) over question ids and option names, as in a pbit-ir program", "properties": {{}}}}}}}},
+          "flags": {flags}}}}}"#));
+    let rules: Vec<(String, Json)> = crate::evaluate::RULES.iter()
+        .filter_map(|k| ir.get("properties").and_then(|x| x.get(k)).map(|x| (k.to_string(), x.clone()))).collect();
+    let path = ["properties", "pbit", "properties", "rules", "properties"];
+    if let Some(r) = path.iter().try_fold(&mut s, |x, k| get_mut(x, k)) { *r = Json::Obj(rules); }
+    if let (Json::Obj(v), Some(d)) = (&mut s, ir.get("$defs")) { v.push(("$defs".into(), d.clone())); }
+    s
 }

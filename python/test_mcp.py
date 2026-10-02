@@ -71,15 +71,18 @@ class Mcp(unittest.TestCase):
         self.assertIn("result", r, r)
         return r["result"]
 
-    def test_legacy_handshake_lists_four_tools(self):
+    def test_legacy_handshake_lists_five_tools(self):
         init = self.legacy()
         self.assertEqual(init["protocolVersion"], "2025-06-18"); self.assertEqual(init["serverInfo"]["name"], "pbit")
         self.assertIn("tools", init["capabilities"]); self.assertNotIn("resultType", init)
         tools = self.c.request("tools/list")["result"]["tools"]
-        self.assertEqual([t["name"] for t in tools], ["pbit_decide", "pbit_run", "pbit_stats", "pbit_demo"])
+        self.assertEqual([t["name"] for t in tools], ["pbit_decide", "pbit_run", "pbit_stats", "pbit_demo", "pbit_evaluate"])
         for t in tools:
             self.assertEqual(t["inputSchema"]["type"], "object"); self.assertTrue(t["description"])
         self.assertIn("flags", tools[0]["inputSchema"]["properties"]); self.assertIn("vars", tools[1]["inputSchema"]["properties"])
+        ev = tools[4]["inputSchema"]
+        self.assertEqual(sorted(ev["properties"]["pbit"]["properties"]["rules"]["properties"]), sorted(["pairs", "caps", "all_different", "implies", "tables", "precedes", "linear"]))
+        self.assertIn("cap", ev["$defs"]); self.assertIn("program", ev["properties"]["flags"]["properties"])
         self.assertEqual(self.c.request("ping")["result"], {})
         self.assertEqual(self.legacy("1999-01-01")["protocolVersion"], "2025-11-25")  # unknown -> the newest handshake revision
 
@@ -113,6 +116,24 @@ class Mcp(unittest.TestCase):
         self.assertEqual(self.c.request("tools/call", {"name": "pbit_demo", "arguments": [1]})["error"]["code"], -32602)
         self.assertEqual(self.c.request("resources/list")["error"]["code"], -32601)
 
+    def test_evaluate_answers_exactly_as_the_cli(self):
+        self.legacy("2025-11-25")
+        with open(os.path.join(EX, "evaluate", "support-12.json")) as f:
+            req = json.load(f)
+        for flags, args in (({}, []), ({"summary": True}, ["--summary"]), ({"op": "sample", "sweeps": 2000, "polish_ms": 0}, ["--op", "sample", "--sweeps", "2000", "--polish-ms", "0"])):
+            r = self.call("pbit_evaluate", dict(req, flags=flags))
+            code, out = cli(["evaluate", *args], req)
+            self.assertFalse(r["isError"]); self.assertEqual(code, 0); self.assertEqual(stable(r["structuredContent"]), stable(json.loads(out)))
+            self.assertEqual(r["structuredContent"]["answers"]["team"]["pbit"]["value"], "technical")  # the judge said billing; the rules move it
+        prog = self.call("pbit_evaluate", dict(req, flags={"program": True}))
+        code, out = cli(["evaluate", "--program"], req)
+        self.assertEqual(prog["content"][0]["text"], out.rstrip("\n")); self.assertEqual(prog["structuredContent"]["pbit_ir"], 1)
+        refused = self.call("pbit_evaluate", dict(req, flags={"op": "sample", "sweeps": 400, "polish_ms": 0}))  # exit 3: an answer
+        self.assertFalse(refused["isError"]); self.assertEqual(refused["structuredContent"]["verdict"], "refused")
+        self.assertTrue(all(not a["pbit"]["released"] for a in refused["structuredContent"]["answers"].values()))
+        bad = self.call("pbit_evaluate", {"questions": {"a": {"type": "boolean"}}})
+        self.assertTrue(bad["isError"]); self.assertEqual(bad["structuredContent"]["error"], {"code": "value", "path": "questions.a.type", "message": bad["structuredContent"]["error"]["message"]})
+
     def test_structured_content_from_2025_06_18_on(self):
         self.legacy("2024-11-05")
         r = self.call("pbit_demo", {"tasks": 3})
@@ -123,7 +144,7 @@ class Mcp(unittest.TestCase):
         self.assertEqual(d["resultType"], "complete"); self.assertIn("2026-07-28", d["supportedVersions"])
         self.assertEqual(d["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "pbit"); self.assertIn("tools", d["capabilities"])
         t = self.c.request("tools/list", meta=MODERN)["result"]
-        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 4)
+        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 5)
         r = self.call("pbit_demo", {"tasks": 4, "seed": 2}, MODERN)
         self.assertEqual(r["resultType"], "complete"); self.assertEqual(len(r["structuredContent"]["tasks"]), 4)
         e = self.c.request("tools/list", meta={"io.modelcontextprotocol/protocolVersion": "1999-01-01", "io.modelcontextprotocol/clientCapabilities": {}})["error"]

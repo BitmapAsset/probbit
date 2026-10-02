@@ -1345,13 +1345,16 @@ fn under_pty(args: &[&str], input: &str, env: &[(&str, &str)], full: bool) -> Op
 #[test]
 fn a_terminal_on_stderr_never_changes_stdout() {
     let (_, d300, _) = pbit(&["demo", "--tasks", "300"], ""); let dn = include_str!("../../examples/denoise-8x12.json"); let (_, d12, _) = pbit(&["demo", "--tasks", "12"], "");
-    let cases: [(Vec<&str>, Vec<&str>, &str, &str); 7] = [
+    let ev = include_str!("../../examples/evaluate/support-12.json");
+    let cases: [(Vec<&str>, Vec<&str>, &str, &str); 9] = [
         (vec!["decide", "--top", "--sweeps", "6400", "--polish-ms", "0", "--threads", "2"], vec!["decide", "--sweeps", "6400", "--polish-ms", "0", "--threads", "2"], &d300, "pbit decide · top"),
         (vec!["decide", "--summary", "--pretty", "--sweeps", "800", "--polish-ms", "0"], vec!["decide", "--summary", "--pretty", "--sweeps", "800", "--polish-ms", "0"], &d300, "pbit decide · PARTIAL"),
         (vec!["run", "--top", "--summary", "--op", "sample", "--sweeps", "40000", "--polish-ms", "0", "--threads", "2"], vec!["run", "--summary", "--op", "sample", "--sweeps", "40000", "--polish-ms", "0", "--threads", "2"], dn, "pbit run · top"),
         (vec!["stats", "--sweeps", "100"], vec!["stats", "--sweeps", "100"], "", ""), (vec!["ir"], vec!["ir"], &d12, ""),
         (vec!["demo", "--tasks", "12"], vec!["demo", "--tasks", "12"], "", ""),
-        (vec!["demo", "--live", "--tasks", "300"], vec!["demo", "--tasks", "300"], "", "LADDER")];
+        (vec!["demo", "--live", "--tasks", "300"], vec!["demo", "--tasks", "300"], "", "LADDER"),
+        (vec!["evaluate", "--summary", "--pretty"], vec!["evaluate", "--summary", "--pretty"], ev, "pbit evaluate · EXACT"),
+        (vec!["evaluate", "--top", "--op", "sample", "--sweeps", "400000", "--polish-ms", "0", "--threads", "2"], vec!["evaluate", "--op", "sample", "--sweeps", "400000", "--polish-ms", "0", "--threads", "2"], ev, "pbit evaluate · top")];
     for (tty, piped, input, drawn) in cases {
         let Some((c, out, screen)) = under_pty(&tty, input, &[], false) else { eprintln!("no `script` here: pty test skipped"); return };
         let (c2, want, _) = pbit(&piped, input);
