@@ -153,7 +153,7 @@ impl Model {
     pub fn feasible_init_with(&self, rng: &mut Philox4x32, first_work: u64) -> Option<Vec<usize>> { self.feasible_init_until(rng, first_work, None) }
     /// `feasible_init_with` that also gives up (None, no further retries) once `deadline` passes (non-partition search
     /// only, clock read every 64 nodes (4096 was ~170 ms apart on a 200-job program); a start found before the deadline is identical).
-    pub fn feasible_init_until(&self, rng: &mut Philox4x32, first_work: u64, deadline: Option<std::time::Instant>) -> Option<Vec<usize>> {
+    pub fn feasible_init_until(&self, rng: &mut Philox4x32, first_work: u64, deadline: Option<pbit_core::rt::Instant>) -> Option<Vec<usize>> {
         let (n, k) = (self.n, self.k);
         let key: Vec<f64> = (0..n * k + n).map(|_| rng.f64()).collect();
         let order_of = |i: usize| { let mut o: Vec<usize> = self.cand[i].iter().copied().filter(|&v| self.ok(i, v)).collect();
@@ -182,9 +182,9 @@ impl Model {
         // Programs where nothing is pruned skip it: their starts and RNG streams are unchanged.
         if START_MAC.load(std::sync::atomic::Ordering::Relaxed) { match self.mac_start(&key, &rank, first_work, deadline) { Ok(x) => return Some(x), Err(true) => return None, Err(false) => {} } }
         #[allow(clippy::too_many_arguments)]
-        fn dfs(m: &Model, left: usize, rank: &[usize], x: &mut [usize], load: &mut [usize], nodes: &mut u64, work: &mut u64, budget: u64, order_of: &dyn Fn(usize) -> Vec<usize>, mrv: bool, dl: (Option<std::time::Instant>, &mut bool)) -> bool {
+        fn dfs(m: &Model, left: usize, rank: &[usize], x: &mut [usize], load: &mut [usize], nodes: &mut u64, work: &mut u64, budget: u64, order_of: &dyn Fn(usize) -> Vec<usize>, mrv: bool, dl: (Option<pbit_core::rt::Instant>, &mut bool)) -> bool {
             if left == 0 { return true; } *nodes += 1; if *nodes > 2_000_000 || *work > budget || *dl.1 { return false; }
-            if *nodes & 63 == 0 { if let Some(d) = dl.0 { if std::time::Instant::now() >= d { *dl.1 = true; return false; } } }
+            if *nodes & 63 == 0 { if let Some(d) = dl.0 { if pbit_core::rt::Instant::now() >= d { *dl.1 = true; return false; } } }
             let fits = |i: usize, v: usize, load: &[usize]| m.fits_load(load, i * m.k + v);
             let mut pick = (usize::MAX, usize::MAX, 0usize); // (feasible count, rank, var)
             for i in 0..m.n { if x[i] != usize::MAX { continue; }
@@ -226,7 +226,7 @@ impl Model {
     /// value, removes the members of every cap that becomes full from the open domains, and re-establishes arc consistency
     /// (AC-3); a wiped-out domain backtracks. Budgets as the plain search (START_WORK-style work, 2M nodes, clock every 64 nodes).
     /// Ok = a feasible start; Err(true) = `deadline` passed; Err(false) = not applicable or budgets spent (the plain search runs).
-    fn mac_start(&self, key: &[f64], rank: &[usize], budget: u64, deadline: Option<std::time::Instant>) -> Result<Vec<usize>, bool> {
+    fn mac_start(&self, key: &[f64], rank: &[usize], budget: u64, deadline: Option<pbit_core::rt::Instant>) -> Result<Vec<usize>, bool> {
         let (n, k) = (self.n, self.k); let wd = k.div_ceil(64);
         let mut idx: HashMap<(usize, usize), usize> = HashMap::new(); let mut tab: Vec<Vec<u64>> = vec![]; let mut arcs: Vec<Vec<(usize, usize)>> = vec![vec![]; n];
         for cp in &self.caps { if cp.limit != 1 || cp.members.len() != 2 || cp.members[0].0 == cp.members[1].0 { continue; }
@@ -253,9 +253,9 @@ impl Model {
         }
         #[allow(clippy::too_many_arguments)]
         fn go(m: &Model, tab: &[Vec<u64>], arcs: &[Vec<(usize, usize)>], wd: usize, left: usize, key: &[f64], rank: &[usize], dom: &mut Vec<u64>, x: &mut [usize], load: &mut [usize],
-            nodes: &mut u64, work: &mut u64, budget: u64, dl: Option<std::time::Instant>, late: &mut bool) -> bool {
+            nodes: &mut u64, work: &mut u64, budget: u64, dl: Option<pbit_core::rt::Instant>, late: &mut bool) -> bool {
             if left == 0 { return true; } *nodes += 1; if *nodes > 2_000_000 || *work > budget || *late { return false; }
-            if *nodes & 63 == 0 { if let Some(d) = dl { if std::time::Instant::now() >= d { *late = true; return false; } } }
+            if *nodes & 63 == 0 { if let Some(d) = dl { if pbit_core::rt::Instant::now() >= d { *late = true; return false; } } }
             let (n, k) = (m.n, m.k); let mut pick = (u64::MAX, usize::MAX, 0usize);
             for i in 0..n { if x[i] != usize::MAX { continue; } let c: u64 = dom[i * wd..(i + 1) * wd].iter().map(|w| w.count_ones() as u64).sum(); if (c, rank[i]) < (pick.0, pick.1) { pick = (c, rank[i], i); } }
             *work += (n * wd) as u64; let i = pick.2;
@@ -293,13 +293,13 @@ pub fn exact(m: &Model, topk: usize, limit: u64) -> Option<Exact> { exact_until(
 /// nodes) instead of declining: the gap budget stopped the search for the FIRST plan, which on an infeasible CSP is also the
 /// proof (hard 3-colourings an earlier binary proved infeasible in 0.13-4.3 s came back `refused`). None = `exact`.
 /// The bool is true if the search ran past its gap budget on the deadline's credit (the caller's budget was spent).
-pub fn exact_until(m: &Model, topk: usize, limit: u64, deadline: Option<std::time::Instant>) -> (Option<Exact>, bool) { exact_within(m, topk, limit, deadline, None) }
+pub fn exact_until(m: &Model, topk: usize, limit: u64, deadline: Option<pbit_core::rt::Instant>) -> (Option<Exact>, bool) { exact_within(m, topk, limit, deadline, None) }
 /// `exact_until` with a HARD stop: past `hard` (clock read every 64 nodes, in both passes and both search orders) the
 /// search declines (None), whatever its plan count or gap budget. This is the opt-in `--exact-ms` cap of the CLI; None = `exact_until`.
-pub fn exact_within(m: &Model, topk: usize, limit: u64, deadline: Option<std::time::Instant>, hard: Option<std::time::Instant>) -> (Option<Exact>, bool) {
+pub fn exact_within(m: &Model, topk: usize, limit: u64, deadline: Option<pbit_core::rt::Instant>, hard: Option<pbit_core::rt::Instant>) -> (Option<Exact>, bool) {
     deep(m.n, || exact_search(m, topk, limit, deadline, hard))
 }
-fn exact_search(m: &Model, topk: usize, limit: u64, deadline: Option<std::time::Instant>, hard: Option<std::time::Instant>) -> (Option<Exact>, bool) {
+fn exact_search(m: &Model, topk: usize, limit: u64, deadline: Option<pbit_core::rt::Instant>, hard: Option<pbit_core::rt::Instant>) -> (Option<Exact>, bool) {
     if past(hard) { return (None, false); }
     // Non-partition programs (CSPs: sudoku, colouring) branch on the most constrained variable (dynamic MRV), like a
     // classical backtracking solver; partition programs keep the static order (bit-identical to the assignment front-end)
@@ -327,10 +327,10 @@ struct Ex<'a> { m: &'a Model, x: Vec<usize>, load: Vec<usize>, mx: f64, sum: f64
     /// (`cut` is also set by the hard stop, in both search orders)
     work: u64, last: u64, gap_limit: u64, cut: bool,
     /// Past the gap budget, keep searching until this instant; `extended` = that happened
-    deadline: Option<std::time::Instant>, extended: bool,
+    deadline: Option<pbit_core::rt::Instant>, extended: bool,
     /// Hard stop (`exact_within`) and the node count that triggers the next check (`halt`): the node limit without a
     /// hard stop, so the default path keeps a single comparison
-    hard: Option<std::time::Instant>, stop: u64,
+    hard: Option<pbit_core::rt::Instant>, stop: u64,
     /// Per variable, the checks one MRV scan of it counts (sum over its candidates of 1 + |cap_of|): the same count earlier code
     /// summed inside the scan's filter at every node, which cost 18-21% on 3-colouring proofs (1.4-4.2% on sudoku)
     wsum: Vec<u64> }
@@ -358,7 +358,7 @@ impl<'a> Ex<'a> {
     fn dfs_mrv(&mut self, left: usize, lw: f64) {
         if (self.n > self.limit || self.nodes > self.stop || self.cut) && self.halt() { return; }
         if self.work - self.last > self.gap_limit {
-            match self.deadline { Some(d) if self.nodes & 63 != 0 || std::time::Instant::now() < d => self.extended = true, _ => { self.cut = true; return; } } }
+            match self.deadline { Some(d) if self.nodes & 63 != 0 || pbit_core::rt::Instant::now() < d => self.extended = true, _ => { self.cut = true; return; } } }
         self.nodes += 1; let m = self.m; let k = m.k;
         if left == 0 { self.leaf(lw); return; }
         let fits = |ld: &[usize], i: usize, v: usize| m.ok(i, v) && m.fits_load(ld, i * k + v);
@@ -404,7 +404,7 @@ struct CTab { mem: Vec<usize>, caps: Vec<usize>, buckets: Vec<(Vec<u8>, f64, Vec
 /// Components (union-find over `pairs`, ordered by smallest member) with their bucket tables. None if a component has
 /// more than 4096 assignments. Assignments whose load on one cap already exceeds min(limit, 255) are dropped here.
 /// Also None once `hard` passes (clock read per component).
-fn comp_tabs(m: &Model, hard: Option<std::time::Instant>) -> Option<Vec<CTab>> {
+fn comp_tabs(m: &Model, hard: Option<pbit_core::rt::Instant>) -> Option<Vec<CTab>> {
     let (n, k) = (m.n, m.k); let mut par: Vec<usize> = (0..n).collect();
     fn find(par: &mut [usize], mut x: usize) -> usize { while par[x] != x { par[x] = par[par[x]]; x = par[x]; } x }
     for p in &m.pairs { let (a, b) = (find(&mut par, p.i), find(&mut par, p.j)); if a != b { par[a.max(b)] = a.min(b); } } // root = smallest member
@@ -453,14 +453,14 @@ pub const FRONTIER_MAX_STATES: usize = 1 << 12;
 /// agents, so this is the router's earlier frontier DP; results agree with it to float rounding (component order can differ from its group order).
 pub fn exact_frontier(m: &Model, max_states: usize) -> Option<FrontierExact> { exact_frontier_until(m, max_states, None) }
 /// Whether an optional hard stop has passed.
-fn past(hard: Option<std::time::Instant>) -> bool { hard.is_some_and(|h| std::time::Instant::now() >= h) }
+fn past(hard: Option<pbit_core::rt::Instant>) -> bool { hard.is_some_and(|h| pbit_core::rt::Instant::now() >= h) }
 /// `exact_frontier` that declines once `hard` passes (clock read per component while tabulating and per DP step,
 /// forward and backward). This is the opt-in `--exact-ms` cap of the CLI; None = `exact_frontier`.
-pub fn exact_frontier_until(m: &Model, max_states: usize, hard: Option<std::time::Instant>) -> Option<FrontierExact> {
+pub fn exact_frontier_until(m: &Model, max_states: usize, hard: Option<pbit_core::rt::Instant>) -> Option<FrontierExact> {
     if !m.partition || past(hard) { return None; }
     deep(m.n, || frontier(m, max_states, hard))
 }
-fn frontier(m: &Model, max_states: usize, hard: Option<std::time::Instant>) -> Option<FrontierExact> {
+fn frontier(m: &Model, max_states: usize, hard: Option<pbit_core::rt::Instant>) -> Option<FrontierExact> {
     // Carried cap loads live in 8-bit lanes, and a transition past 255 was dropped as if it broke the cap, so a cap that
     // could hold more than 255 returned a truncated distribution labelled exact (600 free spins, at-most-600 cap: log Z 406.99 vs
     // 415.89). Decline whenever a cap's limit and its member count both exceed 255 (a load can then pass 255)
@@ -611,11 +611,11 @@ fn lse(xs: impl Iterator<Item = f64>) -> f64 { let v: Vec<f64> = xs.collect(); l
 /// (summed over the enumerated components), else by the frontier DP (partition components, `max_states` > 0). None (decline) if one component cannot be
 /// solved, the program is a single non-tree component (the whole-program tiers already tried it), the forest work exceeds
 /// `FOREST_MAX_WORK`, or `hard` passes (clock read per component).
-pub fn exact_components_until(m: &Model, limit: u64, max_states: usize, hard: Option<std::time::Instant>) -> Option<CompExact> {
+pub fn exact_components_until(m: &Model, limit: u64, max_states: usize, hard: Option<pbit_core::rt::Instant>) -> Option<CompExact> {
     if past(hard) { return None; }
     deep(m.n, || components(m, limit, max_states, hard))
 }
-fn components(m: &Model, limit: u64, max_states: usize, hard: Option<std::time::Instant>) -> Option<CompExact> {
+fn components(m: &Model, limit: u64, max_states: usize, hard: Option<pbit_core::rt::Instant>) -> Option<CompExact> {
     let (n, k) = (m.n, m.k); let mut par: Vec<usize> = (0..n).collect();
     fn find(par: &mut [usize], mut x: usize) -> usize { while par[x] != x { par[x] = par[par[x]]; x = par[x]; } x }
     fn join(par: &mut [usize], a: usize, b: usize) { let (a, b) = (find(par, a), find(par, b)); if a != b { par[a.max(b)] = a.min(b); } }
@@ -804,7 +804,7 @@ struct FlipPlan {
 impl<'a> Chain<'a> {
     pub fn new(m: &'a Model, seed: u64, stream: u64) -> Option<Self> { Self::new_until(m, seed, stream, None) }
     /// `new` whose feasible-start search gives up at `deadline` (a wall-clock sampling budget's end).
-    pub fn new_until(m: &'a Model, seed: u64, stream: u64, deadline: Option<std::time::Instant>) -> Option<Self> {
+    pub fn new_until(m: &'a Model, seed: u64, stream: u64, deadline: Option<pbit_core::rt::Instant>) -> Option<Self> {
         let mut rng = Philox4x32::new(seed, stream);
         let x = match &m.start { Some(s) if stream == 0 && s.len() == m.n && m.violations(s) == 0 => s.clone(), _ => m.feasible_init_until(&mut rng, START_WORK, deadline)? }; // an infeasible start is ignored
         let mut load = vec![0; m.caps.len()]; for (i, &v) in x.iter().enumerate() { m.add_load(&mut load, i * m.k + v); }
@@ -1040,11 +1040,11 @@ pub fn anneal_sweeps(m: &Model, start: Option<&[usize]>, betas: &[f64], sweeps: 
 /// chain gets ms / ceil(chains / threads), as in the sampler. threads >= chains = the old one-thread-per-chain behaviour.
 #[allow(clippy::too_many_arguments)]
 pub fn anneal_on(m: &Model, start: Option<&[usize]>, betas: &[f64], ms: f64, sweeps: usize, chains: usize, threads: usize, seed: u64) -> Option<(f64, Vec<usize>)> {
-    let t = threads.clamp(1, chains.max(1)); let ms = ms / chains.div_ceil(t) as f64;
+    let seq = pbit_core::rt::sequential(); let t = if seq { 1 } else { threads.clamp(1, chains.max(1)) }; let ms = ms / chains.div_ceil(t) as f64;
     // R19.7: one model, the stage's beta on the chain (was a scaled Model clone per beta, built before the clock started)
     let run = |c: usize| -> Option<(f64, Vec<usize>)> {
         let mut x = match start { Some(s) => s.to_vec(), None => Chain::new(m, seed, c as u64)?.x };
-        let mut best = (m.logw(&x), x.clone()); let t0 = std::time::Instant::now(); let nq = betas.len();
+        let mut best = (m.logw(&x), x.clone()); let t0 = pbit_core::rt::Instant::now(); let nq = betas.len();
         for (q, &b) in betas.iter().enumerate() {
             let mut ch = Chain::from_state(m, seed ^ 0x5eed, (c * 64 + q) as u64, &x); ch.beta = b; ch.plain = true;
             let stop = ms * (q + 1) as f64 / nq as f64; let mut j = 0usize;
@@ -1055,8 +1055,9 @@ pub fn anneal_on(m: &Model, start: Option<&[usize]>, betas: &[f64], ms: f64, swe
         Some(best)
     };
     let mut slots: Vec<Option<(f64, Vec<usize>)>> = (0..chains).map(|_| None).collect();
+    if seq { for (c, slot) in slots.iter_mut().enumerate() { *slot = run(c); } } else {
     std::thread::scope(|sc| { let hs: Vec<_> = (0..t).map(|w| { let run = &run; chain_thread(m).spawn_scoped(sc, move || (w..chains).step_by(t).map(|c| (c, run(c))).collect::<Vec<_>>()).unwrap() }).collect();
-        for h in hs { for (c, r) in h.join().unwrap() { slots[c] = r; } } });
+        for h in hs { for (c, r) in h.join().unwrap() { slots[c] = r; } } }); }
     slots.into_iter().collect::<Option<Vec<_>>>()?.into_iter().max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
 }
 
@@ -1071,7 +1072,7 @@ pub const DEEP_VARS: usize = 2048;
 /// on the CALLER's stack: a 100,000-variable clamped program aborted `pbit run --op decide|exact` (exit 134, main-thread stack
 /// overflow, 8 MiB). Above DEEP_VARS variables `f` runs on a scoped thread sized like a chain thread; below, in place (unchanged).
 pub fn deep<T: Send>(n: usize, f: impl FnOnce() -> T + Send) -> T {
-    if n <= DEEP_VARS { return f(); }
+    if n <= DEEP_VARS || pbit_core::rt::sequential() { return f(); }
     std::thread::scope(|s| std::thread::Builder::new().stack_size(stack_for(n)).spawn_scoped(s, f).expect("exact-tier thread").join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
 }
 
@@ -1095,15 +1096,15 @@ pub fn sample(m: &Model, chains: usize, sweeps: usize, budget_ms: Option<f64>, s
 fn run_chain(m: &Model, c: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, keep_plans: bool, duty: f64, max_rows: usize, start_frac: f64) -> Option<Samples> {
     // A wall-clock budget includes the chain's feasible-start search (docs: "the deadline of the whole sampling phase";
     // a 200-job schedule's 1 s budget used to sample for 1.76 s: 0.7 s of start outside the clock)
-    let t0 = std::time::Instant::now(); let k = m.k;
+    let t0 = pbit_core::rt::Instant::now(); let k = m.k;
     let mut ch = Chain::new_until(m, seed, c as u64, budget_ms.map(|b| t0 + std::time::Duration::from_secs_f64(b.max(0.0) * start_frac / 1e3)))?;
     let burn = sweeps / 10;
     let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; m.n * k], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
-    let mut it = 0usize; let mut busy0 = std::time::Instant::now(); let mut stride = 1usize;
+    let mut it = 0usize; let mut busy0 = pbit_core::rt::Instant::now(); let mut stride = 1usize;
     loop {
         if let Some(b) = budget_ms { if it % 8 == 0 && t0.elapsed().as_secs_f64() * 1e3 >= b { break; } } else if it >= sweeps { break; }
         ch.sweep(); it += 1; progress_tick(it);
-        if duty < 1.0 { let b = busy0.elapsed(); if b.as_secs_f64() >= 0.002 { std::thread::sleep(b.mul_f64(1.0 / duty - 1.0)); busy0 = std::time::Instant::now(); } }
+        if duty < 1.0 { let b = busy0.elapsed(); if b.as_secs_f64() >= 0.002 { std::thread::sleep(b.mul_f64(1.0 / duty - 1.0)); busy0 = pbit_core::rt::Instant::now(); } }
         let burn_now = if budget_ms.is_some() { it <= 20 } else { it <= burn };
         if burn_now { continue; }
         for i in 0..m.n { s.marg[i * k + ch.x[i]] += 1.0; }
@@ -1130,12 +1131,13 @@ pub fn sample_on(m: &Model, chains: usize, threads: usize, sweeps: usize, budget
 /// (sampling still runs to the budget's end), leaving the rest for an exact fallback (`pbit run --op decide`). 1.0 = `sample_on`.
 #[allow(clippy::too_many_arguments)]
 pub fn sample_on_starting(m: &Model, chains: usize, threads: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, keep_plans: bool, cpu_pct: u32, max_rows: usize, start_frac: f64) -> Option<Samples> {
-    let t = threads.clamp(1, chains.max(1)); let rounds = chains.div_ceil(t).max(1); let b = budget_ms.map(|b| b / rounds as f64);
+    let seq = pbit_core::rt::sequential(); let t = if seq { 1 } else { threads.clamp(1, chains.max(1)) }; let rounds = chains.div_ceil(t).max(1); let b = budget_ms.map(|b| b / rounds as f64);
     let mut slots: Vec<Option<Samples>> = (0..chains).map(|_| None).collect();
+    if seq { for (c, slot) in slots.iter_mut().enumerate() { *slot = run_chain(m, c, sweeps, b, seed, keep_plans, cpu_pct.clamp(1, 100) as f64 / 100.0, max_rows, start_frac); } } else {
     std::thread::scope(|sc| {
         let hs: Vec<_> = (0..t).map(|w| chain_thread(m).spawn_scoped(sc, move || (w..chains).step_by(t).map(|c| (c, run_chain(m, c, sweeps, b, seed, keep_plans, cpu_pct.clamp(1, 100) as f64 / 100.0, max_rows, start_frac))).collect::<Vec<_>>()).unwrap()).collect();
         for h in hs { for (c, s) in h.join().unwrap() { slots[c] = s; } }
-    });
+    }); }
     Some(merge(m.n * m.k, slots.into_iter().collect::<Option<Vec<_>>>()?))
 }
 /// Monitoring: while `PROGRESS_ON` is set (the CLI's `--progress`), every sampler chain (this crate's and the router's)
@@ -1348,7 +1350,7 @@ pub static GATE_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::Ato
 /// caller, so every statistic is bit-identical to the per-chain-thread version.
 pub fn pool_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let g = GATE_THREADS.load(std::sync::atomic::Ordering::Relaxed);
-    let w = if g == 0 { std::thread::available_parallelism().map_or(1, |p| p.get()) } else { g }.clamp(1, n.max(1));
+    let w = if pbit_core::rt::sequential() { 1 } else if g == 0 { std::thread::available_parallelism().map_or(1, |p| p.get()) } else { g }.clamp(1, n.max(1));
     if w == 1 { return (0..n).map(f).collect(); }
     let mut slots: Vec<Option<T>> = (0..n).map(|_| None).collect();
     std::thread::scope(|sc| { let f = &f; let hs: Vec<_> = (0..w).map(|wk| sc.spawn(move || (wk..n).step_by(w).map(|c| (c, f(c))).collect::<Vec<_>>())).collect();
@@ -1356,8 +1358,9 @@ pub fn pool_map<T: Send>(n: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     slots.into_iter().map(|r| r.expect("pool_map slot")).collect()
 }
 pub fn gate_stats(m: &Model, s: &Samples) -> Gate {
-    let (mut g, l, (fz, esc)) = std::thread::scope(|sc| { let hl = sc.spawn(|| gate_stats_bs(m, s, 2.0 / 3.0, false)); let hf = sc.spawn(|| frozen_detail(m, s));
-        (gate_stats_with(m, s, GATE_BS_POW), hl.join().unwrap(), hf.join().unwrap()) });
+    let (mut g, l, (fz, esc)) = if pbit_core::rt::sequential() { (gate_stats_with(m, s, GATE_BS_POW), gate_stats_bs(m, s, 2.0 / 3.0, false), frozen_detail(m, s)) } else {
+        std::thread::scope(|sc| { let hl = sc.spawn(|| gate_stats_bs(m, s, 2.0 / 3.0, false)); let hf = sc.spawn(|| frozen_detail(m, s));
+        (gate_stats_with(m, s, GATE_BS_POW), hl.join().unwrap(), hf.join().unwrap()) }) };
     g.sig_tv_long = l.sig_tv; g.min_batches_long = l.min_batches; g.frozen = fz; g.escalate = esc; g.rhat_task = rhat_tasks(m, s);
     g.rhat_occ = rhat_occupancy(m, s);
     if !g.rhat_occ.is_empty() { let mut o = vec![1.0f64; m.n]; for (c, cap) in m.caps.iter().enumerate() { for &(i, _) in &cap.members { if !(o[i] >= g.rhat_occ[c]) { o[i] = g.rhat_occ[c]; } } } g.occ_task = o; }
@@ -2212,7 +2215,7 @@ mod tests {
         for i in 0..n - 1 { for a in 0..k { for b in 0..=a { caps.push(Cap { weights: vec![], members: vec![(i, a), (i + 1, b)], limit: 1 }); } } }
         let m = Model::new(n, k, vec![0.0; n * k], vec![true; n * k], vec![None; n], vec![], caps).unwrap(); assert!(!m.is_partition());
         let p0 = START_PROPAGATED.load(std::sync::atomic::Ordering::Relaxed);
-        for seed in 0..8u64 { let t = std::time::Instant::now();
+        for seed in 0..8u64 { let t = pbit_core::rt::Instant::now();
             let x = m.feasible_init_until(&mut Philox4x32::new(seed, 3), START_WORK, Some(t + std::time::Duration::from_secs(5))).expect("MAC start");
             assert_eq!(m.violations(&x), 0); assert!((1..n).all(|i| x[i] > x[i - 1])); }
         assert!(START_PROPAGATED.load(std::sync::atomic::Ordering::Relaxed) >= p0 + 8);
@@ -2282,7 +2285,7 @@ mod tests {
         let m = Model::new(p + 1, k, hh, allowed, vec![None; p + 1], vec![], caps).unwrap(); assert!(!m.is_partition());
         assert!(exact(&m, 1, 1 << 20).is_none(), "the gap budget declines in the thrash");
         let full = exact(&m, 1, u64::MAX / 128).unwrap(); assert_eq!(full.n_feasible, 40_320);
-        let now = std::time::Instant::now();
+        let now = pbit_core::rt::Instant::now();
         let (e, ext) = exact_until(&m, 1, 1 << 20, Some(now + std::time::Duration::from_secs(3600))); let e = e.expect("runs on to the deadline");
         assert!(ext); assert_eq!(e.n_feasible, 40_320); assert_eq!(e.logz.to_bits(), full.logz.to_bits());
         assert!(e.marg.iter().zip(&full.marg).all(|(x, y)| x.to_bits() == y.to_bits())); assert_eq!(e.top[0].1, full.top[0].1);
@@ -2304,7 +2307,7 @@ mod tests {
     fn exact_within_hard_stop_declines_and_a_far_one_changes_nothing() {
         // --exact-ms: a passed hard stop declines every exact tier (MRV on a non-partition program; static order and
         // frontier DP on a partition one); a far one returns the unbounded answer bit for bit; a near one stops a long search.
-        let now = std::time::Instant::now(); let far = Some(now + std::time::Duration::from_secs(3600));
+        let now = pbit_core::rt::Instant::now(); let far = Some(now + std::time::Duration::from_secs(3600));
         let same = |a: &Exact, b: &Exact| a.n_feasible == b.n_feasible && a.logz.to_bits() == b.logz.to_bits() && a.top[0].1 == b.top[0].1
             && a.marg.iter().zip(&b.marg).all(|(x, y)| x.to_bits() == y.to_bits());
         let m = toy(); assert!(!m.is_partition()); let e = exact(&m, 3, 1 << 20).unwrap();
@@ -2326,7 +2329,7 @@ mod tests {
         let mut caps: Vec<Cap> = (0..h * dup).map(|c| Cap { weights: vec![], members: (0..p).map(|i| (i, c % h)).collect(), limit: 1 }).collect();
         caps.push(Cap { weights: vec![], members: vec![(p - 1, h), (a, a0)], limit: 1 });
         let m = Model::new(p + 1, k, vec![0.0; (p + 1) * k], allowed, vec![None; p + 1], vec![], caps).unwrap();
-        let t = std::time::Instant::now(); let r = exact_within(&m, 1, u64::MAX / 128, None, Some(t + std::time::Duration::from_millis(20)));
+        let t = pbit_core::rt::Instant::now(); let r = exact_within(&m, 1, u64::MAX / 128, None, Some(t + std::time::Duration::from_millis(20)));
         let el = t.elapsed().as_secs_f64() * 1e3; assert!(r.0.is_none() && el < 500.0, "stopped after {el} ms");
     }
     #[test]
@@ -2343,7 +2346,7 @@ mod tests {
         let m = Model::new(n, t, vec![0.0; n * t], allowed, vec![None; n], vec![], caps).unwrap(); assert_eq!(m.caps.len(), 10_710);
         let s = sample_on(&m, 5, 5, 1, None, 60, false, 100, 0).expect("all 5 chains start"); assert_eq!(s.viol, 0);
         // The start search gives up at a passed deadline (stream 3 needs > 4096 nodes); a far deadline changes nothing
-        let now = std::time::Instant::now(); assert!(m.feasible_init_until(&mut Philox4x32::new(60, 3), START_WORK, Some(now)).is_none());
+        let now = pbit_core::rt::Instant::now(); assert!(m.feasible_init_until(&mut Philox4x32::new(60, 3), START_WORK, Some(now)).is_none());
         assert_eq!(m.feasible_init_until(&mut Philox4x32::new(60, 7), START_WORK, Some(now + std::time::Duration::from_secs(3600))), m.feasible_init_rand(&mut Philox4x32::new(60, 7)));
     }
     #[test]
@@ -2389,7 +2392,7 @@ mod tests {
         let pairs: Vec<Pair> = (1..n).map(|i| Pair { i: i - 1, j: i, c: Coupling::Table((0..4).map(|_| r.f64() * 2.0 - 1.0).collect()) }).collect();
         let tabs: Vec<Vec<f64>> = pairs.iter().map(|p| match &p.c { Coupling::Table(t) => t.clone(), _ => unreachable!() }).collect();
         let m = Model::new(n, k, h.clone(), vec![true; n * k], vec![None; n], pairs, vec![]).unwrap();
-        let t0 = std::time::Instant::now(); let c = exact_components_until(&m, 2_000_000, FRONTIER_MAX_STATES, None).unwrap(); let ms = t0.elapsed().as_secs_f64() * 1e3;
+        let t0 = pbit_core::rt::Instant::now(); let c = exact_components_until(&m, 2_000_000, FRONTIER_MAX_STATES, None).unwrap(); let ms = t0.elapsed().as_secs_f64() * 1e3;
         let mut a = [h[0], h[1]];
         for i in 1..n { let t = &tabs[i - 1]; let nx = |v: usize| { let (x, y) = (a[0] + t[v], a[1] + t[2 + v]); let mx = x.max(y); mx + ((x - mx).exp() + (y - mx).exp()).ln() + h[i * k + v] }; a = [nx(0), nx(1)]; }
         let tm = a[0].max(a[1]) + ((a[0] - a[0].max(a[1])).exp() + (a[1] - a[0].max(a[1])).exp()).ln();
@@ -2432,7 +2435,7 @@ mod tests {
         let n = 512; let mut h = vec![0.0; 2 * n]; for i in 0..n { h[2 * i + 1] = 0.06; }
         let pairs: Vec<Pair> = (0..n).flat_map(|i| (i + 1..n).map(move |j| Pair { i, j, c: Coupling::Potts(0.2) })).collect();
         let m = Model::new(n, 2, h, vec![true; 2 * n], vec![None; n], pairs, vec![]).unwrap();
-        let t0 = std::time::Instant::now(); let c = exact_components_until(&m, 2_000_000, FRONTIER_MAX_STATES, None).unwrap(); let ms = t0.elapsed().as_secs_f64() * 1e3;
+        let t0 = pbit_core::rt::Instant::now(); let c = exact_components_until(&m, 2_000_000, FRONTIER_MAX_STATES, None).unwrap(); let ms = t0.elapsed().as_secs_f64() * 1e3;
         let lc: Vec<f64> = (0..=n).map(|c| { let ln_choose = (1..=c).map(|q| (((n - c + q) as f64) / q as f64).ln()).sum::<f64>(); let c2 = |x: usize| (x * x.saturating_sub(1) / 2) as f64;
             ln_choose + 0.2 * (c2(c) + c2(n - c)) + 0.06 * c as f64 }).collect();
         let mx = lc.iter().cloned().fold(f64::NEG_INFINITY, f64::max); let z: f64 = lc.iter().map(|x| (x - mx).exp()).sum(); let logz = mx + z.ln();

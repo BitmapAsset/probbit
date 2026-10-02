@@ -4,6 +4,7 @@
 //! - `multispin`: T0 bit-sliced 2D ±J kernel, 64 replicas per u64, one shared uniform per site.
 //!   `sweep_prefix` is the PT-in-a-word variant (per-lane betas, shared uniform -> contiguous lane prefix mask).
 //! - `heatbath_f32`: T1 SoA f32 heat-bath on a 2D ±J lattice with LUT sigmoid.
+//! - `rt`: the engine's clock and its no-thread switch (for targets without threads or a std clock: wasm32-unknown-unknown).
 
 #[derive(Clone)]
 pub struct Philox4x32 { key: [u32; 2], ctr: [u32; 4], buf: [u32; 4], idx: usize }
@@ -241,6 +242,54 @@ pub mod heatbath_f32 {
         }
     }
     pub fn lut(beta: f32) -> [f32; 9] { let mut t = [0f32; 9]; for k in 0..9 { t[k] = (beta * (k as f32 - 4.0)).tanh(); } t }
+}
+
+/// The runtime pbit-ir and pbit-decide run on: their clock and whether they may spawn threads.
+///
+/// `Instant` is `std::time::Instant` on every target that has one (the CLI: unchanged behaviour, the same type). On
+/// wasm32-unknown-unknown (a browser), where `std::time::Instant::now()` panics, it is a millisecond instant read from a clock
+/// function the embedder installs with `set_clock` (e.g. `performance.now()`); reading it before `set_clock` panics.
+///
+/// `sequential()` (per thread; on by default only on wasm32-unknown-unknown, where a thread spawn fails): every parallel section
+/// of pbit-ir and pbit-decide (chains, gate passes, polish, the exact tiers' deep-stack thread) runs its work in order on the
+/// calling thread instead of on scoped threads, as one worker would (`--threads 1`). A chain's random stream depends on its index
+/// only, so at fixed work the answer is the same as on any number of threads. Stack depth is then the caller's: the deep-stack
+/// threads sized for > 2,048-variable programs are not used.
+pub mod rt {
+    use std::cell::Cell;
+    thread_local! { static SEQUENTIAL: Cell<bool> = const { Cell::new(cfg!(all(target_family = "wasm", target_os = "unknown"))) }; }
+    /// No threads on this thread's calls into the engine (see the module doc). Returns the previous setting.
+    pub fn set_sequential(on: bool) -> bool { SEQUENTIAL.with(|s| s.replace(on)) }
+    /// Whether this thread's engine calls run without threads.
+    pub fn sequential() -> bool { SEQUENTIAL.with(|s| s.get()) }
+
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    pub use std::time::Instant;
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    pub use clock::{set_clock, Instant};
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    mod clock {
+        use std::cell::Cell;
+        use std::time::Duration;
+        thread_local! { static NOW_MS: Cell<Option<fn() -> f64>> = const { Cell::new(None) }; }
+        /// Install the clock: a function returning monotonic milliseconds (e.g. JavaScript's `performance.now()`).
+        pub fn set_clock(now_ms: fn() -> f64) { NOW_MS.with(|c| c.set(Some(now_ms))) }
+        /// A point in time in milliseconds of the installed clock (the subset of `std::time::Instant` the engine uses).
+        #[derive(Clone, Copy, Debug)]
+        pub struct Instant(f64);
+        impl Instant {
+            pub fn now() -> Instant { Instant(NOW_MS.with(|c| c.get()).expect("pbit_core::rt::set_clock was not called")()) }
+            pub fn elapsed(&self) -> Duration { Instant::now().saturating_duration_since(*self) }
+            pub fn duration_since(&self, earlier: Instant) -> Duration { self.saturating_duration_since(earlier) }
+            pub fn saturating_duration_since(&self, earlier: Instant) -> Duration { Duration::from_secs_f64((self.0 - earlier.0).max(0.0) / 1e3) }
+        }
+        impl PartialEq for Instant { fn eq(&self, o: &Instant) -> bool { self.0 == o.0 } }
+        impl Eq for Instant {}
+        impl PartialOrd for Instant { fn partial_cmp(&self, o: &Instant) -> Option<std::cmp::Ordering> { Some(self.cmp(o)) } }
+        impl Ord for Instant { fn cmp(&self, o: &Instant) -> std::cmp::Ordering { self.0.total_cmp(&o.0) } }
+        impl std::ops::Add<Duration> for Instant { type Output = Instant; fn add(self, d: Duration) -> Instant { Instant(self.0 + d.as_secs_f64() * 1e3) } }
+        impl std::ops::Sub<Instant> for Instant { type Output = Duration; fn sub(self, o: Instant) -> Duration { self.saturating_duration_since(o) } }
+    }
 }
 
 #[cfg(test)]

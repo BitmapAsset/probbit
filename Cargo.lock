@@ -29,3 +29,12 @@ version = "0.3.0"
 dependencies = [
  "pbit-core",
 ]
+
+[[package]]
+name = "pbit-wasm"
+version = "0.3.0"
+dependencies = [
+ "pbit-core",
+ "pbit-decide",
+ "pbit-ir",
+]

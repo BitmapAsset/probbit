@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pbit playground</title>
+<style>
+  :root { color-scheme: dark; --bg: #0b0f14; --panel: #121821; --line: #223042; --text: #d8e1ea; --dim: #7d8da0; --cyan: #4fd1e8; --magenta: #e45bd0; --yellow: #f2c94c; --green: #5bd68a; --red: #ef6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 28px clamp(16px, 4vw, 48px); background: var(--bg); color: var(--text); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: 0.02em; } h1 b { color: var(--cyan); } h1 span { color: var(--dim); font-weight: 400; font-size: 17px; }
+  p.lede { margin: 0 0 18px; color: var(--dim); max-width: 860px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  button, select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+  button.go { border-color: var(--cyan); color: var(--cyan); font-weight: 600; } button:disabled { opacity: 0.5; cursor: wait; }
+  textarea { width: 100%; height: 220px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+  #runs { margin: 14px 0 6px; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); white-space: pre-wrap; }
+  #verdict { margin: 10px 0; font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
+  .exact, .diagnostics_passed { color: var(--green); } .partial { color: var(--yellow); } .refused, .declined, .infeasible, .error { color: var(--red); }
+  table { border-collapse: collapse; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 6px; }
+  th, td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--dim); font-weight: 500; }
+  td.moved { color: var(--magenta); } .note { color: var(--dim); font-size: 13px; margin-top: 6px; }
+  details { margin-top: 16px; } summary { cursor: pointer; color: var(--dim); }
+  pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; max-height: 420px; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1><b>pbit</b> <span>playground: WebAssembly, one thread, no server</span></h1>
+<p class="lede">The pbit engine compiled to WebAssembly, running in this page without threads. <b>decide</b> routes tasks to workers under
+hard rules; <b>evaluate</b> takes a decision model's per-question probabilities plus your rules and returns the most likely answer set that
+obeys every rule, with odds and a gate that refuses instead of guessing. Edit the JSON and press Run (flags go in <code>"flags"</code>, as in <code>pbit mcp</code>).</p>
+<div class="bar">
+  <button id="ex-demo">300-task demo</button> <button id="ex-eval">evaluate example</button>
+  <select id="op"><option value="decide">decide</option><option value="evaluate">evaluate</option><option value="run">run</option></select>
+  <button id="go" class="go" disabled>Run</button> <span id="status" class="note">loading the module...</span>
+</div>
+<textarea id="input" spellcheck="false"></textarea>
+<div id="runs"></div>
+<div id="verdict"></div>
+<table id="odds"></table>
+<div id="odds-note" class="note"></div>
+<details><summary>full answer (JSON)</summary><pre id="raw"></pre></details>
+<!-- written by playground/build.sh: the module as base64 (a page opened from disk may not fetch pbit.wasm); absent over http -->
+<script src="pbit-wasm.js"></script>
+<script>
+"use strict";
+const EVALUATE_EXAMPLE = {"model": "jev-latest", "state": {"subject": "Checkout down, charged twice", "message": "Your checkout has failed for an hour and I was charged twice. Refund me now or I cancel. Card ending 4242."}, "questions": {"urgent": {"type": "noul", "instructions": "Is this request urgent?"}, "team": {"type": "choice", "instructions": "Which team owns it?", "criteria": {"billing": "Payments, invoices, refunds", "technical": "Outages, errors, configuration", "sales": "Plans and upgrades", "security": "Account takeover, fraud, data exposure"}}, "severity": {"type": "score", "instructions": "How severe is the customer impact?", "criteria": ["No impact", "Minor", "Major", "Critical"]}, "refund_requested": {"type": "noul", "instructions": "Does the customer ask for a refund?"}, "refund_action": {"type": "choice", "instructions": "Which refund do we issue?", "criteria": {"none": null, "partial": "Refund the duplicate charge", "full": "Refund the whole order"}}, "escalate_to_human": {"type": "noul", "instructions": "Should a human take over?"}, "sentiment": {"type": "choice", "instructions": "Customer sentiment?", "criteria": {"angry": null, "neutral": null, "happy": null}}, "churn_risk": {"type": "score", "instructions": "How likely is the customer to leave?", "criteria": ["Low", "Medium", "High"]}, "reply_channel": {"type": "choice", "instructions": "How do we reply?", "criteria": {"email": null, "phone": null, "chat": null}}, "pii_present": {"type": "noul", "instructions": "Does the message contain personal or payment data?"}, "reply_template": {"type": "choice", "instructions": "Which reply template?", "criteria": {"apology": null, "howto": null, "outage": "Known incident notice", "upsell": "Offer a higher plan"}}, "sla": {"type": "choice", "instructions": "Response time target?", "criteria": {"4h": null, "24h": null, "72h": null}}}, "pbit": {"judge": {"model": "jev-latest", "usage": {"input_tokens": 412, "output_tokens": 24}, "answers": {"urgent": {"type": "noul", "noul": 0.41}, "team": {"type": "choice", "choice": "billing", "confidence": 0.48, "probabilities": {"billing": 0.48, "technical": 0.44, "sales": 0.03, "security": 0.05}}, "severity": {"type": "score", "score": 2.27, "confidence": 0.46, "legend": {"0": "No impact", "1": "Minor", "2": "Major", "3": "Critical"}, "probabilities": {"0": 0.02, "1": 0.12, "2": 0.4, "3": 0.46}}, "refund_requested": {"type": "noul", "noul": 0.93}, "refund_action": {"type": "choice", "choice": "full", "confidence": 0.47, "probabilities": {"none": 0.08, "partial": 0.45, "full": 0.47}}, "escalate_to_human": {"type": "noul", "noul": 0.38}, "sentiment": {"type": "choice", "choice": "angry", "confidence": 0.86, "probabilities": {"angry": 0.86, "neutral": 0.12, "happy": 0.02}}, "churn_risk": {"type": "score", "score": 1.64, "confidence": 0.7, "legend": {"0": "Low", "1": "Medium", "2": "High"}, "probabilities": {"0": 0.06, "1": 0.24, "2": 0.7}}, "reply_channel": {"type": "choice", "choice": "chat", "confidence": 0.51, "probabilities": {"email": 0.3, "phone": 0.19, "chat": 0.51}}, "pii_present": {"type": "noul", "noul": 0.88}, "reply_template": {"type": "choice", "choice": "outage", "confidence": 0.52, "probabilities": {"apology": 0.36, "howto": 0.04, "outage": 0.52, "upsell": 0.08}}, "sla": {"type": "choice", "choice": "24h", "confidence": 0.55, "probabilities": {"4h": 0.4, "24h": 0.55, "72h": 0.05}}}}, "rules": {"implies": [{"if": {"var": "severity", "value": "3"}, "then": {"var": "urgent", "in": ["true"]}}, {"if": {"var": "urgent", "value": "true"}, "then": {"var": "sla", "in": ["4h"]}}, {"if": {"var": "refund_action", "value": "partial"}, "then": {"var": "refund_requested", "in": ["true"]}}, {"if": {"var": "refund_action", "value": "full"}, "then": {"var": "refund_requested", "in": ["true"]}}, {"if": {"var": "refund_action", "value": "full"}, "then": {"var": "escalate_to_human", "in": ["true"]}}, {"if": {"var": "team", "value": "security"}, "then": {"var": "escalate_to_human", "in": ["true"]}}, {"if": {"var": "churn_risk", "value": "2"}, "then": {"var": "escalate_to_human", "in": ["true"]}}, {"if": {"var": "pii_present", "value": "true"}, "then": {"var": "reply_channel", "in": ["email", "phone"]}}, {"if": {"var": "reply_template", "value": "outage"}, "then": {"var": "team", "in": ["technical"]}}, {"if": {"var": "reply_template", "value": "upsell"}, "then": {"var": "team", "in": ["sales"]}}], "tables": [{"vars": ["sentiment", "reply_template"], "forbid": [["angry", "upsell"]]}], "linear": [{"terms": [["refund_action", "partial", 1], ["refund_action", "full", 3], ["escalate_to_human", "true", 2], ["reply_channel", "phone", 1]], "limit": 4}]}}};
+const $ = id => document.getElementById(id);
+let pbit = null, demo300 = null, sync = false;
+
+async function load() {
+  let bytes;
+  if (typeof PBIT_WASM_B64 === "string") { const s = atob(PBIT_WASM_B64); bytes = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i); }
+  else bytes = new Uint8Array(await (await fetch("pbit.wasm")).arrayBuffer());
+  const t = performance.now(), imports = { pbit: { now_ms: () => performance.now() } };
+  let instance;  // synchronous where the browser allows it (the page is then complete at its load event), else asynchronous
+  try { instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), imports); sync = true; } catch (e) { ({ instance } = await WebAssembly.instantiate(bytes, imports)); }
+  const ex = instance.exports;
+  const call = (op, text) => {
+    const input = new TextEncoder().encode(text), p = ex.pbit_alloc(input.length);
+    new Uint8Array(ex.memory.buffer, p, input.length).set(input);
+    const n = ex.pbit_call(op, p, input.length);
+    return { code: ex.pbit_out_code(), text: new TextDecoder().decode(new Uint8Array(ex.memory.buffer, ex.pbit_out_ptr(), n)) };
+  };
+  pbit = { decide: j => call(0, j), run: j => call(1, j), evaluate: j => call(2, j), demo: j => call(3, j) };
+  return { bytes: bytes.length, ms: performance.now() - t };
+}
+
+function log(line) { $("runs").textContent += line + "\n"; }
+const fmt = x => typeof x === "number" ? (Math.round(x * 1000) / 1000).toString() : String(x);
+
+function show(op, doc) {
+  const v = doc.error ? "error" : doc.verdict;
+  $("verdict").className = v; $("verdict").textContent = doc.error ? "ERROR " + doc.error.code + " at " + (doc.error.path || "the document") + ": " + doc.error.message
+    : (v.toUpperCase() + (doc.tier ? " · " + doc.tier : "") + (doc.released ? " · " + doc.released.length + " released, " + doc.escalated.length + " escalated" : "") + (doc.violations !== undefined ? " · " + doc.violations + " violations" : ""));
+  const t = $("odds"); t.innerHTML = ""; $("odds-note").textContent = "";
+  const row = (cells, head) => { const r = t.insertRow(); for (const c of cells) { const d = document.createElement(head ? "th" : "td"); if (c && c.moved) { d.className = "moved"; d.textContent = c.text; } else d.textContent = c; r.appendChild(d); } };
+  if (op === "evaluate" && doc.answers) {
+    row(["question", "type", "answer", "p", "judge said", "released", "probabilities under the rules"], true);
+    for (const [id, a] of Object.entries(doc.answers)) {
+      const x = a.pbit, probs = a.type === "noul" ? "true " + fmt(a.noul) : Object.entries(a.probabilities).map(([k, p]) => k + " " + fmt(p)).join("  ");
+      row([id, a.type, x.changed ? { moved: true, text: x.value + " *" } : x.value, fmt(x.p), x.judge === null ? "-" : x.judge, x.released ? "yes" : "no", probs]);
+    }
+    $("odds-note").textContent = "* moved by a rule: the judge's own answer broke one. Without rules every answer is the judge's own.";
+  } else if (doc.plan) {
+    const odds = doc.odds || doc.marginals, ids = Object.keys(doc.plan), shown = ids.slice(0, 24), rel = new Set(doc.released || []);
+    row([op === "decide" ? "task" : "variable", "plan", "p", "top-2 odds", "released"], true);
+    for (const id of shown) { const o = Object.entries(odds[id] || {}); row([id, doc.plan[id], fmt((odds[id] || {})[doc.plan[id]]), o.slice(0, 2).map(([k, p]) => k + " " + fmt(p)).join("  "), rel.has(id) ? "yes" : "no"]); }
+    if (ids.length > shown.length) $("odds-note").textContent = "first " + shown.length + " of " + ids.length + " rows; every row is in the full answer below.";
+  }
+  $("raw").textContent = JSON.stringify(doc, null, 2);
+}
+
+function go(op, text, label) {
+  const t = performance.now(), r = pbit[op](text), wall = performance.now() - t, doc = JSON.parse(r.text);
+  const sweeps = doc.gate ? " · " + doc.gate.sweeps + " sweeps over " + doc.gate.chains + " chains" : "";
+  log(op + " · " + label + " · exit " + r.code + " · " + (doc.error ? "error" : doc.verdict) + sweeps + " · " + wall.toFixed(1) + " ms in the browser" + (doc.ms !== undefined ? " (answer ms " + doc.ms.toFixed(1) + ")" : ""));
+  show(op, doc); return doc;
+}
+function example(which) {
+  if (which === "demo") { $("op").value = "decide"; $("input").value = JSON.stringify(Object.assign({}, demo300, { flags: { sweeps: 3200, polish_ms: 0 } }), null, 1); }
+  else { $("op").value = "evaluate"; $("input").value = JSON.stringify(EVALUATE_EXAMPLE, null, 1); }
+}
+
+load().then(info => {
+  demo300 = JSON.parse(pbit.demo('{"tasks": 300, "seed": 7}').text);
+  $("status").textContent = "module " + info.bytes + " bytes, compiled in " + info.ms.toFixed(1) + " ms";
+  log("wasm module: " + info.bytes + " bytes, compiled + instantiated " + (sync ? "synchronously" : "asynchronously") + " in " + info.ms.toFixed(1) + " ms; no threads; clock = performance.now()");
+  go("decide", JSON.stringify(Object.assign({}, demo300, { flags: { sweeps: 3200, polish_ms: 0 } })), "300-task demo, sweeps 3200, polish_ms 0");
+  example("eval"); go("evaluate", $("input").value, "12 questions, judge answers + 12 rules");
+  $("go").disabled = false;
+  $("go").onclick = () => { $("go").disabled = true; $("status").textContent = "running..."; setTimeout(() => { try { go($("op").value, $("input").value, "your input"); } finally { $("go").disabled = false; $("status").textContent = ""; } }, 20); };
+  $("ex-demo").onclick = () => example("demo"); $("ex-eval").onclick = () => example("eval");
+  document.title = "pbit playground: ready";
+}).catch(e => { $("status").textContent = "could not load the module: " + e + " (run playground/build.sh; over http, serve pbit.wasm next to this page)"; $("status").className = "error"; });
+</script>
+</body>
+</html>

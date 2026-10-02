@@ -1,0 +1,17 @@
+[package]
+name = "pbit-wasm"
+description = "pbit in a browser: decide, run and evaluate as JSON-in / JSON-out functions on wasm32-unknown-unknown, without threads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pbit-core = { path = "../pbit-core" }
+pbit-ir = { path = "../pbit-ir" }
+pbit-decide = { path = "../pbit-decide" }

@@ -87,8 +87,8 @@ impl Problem {
     /// Potts pairs are built, and before and after `Model::new` (R19.8, P2.3 item 2: the CLI's `--exact-ms` cap did not
     /// cover this lowering, ~200 ms on one 3,000-task group). None = `lower`. Also None when the IR rejects the model (more than
     /// 65,535 workers): an `expect` here aborted `pbit decide` (exit 134, empty stdout) on a 65,536-worker document.
-    pub fn lower_until(&self, hard: Option<std::time::Instant>) -> Option<pbit_ir::Model> {
-        let late = || hard.is_some_and(|h| std::time::Instant::now() >= h);
+    pub fn lower_until(&self, hard: Option<pbit_core::rt::Instant>) -> Option<pbit_ir::Model> {
+        let late = || hard.is_some_and(|h| pbit_core::rt::Instant::now() >= h);
         let mut gm: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
         for i in 0..self.t { if self.group[i] != usize::MAX { gm.entry(self.group[i]).or_default().push(i); } }
         let mut pairs = vec![];
@@ -137,7 +137,7 @@ pub struct Exact { pub logz: f64, pub marg: Vec<f64>, pub top: Vec<(f64, Vec<usi
 pub fn exact(p: &Problem, k: usize, limit: u64) -> Option<Exact> { exact_within(p, k, limit, None) }
 /// `exact` that declines (None) once `hard` passes (clock read every 64 nodes, both passes): the opt-in `--exact-ms`
 /// cap of the CLI. None = `exact`.
-pub fn exact_within(p: &Problem, k: usize, limit: u64, hard: Option<std::time::Instant>) -> Option<Exact> {
+pub fn exact_within(p: &Problem, k: usize, limit: u64, hard: Option<pbit_core::rt::Instant>) -> Option<Exact> {
     pbit_ir::deep(p.t, || enumerate(p, k, limit, hard, MEMO_MAX)) // the DFS recurses once per task; big inputs get their own stack
 }
 /// `exact` with the enumeration's affinity memo capped at `memo_max` entries (tests: the past-the-chunk fold is bit-identical).
@@ -147,8 +147,8 @@ pub fn exact_memo_capped(p: &Problem, k: usize, limit: u64, memo_max: usize) -> 
 }
 /// Cap on the enumeration's affinity memo (f64 entries, 128 MB); larger programs get shorter chunks per (task, worker).
 const MEMO_MAX: usize = 1 << 24;
-fn enumerate(p: &Problem, k: usize, limit: u64, hard: Option<std::time::Instant>, memo_max: usize) -> Option<Exact> {
-    if hard.is_some_and(|h| std::time::Instant::now() >= h) { return None; }
+fn enumerate(p: &Problem, k: usize, limit: u64, hard: Option<pbit_core::rt::Instant>, memo_max: usize) -> Option<Exact> {
+    if hard.is_some_and(|h| pbit_core::rt::Instant::now() >= h) { return None; }
     // dense group index per task (usize::MAX = ungrouped: no mates, so no affinity term)
     let mut ids: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
     let gi: Vec<usize> = p.group.iter().map(|&g| if g == usize::MAX { usize::MAX } else { let n = ids.len(); *ids.entry(g).or_insert(n) }).collect();
@@ -187,14 +187,14 @@ struct Ex<'a> { p: &'a Problem, gi: Vec<usize>, cnt: Vec<usize>, memo: Vec<f64>,
     top: Vec<(f64, Vec<usize>)>, k: usize, n: u64, limit: u64, pass: u8, nodes: u64, node_limit: u64,
     /// Hard stop (`exact_within`), whether it fired, and the node count that triggers the next check (`halt`): the node
     /// limit without a hard stop, so the default path keeps its single comparison (a separate clock branch cost +2.0%)
-    hard: Option<std::time::Instant>, cut: bool, stop: u64 }
+    hard: Option<pbit_core::rt::Instant>, cut: bool, stop: u64 }
 impl<'a> Ex<'a> {
     fn arm(&self) -> u64 { if self.hard.is_some() { self.node_limit.min(self.nodes + 63) } else { self.node_limit } }
     /// The real stop conditions, reached only past `stop`: plan / node limit, a cut, the hard stop (clock every 64 nodes).
     #[cold]
     fn halt(&mut self) -> bool {
         if self.n > self.limit || self.nodes > self.node_limit || self.cut { return true; }
-        if self.hard.is_some_and(|h| std::time::Instant::now() >= h) { self.cut = true; return true; }
+        if self.hard.is_some_and(|h| pbit_core::rt::Instant::now() >= h) { self.cut = true; return true; }
         self.stop = self.arm(); false
     }
     fn dfs(&mut self, i: usize, lw: f64) {
@@ -468,7 +468,7 @@ pub fn sample(p: &Problem, chains: usize, sweeps: usize, budget_ms: Option<f64>,
 pub fn sample_opts(p: &Problem, chains: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, threads: bool, keep_plans: bool, group_pairs: bool) -> Option<Samples> {
     let gpt = if group_pairs { GroupPairs::new(p) } else { None };
     let wt = window_tables(p);
-    let run = |c: usize| chain_samples(p, c, sweeps, budget_ms.map(|b| std::time::Instant::now() + std::time::Duration::from_secs_f64(b.max(0.0) / 1e3)), seed, keep_plans, &gpt, &wt, 1.0, 0);
+    let run = |c: usize| chain_samples(p, c, sweeps, budget_ms.map(|b| pbit_core::rt::Instant::now() + std::time::Duration::from_secs_f64(b.max(0.0) / 1e3)), seed, keep_plans, &gpt, &wt, 1.0, 0);
     let parts: Vec<Samples> = if threads {
         std::thread::scope(|sc| { let hs: Vec<_> = (0..chains).map(|c| { let run = &run; sc.spawn(move || run(c)) }).collect(); hs.into_iter().map(|h| h.join().unwrap()).collect::<Option<Vec<_>>>() })?
     } else { (0..chains).map(run).collect::<Option<Vec<_>>>()? };
@@ -477,16 +477,16 @@ pub fn sample_opts(p: &Problem, chains: usize, sweeps: usize, budget_ms: Option<
 /// One router chain (stream `c`): a pure function of (problem, seed, c, sweeps) when `budget_ms` is None. `duty` < 1
 /// (CPU limit, as `pbit_ir`): after every ~2 ms of sweeping the thread sleeps busy * (1/duty - 1); samples are unchanged.
 #[allow(clippy::too_many_arguments)]
-fn chain_samples(p: &Problem, c: usize, sweeps: usize, deadline: Option<std::time::Instant>, seed: u64, keep_plans: bool, gpt: &Option<GroupPairs>, wt: &Option<GroupPairs>, duty: f64, max_rows: usize) -> Option<Samples> {
+fn chain_samples(p: &Problem, c: usize, sweeps: usize, deadline: Option<pbit_core::rt::Instant>, seed: u64, keep_plans: bool, gpt: &Option<GroupPairs>, wt: &Option<GroupPairs>, duty: f64, max_rows: usize) -> Option<Samples> {
     // R19.9: a wall-clock run stops at `deadline` (set before the chain is built: the build and the start count)
     let mut ch = Chain::new(p, seed, c as u64)?; ch.gp = gpt.clone(); ch.set_window(wt); let na = p.a;
-    let burn = sweeps / 10; let mut busy0 = std::time::Instant::now(); let mut stride = 1usize;
+    let burn = sweeps / 10; let mut busy0 = pbit_core::rt::Instant::now(); let mut stride = 1usize;
     let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
     let mut k = 0usize;
     loop {
-        if let Some(d) = deadline { if k % 8 == 0 && std::time::Instant::now() >= d { break; } } else if k >= sweeps { break; }
+        if let Some(d) = deadline { if k % 8 == 0 && pbit_core::rt::Instant::now() >= d { break; } } else if k >= sweeps { break; }
         ch.sweep(); k += 1; pbit_ir::progress_tick(k);
-        if duty < 1.0 { let b = busy0.elapsed(); if b.as_secs_f64() >= 0.002 { std::thread::sleep(b.mul_f64(1.0 / duty - 1.0)); busy0 = std::time::Instant::now(); } }
+        if duty < 1.0 { let b = busy0.elapsed(); if b.as_secs_f64() >= 0.002 { std::thread::sleep(b.mul_f64(1.0 / duty - 1.0)); busy0 = pbit_core::rt::Instant::now(); } }
         let burn_now = if deadline.is_some() { k <= 20 } else { k <= burn };
         if burn_now { continue; }
         for i in 0..p.t { s.marg[i * na + ch.x[i]] += 1.0; }
@@ -512,14 +512,15 @@ fn chain_samples(p: &Problem, c: usize, sweeps: usize, deadline: Option<std::tim
 /// `max_rows` > 0 (memory limit): at most that many trajectory rows per chain (`pbit_ir::record_row`); 0 = unbounded.
 pub fn sample_on(p: &Problem, chains: usize, threads: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, keep_plans: bool, group_pairs: bool, cpu_pct: u32, max_rows: usize) -> Option<Samples> {
     let gpt = if group_pairs { GroupPairs::new(p) } else { None }; let wt = window_tables(p);
-    let t = threads.clamp(1, chains.max(1)); let rounds = chains.div_ceil(t).max(1); let b = budget_ms.map(|b| b / rounds as f64);
-    let duty = cpu_pct.clamp(1, 100) as f64 / 100.0; let (gpt, wt) = (&gpt, &wt); let t_call = std::time::Instant::now();
+    let seq = pbit_core::rt::sequential(); let t = if seq { 1 } else { threads.clamp(1, chains.max(1)) }; let rounds = chains.div_ceil(t).max(1); let b = budget_ms.map(|b| b / rounds as f64);
+    let duty = cpu_pct.clamp(1, 100) as f64 / 100.0; let (gpt, wt) = (&gpt, &wt); let t_call = pbit_core::rt::Instant::now();
     let due = move |c: usize| b.map(|b| t_call + std::time::Duration::from_secs_f64(b.max(0.0) * (c / t + 1) as f64 / 1e3));
     let mut slots: Vec<Option<Samples>> = (0..chains).map(|_| None).collect();
+    if seq { for (c, slot) in slots.iter_mut().enumerate() { *slot = chain_samples(p, c, sweeps, due(c), seed, keep_plans, gpt, wt, duty, max_rows); } } else {
     std::thread::scope(|sc| {
         let hs: Vec<_> = (0..t).map(|w| sc.spawn(move || (w..chains).step_by(t).map(|c| (c, chain_samples(p, c, sweeps, due(c), seed, keep_plans, gpt, wt, duty, max_rows))).collect::<Vec<_>>())).collect();
         for h in hs { for (c, s) in h.join().unwrap() { slots[c] = s; } }
-    });
+    }); }
     Some(pbit_ir::merge(p.t * p.a, slots.into_iter().collect::<Option<Vec<_>>>()?))
 }
 
@@ -533,7 +534,7 @@ pub struct Decision { pub verdict: Verdict, pub map: Vec<usize>, pub map_logw: f
 
 /// Router: exact if feasible set <= exact_limit, else 4-chain Gibbs with R-hat gate.
 pub fn decide(p: &Problem, exact_limit: u64, sweeps: usize, seed: u64) -> Option<Decision> {
-    let t0 = std::time::Instant::now();
+    let t0 = pbit_core::rt::Instant::now();
     if let Some(e) = exact(p, 5, exact_limit) {
         if e.n_feasible == 0 { return None; }
         let map = e.top[0].1.clone();
@@ -600,7 +601,7 @@ pub fn gate_stats_with(p: &Problem, s: &Samples, bs_pow: f64) -> Gate { pbit_ir:
 /// With exact_limit > 0 a second exact tier runs before sampling: `exact_frontier` (thin sharing: exact odds + exact MAP
 /// at any size; declines in <= ~10 ms on thick queues). exact_limit = 0 still forces the sampler.
 pub fn decide_gated(p: &Problem, exact_limit: u64, sweeps: usize, budget_ms: Option<f64>, seed: u64, cfg: &GateCfg) -> Option<(Decision, Option<Gate>)> {
-    let t0 = std::time::Instant::now();
+    let t0 = pbit_core::rt::Instant::now();
     if let Some(e) = exact(p, 5, exact_limit) {
         if e.n_feasible == 0 { return None; }
         let map = e.top[0].1.clone();
@@ -630,7 +631,7 @@ pub fn sample_tempered(p: &Problem, ladder: &[f64], budget_ms: f64, seed: u64) -
     let run = |c: usize| -> Option<Samples> {
         let mut reps: Vec<Chain> = probs.iter().enumerate().map(|(k, q)| Chain::new(q, seed, (c * 64 + k) as u64)).collect::<Option<Vec<_>>>()?;
         let mut rng = pbit_core::Philox4x32::new(seed ^ 0xA5A5, 1000 + c as u64);
-        let na = p.a; let kt = reps.len() - 1; let t0 = std::time::Instant::now();
+        let na = p.a; let kt = reps.len() - 1; let t0 = pbit_core::rt::Instant::now();
         let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
         let mut k = 0usize;
         loop {
@@ -672,7 +673,7 @@ pub fn look_z(cfg: &GateCfg, k: usize, alpha_spend: bool) -> f64 { if alpha_spen
 /// `slice_growth` > 1 makes slice k last slice_ms * growth^(k-1) (geometric looks: fewer gate evaluations and fewer chances to stop on noise).
 #[allow(clippy::too_many_arguments)]
 pub fn decide_anytime(p: &Problem, deadline_ms: f64, slice_ms: f64, slice_growth: f64, seed: u64, cfg: &GateCfg, alpha_spend: bool, per_ticket_target: Option<f64>) -> Option<Anytime> {
-    let t0 = std::time::Instant::now(); let na = p.a;
+    let t0 = pbit_core::rt::Instant::now(); let na = p.a;
     let mut chains: Vec<Chain> = (0..4).map(|c| Chain::new(p, seed, c as u64)).collect::<Option<Vec<_>>>()?;
     if auto_group_pairs(p) { let gpt = GroupPairs::new(p); for ch in chains.iter_mut() { ch.gp = gpt.clone(); } }
     let wt = window_tables(p); for ch in chains.iter_mut() { ch.set_window(&wt); }
@@ -682,7 +683,7 @@ pub fn decide_anytime(p: &Problem, deadline_ms: f64, slice_ms: f64, slice_growth
     loop {
         let now = t0.elapsed().as_secs_f64() * 1e3; let slice = (slice_ms * slice_growth.powi(looks as i32)).min(deadline_ms - now).max(0.0);
         std::thread::scope(|sc| { for (ch, ac) in chains.iter_mut().zip(accs.iter_mut()) { sc.spawn(move || {
-            let ts = std::time::Instant::now(); let mut j = 0usize;
+            let ts = pbit_core::rt::Instant::now(); let mut j = 0usize;
             loop { if j % 8 == 0 && ts.elapsed().as_secs_f64() * 1e3 >= slice { break; }
                 ch.sweep(); j += 1; ac.k += 1; if ac.k <= 20 { continue; }
                 for i in 0..p.t { ac.marg[i * na + ch.x[i]] += 1.0; }
@@ -916,8 +917,8 @@ pub fn exact_frontier(p: &Problem, max_states: usize) -> Option<FrontierExact> {
 /// The lowering (O(group size^2) pairs) ran before the IR read the clock, so one 3,000-task group spent
 /// ~115 ms past `--exact-ms 50`; a passed deadline now declines first (the IR declines on a passed deadline anyway: same answers).
 /// The lowering itself is still not interruptible.
-pub fn exact_frontier_until(p: &Problem, max_states: usize, hard: Option<std::time::Instant>) -> Option<FrontierExact> {
-    if hard.is_some_and(|h| std::time::Instant::now() >= h) { return None; }
+pub fn exact_frontier_until(p: &Problem, max_states: usize, hard: Option<pbit_core::rt::Instant>) -> Option<FrontierExact> {
+    if hard.is_some_and(|h| pbit_core::rt::Instant::now() >= h) { return None; }
     pbit_ir::exact_frontier_until(&p.lower(), max_states, hard)
 }
 
@@ -936,12 +937,12 @@ pub fn polish_plan(p: &Problem, start: Option<&[usize]>, ms: f64, seed: u64) -> 
 pub fn polish_plan_sweeps(p: &Problem, start: Option<&[usize]>, sweeps: usize, seed: u64) -> Option<(f64, Vec<usize>)> { polish_plan_on(p, start, 0.0, sweeps.max(1), 4, seed) }
 /// The polish's 4 chains on `threads` workers (`--threads`); see `pbit_ir::anneal_on` for the ms / sweeps semantics.
 pub fn polish_plan_on(p: &Problem, start: Option<&[usize]>, ms: f64, sweeps: usize, threads: usize, seed: u64) -> Option<(f64, Vec<usize>)> {
-    let t = threads.clamp(1, 4); let ms = ms / 4usize.div_ceil(t) as f64;
+    let seq = pbit_core::rt::sequential(); let t = if seq { 1 } else { threads.clamp(1, 4) }; let ms = ms / 4usize.div_ceil(t) as f64;
     let betas = [2.0, 4.0, 8.0, 16.0, 32.0];
     let qs: Vec<Problem> = betas.iter().map(|&b| { let mut q = p.clone(); for v in q.h.iter_mut() { *v *= b; } q.lam *= b; q }).collect();
     let run = |c: usize| -> Option<(f64, Vec<usize>)> {
         let mut x: Vec<usize> = match start { Some(s) => s.to_vec(), None => Chain::new(p, seed, c as u64)?.x };
-        let mut best = (p.logw(&x), x.clone()); let t0 = std::time::Instant::now();
+        let mut best = (p.logw(&x), x.clone()); let t0 = pbit_core::rt::Instant::now();
         for (k, q) in qs.iter().enumerate() {
             // Past the chain's whole wall-clock share, every remaining beta would run 0 sweeps (each stops at <= ms), so
             // skip building their chains (`Chain::new` = a random feasible start + 5 uniform sweeps: ~20 ms each on 100k grouped
@@ -957,7 +958,8 @@ pub fn polish_plan_on(p: &Problem, start: Option<&[usize]>, ms: f64, sweeps: usi
         Some(best)
     };
     let mut slots: Vec<Option<(f64, Vec<usize>)>> = (0..4).map(|_| None).collect();
+    if seq { for (c, slot) in slots.iter_mut().enumerate() { *slot = run(c); } } else {
     std::thread::scope(|sc| { let hs: Vec<_> = (0..t).map(|w| { let run = &run; sc.spawn(move || (w..4).step_by(t).map(|c| (c, run(c))).collect::<Vec<_>>()) }).collect();
-        for h in hs { for (c, r) in h.join().unwrap() { slots[c] = r; } } });
+        for h in hs { for (c, r) in h.join().unwrap() { slots[c] = r; } } }); }
     slots.into_iter().collect::<Option<Vec<_>>>()?.into_iter().max_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
 }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["pbit-core", "pbit-ir", "pbit-decide", "pbit-cli"]
+members = ["pbit-core", "pbit-ir", "pbit-decide", "pbit-cli", "pbit-wasm"]
 
 [workspace.package]
 version = "0.3.0"

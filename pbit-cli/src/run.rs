@@ -222,7 +222,7 @@ pub fn gate2(g: &Gate, s: &Samples, k: usize, ids: &[String], values: &[String])
 }
 /// The components / forest tier's answer (`exact_components_until`): tier `forest` when every component is a cap-free tree,
 /// else `components`, with the per-tier component counts; exit 1 if one component has no feasible assignment.
-fn comp_doc(p: &Prog, c: &CompExact, mut out: Vec<(&str, Json)>, t0: std::time::Instant) -> (Json, i32) {
+fn comp_doc(p: &Prog, c: &CompExact, mut out: Vec<(&str, Json)>, t0: pbit_core::rt::Instant) -> (Json, i32) {
     let m = &p.m; let ms = num(t0.elapsed().as_secs_f64() * 1e3);
     let parts = obj(vec![("count", num(c.components as f64)), ("forest", num(c.forest as f64)), ("occupancy", num(c.occupancy as f64)), ("enumerate", num(c.enumerated as f64)), ("frontier", num(c.frontier as f64))]);
     if c.infeasible { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no assignment satisfies every rule (one independent component has no feasible assignment)")), ("components", parts), ("ms", ms)]); return (obj(out), 1); }
@@ -246,8 +246,8 @@ fn ids(p: &Prog, mask: &[bool], want: bool) -> Json { Json::Arr(p.vars.iter().en
 /// `mem`: the memory cap (--mem-limit-mb, rows per chain) — see main.rs `mem_limit`.
 /// `bars`: filled with the per-variable error bars on a sampled answer (`--summary`), left empty otherwise.
 #[allow(clippy::too_many_arguments)]
-pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_ms: f64, polish_sweeps: usize, sweeps: usize, fr_states: usize, chains: usize, threads: usize, cpu_pct: u32, mem: (usize, usize), exact_ms: Option<f64>, deadline: Option<(std::time::Instant, f64, bool)>, bars: &mut Vec<f64>) -> (Json, i32) {
-    let m = &p.m; let t0 = std::time::Instant::now();
+pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_ms: f64, polish_sweeps: usize, sweeps: usize, fr_states: usize, chains: usize, threads: usize, cpu_pct: u32, mem: (usize, usize), exact_ms: Option<f64>, deadline: Option<(pbit_core::rt::Instant, f64, bool)>, bars: &mut Vec<f64>) -> (Json, i32) {
+    let m = &p.m; let t0 = pbit_core::rt::Instant::now();
     // --exact-ms (opt-in) = a hard wall-clock stop for the exact tiers below, from t0 (see main.rs `exact_ms`)
     let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();
     // R19.6: without --exact-ms, `decide` on a wall-clock budget stops the exact tiers before the sampler at --budget-ms when the
@@ -265,7 +265,7 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
     let mut out: Vec<(&str, Json)> = vec![("engine", jstr(&format!("pbit {}", env!("CARGO_PKG_VERSION")))), ("op", jstr(op)),
         ("program", obj(vec![("vars", num(m.n as f64)), ("values", num(m.k as f64)), ("pairs", num(m.pairs.len() as f64)), ("caps", num(m.caps.len() as f64))]))];
     out.push(("compiled", obj(vec![("pairs_dropped", num(p.compiled.pairs_dropped as f64)), ("caps_dropped", num(p.compiled.caps_dropped as f64)), ("tables_folded", num(p.compiled.tables_folded as f64))])));
-    let ms = |t0: std::time::Instant| num(t0.elapsed().as_secs_f64() * 1e3);
+    let ms = |t0: pbit_core::rt::Instant| num(t0.elapsed().as_secs_f64() * 1e3);
     if op == "decide" || op == "exact" {
         let lim = if op == "exact" { u64::MAX / 128 } else { exact_limit };
         // When the raw space exceeds the enumeration limit, the frontier DP goes FIRST: enumeration would spend its
@@ -291,7 +291,7 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
                 return (obj(out), 0);
             }
             if op == "exact" { if space <= lim as f64 { if let Some(c) = comp() { return comp_doc(p, &c, out, t0); } }
-                let why = if hard.is_some_and(|h| std::time::Instant::now() >= h) { "enumeration stopped at --exact-ms; raise it, or use --op decide or sample" } else { "enumeration node budget exhausted; use --op decide or sample" };
+                let why = if hard.is_some_and(|h| pbit_core::rt::Instant::now() >= h) { "enumeration stopped at --exact-ms; raise it, or use --op decide or sample" } else { "enumeration node budget exhausted; use --op decide or sample" };
                 out.extend([("verdict", jstr("declined")), ("reason", jstr(why)), ("ms", ms(t0))]); return (obj(out), 3); }
             f = fr(false);
         }
@@ -305,7 +305,7 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
         if space <= lim as f64 { if let Some(c) = comp() { return comp_doc(p, &c, out, t0); } } // enumeration declined on its node budget
     }
     // Only a run whose exact tiers could run can have hit the cap (was also true under --op sample)
-    let ts = std::time::Instant::now(); let reached = op != "sample" && hard.is_some_and(|h| ts >= h);
+    let ts = pbit_core::rt::Instant::now(); let reached = op != "sample" && hard.is_some_and(|h| ts >= h);
     let (budget, polish_ms) = match (deadline, dl_end) { (Some((_, _, explicit)), Some(end)) => {
         let left = end.saturating_duration_since(ts).as_secs_f64() * 1e3;
         if left <= 0.0 { out.extend([("verdict", jstr("refused")), ("reason", jstr("--deadline-ms passed before the sampler could start; raise it")), ("ms", ms(t0))]); return (obj(out), 3); }
@@ -323,7 +323,7 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
         // later (it used to be a soft deadline from the start of the call, consulted only between plans: a program with many plans
         // ran on to --exact-limit, ~7 s past a 200 ms budget). The half budget: on a loaded machine 1,024 chains' wall-clock slices
         // overran the 4 s phase, the fallback started past its end and refused a program it enumerates in ~0.3 s.
-        let end = (ts + std::time::Duration::from_secs_f64(budget / 1e3)).max(std::time::Instant::now() + std::time::Duration::from_secs_f64(budget / 2e3));
+        let end = (ts + std::time::Duration::from_secs_f64(budget / 1e3)).max(pbit_core::rt::Instant::now() + std::time::Duration::from_secs_f64(budget / 2e3));
         if fallback { if let (Some(e), _) = exact_within(m, 5, exact_limit, Some(end), Some(end)) {
             if e.n_feasible == 0 { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no assignment satisfies every rule")), ("ms", ms(t0))]); return (obj(out), 1); }
             let best = &e.top[0].1; // a feasible program no chain could start in time, enumerated within the budget
@@ -337,14 +337,14 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
         let hint = if op == "decide" { "no feasible start found within the search budget, and the bounded exact search (run again to the end of --budget-ms) found no plan (not a proof of infeasibility); --op exact searches exhaustively and can prove infeasibility, or raise --budget-ms" }
             else { "no feasible start found within the search budget (not a proof of infeasibility); try --op decide" };
         out.extend([("verdict", jstr("refused")), ("reason", jstr(hint)), ("ms", ms(t0))]); return (obj(out), 3); } };
-    let sample_s = ts.elapsed().as_secs_f64(); let tg = std::time::Instant::now(); crate::tui::tier("gate");
+    let sample_s = ts.elapsed().as_secs_f64(); let tg = pbit_core::rt::Instant::now(); crate::tui::tier("gate");
     let g = gate_stats(m, &s); let gate_ms = tg.elapsed().as_secs_f64() * 1e3; let rel = g.released_tasks(&GATE); let whole = g.diagnostics_passed(&GATE);
     let nrel = rel.iter().filter(|&&r| r).count(); crate::tui::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { m.n } else { nrel }, m.n); crate::tui::tier("polish"); *bars = crate::item_bars(&g); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
     let mask: Vec<bool> = if whole { vec![true; m.n] } else { rel };
     // plan polish (as `pbit decide`): anneal the chains' best plan through beta 2 -> 32; never worse than that plan
     // --polish-sweeps N = fixed-work polish (deterministic); --polish-ms is wall-clock, so its plan can vary run to run
     // The polish runs on --threads workers (it used 4 threads whatever --threads said)
-    let tpol = std::time::Instant::now();
+    let tpol = pbit_core::rt::Instant::now();
     let (plw, px) = if polish_sweeps > 0 || polish_ms > 0.0 { anneal_on(m, Some(&s.best.1), &[2.0, 4.0, 8.0, 16.0, 32.0], if polish_sweeps > 0 { 0.0 } else { polish_ms }, polish_sweeps, 4, threads, seed).unwrap_or((s.best.0, s.best.1.clone())) }
         else { (s.best.0, s.best.1.clone()) };
     let polish_wall = tpol.elapsed().as_secs_f64() * 1e3;

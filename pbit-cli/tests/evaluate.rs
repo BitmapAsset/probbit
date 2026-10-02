@@ -87,7 +87,7 @@ fn with_rules_only_broken_components_move() {
         let k = 3 + r.n(10); let qs = questions(&mut r, k); let n = qs.len(); let mut rules_i = vec![]; let mut rules_t = vec![]; let mut rules_a = vec![];
         let judge: Vec<usize> = qs.iter().map(|q| argmax(&q.p)).collect();
         let mut links: Vec<(usize, usize)> = vec![]; // (x, y) questions tied by one rule
-        let mut checks: Vec<Box<dyn Fn(&[usize]) -> bool>> = vec![];
+        let mut checks: Vec<Check> = vec![];
         for _ in 0..1 + r.n(4) { let (x, y) = (r.n(n), r.n(n)); if x == y { continue; } let (ox, oy) = (qs[x].opts.len(), qs[y].opts.len()); let bite = r.n(2) == 0;
             match r.n(3) {
                 0 => { let a = if bite { judge[x] } else { r.n(ox) }; let keep: Vec<usize> = (0..oy).filter(|&o| !(bite && o == judge[y]) && r.f() < 0.5).collect(); if keep.is_empty() { continue; }
@@ -100,7 +100,7 @@ fn with_rules_only_broken_components_move() {
                     let (ox_, oy_) = (qs[x].opts.clone(), qs[y].opts.clone()); checks.push(Box::new(move |v: &[usize]| ox_[v[x]] != oy_[v[y]])); } }
             links.push((x, y)); }
         if links.is_empty() { continue; }
-        let mut rules = vec![]; if !rules_i.is_empty() { rules.push(("implies", Json::Arr(rules_i))); } if !rules_t.is_empty() { rules.push(("tables", Json::Arr(rules_t))); } if !rules_a.is_empty() { rules.push(("all_different", Json::Arr(rules_a))); }
+        let rules: Vec<(&str, Json)> = [("implies", rules_i), ("tables", rules_t), ("all_different", rules_a)].into_iter().filter(|(_, r)| !r.is_empty()).map(|(k, r)| (k, Json::Arr(r))).collect();
         let (c, out, err) = pbit(&["evaluate"], &request(&qs, Some(obj(rules))));
         if c == 1 { continue; } // the random rules admit no answer (infeasible is a proof, exit 1)
         assert_eq!(c, 0, "case {case}: {err} {out:.300}"); let d = parse(&out); assert_eq!(d.get("verdict").and_then(Json::as_str), Some("exact"));
@@ -131,6 +131,8 @@ fn with_rules_only_broken_components_move() {
     assert!(informative >= 200 && moved_cases >= 100 && kept_cases >= 50, "too few informative cases: {informative} answered, {moved_cases} broken, {kept_cases} kept");
 }
 fn q_p(q: &Q, o: usize) -> f64 { q.p[o] }
+/// A rule as a predicate on an assignment (option index per question)
+type Check = Box<dyn Fn(&[usize]) -> bool>;
 
 /// A hard instance on a budget too small for the gate: `refused`, exit 3 as `pbit run`, every answer present and unreleased.
 #[test]

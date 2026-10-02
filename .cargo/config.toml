@@ -5,3 +5,8 @@
 # or uncomment the two lines below (they apply to every cargo command in this tree):
 # [build]
 # rustflags = ["-C", "target-cpu=native"]
+
+# WebAssembly (pbit-wasm, playground/): an 8 MiB stack, the native chain threads' minimum (the feasible-start search and the
+# exact tiers recurse once per variable; the default is 1 MiB), and no symbol names in the module (104 KB of 935 KB).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-zstack-size=8388608", "-C", "strip=symbols"]

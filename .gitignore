@@ -7,3 +7,5 @@
 /raw
 __pycache__/
 *.pyc
+playground/pbit.wasm
+playground/pbit-wasm.js
