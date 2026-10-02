@@ -3,6 +3,15 @@
 # (No 2>$null on native calls: Windows PowerShell 5.1 turns redirected stderr into errors.)
 $ErrorActionPreference = 'Continue'
 "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), pbit at $((Get-Command pbit).Source)"
+"`$OutputEncoding: $($OutputEncoding.WebName), $($OutputEncoding.GetPreamble().Length)-byte preamble"
+if ($OutputEncoding.GetPreamble().Length) {
+    # Windows PowerShell 5.1 re-encodes text piped into a native command with $OutputEncoding, BOM included, and pbit 0.2.0
+    # rejects a leading BOM (exit 2). Show it once, then apply the docs/agents.md workaround.
+    pbit demo --tasks 12 | pbit decide | Out-Null
+    "as is: pbit demo --tasks 12 | pbit decide -> exit $LASTEXITCODE (2 = the BOM was rejected)"
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    '> $OutputEncoding = [System.Text.UTF8Encoding]::new($false)'
+}
 
 '> pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms'
 pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms | Format-List | Out-String -Width 200

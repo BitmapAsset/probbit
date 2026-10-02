@@ -3,11 +3,18 @@ name: bench
 # builds; the installers (install.sh, install.ps1), the npm wrapper and the docs/agents.md recipes, each against a local
 # server (no release needed). Runs on pushes to its own branch and by hand only, never on pull requests or main: macOS
 # minutes bill at 10x on a private repo. Standard runners only. Results: BENCHMARK-MATRIX.md, PORTABILITY.md.
+# The macOS Intel row (macos-15-intel: the slowest runner, at 10x) runs only when asked: "[intel]" in the pushed commit
+# message, or the `intel` input of a manual run. It ran once, in run 36969399069.
 on:
   push:
     branches: [r22-portability-matrix]
     paths-ignore: ["**.md", "scripts/bench/results/**"]
   workflow_dispatch:
+    inputs:
+      intel:
+        description: also run the macOS Intel row (macos-15-intel)
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -20,11 +27,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-latest, label: linux-x86_64, target: x86_64-unknown-linux-gnu, py: python3, native: true, timeout: 15 }
-          - { os: macos-latest, label: macos-arm64, target: aarch64-apple-darwin, py: python3, native: false, timeout: 15 }
-          - { os: windows-latest, label: windows-x86_64, target: x86_64-pc-windows-msvc, py: python, native: true, timeout: 15 }
-          - { os: macos-15-intel, label: macos-x86_64, target: x86_64-apple-darwin, py: python3, native: true, timeout: 12 }
+        include: >-
+          ${{ fromJSON(format('[{0}, {1}, {2}{3}]',
+          '{"os": "ubuntu-latest", "label": "linux-x86_64", "target": "x86_64-unknown-linux-gnu", "py": "python3", "native": true, "timeout": 15}',
+          '{"os": "macos-latest", "label": "macos-arm64", "target": "aarch64-apple-darwin", "py": "python3", "native": false, "timeout": 15}',
+          '{"os": "windows-latest", "label": "windows-x86_64", "target": "x86_64-pc-windows-msvc", "py": "python", "native": true, "timeout": 15}',
+          (inputs.intel || contains(github.event.head_commit.message, '[intel]')) && ', {"os": "macos-15-intel", "label": "macos-x86_64", "target": "x86_64-apple-darwin", "py": "python3", "native": true, "timeout": 12}' || '')) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
     defaults:
@@ -207,11 +215,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-latest, label: linux-x86_64, py: python3, timeout: 15 }
-          - { os: macos-latest, label: macos-arm64, py: python3, timeout: 15 }
-          - { os: windows-latest, label: windows-x86_64, py: python, timeout: 15 }
-          - { os: macos-15-intel, label: macos-x86_64, py: python3, timeout: 12 }
+        include: >-
+          ${{ fromJSON(format('[{0}, {1}, {2}{3}]',
+          '{"os": "ubuntu-latest", "label": "linux-x86_64", "py": "python3", "timeout": 15}',
+          '{"os": "macos-latest", "label": "macos-arm64", "py": "python3", "timeout": 15}',
+          '{"os": "windows-latest", "label": "windows-x86_64", "py": "python", "timeout": 15}',
+          (inputs.intel || contains(github.event.head_commit.message, '[intel]')) && ', {"os": "macos-15-intel", "label": "macos-x86_64", "py": "python3", "timeout": 12}' || '')) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.timeout }}
     defaults:
@@ -220,12 +229,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - name: cargo test --release --locked --workspace
+      - name: cargo test --release --locked --workspace --no-fail-fast
         run: |
           mkdir -p out
           start=$(date +%s)
           set +e
-          cargo test --release --locked --workspace 2>&1 | tee "out/test-${{ matrix.label }}.log"
+          cargo test --release --locked --workspace --no-fail-fast 2>&1 | tee "out/test-${{ matrix.label }}.log"
           rc=${PIPESTATUS[0]}
           set -e
           ${{ matrix.py }} scripts/bench/test_summary.py "out/test-${{ matrix.label }}.log" "$rc" "$(( $(date +%s) - start ))" \

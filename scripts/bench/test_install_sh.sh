@@ -15,7 +15,7 @@ sh scripts/bench/package_like_release.sh "$BIN" "$TARGET" "$TAG" "$WORK/srv/good
 cp -R "$WORK/srv/good" "$WORK/srv/bad"
 printf '%064d  %s\n' 0 "pbit-$TAG-$TARGET.tar.gz" > "$WORK/srv/bad/$TAG/pbit-$TAG-$TARGET.tar.gz.sha256"
 PORT=$("$PY" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
-"$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1 &
+"$PY" scripts/bench/serve.py "$WORK/srv" "$PORT" > "$WORK/http.log" 2>&1 &
 SRV=$!
 i=0
 until curl -fsS -o /dev/null "http://127.0.0.1:$PORT/" 2> /dev/null; do

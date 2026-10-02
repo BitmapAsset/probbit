@@ -63,16 +63,23 @@ The npm package (`npm/`) installs the binary and a `pbit` command with exit code
 
 ## PowerShell
 
-Run on Windows with PowerShell 7 (`pwsh`) and Windows PowerShell 5.1.
+Run on Windows with PowerShell 7 (`pwsh`) and Windows PowerShell 5.1 (5.1 with the `$OutputEncoding` line below).
 
 ```powershell
 pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms
 Get-Content router.json -Raw | pbit decide --budget-ms 200 | ConvertFrom-Json; $LASTEXITCODE   # 0 / 1 / 2 / 3
 ```
 
-PowerShell 7.4 and later pipe bytes between native commands unchanged. Windows PowerShell 5.1 re-encodes text piped into
-a native command with `$OutputEncoding` (ASCII by default), so a document with non-ASCII ids needs
-`$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` first.
+Byte-order marks: text that PowerShell itself pipes into pbit is re-encoded with `$OutputEncoding`. That covers
+`Get-Content ... | pbit` everywhere, and in Windows PowerShell 5.1 also `pbit demo | pbit decide` (PowerShell 7.4 and
+later pass bytes between two native commands unchanged). When `$OutputEncoding` writes a byte-order mark (UTF-8 with BOM:
+the default of Windows PowerShell 5.1 on the GitHub `windows-latest` image, or `[Text.Encoding]::UTF8` set in a profile),
+pbit 0.2.0 rejects the input with exit 2 and `bad JSON: unexpected character 'ï' at byte 0`. Run this once per session
+first:
+
+```powershell
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)   # UTF-8 without a byte-order mark
+```
 
 ## For agents
 

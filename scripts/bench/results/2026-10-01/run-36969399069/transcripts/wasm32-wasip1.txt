@@ -1,0 +1,8 @@
+$ rustup target add wasm32-wasip1
+info: downloading component rust-std
+$ cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide
+exit 0
+first error: none
+    Checking pbit-ir v0.2.0 (/home/runner/work/pbit/pbit/pbit-ir)
+    Checking pbit-decide v0.2.0 (/home/runner/work/pbit/pbit/pbit-decide)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.69s

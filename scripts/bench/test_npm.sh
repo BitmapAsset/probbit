@@ -19,7 +19,7 @@ cp -R "$WORK/srv/good" "$WORK/srv/bad"
 case "$TARGET" in *windows*) EXT=zip ;; *) EXT=tar.gz ;; esac
 printf '%064d  %s\n' 0 "pbit-$TAG-$TARGET.$EXT" > "$WORK/srv/bad/$TAG/pbit-$TAG-$TARGET.$EXT.sha256"
 PORT=$("$PY" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
-"$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1 &
+"$PY" scripts/bench/serve.py "$WORK/srv" "$PORT" > "$WORK/http.log" 2>&1 &
 SRV=$!
 i=0
 until curl -fsS -o /dev/null "http://127.0.0.1:$PORT/" 2> /dev/null; do

@@ -88,6 +88,12 @@ if (-not (& $onPath $userPath)) {
         Write-Host "  [Environment]::SetEnvironmentVariable('Path', '$full;' + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')"
     }
 }
+if ($OutputEncoding.GetPreamble().Length) {
+    # Windows PowerShell 5.1 (and any session whose $OutputEncoding writes a BOM): pbit 0.2.0 rejects a leading BOM on stdin
+    Write-Host ''
+    Write-Host 'This session writes a byte-order mark when piping text into programs, which pbit 0.2.0 rejects. First run:'
+    Write-Host '  $OutputEncoding = [System.Text.UTF8Encoding]::new($false)'
+}
 Write-Host ''
 Write-Host 'Next:'
 Write-Host '  pbit version'

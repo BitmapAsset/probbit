@@ -1,0 +1,33 @@
+PowerShell 7.6.6 (Core), pbit at D:\a\pbit\pbit\target\release\pbit.exe
+> pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms
+
+verdict    : exact
+violations : 0
+ms         : 19.688
+
+
+> Get-Content router.json -Raw | pbit decide --budget-ms 200 | ConvertFrom-Json; $LASTEXITCODE
+verdict exact, released 24 of 24, violations 0; exit 0
+> one call per exit code (infeasible, bad input, declined)
+pbit: bad problem: workers: must be an array
+exit codes: infeasible 1 (want 1), bad input 2 (want 2), declined 3 (want 3)
+PowerShell recipes: all passed
+PowerShell 5.1.26100.33438 (Desktop), pbit at D:\a\pbit\pbit\target\release\pbit.exe
+> pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms
+pbit: bad JSON: unexpected character 'ï' at byte 0
+
+
+verdict    : 
+violations : 
+ms         : 
+
+
+
+
+demo pipeline: exit 2
+At D:\a\pbit\pbit\scripts\bench\callers.ps1:9 char:28
++ ... f ($LASTEXITCODE -ne 0) { throw "demo pipeline: exit $LASTEXITCODE" }
++                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (demo pipeline: exit 2:String) [], RuntimeException
+    + FullyQualifiedErrorId : demo pipeline: exit 2
+ 

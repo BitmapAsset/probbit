@@ -5,9 +5,15 @@
 #   powershell -ExecutionPolicy Bypass -File scripts/bench/test_install_ps1.ps1 -Srv <dir>
 param([Parameter(Mandatory = $true)][string]$Srv, [string]$Tag = 'v0.2.0', [switch]$AddToPath)
 $ErrorActionPreference = 'Stop'
-"PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+"PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), `$OutputEncoding $($OutputEncoding.WebName) with a $($OutputEncoding.GetPreamble().Length)-byte preamble"
+if ($OutputEncoding.GetPreamble().Length) {
+    # Windows PowerShell 5.1 re-encodes text piped into a native command with $OutputEncoding; with a BOM (UTF-8 here) pbit
+    # 0.2.0 rejects the input (exit 2, "unexpected character at byte 0"). The docs/agents.md workaround:
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)   (docs/agents.md, PowerShell)'
+}
 $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0); $l.Start(); $port = $l.LocalEndpoint.Port; $l.Stop()
-$server = Start-Process -FilePath python -ArgumentList @('-m', 'http.server', "$port", '--bind', '127.0.0.1', '--directory', $Srv) -PassThru -WindowStyle Hidden
+$server = Start-Process -FilePath python -ArgumentList @('scripts/bench/serve.py', $Srv, "$port") -PassThru -WindowStyle Hidden
 $base = "http://127.0.0.1:$port"
 try {
     for ($i = 0; $i -lt 50; $i++) { try { Invoke-WebRequest -UseBasicParsing -Uri "$base/" -TimeoutSec 2 | Out-Null; break } catch { Start-Sleep -Milliseconds 200 } }
