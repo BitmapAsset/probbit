@@ -158,7 +158,7 @@ fn a_refusal_keeps_the_exit_code_and_releases_nothing() {
 #[test]
 fn bad_requests_are_one_error_object_located_in_the_request() {
     let q = r#""questions": {"a": {"type": "choice", "criteria": {"x": null, "y": null}}, "b": {"type": "noul"}}"#;
-    let cases: [(String, &str, &str); 16] = [
+    let cases: [(String, &str, &str); 21] = [
         ("not json".into(), "schema", ""), (r#"{"state": "s"}"#.into(), "schema", "questions"), (format!(r#"{{{q}, "extra": 1}}"#), "schema", "extra"),
         (r#"{"questions": {}}"#.into(), "value", "questions"), (r#"{"questions": {"a": {"type": "boolean"}}}"#.into(), "value", "questions.a.type"),
         (r#"{"questions": {"a": {"type": "choice"}}}"#.into(), "schema", "questions.a.criteria"), (r#"{"questions": {"a": {"type": "score", "criteria": []}}}"#.into(), "value", "questions.a.criteria"),
@@ -169,7 +169,13 @@ fn bad_requests_are_one_error_object_located_in_the_request() {
         (format!(r#"{{{q}, "pbit": {{"weights": {{"b": 1.5}}}}}}"#), "value", "pbit.weights.b"),
         (format!(r#"{{{q}, "pbit": {{"weights": {{"b": 0.5}}, "logw": {{"b": {{"true": 1}}}}}}}}"#), "value", "pbit.logw.b"),
         (format!(r#"{{{q}, "pbit": {{"rules": {{"implies": [{{"if": {{"var": "a", "value": "x"}}, "then": {{"var": "zz", "in": ["true"]}}}}]}}}}}}"#), "value", "pbit.rules.implies[0].then.var"),
-        (format!(r#"{{{q}, "pbit": {{"rules": {{"start": {{}}}}}}}}"#), "schema", "pbit.rules.start"), (format!(r#"{{{q}, "pbit": {{"floor": 0}}}}"#), "value", "pbit.floor")];
+        (format!(r#"{{{q}, "pbit": {{"rules": {{"start": {{}}}}}}}}"#), "schema", "pbit.rules.start"), (format!(r#"{{{q}, "pbit": {{"floor": 0}}}}"#), "value", "pbit.floor"),
+        // a rule naming an option its question does not have (another question's option is in the shared alphabet): an error, not a silent exclusion
+        (format!(r#"{{{q}, "pbit": {{"rules": {{"implies": [{{"if": {{"var": "a", "value": "x"}}, "then": {{"var": "b", "in": ["y"]}}}}]}}}}}}"#), "value", "pbit.rules.implies[0].then.in[0]"),
+        (format!(r#"{{{q}, "pbit": {{"rules": {{"implies": [{{"if": {{"var": "a", "value": "true"}}, "then": {{"var": "b", "in": ["true"]}}}}]}}}}}}"#), "value", "pbit.rules.implies[0].if.value"),
+        (format!(r#"{{{q}, "pbit": {{"rules": {{"tables": [{{"vars": ["a", "b"], "forbid": [["x", "x"]]}}]}}}}}}"#), "value", "pbit.rules.tables[0].forbid[0][1]"),
+        (format!(r#"{{{q}, "pbit": {{"rules": {{"caps": [{{"value": "x", "vars": ["b"], "limit": 1}}]}}}}}}"#), "value", "pbit.rules.caps[0].value"),
+        (format!(r#"{{{q}, "pbit": {{"rules": {{"linear": [{{"terms": [["b", "y", 2]], "limit": 1}}]}}}}}}"#), "value", "pbit.rules.linear[0].terms[0][1]")];
     for (doc, code, path) in &cases {
         let (c, out, err) = pbit(&["evaluate"], doc); assert_eq!(c, 2, "{doc}: {out} {err}");
         assert_eq!(out.lines().count(), 1, "{doc}: one line"); let e = parse(&out); let e = e.get("error").unwrap_or_else(|| panic!("{doc}: {out}"));

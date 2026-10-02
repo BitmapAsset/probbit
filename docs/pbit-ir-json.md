@@ -405,9 +405,9 @@ after any of them: it reads the judge's request plus the judge's probabilities a
 likely answer set that obeys every rule, in the judge's response shape, with odds per option and the gate's verdict.
 
 **Request** = a System One request plus one optional `pbit` block. The System One fields were checked against the published
-schemas on 2026-10-02: TypeSafe's OpenAPI 0.2.0 (`https://api.typesafe.ai/openapi.json`, `POST /v1/systemone`) and the Workers AI
-input / output schemas of `@cf/cloudflare/clef` and `clef-flash` (`https://developers.cloudflare.com/workers-ai/models/clef/`).
-Both agree:
+schemas on 2026-10-02: TypeSafe's OpenAPI 0.2.0 (`https://api.typesafe.ai/openapi.json`, `POST /v1/systemone`; the official Python
+SDK, PyPI `typesafe-sdk` 0.7.2, generates its wire models from it) and the Workers AI input / output schemas of
+`@cf/cloudflare/clef` and `@cf/cloudflare/clef-flash` (`https://developers.cloudflare.com/workers-ai/models/clef/`). They agree:
 
 | field | type | pbit |
 |---|---|---|
@@ -425,7 +425,10 @@ a probability (`noul`: P(true)) or probabilities keyed by option, as a judge ret
 weights keyed by option (a missing option 0); `floor` = the probability floor (default 1e-6, 0 < floor <= 1); `rules` = the
 pbit-ir constructs over question ids and option names: `caps`, `implies`, `tables`, `precedes`, `linear`, `all_different` and the
 soft `pairs`, exactly as in a program. One weight source per question (a second is exit 2); a question with none has uniform
-weights.
+weights. Every (question, option) a rule names must be one of that question's options, and a `value` cap must count at least one
+question that has the value (exit 2, code `value`, at the rule's path): the program's value names are one alphabet shared by all
+questions, where another question's option would be accepted and would quietly exclude (an `implies` target) or be dropped (a
+table tuple, a cap member, a linear term).
 
 **Compilation** (no new engine code): one variable per question, its options as its allowed values, log-weight = ln max(p,
 floor): p = 0 becomes ln 1e-6 = -13.815511, so a rule can still force an answer the judge ruled out. The value alphabet lists the
@@ -463,8 +466,8 @@ paths inside the request, e.g. `pbit.rules.implies[0].then.var`, `questions.a.ty
   force); nothing moved outside them; `violations` 0; `changed` marks exactly the moved answers.
 - the refusal (`a_refusal_keeps_the_exit_code_and_releases_nothing`): 40 questions under a tight cap at `--op sample --sweeps 30`:
   `refused`, exit 3, every answer present and unreleased; no plan at all (the rules admit none): `infeasible`, exit 1, no `answers`.
-- bad input (`bad_requests_are_one_error_object_located_in_the_request`): 16 malformed requests, each exit 2 with one error object
-  at the right path; a bad flag prints a stderr line only.
+- bad input (`bad_requests_are_one_error_object_located_in_the_request`): 21 malformed requests (5 of them rules naming an option
+  their question does not have), each exit 2 with one error object at the right path; a bad flag prints a stderr line only.
 - the vendor shape (`answers_have_the_vendor_shape`) and the weight sources (`weights_judge_and_logw_are_the_same_program`: the
   judge's answers, `weights` and `logw` compile to the same program).
 
@@ -473,6 +476,19 @@ and a linear budget): `exact` (enumeration), 5 of 12 answers moved, 0 violations
 process; without its rules 4.62 / 6.6 ms (the joint space of 248,832 records is enumerated whole); `--op sample --sweeps 2000`:
 `diagnostics_passed`, 2.62 / 5.5 ms; at `--sweeps 400` the gate refuses (1,440 samples, bound 0.071 > 0.05). MCP: tool
 `pbit_evaluate` (docs/agents.md). Python: `pbit.evaluate(request, judge=...)` with a callable or a System One URL (python/pbit.py).
+One example per surface, from the repository root with `pbit` on `PATH`:
+
+```sh
+# shell
+pbit evaluate --summary --pretty < examples/evaluate/support-12.json
+# Python (python/pbit.py, stdlib only)
+PYTHONPATH=python python3 -c 'import json, pbit; print(pbit.evaluate(json.load(open("examples/evaluate/support-12.json")))["verdict"])'
+# MCP: tool pbit_evaluate, here over a pipe (in an agent: claude mcp add pbit -- pbit mcp)
+{ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"sh","version":"1"}}}'
+  python3 -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pbit_evaluate","arguments":json.load(sys.stdin)}}))' < examples/evaluate/support-12.json; } | pbit mcp
+# browser: build the module, then open the page from disk (no server)
+sh playground/build.sh && python3 -m webbrowser "file://$PWD/playground/index.html"
+```
 
 ## Visuals and agents
 

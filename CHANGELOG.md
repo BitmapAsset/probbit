@@ -12,7 +12,8 @@ All notable changes to this project are documented here. The format follows
   constructs over question ids). It compiles to a pbit-ir program (one variable per question, log-weight = ln max(p, 1e-6)), runs
   it as `pbit run` does with every `pbit run` flag, and answers in the judge's response shape (`model`, `answers`, `usage`) plus
   the `pbit run` document; each answer carries a `pbit` object (`value`, `p`, `judge`, `changed`, `released`). `--program` prints
-  the compiled program. Same exit codes, error objects, `--summary`, `--pretty` and terminal rules as `pbit run`.
+  the compiled program. Same exit codes, error objects, `--summary`, `--pretty` and terminal rules as `pbit run`; a rule naming an
+  option its question does not have is a `value` error at the rule's path (the program's value names are shared by all questions).
   docs/pbit-ir-json.md "Decision API"; tests in `pbit-cli/tests/evaluate.rs`.
 - **MCP tool `pbit_evaluate`** in `pbit mcp` (the same contract; its input schema carries the pbit-ir rule definitions).
 - **Python `pbit.evaluate(request, judge=None)`**: the judge is a callable (returning a System One response or per-question

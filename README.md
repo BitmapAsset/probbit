@@ -342,13 +342,21 @@ requests: largest gap 1.1e-16); with rules only rule-connected questions whose j
 its most likely rule-abiding assignment (191 groups checked by brute force). docs/pbit-ir-json.md "Decision API".
 
 ```sh
-pbit evaluate --summary --pretty < examples/evaluate/support-12.json   # 12 questions, 12 rules: exact, 5 answers moved, 1.24 ms
+# shell
+pbit evaluate --summary --pretty < examples/evaluate/support-12.json
+# Python (python/pbit.py, stdlib only)
+PYTHONPATH=python python3 -c 'import json, pbit; print(pbit.evaluate(json.load(open("examples/evaluate/support-12.json")))["verdict"])'
+# MCP: tool pbit_evaluate, here over a pipe (in an agent: claude mcp add pbit -- pbit mcp)
+{ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"sh","version":"1"}}}'
+  python3 -c 'import json,sys; print(json.dumps({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pbit_evaluate","arguments":json.load(sys.stdin)}}))' < examples/evaluate/support-12.json; } | pbit mcp
+# browser: build the module, then open the page from disk (no server)
+sh playground/build.sh && python3 -m webbrowser "file://$PWD/playground/index.html"
 ```
 
-From Python (`pbit.evaluate(request, judge=<a callable or a System One URL>)`, stdlib `urllib`), MCP (tool `pbit_evaluate`) and
-a browser (`playground/index.html`: the CLI's code compiled to WebAssembly without threads, 830 KB; the 300-task router demo at
-3,200 sweeps in 531 ms in Chrome against 346 / 133 ms native at 1 / 4 threads, Apple M4): [docs/agents.md](docs/agents.md),
-"After a judge". The refusal is the point: when the gate does not pass, the verdict is `refused` (exit 3) and every answer is
+On the example (12 questions, 12 rules): `exact`, 5 answers moved, 1.24 ms inside the answer (Apple M4, median of 7). Python can
+also ask the judge first (`pbit.evaluate(request, judge=<a callable or a System One URL>)`, stdlib `urllib`); the browser page
+runs the CLI's own code compiled to WebAssembly without threads (830 KB; the 300-task router demo at 3,200 sweeps in 531 ms in
+Chrome against 346 / 133 ms native at 1 / 4 threads). More in [docs/agents.md](docs/agents.md), "After a judge". The refusal is the point: when the gate does not pass, the verdict is `refused` (exit 3) and every answer is
 marked unreleased instead of guessed.
 
 ## Library API (Rust)

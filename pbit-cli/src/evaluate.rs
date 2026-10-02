@@ -66,6 +66,7 @@ pub fn compile(j: &Json) -> Result<Request, InErr> {
     }
     let qidx: HashMap<&str, usize> = qs.iter().enumerate().map(|(i, q)| (q.id.as_str(), i)).collect();
     let pb = opt(j, "pbit"); if let Some(p) = pb { fields(p, "pbit", &["judge", "weights", "logw", "floor", "rules"])?; }
+    if let Some(r) = pb.and_then(|p| opt(p, "rules")) { fields(r, "pbit.rules", &RULES)?; rule_options(r, &qs, &qidx)?; }
     let get = |k: &str| pb.and_then(|p| opt(p, k));
     let floor = match get("floor") { None => FLOOR, Some(f) => { let x = number(f, "pbit.floor")?;
         if !(x > 0.0 && x <= 1.0) { return Err(value("pbit.floor", "the probability floor must be above 0 and at most 1")); } x } };
@@ -121,6 +122,42 @@ pub fn compile(j: &Json) -> Result<Request, InErr> {
     let program = crate::json::parse(&crate::json::write(&obj(program), false)).map_err(|e| value("", format!("internal: the compiled program does not re-parse: {}", e.msg)))?;
     Ok(Request { qs, model: judge_model.or(model).unwrap_or_else(|| "pbit".to_string()),
         usage: usage.unwrap_or_else(|| obj(vec![("input_tokens", num(0.0)), ("output_tokens", num(0.0))])), program })
+}
+
+/// Rules name options per question, but pbit-ir's value names are one alphabet shared by every question, where another
+/// question's option is accepted and quietly excludes (an `implies` target) or is skipped (a table tuple, a cap member). A user of
+/// `evaluate` never sees that alphabet, so every (question, option) a rule names must be one of that question's options, and a value
+/// cap must count at least one question that has the value: exit 2 at the rule's path. Malformed shapes and unknown question ids are
+/// left to the program's own checks (located by `locate`).
+fn rule_options(r: &Json, qs: &[Question], qidx: &HashMap<&str, usize>) -> Result<(), InErr> {
+    let has = |q: &str, o: &str, path: String| match qidx.get(q) {
+        Some(&i) if !qs[i].options.iter().any(|x| x == o) => Err(value(&path, format!("question {q} has no option {o} (its options: {})", qs[i].options.join(", ")))),
+        _ => Ok(()) };
+    let items = |k: &str| r.get(k).and_then(Json::as_arr).unwrap_or(&[]);
+    fn arr(j: Option<&Json>) -> &[Json] { j.and_then(Json::as_arr).unwrap_or(&[]) }
+    for (n, c) in items("implies").iter().enumerate() {
+        let (i, t) = (c.get("if"), c.get("then"));
+        if let (Some(x), Some(a)) = (i.and_then(|i| i.get("var")).and_then(Json::as_str), i.and_then(|i| i.get("value")).and_then(Json::as_str)) { has(x, a, format!("pbit.rules.implies[{n}].if.value"))?; }
+        if let Some(y) = t.and_then(|t| t.get("var")).and_then(Json::as_str) {
+            for (m, v) in arr(t.and_then(|t| t.get("in"))).iter().enumerate() { if let Some(v) = v.as_str() { has(y, v, format!("pbit.rules.implies[{n}].then.in[{m}]"))?; } } }
+    }
+    for (n, c) in items("tables").iter().enumerate() {
+        let vars: Vec<Option<&str>> = arr(c.get("vars")).iter().map(Json::as_str).collect();
+        for key in ["forbid", "allow"] { for (m, t) in arr(c.get(key)).iter().enumerate() { for (e, (v, q)) in arr(Some(t)).iter().zip(&vars).enumerate() {
+            if let (Some(v), Some(q)) = (v.as_str(), q) { has(q, v, format!("pbit.rules.tables[{n}].{key}[{m}][{e}]"))?; } } } }
+    }
+    for (n, c) in items("caps").iter().enumerate() {
+        for (m, mb) in arr(c.get("members")).iter().enumerate() { if let Some([q, v]) = mb.as_arr() {
+            if let (Some(q), Some(v)) = (q.as_str(), v.as_str()) { has(q, v, format!("pbit.rules.caps[{n}].members[{m}][1]"))?; } } }
+        // a value cap counts the listed questions (default: all) that have the value; one with no such question is vacuous
+        if let Some(v) = c.get("value").and_then(Json::as_str) {
+            let over: Vec<&Question> = match c.get("vars").and_then(Json::as_arr) { Some(vars) => vars.iter().filter_map(|q| q.as_str().and_then(|q| qidx.get(q)).map(|&i| &qs[i])).collect(), None => qs.iter().collect() };
+            if !over.is_empty() && !over.iter().any(|q| q.options.iter().any(|o| o == v)) {
+                return Err(value(&format!("pbit.rules.caps[{n}].value"), format!("no question it counts has the option {v}"))); } }
+    }
+    for (n, c) in items("linear").iter().enumerate() { for (m, t) in arr(c.get("terms")).iter().enumerate() { if let Some([q, v, _]) = t.as_arr() {
+        if let (Some(q), Some(v)) = (q.as_str(), v.as_str()) { has(q, v, format!("pbit.rules.linear[{n}].terms[{m}][1]"))?; } } } }
+    Ok(())
 }
 
 /// A `pbit run` error on the compiled program, located in the request: rule paths (`implies[0].then.var`) under `pbit.rules`;
