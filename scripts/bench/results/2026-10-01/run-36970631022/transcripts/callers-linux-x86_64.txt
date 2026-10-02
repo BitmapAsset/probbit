@@ -1,0 +1,33 @@
+$ pbit demo --tasks 12 | pbit decide --pretty   (/home/runner/work/pbit/pbit/onpath/pbit)
+exit 0
+{
+  "engine": "pbit 0.2.0",
+  "tasks": 12,
+  "workers": 6,
+  "affinity": 0.8,
+  "verdict": "exact",
+  "tier": "enumerate",
+  "plan": {
+$ pbit decide --budget-ms 200 < router.json > decision.json; case $? in ...
+answer
+exact
+$ python3 python/test_pbit.py
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.631s
+
+OK
+$ python3 python/examples/route_agents.py
+exact released 24 of 24 tasks
+  T000 -> human  odds 0.895
+  T001 -> human  odds 0.883
+  T002 -> codex  odds 0.326
+  T003 -> human  odds 0.333
+  T004 -> luna-pro  odds 0.704
+$ node examples/node/decide.mjs   (node v22.23.3)
+pbit 0.2.0 (/home/runner/work/pbit/pbit/target/release/pbit)
+exit 0 answer     a 12-task demo document: verdict exact, 12 of 12 released, plan T000->human, T001->human, T002->codex, ...
+exit 1 infeasible two tasks, one worker with room for one: verdict infeasible (no plan satisfies every rule (allowed sets + capacities + clamps))
+exit 2 bad_input  a malformed document: schema at workers: must be an array
+exit 3 refused    exact enumeration of a 96-variable program, capped at 50 ms: verdict declined (enumeration stopped at --exact-ms; raise it, or use --op decide or sample)
+all four exit codes mapped as expected

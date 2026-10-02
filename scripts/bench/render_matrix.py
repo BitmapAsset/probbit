@@ -6,15 +6,16 @@
 import json, os, sys
 
 D = sys.argv[1]
-RUN1 = "run-36969399069/"
+RUN1 = "run-36969399069/"  # first run: the only one with the macOS Intel row
+RUN2 = "run-36970631022/"  # second run, same source: the standard rows and the cross job
 ROWS = [  # (row label, bench JSON, test JSON or None, key inside cross-linux-x86_64.json "bench" when nested); paths relative to D
     ("macOS arm64, Apple M4 (local)", "local-m4/bench-macos-arm64-m4-local.json", None, None),
-    ("Linux x86_64 (`ubuntu-latest`)", RUN1 + "bench-linux-x86_64.json", RUN1 + "test-linux-x86_64.json", None),
-    ("Linux x86_64, static musl (`ubuntu-latest`)", RUN1 + "cross-linux-x86_64.json", None, "linux-x86_64-musl"),
-    ("Linux x86_64, glibc, same VM as musl", RUN1 + "cross-linux-x86_64.json", None, "linux-x86_64-gnu-samevm"),
-    ("macOS arm64 (`macos-latest`)", RUN1 + "bench-macos-arm64.json", RUN1 + "test-macos-arm64.json", None),
-    ("Windows x86_64 (`windows-latest`)", RUN1 + "bench-windows-x86_64.json", RUN1 + "test-windows-x86_64.json", None),
-    ("macOS x86_64 (`macos-15-intel`)", RUN1 + "bench-macos-x86_64.json", RUN1 + "test-macos-x86_64.json", None),
+    ("Linux x86_64 (`ubuntu-latest`)", RUN2 + "bench-linux-x86_64.json", RUN2 + "test-linux-x86_64.json", None),
+    ("Linux x86_64, static musl (`ubuntu-latest`)", RUN2 + "cross-linux-x86_64.json", None, "linux-x86_64-musl"),
+    ("Linux x86_64, glibc, same VM as musl", RUN2 + "cross-linux-x86_64.json", None, "linux-x86_64-gnu-samevm"),
+    ("macOS arm64 (`macos-latest`)", RUN2 + "bench-macos-arm64.json", RUN2 + "test-macos-arm64.json", None),
+    ("Windows x86_64 (`windows-latest`)", RUN2 + "bench-windows-x86_64.json", RUN2 + "test-windows-x86_64.json", None),
+    ("macOS x86_64 (`macos-15-intel`, run 1 only)", RUN1 + "bench-macos-x86_64.json", RUN1 + "test-macos-x86_64.json", None),
 ]
 PENDING = ["Linux x86_64, WSL2 on a Windows desktop with an RTX 4070", "Linux x86_64, VirtualBox VM (CPU only)"]
 
@@ -126,6 +127,25 @@ for lab, b, t, src in data:
         rows.append([lab] + ["%.1f [%.1f-%.1f]" % (th[k]["wall_ms"], th[k]["wall_iqr"][0], th[k]["wall_iqr"][1]) if k in th else "n/a"
                              for k in ("threads_1", "threads_2", "threads_4")] + [", ".join(sorted({th[k]["verdict"] for k in th if k.startswith("threads_")}))])
     else:
-        rows.append([lab, "n/a: " + str(th)[:120], "", "", ""])
+        rows.append([lab, str(th)[:120], "", "", ""])
 print(table("`bench/decide_threads.py`: 300-task decide, fixed work (4 chains x 400 sweeps, polish 0), wall ms (N = 5)",
             ["--threads 1", "--threads 2", "--threads 4", "verdict"], rows))
+
+# run to run: the same source measured by run 1 and run 2 on two VMs of the same runner label
+rows = []
+for lab, f in [("Linux x86_64 (`ubuntu-latest`)", "bench-linux-x86_64.json"), ("macOS arm64 (`macos-latest`)", "bench-macos-arm64.json"),
+               ("Windows x86_64 (`windows-latest`)", "bench-windows-x86_64.json")]:
+    a, b = load(RUN1 + f), load(RUN2 + f)
+    if not (a and b):
+        continue
+    cell = lambda k, j: (j["cells"].get(k) or {}).get("median")
+    def pair(k, f=e):
+        x, y = cell(k, a), cell(k, b)
+        return "%s / %s (%+.0f%%)" % (f(x), f(y), 100 * (y / x - 1)) if x and y else "n/a"
+    cpus = a["machine"].get("cpu_model"), b["machine"].get("cpu_model")
+    rows.append([lab, "%s / %s" % cpus if cpus[0] != cpus[1] else "both " + str(cpus[0]), pair("stats_1t"), pair("kernel_multispin_fast_1t"),
+                 pair("decide_12_wall_ms", ms), pair("decide_300_wall_ms", ms), pair("decide_300_peak_rss_bytes", mib)])
+out = ["#### Run to run: run 1 / run 2 medians, same source, two VMs per runner label", "",
+       "| platform | CPU (run 1 / run 2) | `pbit stats` 1 thread | multispin fast, 1 thread | 12-task wall ms | 300-task wall ms | peak RSS MiB |",
+       "|---|---|---|---|---|---|---|"] + ["| %s |" % " | ".join(r) for r in rows]
+print("\n".join(out))

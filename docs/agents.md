@@ -63,23 +63,25 @@ The npm package (`npm/`) installs the binary and a `pbit` command with exit code
 
 ## PowerShell
 
-Run on Windows with PowerShell 7 (`pwsh`) and Windows PowerShell 5.1 (5.1 with the `$OutputEncoding` line below).
+Run on Windows (`windows-latest`) with PowerShell 7.6 as written, and with Windows PowerShell 5.1 through `cmd` (below).
 
 ```powershell
 pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms
 Get-Content router.json -Raw | pbit decide --budget-ms 200 | ConvertFrom-Json; $LASTEXITCODE   # 0 / 1 / 2 / 3
 ```
 
-Byte-order marks: text that PowerShell itself pipes into pbit is re-encoded with `$OutputEncoding`. That covers
-`Get-Content ... | pbit` everywhere, and in Windows PowerShell 5.1 also `pbit demo | pbit decide` (PowerShell 7.4 and
-later pass bytes between two native commands unchanged). When `$OutputEncoding` writes a byte-order mark (UTF-8 with BOM:
-the default of Windows PowerShell 5.1 on the GitHub `windows-latest` image, or `[Text.Encoding]::UTF8` set in a profile),
-pbit 0.2.0 rejects the input with exit 2 and `bad JSON: unexpected character 'ï' at byte 0`. Run this once per session
-first:
+Windows PowerShell 5.1 (the `powershell.exe` that ships with Windows) adds a UTF-8 byte-order mark to text it pipes into
+a program, even with `$OutputEncoding` set to `us-ascii` (the image default), and pbit 0.2.0 rejects that input: exit 2,
+`bad JSON: unexpected character 'ï' at byte 0`. Use PowerShell 7 (`pwsh`), or let `cmd` do the piping and the
+redirection; PowerShell then only reads pbit's output:
 
 ```powershell
-$OutputEncoding = [System.Text.UTF8Encoding]::new($false)   # UTF-8 without a byte-order mark
+cmd /c "pbit demo --tasks 12 | pbit decide" | ConvertFrom-Json | Select-Object verdict, violations, ms
+cmd /c "pbit decide --budget-ms 200 < router.json" | ConvertFrom-Json; $LASTEXITCODE
 ```
+
+PowerShell 7 writes a byte-order mark too if a profile sets `$OutputEncoding = [Text.Encoding]::UTF8` (a string piped
+into pbit then exits 2; seen with PowerShell 7.6); `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` fixes that.
 
 ## For agents
 
@@ -94,11 +96,13 @@ paragraph like this one in the project's agent instructions (`CLAUDE.md`, `AGENT
 
 Practical notes for agent use:
 
-- Bound the call: `--budget-ms` caps the sampler (the default answer takes ~300 ms on the 300-task demo), and
-  `pbit run --deadline-ms N` bounds a whole `run` call. Small documents (about 12 tasks by 6 workers) are answered exactly.
+- Bound the call: `--budget-ms` caps the sampler (with `--budget-ms 300` the 300-task demo answered in 420-495 ms on
+  every machine in BENCHMARK-MATRIX.md: the budget, then the gate and the polish), and `pbit run --deadline-ms N` bounds
+  a whole `run` call (a target, not a hard limit on a slow CPU: PORTABILITY.md). Small documents (about 12 tasks by 6
+  workers) are answered exactly.
 - Fixed work is reproducible: `--sweeps N --polish-ms 0` makes the answer a pure function of the document and `--seed`,
   which is what a test or a replayed agent step wants.
 - `pbit stats` prints the machine, the effective controls and a measured self-test; `--threads`, `--cpu-limit` and
-  `--priority low` keep it from crowding the agent's own process.
+  (on Linux and macOS) `--priority low` keep it from crowding the agent's own process.
 - An MCP server is planned for a later release and is not built yet; until then the shell command above is the
   integration.

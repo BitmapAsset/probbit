@@ -1,0 +1,72 @@
+{
+ "schema": "pbit-test-matrix/1",
+ "label": "linux-x86_64",
+ "date_utc": "2026-10-02T05:52:37Z",
+ "cmd": "cargo test --release --locked --workspace --no-fail-fast",
+ "exit": 0,
+ "passed": true,
+ "seconds": 201,
+ "test_binaries": 10,
+ "totals": {
+  "passed": 127,
+  "failed": 0,
+  "ignored": 1,
+  "measured": 0,
+  "filtered_out": 0
+ },
+ "failures": [],
+ "runner": {
+  "RUNNER_OS": "Linux",
+  "RUNNER_ARCH": "X64",
+  "ImageOS": "ubuntu24",
+  "ImageVersion": "20260927.320.1",
+  "GITHUB_RUN_ID": "36970631022",
+  "GITHUB_RUN_ATTEMPT": "1",
+  "GITHUB_JOB": "test",
+  "GITHUB_SHA": "bef46ca8ea1a4970e7b95d5dd7bc047c00a30344",
+  "GITHUB_REF_NAME": "r22-portability-matrix",
+  "GITHUB_WORKFLOW": "bench"
+ },
+ "machine": {
+  "system": "Linux",
+  "os_release": "6.17.0-1022-azure",
+  "arch": "x86_64",
+  "python": "3.12.3",
+  "logical_cores": 2,
+  "cpu_cmd": "lscpu",
+  "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+  "lscpu": {
+   "Architecture": "x86_64",
+   "CPU(s)": "2",
+   "Thread(s) per core": "2",
+   "Core(s) per socket": "1",
+   "Socket(s)": "1",
+   "Vendor ID": "AuthenticAMD",
+   "Model name": "AMD EPYC 9V45 96-Core Processor",
+   "Hypervisor vendor": "Microsoft"
+  },
+  "cpu_flags": {
+   "sse4_2": true,
+   "avx": true,
+   "avx2": true,
+   "fma": true,
+   "bmi2": true,
+   "avx512f": true,
+   "avx512bw": true,
+   "avx512vl": true
+  },
+  "memory_bytes": 8323969024,
+  "os_version": "Ubuntu 24.04.5 LTS",
+  "libc": "glibc 2.39"
+ },
+ "toolchain": {
+  "binary": "rustc",
+  "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+  "commit-date": "2026-09-28",
+  "host": "x86_64-unknown-linux-gnu",
+  "release": "1.99.0",
+  "LLVM version": "23.1.1",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+ }
+}

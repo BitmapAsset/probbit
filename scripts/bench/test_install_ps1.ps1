@@ -5,13 +5,10 @@
 #   powershell -ExecutionPolicy Bypass -File scripts/bench/test_install_ps1.ps1 -Srv <dir>
 param([Parameter(Mandatory = $true)][string]$Srv, [string]$Tag = 'v0.2.0', [switch]$AddToPath)
 $ErrorActionPreference = 'Stop'
-"PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), `$OutputEncoding $($OutputEncoding.WebName) with a $($OutputEncoding.GetPreamble().Length)-byte preamble"
-if ($OutputEncoding.GetPreamble().Length) {
-    # Windows PowerShell 5.1 re-encodes text piped into a native command with $OutputEncoding; with a BOM (UTF-8 here) pbit
-    # 0.2.0 rejects the input (exit 2, "unexpected character at byte 0"). The docs/agents.md workaround:
-    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-    '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)   (docs/agents.md, PowerShell)'
-}
+"PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
+# Windows PowerShell 5.1 adds a UTF-8 byte-order mark to text it pipes into a native program, which pbit 0.2.0 rejects
+# (docs/agents.md, PowerShell): there the demo pipeline below goes through cmd.exe.
+$desktop = $PSVersionTable.PSEdition -ne 'Core'
 $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0); $l.Start(); $port = $l.LocalEndpoint.Port; $l.Stop()
 $server = Start-Process -FilePath python -ArgumentList @('scripts/bench/serve.py', $Srv, "$port") -PassThru -WindowStyle Hidden
 $base = "http://127.0.0.1:$port"
@@ -27,8 +24,9 @@ try {
     "`$ (Get-Command pbit).Source: $($cmd.Source)"
     if ((Resolve-Path $cmd.Source).Path -ne (Resolve-Path (Join-Path $d1 'pbit.exe')).Path) { throw "FAIL: pbit resolves to $($cmd.Source)" }
     "`$ pbit version: $(pbit version)"
-    $d = pbit demo --tasks 12 | pbit decide | ConvertFrom-Json
-    "`$ pbit demo --tasks 12 | pbit decide | ConvertFrom-Json: exit $LASTEXITCODE, verdict $($d.verdict), released $(@($d.released).Count) of $($d.tasks)"
+    if ($desktop) { $how = 'cmd /c "pbit demo --tasks 12 | pbit decide"'; $d = cmd /c "pbit demo --tasks 12 | pbit decide" | ConvertFrom-Json }
+    else { $how = 'pbit demo --tasks 12 | pbit decide'; $d = pbit demo --tasks 12 | pbit decide | ConvertFrom-Json }
+    "`$ $how | ConvertFrom-Json: exit $LASTEXITCODE, verdict $($d.verdict), released $(@($d.released).Count) of $($d.tasks)"
     if ($LASTEXITCODE -ne 0 -or $d.verdict -ne 'exact') { throw 'FAIL: demo pipeline' }
     if ($AddToPath) {
         $u = [Environment]::GetEnvironmentVariable('Path', 'User')
