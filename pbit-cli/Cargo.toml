@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../README.md"
+keywords = ["p-bit", "cli", "decision", "constraints", "probabilistic"]
+categories = ["command-line-utilities", "algorithms", "science"]
 
 [[bin]]
 name = "pbit"

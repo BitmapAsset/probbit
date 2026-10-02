@@ -5,5 +5,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../README.md"
+keywords = ["p-bit", "ising", "monte-carlo", "philox", "probabilistic"]
+categories = ["algorithms", "science", "simulation"]
 
 [dependencies]

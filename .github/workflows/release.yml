@@ -53,6 +53,7 @@ jobs:
             cp "target/${{ matrix.target }}/release/pbit" "dist/$NAME/"
           fi
           cp README.md LICENSE CHANGELOG.md "dist/$NAME/"
+          cp -R examples python docs "dist/$NAME/"   # JSON examples, the Python wrapper, the IR spec and docs/agents.md
           cd dist
           if [ "${{ matrix.archive }}" = "zip" ]; then
             ASSET="$NAME.zip"; 7z a "$ASSET" "$NAME" > /dev/null

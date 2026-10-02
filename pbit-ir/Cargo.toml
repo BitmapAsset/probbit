@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+readme = "../README.md"
+keywords = ["p-bit", "constraints", "gibbs-sampling", "probabilistic", "ising"]
+categories = ["algorithms", "science", "mathematics"]
 
 [dependencies]
 pbit-core = { path = "../pbit-core" }
