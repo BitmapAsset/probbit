@@ -1,0 +1,55 @@
+{
+ "schema": "pbit-test-matrix/1",
+ "label": "macos-arm64",
+ "date_utc": "2026-10-02T05:37:10Z",
+ "cmd": "cargo test --release --locked --workspace",
+ "exit": 0,
+ "passed": true,
+ "seconds": 250,
+ "test_binaries": 10,
+ "totals": {
+  "passed": 127,
+  "failed": 0,
+  "ignored": 1,
+  "measured": 0,
+  "filtered_out": 0
+ },
+ "failures": [],
+ "runner": {
+  "RUNNER_OS": "macOS",
+  "RUNNER_ARCH": "ARM64",
+  "ImageOS": "macos26",
+  "ImageVersion": "20260907.0351.1",
+  "GITHUB_RUN_ID": "36969399069",
+  "GITHUB_RUN_ATTEMPT": "1",
+  "GITHUB_JOB": "test",
+  "GITHUB_SHA": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+  "GITHUB_REF_NAME": "r22-portability-matrix",
+  "GITHUB_WORKFLOW": "bench"
+ },
+ "machine": {
+  "system": "Darwin",
+  "os_release": "25.6.0",
+  "arch": "arm64",
+  "python": "3.14.7",
+  "logical_cores": 3,
+  "cpu_cmd": "sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize",
+  "cpu_model": "Apple M1 (Virtual)",
+  "hw_ncpu": 3,
+  "memory_bytes": 7516192768,
+  "perf_cores": 3,
+  "efficiency_cores": 0,
+  "rosetta_translated": false,
+  "os_version": "26.6.2"
+ },
+ "toolchain": {
+  "binary": "rustc",
+  "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+  "commit-date": "2026-09-28",
+  "host": "aarch64-apple-darwin",
+  "release": "1.99.0",
+  "LLVM version": "23.1.1",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+ }
+}

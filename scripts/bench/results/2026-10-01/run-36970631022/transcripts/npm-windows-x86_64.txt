@@ -1,0 +1,72 @@
+node v22.23.3, npm 10.9.9, target x86_64-pc-windows-msvc
+npm notice
+npm notice package: pbit@0.2.0
+npm notice Tarball Contents
+npm notice 11.6kB LICENSE
+npm notice 1.6kB README.md
+npm notice 1.8kB bin/pbit.js
+npm notice 5.1kB install.js
+npm notice 760B package.json
+npm notice Tarball Details
+npm notice name: pbit
+npm notice version: 0.2.0
+npm notice filename: pbit-0.2.0.tgz
+npm notice package size: 7.8 kB
+npm notice unpacked size: 20.8 kB
+npm notice shasum: e627337a1e165cdfb101bedbc6a178a24c3695d6
+npm notice integrity: sha512-H/JH23iMhSCfA[...]r7vAu3FiTe5YQ==
+npm notice total files: 5
+npm notice
+== npm pack -> pbit-0.2.0.tgz:
+   package/LICENSE
+   package/install.js
+   package/bin/pbit.js
+   package/package.json
+   package/README.md
+== 1. npm install -g pbit-0.2.0.tgz (PBIT_DOWNLOAD_BASE=http://127.0.0.1:63120/good)
+
+> pbit@0.2.0 postinstall
+> node install.js
+
+pbit: fetching http://127.0.0.1:63120/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
+pbit: installed v0.2.0 (x86_64-pc-windows-msvc), sha256 fe695b5d46bbfa8fcadb0a1ce9200cafd296dfd3cc340d635149af5ce19e36e8
+
+added 1 package in 1s
+$ which pbit: /tmp/tmp.5rSfeA9JT6/prefix1/pbit
+$ pbit version: pbit 0.2.0
+$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+exit codes through the wrapper: infeasible 1 (want 1), bad input 2 (want 2), declined 3 (want 3)
+
+removed 1 package in 474ms
+ok: uninstalled, /tmp/tmp.5rSfeA9JT6/prefix1/pbit absent
+== 2. npm install -g --ignore-scripts: the binary is fetched on first run
+
+added 1 package in 625ms
+pbit: the binary is not installed yet, fetching it now
+pbit: fetching http://127.0.0.1:63120/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
+pbit: installed v0.2.0 (x86_64-pc-windows-msvc), sha256 fe695b5d46bbfa8fcadb0a1ce9200cafd296dfd3cc340d635149af5ce19e36e8
+pbit 0.2.0
+ok: first run fetched it; second run used it
+== 3. PBIT_BINARY=<local build> (no download)
+
+> pbit@0.2.0 postinstall
+> node install.js
+
+pbit: using D:\a\pbit\pbit\target\release\pbit.exe (PBIT_BINARY)
+
+added 1 package in 752ms
+pbit 0.2.0
+== 4. tampered .sha256: npm install must fail
+
+> pbit@0.2.0 postinstall
+> node install.js
+
+pbit: fetching http://127.0.0.1:63120/bad/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
+pbit: checksum mismatch for pbit-v0.2.0-x86_64-pc-windows-msvc.zip: expected 0000000000000000000000000000000000000000000000000000000000000000, got fe695b5d46bbfa8fcadb0a1ce9200cafd296dfd3cc340d635149af5ce19e36e8; nothing was installed
+npm error code 1
+npm error path C:\Users\RUNNER~1\AppData\Local\Temp\tmp.5rSfeA9JT6\prefix4\node_modules\pbit
+npm error command failed
+npm error command C:\Windows\system32\cmd.exe /d /s /c node install.js
+npm error A complete log of this run can be found in: C:\Users\runneradmin\AppData\Local\npm-cache\_logs\2026-10-02T05_51_17_370Z-debug-0.log
+ok: rejected
+npm wrapper: all checks passed (x86_64-pc-windows-msvc)

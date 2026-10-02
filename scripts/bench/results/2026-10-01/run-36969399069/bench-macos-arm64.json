@@ -1,0 +1,1087 @@
+{
+ "schema": "pbit-bench-matrix/1",
+ "label": "macos-arm64",
+ "date_utc": "2026-10-02T05:35:28Z",
+ "git_sha": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+ "runner": {
+  "RUNNER_OS": "macOS",
+  "RUNNER_ARCH": "ARM64",
+  "ImageOS": "macos26",
+  "ImageVersion": "20260907.0351.1",
+  "GITHUB_RUN_ID": "36969399069",
+  "GITHUB_RUN_ATTEMPT": "1",
+  "GITHUB_JOB": "bench",
+  "GITHUB_SHA": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+  "GITHUB_REF_NAME": "r22-portability-matrix",
+  "GITHUB_WORKFLOW": "bench"
+ },
+ "notes": [
+  "build_s=18",
+  "runner=macos-latest"
+ ],
+ "machine": {
+  "system": "Darwin",
+  "os_release": "25.6.0",
+  "arch": "arm64",
+  "python": "3.14.7",
+  "logical_cores": 3,
+  "cpu_cmd": "sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize",
+  "cpu_model": "Apple M1 (Virtual)",
+  "hw_ncpu": 3,
+  "memory_bytes": 7516192768,
+  "perf_cores": 3,
+  "efficiency_cores": 0,
+  "rosetta_translated": false,
+  "os_version": "26.6.2"
+ },
+ "toolchain": {
+  "binary": "rustc",
+  "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+  "commit-date": "2026-09-28",
+  "host": "aarch64-apple-darwin",
+  "release": "1.99.0",
+  "LLVM version": "23.1.1",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+ },
+ "load": {
+  "start": {
+   "loadavg": [
+    12.2509765625,
+    27.529296875,
+    15.13525390625
+   ],
+   "uptime": "5:35  up 4 mins, 1 user, load averages: 12.25 27.53 15.14",
+   "t": "05:35:28"
+  },
+  "after_stats": {
+   "loadavg": [
+    12.2509765625,
+    27.529296875,
+    15.13525390625
+   ],
+   "uptime": "5:35  up 4 mins, 1 user, load averages: 12.25 27.53 15.14",
+   "t": "05:35:31"
+  },
+  "after_decide": {
+   "loadavg": [
+    13.271484375,
+    27.4873046875,
+    15.19287109375
+   ],
+   "uptime": "5:35  up 4 mins, 1 user, load averages: 13.27 27.49 15.19",
+   "t": "05:35:33"
+  },
+  "after_kernels": {
+   "loadavg": [
+    12.71337890625,
+    26.23681640625,
+    15.0986328125
+   ],
+   "uptime": "5:36  up 5 mins, 1 user, load averages: 12.71 26.24 15.10",
+   "t": "05:36:01"
+  },
+  "after_pvn": {
+   "loadavg": [
+    12.71337890625,
+    26.23681640625,
+    15.0986328125
+   ],
+   "uptime": "5:36  up 5 mins, 1 user, load averages: 12.71 26.24 15.10",
+   "t": "05:36:01"
+  },
+  "end": {
+   "loadavg": [
+    13.9375,
+    26.265625,
+    15.173828125
+   ],
+   "uptime": "5:36  up 5 mins, 1 user, load averages: 13.94 26.27 15.17",
+   "t": "05:36:05"
+  }
+ },
+ "errors": [],
+ "binary": {
+  "path": "target/release/pbit",
+  "size_bytes": 1146960,
+  "version": "pbit 0.2.0",
+  "linkage": {
+   "file": "Mach-O 64-bit executable arm64",
+   "otool_L": [
+    "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)"
+   ],
+   "lipo_archs": "arm64"
+  }
+ },
+ "stats_first": {
+  "engine": "pbit 0.2.0",
+  "machine": {
+   "os": "macos",
+   "arch": "aarch64",
+   "logical_cpus": 3
+  },
+  "build": {
+   "target_features": [
+    "neon",
+    "dotprod"
+   ],
+   "debug_assertions": false
+  },
+  "controls": {
+   "chains": {
+    "value": 4,
+    "source": "default"
+   },
+   "threads": {
+    "value": 3,
+    "source": "default"
+   },
+   "cpu_limit_pct": {
+    "value": 100,
+    "source": "default"
+   },
+   "priority": {
+    "value": "normal",
+    "source": "default"
+   },
+   "mem_limit_mb": {
+    "value": 1024,
+    "source": "default"
+   },
+   "config_file": null
+  }
+ },
+ "stats": {
+  "site_updates_per_s_1_thread": {
+   "median": 12463979,
+   "q1": 9767181.0,
+   "q3": 13381267.0,
+   "min": 9406207,
+   "max": 13858931,
+   "n": 5,
+   "values": [
+    12903603,
+    13858931,
+    12463979,
+    9406207,
+    10128155
+   ]
+  },
+  "site_updates_per_s": {
+   "median": 25825231,
+   "q1": 22095427.5,
+   "q3": 26603051.5,
+   "min": 19310092,
+   "max": 27013442,
+   "n": 5,
+   "values": [
+    26192661,
+    19310092,
+    25825231,
+    24880763,
+    27013442
+   ]
+  },
+  "threads": [
+   3
+  ],
+  "speedup": {
+   "median": 2.07,
+   "q1": 1.71,
+   "q3": 2.66,
+   "min": 1.39,
+   "max": 2.67,
+   "n": 5,
+   "values": [
+    2.03,
+    1.39,
+    2.07,
+    2.65,
+    2.67
+   ]
+  }
+ },
+ "decide_12": {
+  "cmd": "pbit demo --tasks 12 | pbit decide ",
+  "runs": [
+   {
+    "wall_ms": 15.10804199998006,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 11.344709,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 15.050082999977121,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 11.4415,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 19.817458999995097,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 11.442583,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 15.493166999988262,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 11.642625,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 16.73816699999975,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 12.139,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   }
+  ],
+  "wall_ms": {
+   "median": 15.493166999988262,
+   "q1": 15.07906249997859,
+   "q3": 18.277812999997423,
+   "min": 15.050082999977121,
+   "max": 19.817458999995097,
+   "n": 5,
+   "values": [
+    15.10804199998006,
+    15.050082999977121,
+    19.817458999995097,
+    15.493166999988262,
+    16.73816699999975
+   ]
+  },
+  "pbit_ms": {
+   "median": 11.442583,
+   "q1": 11.3931045,
+   "q3": 11.8908125,
+   "min": 11.344709,
+   "max": 12.139,
+   "n": 5,
+   "values": [
+    11.344709,
+    11.4415,
+    11.442583,
+    11.642625,
+    12.139
+   ]
+  },
+  "released": {
+   "median": 12,
+   "q1": 12.0,
+   "q3": 12.0,
+   "min": 12,
+   "max": 12,
+   "n": 5,
+   "values": [
+    12,
+    12,
+    12,
+    12,
+    12
+   ]
+  },
+  "violations_max": 0,
+  "verdicts": [
+   "exact"
+  ],
+  "exit_codes": [
+   0
+  ],
+  "site_updates_per_s": null
+ },
+ "decide_300": {
+  "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+  "runs": [
+   {
+    "wall_ms": 432.3906250000107,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 425.390833,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 16136,
+    "site_updates_per_s": 16123822,
+    "threads": 3,
+    "peak_rss_mb_self": 31.1875,
+    "stderr": null
+   },
+   {
+    "wall_ms": 443.55099999998515,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 432.115291,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 15344,
+    "site_updates_per_s": 15334131,
+    "threads": 3,
+    "peak_rss_mb_self": 30.625,
+    "stderr": null
+   },
+   {
+    "wall_ms": 436.02708299999904,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 428.499583,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 13032,
+    "site_updates_per_s": 13018051,
+    "threads": 3,
+    "peak_rss_mb_self": 29.40625,
+    "stderr": null
+   },
+   {
+    "wall_ms": 442.2595000000058,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 430.249042,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 13784,
+    "site_updates_per_s": 13767238,
+    "threads": 3,
+    "peak_rss_mb_self": 29.71875,
+    "stderr": null
+   },
+   {
+    "wall_ms": 448.6665839999944,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 435.776417,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 15248,
+    "site_updates_per_s": 15236972,
+    "threads": 3,
+    "peak_rss_mb_self": 30.546875,
+    "stderr": null
+   }
+  ],
+  "wall_ms": {
+   "median": 442.2595000000058,
+   "q1": 434.20885400000486,
+   "q3": 446.10879199998976,
+   "min": 432.3906250000107,
+   "max": 448.6665839999944,
+   "n": 5,
+   "values": [
+    432.3906250000107,
+    443.55099999998515,
+    436.02708299999904,
+    442.2595000000058,
+    448.6665839999944
+   ]
+  },
+  "pbit_ms": {
+   "median": 430.249042,
+   "q1": 426.945208,
+   "q3": 433.945854,
+   "min": 425.390833,
+   "max": 435.776417,
+   "n": 5,
+   "values": [
+    425.390833,
+    432.115291,
+    428.499583,
+    430.249042,
+    435.776417
+   ]
+  },
+  "released": {
+   "median": 300,
+   "q1": 300.0,
+   "q3": 300.0,
+   "min": 300,
+   "max": 300,
+   "n": 5,
+   "values": [
+    300,
+    300,
+    300,
+    300,
+    300
+   ]
+  },
+  "violations_max": 0,
+  "verdicts": [
+   "diagnostics_passed"
+  ],
+  "exit_codes": [
+   0
+  ],
+  "site_updates_per_s": {
+   "median": 15236972,
+   "q1": 13392644.5,
+   "q3": 15728976.5,
+   "min": 13018051,
+   "max": 16123822,
+   "n": 5,
+   "values": [
+    16123822,
+    15334131,
+    13018051,
+    13767238,
+    15236972
+   ]
+  }
+ },
+ "peak_rss_300": {
+  "cmd": "pbit decide --budget-ms 300 < demo300.json",
+  "method": "/usr/bin/time -l (maximum resident set size, bytes)",
+  "bytes": {
+   "median": 32014336,
+   "q1": 31948800.0,
+   "q3": 32243712.0,
+   "min": 31948800,
+   "max": 32243712,
+   "n": 3,
+   "values": [
+    32014336,
+    32243712,
+    31948800
+   ]
+  },
+  "self_reported_peak_rss_mb": [
+   30.484375,
+   30.734375,
+   30.453125
+  ],
+  "verdicts": [
+   "diagnostics_passed",
+   "diagnostics_passed",
+   "diagnostics_passed"
+  ],
+  "extra": [
+   {
+    "peak_memory_footprint_bytes": 31016128
+   },
+   {
+    "peak_memory_footprint_bytes": 31245504
+   },
+   {
+    "peak_memory_footprint_bytes": 30950592
+   }
+  ]
+ },
+ "kernels": {
+  "cmd": "target/release/examples/kernels",
+  "checksums": [
+   "8520834"
+  ],
+  "lines": {
+   "T1 SoA f32 heat-bath LUT, splitmix": {
+    "median": 344900000.0,
+    "q1": 306000000.0,
+    "q3": 347000000.0,
+    "min": 304400000.0,
+    "max": 347800000.0,
+    "n": 5,
+    "values": [
+     347800000.0,
+     346200000.0,
+     307600000.0,
+     304400000.0,
+     344900000.0
+    ]
+   },
+   "T1 SoA f32 heat-bath LUT, Philox": {
+    "median": 226000000.0,
+    "q1": 221450000.0,
+    "q3": 250250000.0,
+    "min": 220800000.0,
+    "max": 252700000.0,
+    "n": 5,
+    "values": [
+     252700000.0,
+     247800000.0,
+     226000000.0,
+     222100000.0,
+     220800000.0
+    ]
+   },
+   "T0 multispin 64-lane, splitmix": {
+    "median": 12970000000.0,
+    "q1": 12380000000.0,
+    "q3": 14295000000.0,
+    "min": 12030000000.0,
+    "max": 14300000000.0,
+    "n": 5,
+    "values": [
+     14300000000.0,
+     14290000000.0,
+     12970000000.0,
+     12030000000.0,
+     12730000000.0
+    ]
+   },
+   "T0 multispin 64-lane, Philox": {
+    "median": 11320000000.0,
+    "q1": 11230000000.0,
+    "q3": 12135000000.0,
+    "min": 11220000000.0,
+    "max": 12560000000.0,
+    "n": 5,
+    "values": [
+     12560000000.0,
+     11710000000.0,
+     11220000000.0,
+     11320000000.0,
+     11240000000.0
+    ]
+   },
+   "T0 PT-in-a-word prefix-mask, splitm": {
+    "median": 2088000000.0,
+    "q1": 2061500000.0,
+    "q3": 2185000000.0,
+    "min": 2037000000.0,
+    "max": 2243000000.0,
+    "n": 5,
+    "values": [
+     2088000000.0,
+     2127000000.0,
+     2086000000.0,
+     2037000000.0,
+     2243000000.0
+    ]
+   },
+   "T0 multispin splitmix x 4 threads": {
+    "median": 39080000000.0,
+    "q1": 38805000000.0,
+    "q3": 39385000000.0,
+    "min": 38780000000.0,
+    "max": 39650000000.0,
+    "n": 5,
+    "values": [
+     39080000000.0,
+     39120000000.0,
+     38830000000.0,
+     38780000000.0,
+     39650000000.0
+    ]
+   },
+   "T0 multispin splitmix x10 threads": {
+    "median": 37660000000.0,
+    "q1": 32530000000.0,
+    "q3": 38985000000.0,
+    "min": 30200000000.0,
+    "max": 39100000000.0,
+    "n": 5,
+    "values": [
+     39100000000.0,
+     30200000000.0,
+     37660000000.0,
+     34860000000.0,
+     38870000000.0
+    ]
+   },
+   "fast multispin splitmix x 4 thr": {
+    "median": 64230000000.0,
+    "q1": 61225000000.0,
+    "q3": 66495000000.0,
+    "min": 58460000000.0,
+    "max": 66680000000.0,
+    "n": 5,
+    "values": [
+     66680000000.0,
+     63990000000.0,
+     64230000000.0,
+     58460000000.0,
+     66310000000.0
+    ]
+   },
+   "fast multispin splitmix x10 thr": {
+    "median": 65240000000.0,
+    "q1": 61865000000.0,
+    "q3": 65755000000.0,
+    "min": 60620000000.0,
+    "max": 65780000000.0,
+    "n": 5,
+    "values": [
+     65780000000.0,
+     65240000000.0,
+     63110000000.0,
+     60620000000.0,
+     65730000000.0
+    ]
+   },
+   "fast T1 f32 LUT, splitmix": {
+    "median": 532500000.0,
+    "q1": 523800000.0,
+    "q3": 534850000.0,
+    "min": 516400000.0,
+    "max": 535900000.0,
+    "n": 5,
+    "values": [
+     532500000.0,
+     516400000.0,
+     531200000.0,
+     535900000.0,
+     533800000.0
+    ]
+   },
+   "fast T1 f32 LUT, Philox": {
+    "median": 321200000.0,
+    "q1": 317000000.0,
+    "q3": 322700000.0,
+    "min": 314800000.0,
+    "max": 323600000.0,
+    "n": 5,
+    "values": [
+     321800000.0,
+     321200000.0,
+     319200000.0,
+     323600000.0,
+     314800000.0
+    ]
+   },
+   "fast T0 multispin, splitmix": {
+    "median": 21670000000.0,
+    "q1": 21120000000.0,
+    "q3": 21845000000.0,
+    "min": 20680000000.0,
+    "max": 21910000000.0,
+    "n": 5,
+    "values": [
+     21560000000.0,
+     21910000000.0,
+     21780000000.0,
+     21670000000.0,
+     20680000000.0
+    ]
+   },
+   "fast T0 multispin, Philox": {
+    "median": 14510000000.0,
+    "q1": 14320000000.0,
+    "q3": 15130000000.0,
+    "min": 14220000000.0,
+    "max": 15740000000.0,
+    "n": 5,
+    "values": [
+     15740000000.0,
+     14520000000.0,
+     14420000000.0,
+     14220000000.0,
+     14510000000.0
+    ]
+   }
+  }
+ },
+ "portable_vs_native": {
+  "skipped": "no --native-dir"
+ },
+ "decide_threads": {
+  "cmd": "PBIT=target/release/pbit python3 bench/decide_threads.py",
+  "exit": 0,
+  "rows": {
+   "threads_1": {
+    "wall_ms": 116.5,
+    "wall_iqr": [
+     116.4,
+     118.4
+    ],
+    "cpu_ms": 121.1,
+    "site_updates_per_s_M": 8.36,
+    "verdict": "refused"
+   },
+   "threads_2": {
+    "wall_ms": 90.5,
+    "wall_iqr": [
+     89.3,
+     95.9
+    ],
+    "cpu_ms": 125.3,
+    "site_updates_per_s_M": 15.56,
+    "verdict": "refused"
+   },
+   "threads_4": {
+    "wall_ms": 87.0,
+    "wall_iqr": [
+     82.9,
+     89.5
+    ],
+    "cpu_ms": 131.1,
+    "site_updates_per_s_M": 20.78,
+    "verdict": "refused"
+   },
+   "default": {
+    "threads": 3,
+    "wall_ms": 429.5,
+    "wall_iqr": [
+     425.9,
+     430.0
+    ],
+    "sweeps": 15216,
+    "verdict": "diagnostics_passed"
+   }
+  },
+  "stdout": [
+   "machine: Apple M4 (4P+6E), 16 GB; 300-task demo, decide --sweeps 400 --chains 4 --polish-ms 0 (fixed work), 5 runs each, medians [IQR]",
+   "--threads 1: wall ms 116.5 [116.4-118.4], CPU ms 121.1, site updates/s 8.36 M; answer identical: yes; verdict refused",
+   "--threads 2: wall ms 90.5 [89.3-95.9], CPU ms 125.3, site updates/s 15.56 M; answer identical: yes; verdict refused",
+   "--threads 4: wall ms 87.0 [82.9-89.5], CPU ms 131.1, site updates/s 20.78 M; answer identical: yes; verdict refused",
+   "default path (--budget-ms 300, 4 chains, threads 3): wall ms 429.5 [425.9-430.0], sweeps 15216, verdict diagnostics_passed"
+  ],
+  "stderr_tail": null
+ },
+ "attached": {
+  "checks": {
+   "build": "success",
+   "native_build": "skipped",
+   "pack_zip": "skipped",
+   "callers": "success",
+   "install_sh": "success",
+   "npm": "skipped",
+   "npm_windows": "skipped",
+   "install_ps1_pwsh": "skipped",
+   "install_ps1_ps51": "skipped",
+   "ps_callers": "skipped",
+   "rss_powershell": "skipped",
+   "cross_darwin": "success"
+  },
+  "cross_x86_64_apple_darwin": [
+   "$ rustup target add x86_64-apple-darwin",
+   "info: downloading component rust-std",
+   "$ cargo build --release --locked -p pbit-cli --target x86_64-apple-darwin",
+   "    Finished `release` profile [optimized] target(s) in 17.81s",
+   "$ file target/x86_64-apple-darwin/release/pbit",
+   "target/x86_64-apple-darwin/release/pbit: Mach-O 64-bit executable x86_64",
+   "$ lipo -archs target/x86_64-apple-darwin/release/pbit",
+   "x86_64",
+   "$ otool -L target/x86_64-apple-darwin/release/pbit",
+   "target/x86_64-apple-darwin/release/pbit:",
+   "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
+   "size 1270368 bytes",
+   "rosetta: present",
+   "$ arch -x86_64 target/x86_64-apple-darwin/release/pbit version",
+   "pbit 0.2.0",
+   "$ arch -x86_64 pbit demo --tasks 12 | arch -x86_64 pbit decide: exit 0, verdict exact",
+   "$ arch -x86_64 pbit stats (self-test under Rosetta)",
+   "1 thread 10951089 | threads 3 19953406"
+  ]
+ },
+ "cells": {
+  "cpu_model": "Apple M1 (Virtual)",
+  "logical_cores": 3,
+  "binary_size_bytes": 1146960,
+  "stats_1t": {
+   "median": 12463979,
+   "q1": 9767181.0,
+   "q3": 13381267.0,
+   "min": 9406207,
+   "max": 13858931,
+   "n": 5,
+   "values": [
+    12903603,
+    13858931,
+    12463979,
+    9406207,
+    10128155
+   ]
+  },
+  "stats_default": {
+   "median": 25825231,
+   "q1": 22095427.5,
+   "q3": 26603051.5,
+   "min": 19310092,
+   "max": 27013442,
+   "n": 5,
+   "values": [
+    26192661,
+    19310092,
+    25825231,
+    24880763,
+    27013442
+   ]
+  },
+  "stats_default_threads": [
+   3
+  ],
+  "kernel_multispin_fast_4t": {
+   "median": 64230000000.0,
+   "q1": 61225000000.0,
+   "q3": 66495000000.0,
+   "min": 58460000000.0,
+   "max": 66680000000.0,
+   "n": 5,
+   "values": [
+    66680000000.0,
+    63990000000.0,
+    64230000000.0,
+    58460000000.0,
+    66310000000.0
+   ]
+  },
+  "kernel_multispin_fast_10t": {
+   "median": 65240000000.0,
+   "q1": 61865000000.0,
+   "q3": 65755000000.0,
+   "min": 60620000000.0,
+   "max": 65780000000.0,
+   "n": 5,
+   "values": [
+    65780000000.0,
+    65240000000.0,
+    63110000000.0,
+    60620000000.0,
+    65730000000.0
+   ]
+  },
+  "kernel_multispin_fast_1t": {
+   "median": 21670000000.0,
+   "q1": 21120000000.0,
+   "q3": 21845000000.0,
+   "min": 20680000000.0,
+   "max": 21910000000.0,
+   "n": 5,
+   "values": [
+    21560000000.0,
+    21910000000.0,
+    21780000000.0,
+    21670000000.0,
+    20680000000.0
+   ]
+  },
+  "kernel_heatbath_fast_1t": {
+   "median": 532500000.0,
+   "q1": 523800000.0,
+   "q3": 534850000.0,
+   "min": 516400000.0,
+   "max": 535900000.0,
+   "n": 5,
+   "values": [
+    532500000.0,
+    516400000.0,
+    531200000.0,
+    535900000.0,
+    533800000.0
+   ]
+  },
+  "decide_12_wall_ms": {
+   "median": 15.493166999988262,
+   "q1": 15.07906249997859,
+   "q3": 18.277812999997423,
+   "min": 15.050082999977121,
+   "max": 19.817458999995097,
+   "n": 5,
+   "values": [
+    15.10804199998006,
+    15.050082999977121,
+    19.817458999995097,
+    15.493166999988262,
+    16.73816699999975
+   ]
+  },
+  "decide_12_pbit_ms": {
+   "median": 11.442583,
+   "q1": 11.3931045,
+   "q3": 11.8908125,
+   "min": 11.344709,
+   "max": 12.139,
+   "n": 5,
+   "values": [
+    11.344709,
+    11.4415,
+    11.442583,
+    11.642625,
+    12.139
+   ]
+  },
+  "decide_12_verdicts": [
+   "exact"
+  ],
+  "decide_12_exit_codes": [
+   0
+  ],
+  "decide_300_wall_ms": {
+   "median": 442.2595000000058,
+   "q1": 434.20885400000486,
+   "q3": 446.10879199998976,
+   "min": 432.3906250000107,
+   "max": 448.6665839999944,
+   "n": 5,
+   "values": [
+    432.3906250000107,
+    443.55099999998515,
+    436.02708299999904,
+    442.2595000000058,
+    448.6665839999944
+   ]
+  },
+  "decide_300_pbit_ms": {
+   "median": 430.249042,
+   "q1": 426.945208,
+   "q3": 433.945854,
+   "min": 425.390833,
+   "max": 435.776417,
+   "n": 5,
+   "values": [
+    425.390833,
+    432.115291,
+    428.499583,
+    430.249042,
+    435.776417
+   ]
+  },
+  "decide_300_verdicts": [
+   "diagnostics_passed"
+  ],
+  "decide_300_exit_codes": [
+   0
+  ],
+  "decide_300_released": {
+   "median": 300,
+   "q1": 300.0,
+   "q3": 300.0,
+   "min": 300,
+   "max": 300,
+   "n": 5,
+   "values": [
+    300,
+    300,
+    300,
+    300,
+    300
+   ]
+  },
+  "decide_300_violations_max": 0,
+  "decide_300_site_updates_per_s": {
+   "median": 15236972,
+   "q1": 13392644.5,
+   "q3": 15728976.5,
+   "min": 13018051,
+   "max": 16123822,
+   "n": 5,
+   "values": [
+    16123822,
+    15334131,
+    13018051,
+    13767238,
+    15236972
+   ]
+  },
+  "decide_300_peak_rss_bytes": {
+   "median": 32014336,
+   "q1": 31948800.0,
+   "q3": 32243712.0,
+   "min": 31948800,
+   "max": 32243712,
+   "n": 3,
+   "values": [
+    32014336,
+    32243712,
+    31948800
+   ]
+  },
+  "decide_300_peak_rss_method": "/usr/bin/time -l (maximum resident set size, bytes)",
+  "native_over_portable": "no --native-dir",
+  "threads_rows": {
+   "threads_1": {
+    "wall_ms": 116.5,
+    "wall_iqr": [
+     116.4,
+     118.4
+    ],
+    "cpu_ms": 121.1,
+    "site_updates_per_s_M": 8.36,
+    "verdict": "refused"
+   },
+   "threads_2": {
+    "wall_ms": 90.5,
+    "wall_iqr": [
+     89.3,
+     95.9
+    ],
+    "cpu_ms": 125.3,
+    "site_updates_per_s_M": 15.56,
+    "verdict": "refused"
+   },
+   "threads_4": {
+    "wall_ms": 87.0,
+    "wall_iqr": [
+     82.9,
+     89.5
+    ],
+    "cpu_ms": 131.1,
+    "site_updates_per_s_M": 20.78,
+    "verdict": "refused"
+   },
+   "default": {
+    "threads": 3,
+    "wall_ms": 429.5,
+    "wall_iqr": [
+     425.9,
+     430.0
+    ],
+    "sweeps": 15216,
+    "verdict": "diagnostics_passed"
+   }
+  }
+ },
+ "elapsed_s": 36.4
+}

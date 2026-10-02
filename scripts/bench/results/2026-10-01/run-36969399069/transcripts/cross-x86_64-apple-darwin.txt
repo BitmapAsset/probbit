@@ -1,0 +1,18 @@
+$ rustup target add x86_64-apple-darwin
+info: downloading component rust-std
+$ cargo build --release --locked -p pbit-cli --target x86_64-apple-darwin
+    Finished `release` profile [optimized] target(s) in 17.81s
+$ file target/x86_64-apple-darwin/release/pbit
+target/x86_64-apple-darwin/release/pbit: Mach-O 64-bit executable x86_64
+$ lipo -archs target/x86_64-apple-darwin/release/pbit
+x86_64
+$ otool -L target/x86_64-apple-darwin/release/pbit
+target/x86_64-apple-darwin/release/pbit:
+	/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)
+size 1270368 bytes
+rosetta: present
+$ arch -x86_64 target/x86_64-apple-darwin/release/pbit version
+pbit 0.2.0
+$ arch -x86_64 pbit demo --tasks 12 | arch -x86_64 pbit decide: exit 0, verdict exact
+$ arch -x86_64 pbit stats (self-test under Rosetta)
+1 thread 10951089 | threads 3 19953406

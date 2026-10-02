@@ -1,0 +1,117 @@
+shell under test: sh (/bin/sh); archive: pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+pbit-v0.2.0-aarch64-apple-darwin.tar.gz.sha256
+== 1. piped to sh, PBIT_INSTALL_DIR set, version given without the v
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49173/good/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+  sha256 ok  bbbca16f0eba20c351e7759a386d0b176a6d2c0b937a274d10556bf3a2d48099
+  installed  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin/pbit (pbit 0.2.0)
+
+/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin is not on your PATH. Add it (e.g. in ~/.profile):
+  export PATH="/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin:$PATH"
+
+Next:
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin/pbit version
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin/pbit demo --tasks 12 | /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin/pbit decide --pretty
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin/pbit stats --pretty
+$ command -v pbit: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/bin/pbit
+$ pbit version: pbit 0.2.0
+$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+== 2. default directory, scratch HOME
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49173/good/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+  sha256 ok  bbbca16f0eba20c351e7759a386d0b176a6d2c0b937a274d10556bf3a2d48099
+  installed  /usr/local/bin/pbit (pbit 0.2.0)
+
+Next:
+  pbit version
+  pbit demo --tasks 12 | pbit decide --pretty
+  pbit stats --pretty
+ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+== 3. tampered .sha256 must fail and install nothing
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49173/bad/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+pbit install: error: checksum mismatch for pbit-v0.2.0-aarch64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got bbbca16f0eba20c351e7759a386d0b176a6d2c0b937a274d10556bf3a2d48099 (nothing was installed)
+ok: rejected, /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.onitFH8jy0/badbin/pbit absent
+== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
+pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+ok: rejected
+install.sh: all checks passed (sh, aarch64-apple-darwin)
+scripts/bench/test_install_sh.sh: line 12:  1824 Terminated: 15          "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1
+shell under test: bash (/bin/bash); archive: pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+pbit-v0.2.0-aarch64-apple-darwin.tar.gz.sha256
+== 1. piped to bash, PBIT_INSTALL_DIR set, version given without the v
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49182/good/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+  sha256 ok  dcdbc1bdeeb88e3d47e955e98c385062924f4791fe9807de5302c753db6c7428
+  installed  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin/pbit (pbit 0.2.0)
+
+/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin is not on your PATH. Add it (e.g. in ~/.profile):
+  export PATH="/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin:$PATH"
+
+Next:
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin/pbit version
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin/pbit demo --tasks 12 | /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin/pbit decide --pretty
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin/pbit stats --pretty
+$ command -v pbit: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/bin/pbit
+$ pbit version: pbit 0.2.0
+$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+== 2. default directory, scratch HOME
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49182/good/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+  sha256 ok  dcdbc1bdeeb88e3d47e955e98c385062924f4791fe9807de5302c753db6c7428
+  installed  /usr/local/bin/pbit (pbit 0.2.0)
+
+Next:
+  pbit version
+  pbit demo --tasks 12 | pbit decide --pretty
+  pbit stats --pretty
+ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+== 3. tampered .sha256 must fail and install nothing
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49182/bad/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+pbit install: error: checksum mismatch for pbit-v0.2.0-aarch64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got dcdbc1bdeeb88e3d47e955e98c385062924f4791fe9807de5302c753db6c7428 (nothing was installed)
+ok: rejected, /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.CNbEhUFru1/badbin/pbit absent
+== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
+pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+ok: rejected
+install.sh: all checks passed (bash, aarch64-apple-darwin)
+scripts/bench/test_install_sh.sh: line 12:  2372 Terminated: 15          "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1
+shell under test: dash (/bin/dash); archive: pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+pbit-v0.2.0-aarch64-apple-darwin.tar.gz.sha256
+== 1. piped to dash, PBIT_INSTALL_DIR set, version given without the v
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49192/good/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+  sha256 ok  64e596800cb664ecca4343328d610d8372c0803ce4e4e973ff6a3b0e3ab18761
+  installed  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin/pbit (pbit 0.2.0)
+
+/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin is not on your PATH. Add it (e.g. in ~/.profile):
+  export PATH="/var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin:$PATH"
+
+Next:
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin/pbit version
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin/pbit demo --tasks 12 | /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin/pbit decide --pretty
+  /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin/pbit stats --pretty
+$ command -v pbit: /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/bin/pbit
+$ pbit version: pbit 0.2.0
+$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+== 2. default directory, scratch HOME
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49192/good/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+  sha256 ok  64e596800cb664ecca4343328d610d8372c0803ce4e4e973ff6a3b0e3ab18761
+  installed  /usr/local/bin/pbit (pbit 0.2.0)
+
+Next:
+  pbit version
+  pbit demo --tasks 12 | pbit decide --pretty
+  pbit stats --pretty
+ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+== 3. tampered .sha256 must fail and install nothing
+pbit install: v0.2.0 for aarch64-apple-darwin
+  fetching http://127.0.0.1:49192/bad/v0.2.0/pbit-v0.2.0-aarch64-apple-darwin.tar.gz
+pbit install: error: checksum mismatch for pbit-v0.2.0-aarch64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 64e596800cb664ecca4343328d610d8372c0803ce4e4e973ff6a3b0e3ab18761 (nothing was installed)
+ok: rejected, /var/folders/36/tjdph2t965j8snz9_vkdnw0r0000gn/T/tmp.JRasdoqGV0/badbin/pbit absent
+== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
+pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+ok: rejected
+install.sh: all checks passed (dash, aarch64-apple-darwin)
+scripts/bench/test_install_sh.sh: line 12:  3139 Terminated: 15          "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1

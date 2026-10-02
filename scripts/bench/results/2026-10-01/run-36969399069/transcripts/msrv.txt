@@ -1,0 +1,5 @@
+rust 1.72: build FAILED, Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4): error[E0658]: use of unstable library feature 'int_roundings'
+rust 1.73: build ok, Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4)
+rust 1.77: build FAILED, --locked (Cargo.lock as committed, lockfile v4): error: failed to parse lock file at: /home/runner/work/pbit/pbit/Cargo.lock
+rust 1.78: build ok, --locked (Cargo.lock as committed, lockfile v4)
+Cargo.lock restored: 0 changes

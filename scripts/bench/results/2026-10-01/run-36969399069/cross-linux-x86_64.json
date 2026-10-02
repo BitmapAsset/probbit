@@ -1,0 +1,1753 @@
+{
+ "schema": "pbit-cross/1",
+ "label": "cross-linux-x86_64",
+ "date_utc": "2026-10-02T05:35:29Z",
+ "outcomes": {
+  "musl_x86_64": "success",
+  "musl_aarch64": "success",
+  "wasm32_wasip1": "success",
+  "msrv": "success",
+  "measure": "success"
+ },
+ "runner": {
+  "RUNNER_OS": "Linux",
+  "RUNNER_ARCH": "X64",
+  "ImageOS": "ubuntu24",
+  "ImageVersion": "20260927.320.1",
+  "GITHUB_RUN_ID": "36969399069",
+  "GITHUB_RUN_ATTEMPT": "1",
+  "GITHUB_JOB": "cross",
+  "GITHUB_SHA": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+  "GITHUB_REF_NAME": "r22-portability-matrix",
+  "GITHUB_WORKFLOW": "bench"
+ },
+ "machine": {
+  "system": "Linux",
+  "os_release": "6.17.0-1022-azure",
+  "arch": "x86_64",
+  "python": "3.12.3",
+  "logical_cores": 2,
+  "cpu_cmd": "lscpu",
+  "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+  "lscpu": {
+   "Architecture": "x86_64",
+   "CPU(s)": "2",
+   "Thread(s) per core": "2",
+   "Core(s) per socket": "1",
+   "Socket(s)": "1",
+   "Vendor ID": "GenuineIntel",
+   "Model name": "INTEL(R) XEON(R) PLATINUM 8573C",
+   "Hypervisor vendor": "Microsoft"
+  },
+  "cpu_flags": {
+   "sse4_2": true,
+   "avx": true,
+   "avx2": true,
+   "fma": true,
+   "bmi2": true,
+   "avx512f": true,
+   "avx512bw": true,
+   "avx512vl": true
+  },
+  "memory_bytes": 8322932736,
+  "os_version": "Ubuntu 24.04.5 LTS",
+  "libc": "glibc 2.39"
+ },
+ "toolchain": {
+  "binary": "rustc",
+  "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+  "commit-date": "2026-09-28",
+  "host": "x86_64-unknown-linux-gnu",
+  "release": "1.99.0",
+  "LLVM version": "23.1.1",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+ },
+ "transcripts": {
+  "msrv.txt": [
+   "rust 1.72: build FAILED, Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4): error[E0658]: use of unstable library feature 'int_roundings'",
+   "rust 1.73: build ok, Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4)",
+   "rust 1.77: build FAILED, --locked (Cargo.lock as committed, lockfile v4): error: failed to parse lock file at: /home/runner/work/pbit/pbit/Cargo.lock",
+   "rust 1.78: build ok, --locked (Cargo.lock as committed, lockfile v4)",
+   "Cargo.lock restored: 0 changes"
+  ],
+  "musl-aarch64.txt": [
+   "$ sudo apt-get install -y gcc-aarch64-linux-gnu",
+   "",
+   "Running kernel seems to be up-to-date.",
+   "",
+   "No services need to be restarted.",
+   "",
+   "No containers need to be restarted.",
+   "",
+   "No user sessions are running outdated binaries.",
+   "",
+   "No VM guests are running outdated hypervisor (qemu) binaries on this host.",
+   "linker installed in 13 s",
+   "$ rustup target add aarch64-unknown-linux-musl",
+   "info: downloading component rust-std",
+   "$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p pbit-cli --target aarch64-unknown-linux-musl",
+   "    Finished `release` profile [optimized] target(s) in 19.31s",
+   "$ file target/aarch64-unknown-linux-musl/release/pbit",
+   "target/aarch64-unknown-linux-musl/release/pbit: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=6b9608f1981e300fe1d149bd279ce6fa0ba3e383, not stripped",
+   "size 1477600 bytes",
+   "qemu-user-static installed in 4 s",
+   "$ qemu-aarch64-static target/aarch64-unknown-linux-musl/release/pbit version",
+   "pbit 0.2.0",
+   "$ qemu pbit demo --tasks 12 | qemu pbit decide: exit 0, verdict exact"
+  ],
+  "musl-x86_64.txt": [
+   "$ rustup target add x86_64-unknown-linux-musl",
+   "info: downloading component rust-std",
+   "$ cargo build --release --locked -p pbit-cli --target x86_64-unknown-linux-musl",
+   "    Finished `release` profile [optimized] target(s) in 18.87s",
+   "$ file target/x86_64-unknown-linux-musl/release/pbit",
+   "target/x86_64-unknown-linux-musl/release/pbit: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped",
+   "$ ldd target/x86_64-unknown-linux-musl/release/pbit",
+   "\tstatically linked",
+   "size 1545968 bytes",
+   "$ target/x86_64-unknown-linux-musl/release/pbit version",
+   "pbit 0.2.0",
+   "$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact"
+  ],
+  "wasm32-wasip1.txt": [
+   "$ rustup target add wasm32-wasip1",
+   "info: downloading component rust-std",
+   "$ cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide",
+   "exit 0",
+   "first error: none",
+   "    Checking pbit-ir v0.2.0 (/home/runner/work/pbit/pbit/pbit-ir)",
+   "    Checking pbit-decide v0.2.0 (/home/runner/work/pbit/pbit/pbit-decide)",
+   "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.69s"
+  ]
+ },
+ "bench": {
+  "linux-x86_64-gnu-samevm": {
+   "schema": "pbit-bench-matrix/1",
+   "label": "linux-x86_64-gnu-samevm",
+   "date_utc": "2026-10-02T05:35:18Z",
+   "git_sha": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+   "runner": {
+    "RUNNER_OS": "Linux",
+    "RUNNER_ARCH": "X64",
+    "ImageOS": "ubuntu24",
+    "ImageVersion": "20260927.320.1",
+    "GITHUB_RUN_ID": "36969399069",
+    "GITHUB_RUN_ATTEMPT": "1",
+    "GITHUB_JOB": "cross",
+    "GITHUB_SHA": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+    "GITHUB_REF_NAME": "r22-portability-matrix",
+    "GITHUB_WORKFLOW": "bench"
+   },
+   "notes": [
+    "glibc build, same VM as the musl row"
+   ],
+   "machine": {
+    "system": "Linux",
+    "os_release": "6.17.0-1022-azure",
+    "arch": "x86_64",
+    "python": "3.12.3",
+    "logical_cores": 2,
+    "cpu_cmd": "lscpu",
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "lscpu": {
+     "Architecture": "x86_64",
+     "CPU(s)": "2",
+     "Thread(s) per core": "2",
+     "Core(s) per socket": "1",
+     "Socket(s)": "1",
+     "Vendor ID": "GenuineIntel",
+     "Model name": "INTEL(R) XEON(R) PLATINUM 8573C",
+     "Hypervisor vendor": "Microsoft"
+    },
+    "cpu_flags": {
+     "sse4_2": true,
+     "avx": true,
+     "avx2": true,
+     "fma": true,
+     "bmi2": true,
+     "avx512f": true,
+     "avx512bw": true,
+     "avx512vl": true
+    },
+    "memory_bytes": 8322932736,
+    "os_version": "Ubuntu 24.04.5 LTS",
+    "libc": "glibc 2.39"
+   },
+   "toolchain": {
+    "binary": "rustc",
+    "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+    "commit-date": "2026-09-28",
+    "host": "x86_64-unknown-linux-gnu",
+    "release": "1.99.0",
+    "LLVM version": "23.1.1",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+   },
+   "load": {
+    "start": {
+     "loadavg": [
+      1.5732421875,
+      0.88134765625,
+      0.3720703125
+     ],
+     "uptime": "05:35:18 up 4 min,  0 user,  load average: 1.57, 0.88, 0.37",
+     "t": "05:35:18"
+    },
+    "after_stats": {
+     "loadavg": [
+      1.52685546875,
+      0.8837890625,
+      0.37548828125
+     ],
+     "uptime": "05:35:21 up 4 min,  0 user,  load average: 1.53, 0.88, 0.38",
+     "t": "05:35:21"
+    },
+    "after_decide": {
+     "loadavg": [
+      1.52685546875,
+      0.8837890625,
+      0.37548828125
+     ],
+     "uptime": "05:35:23 up 4 min,  0 user,  load average: 1.53, 0.88, 0.38",
+     "t": "05:35:23"
+    },
+    "after_kernels": {
+     "loadavg": [
+      1.56494140625,
+      0.90234375,
+      0.38427734375
+     ],
+     "uptime": "05:35:25 up 4 min,  0 user,  load average: 1.56, 0.90, 0.38",
+     "t": "05:35:25"
+    },
+    "after_pvn": {
+     "loadavg": [
+      1.56494140625,
+      0.90234375,
+      0.38427734375
+     ],
+     "uptime": "05:35:25 up 4 min,  0 user,  load average: 1.56, 0.90, 0.38",
+     "t": "05:35:25"
+    },
+    "end": {
+     "loadavg": [
+      1.60009765625,
+      0.9208984375,
+      0.39306640625
+     ],
+     "uptime": "05:35:29 up 4 min,  0 user,  load average: 1.60, 0.92, 0.39",
+     "t": "05:35:29"
+    }
+   },
+   "errors": [],
+   "binary": {
+    "path": "target/release/pbit",
+    "size_bytes": 1401248,
+    "version": "pbit 0.2.0",
+    "linkage": {
+     "file": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=3a4791ff347b29ab20fc5b1ff998dd05660b1d15, not stripped",
+     "ldd": [
+      "linux-vdso.so.1 (0x00007efc52923000)",
+      "\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007efc527b5000)",
+      "\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007efc526cc000)",
+      "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007efc52400000)",
+      "\t/lib64/ld-linux-x86-64.so.2 (0x00007efc52925000)"
+     ],
+     "glibc_symbol_versions": [
+      "2.2.5",
+      "2.3",
+      "2.3.4",
+      "2.14",
+      "2.16",
+      "2.17",
+      "2.18",
+      "2.25",
+      "2.28",
+      "2.29",
+      "2.30",
+      "2.32",
+      "2.33",
+      "2.34"
+     ],
+     "min_glibc": "2.34"
+    }
+   },
+   "stats_first": {
+    "engine": "pbit 0.2.0",
+    "machine": {
+     "os": "linux",
+     "arch": "x86_64",
+     "logical_cpus": 2
+    },
+    "build": {
+     "target_features": [],
+     "debug_assertions": false
+    },
+    "controls": {
+     "chains": {
+      "value": 4,
+      "source": "default"
+     },
+     "threads": {
+      "value": 2,
+      "source": "default"
+     },
+     "cpu_limit_pct": {
+      "value": 100,
+      "source": "default"
+     },
+     "priority": {
+      "value": "normal",
+      "source": "default"
+     },
+     "mem_limit_mb": {
+      "value": 1024,
+      "source": "default"
+     },
+     "config_file": null
+    }
+   },
+   "stats": {
+    "site_updates_per_s_1_thread": {
+     "median": 12050263,
+     "q1": 12034773.5,
+     "q3": 12066932.5,
+     "min": 12033304,
+     "max": 12070736,
+     "n": 5,
+     "values": [
+      12033304,
+      12036243,
+      12063129,
+      12070736,
+      12050263
+     ]
+    },
+    "site_updates_per_s": {
+     "median": 15575011,
+     "q1": 15445940.0,
+     "q3": 15599585.5,
+     "min": 15346475,
+     "max": 15616096,
+     "n": 5,
+     "values": [
+      15575011,
+      15346475,
+      15616096,
+      15583075,
+      15545405
+     ]
+    },
+    "threads": [
+     2
+    ],
+    "speedup": {
+     "median": 1.29,
+     "q1": 1.2850000000000001,
+     "q3": 1.29,
+     "min": 1.28,
+     "max": 1.29,
+     "n": 5,
+     "values": [
+      1.29,
+      1.28,
+      1.29,
+      1.29,
+      1.29
+     ]
+    }
+   },
+   "decide_12": {
+    "cmd": "pbit demo --tasks 12 | pbit decide ",
+    "runs": [
+     {
+      "wall_ms": 16.310452999960035,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.852785,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 16.021156000022074,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.613127,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 15.986572000031174,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.621756,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 16.12302700004875,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.772905,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 15.932785999950738,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.607325,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     }
+    ],
+    "wall_ms": {
+     "median": 16.021156000022074,
+     "q1": 15.959678999990956,
+     "q3": 16.216740000004393,
+     "min": 15.932785999950738,
+     "max": 16.310452999960035,
+     "n": 5,
+     "values": [
+      16.310452999960035,
+      16.021156000022074,
+      15.986572000031174,
+      16.12302700004875,
+      15.932785999950738
+     ]
+    },
+    "pbit_ms": {
+     "median": 14.621756,
+     "q1": 14.610226,
+     "q3": 14.812845,
+     "min": 14.607325,
+     "max": 14.852785,
+     "n": 5,
+     "values": [
+      14.852785,
+      14.613127,
+      14.621756,
+      14.772905,
+      14.607325
+     ]
+    },
+    "released": {
+     "median": 12,
+     "q1": 12.0,
+     "q3": 12.0,
+     "min": 12,
+     "max": 12,
+     "n": 5,
+     "values": [
+      12,
+      12,
+      12,
+      12,
+      12
+     ]
+    },
+    "violations_max": 0,
+    "verdicts": [
+     "exact"
+    ],
+    "exit_codes": [
+     0
+    ],
+    "site_updates_per_s": null
+   },
+   "decide_300": {
+    "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+    "runs": [
+     {
+      "wall_ms": 454.34242500004984,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 449.546502,
+      "verdict": "partial",
+      "tier": null,
+      "released": 298,
+      "escalated": 2,
+      "violations": 0,
+      "sweeps": 8992,
+      "site_updates_per_s": 8974146,
+      "threads": 2,
+      "peak_rss_mb_self": 21.355469,
+      "stderr": null
+     },
+     {
+      "wall_ms": 455.2757420000262,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 450.298547,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 8904,
+      "site_updates_per_s": 8893716,
+      "threads": 2,
+      "peak_rss_mb_self": 21.386719,
+      "stderr": null
+     },
+     {
+      "wall_ms": 454.6698190000029,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 449.541653,
+      "verdict": "partial",
+      "tier": null,
+      "released": 299,
+      "escalated": 1,
+      "violations": 0,
+      "sweeps": 8872,
+      "site_updates_per_s": 8855982,
+      "threads": 2,
+      "peak_rss_mb_self": 21.207031,
+      "stderr": null
+     },
+     {
+      "wall_ms": 455.9836380000206,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 450.782181,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 8904,
+      "site_updates_per_s": 8893969,
+      "threads": 2,
+      "peak_rss_mb_self": 21.390625,
+      "stderr": null
+     },
+     {
+      "wall_ms": 454.67246999999134,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 449.679244,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 8968,
+      "site_updates_per_s": 8952163,
+      "threads": 2,
+      "peak_rss_mb_self": 21.277344,
+      "stderr": null
+     }
+    ],
+    "wall_ms": {
+     "median": 454.67246999999134,
+     "q1": 454.5061220000264,
+     "q3": 455.6296900000234,
+     "min": 454.34242500004984,
+     "max": 455.9836380000206,
+     "n": 5,
+     "values": [
+      454.34242500004984,
+      455.2757420000262,
+      454.6698190000029,
+      455.9836380000206,
+      454.67246999999134
+     ]
+    },
+    "pbit_ms": {
+     "median": 449.679244,
+     "q1": 449.54407749999996,
+     "q3": 450.54036399999995,
+     "min": 449.541653,
+     "max": 450.782181,
+     "n": 5,
+     "values": [
+      449.546502,
+      450.298547,
+      449.541653,
+      450.782181,
+      449.679244
+     ]
+    },
+    "released": {
+     "median": 300,
+     "q1": 298.5,
+     "q3": 300.0,
+     "min": 298,
+     "max": 300,
+     "n": 5,
+     "values": [
+      298,
+      300,
+      299,
+      300,
+      300
+     ]
+    },
+    "violations_max": 0,
+    "verdicts": [
+     "diagnostics_passed",
+     "partial"
+    ],
+    "exit_codes": [
+     0
+    ],
+    "site_updates_per_s": {
+     "median": 8893969,
+     "q1": 8874849.0,
+     "q3": 8963154.5,
+     "min": 8855982,
+     "max": 8974146,
+     "n": 5,
+     "values": [
+      8974146,
+      8893716,
+      8855982,
+      8893969,
+      8952163
+     ]
+    }
+   },
+   "peak_rss_300": {
+    "cmd": "pbit decide --budget-ms 300 < demo300.json",
+    "method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
+    "bytes": {
+     "median": 22396928,
+     "q1": 22384640.0,
+     "q3": 22433792.0,
+     "min": 22384640,
+     "max": 22433792,
+     "n": 3,
+     "values": [
+      22384640,
+      22433792,
+      22396928
+     ]
+    },
+    "self_reported_peak_rss_mb": [
+     21.347656,
+     21.394531,
+     21.359375
+    ],
+    "verdicts": [
+     "diagnostics_passed",
+     "diagnostics_passed",
+     "diagnostics_passed"
+    ],
+    "extra": [
+     {},
+     {},
+     {}
+    ]
+   },
+   "kernels": {
+    "skipped": "no kernels example at target/release/examples/kernels (build it with -p pbit-core --example kernels)"
+   },
+   "portable_vs_native": {
+    "skipped": "no --native-dir"
+   },
+   "decide_threads": {
+    "cmd": "PBIT=target/release/pbit python3 bench/decide_threads.py",
+    "exit": 0,
+    "rows": {
+     "threads_1": {
+      "wall_ms": 165.3,
+      "wall_iqr": [
+       164.5,
+       166.4
+      ],
+      "cpu_ms": 168.2,
+      "site_updates_per_s_M": 6.12,
+      "verdict": "refused"
+     },
+     "threads_2": {
+      "wall_ms": 141.5,
+      "wall_iqr": [
+       141.3,
+       143.1
+      ],
+      "cpu_ms": 199.6,
+      "site_updates_per_s_M": 8.8,
+      "verdict": "refused"
+     },
+     "threads_4": {
+      "wall_ms": 142.4,
+      "wall_iqr": [
+       142.0,
+       142.6
+      ],
+      "cpu_ms": 199.4,
+      "site_updates_per_s_M": 8.71,
+      "verdict": "refused"
+     },
+     "default": {
+      "threads": 2,
+      "wall_ms": 449.8,
+      "wall_iqr": [
+       449.5,
+       450.1
+      ],
+      "sweeps": 8960,
+      "verdict": "diagnostics_passed"
+     }
+    },
+    "stdout": [
+     "machine: Apple M4 (4P+6E), 16 GB; 300-task demo, decide --sweeps 400 --chains 4 --polish-ms 0 (fixed work), 5 runs each, medians [IQR]",
+     "--threads 1: wall ms 165.3 [164.5-166.4], CPU ms 168.2, site updates/s 6.12 M; answer identical: yes; verdict refused",
+     "--threads 2: wall ms 141.5 [141.3-143.1], CPU ms 199.6, site updates/s 8.80 M; answer identical: yes; verdict refused",
+     "--threads 4: wall ms 142.4 [142.0-142.6], CPU ms 199.4, site updates/s 8.71 M; answer identical: yes; verdict refused",
+     "default path (--budget-ms 300, 4 chains, threads 2): wall ms 449.8 [449.5-450.1], sweeps 8960, verdict diagnostics_passed"
+    ],
+    "stderr_tail": null
+   },
+   "cells": {
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "logical_cores": 2,
+    "binary_size_bytes": 1401248,
+    "stats_1t": {
+     "median": 12050263,
+     "q1": 12034773.5,
+     "q3": 12066932.5,
+     "min": 12033304,
+     "max": 12070736,
+     "n": 5,
+     "values": [
+      12033304,
+      12036243,
+      12063129,
+      12070736,
+      12050263
+     ]
+    },
+    "stats_default": {
+     "median": 15575011,
+     "q1": 15445940.0,
+     "q3": 15599585.5,
+     "min": 15346475,
+     "max": 15616096,
+     "n": 5,
+     "values": [
+      15575011,
+      15346475,
+      15616096,
+      15583075,
+      15545405
+     ]
+    },
+    "stats_default_threads": [
+     2
+    ],
+    "kernel_multispin_fast_4t": null,
+    "kernel_multispin_fast_10t": null,
+    "kernel_multispin_fast_1t": null,
+    "kernel_heatbath_fast_1t": null,
+    "decide_12_wall_ms": {
+     "median": 16.021156000022074,
+     "q1": 15.959678999990956,
+     "q3": 16.216740000004393,
+     "min": 15.932785999950738,
+     "max": 16.310452999960035,
+     "n": 5,
+     "values": [
+      16.310452999960035,
+      16.021156000022074,
+      15.986572000031174,
+      16.12302700004875,
+      15.932785999950738
+     ]
+    },
+    "decide_12_pbit_ms": {
+     "median": 14.621756,
+     "q1": 14.610226,
+     "q3": 14.812845,
+     "min": 14.607325,
+     "max": 14.852785,
+     "n": 5,
+     "values": [
+      14.852785,
+      14.613127,
+      14.621756,
+      14.772905,
+      14.607325
+     ]
+    },
+    "decide_12_verdicts": [
+     "exact"
+    ],
+    "decide_12_exit_codes": [
+     0
+    ],
+    "decide_300_wall_ms": {
+     "median": 454.67246999999134,
+     "q1": 454.5061220000264,
+     "q3": 455.6296900000234,
+     "min": 454.34242500004984,
+     "max": 455.9836380000206,
+     "n": 5,
+     "values": [
+      454.34242500004984,
+      455.2757420000262,
+      454.6698190000029,
+      455.9836380000206,
+      454.67246999999134
+     ]
+    },
+    "decide_300_pbit_ms": {
+     "median": 449.679244,
+     "q1": 449.54407749999996,
+     "q3": 450.54036399999995,
+     "min": 449.541653,
+     "max": 450.782181,
+     "n": 5,
+     "values": [
+      449.546502,
+      450.298547,
+      449.541653,
+      450.782181,
+      449.679244
+     ]
+    },
+    "decide_300_verdicts": [
+     "diagnostics_passed",
+     "partial"
+    ],
+    "decide_300_exit_codes": [
+     0
+    ],
+    "decide_300_released": {
+     "median": 300,
+     "q1": 298.5,
+     "q3": 300.0,
+     "min": 298,
+     "max": 300,
+     "n": 5,
+     "values": [
+      298,
+      300,
+      299,
+      300,
+      300
+     ]
+    },
+    "decide_300_violations_max": 0,
+    "decide_300_site_updates_per_s": {
+     "median": 8893969,
+     "q1": 8874849.0,
+     "q3": 8963154.5,
+     "min": 8855982,
+     "max": 8974146,
+     "n": 5,
+     "values": [
+      8974146,
+      8893716,
+      8855982,
+      8893969,
+      8952163
+     ]
+    },
+    "decide_300_peak_rss_bytes": {
+     "median": 22396928,
+     "q1": 22384640.0,
+     "q3": 22433792.0,
+     "min": 22384640,
+     "max": 22433792,
+     "n": 3,
+     "values": [
+      22384640,
+      22433792,
+      22396928
+     ]
+    },
+    "decide_300_peak_rss_method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
+    "native_over_portable": "no --native-dir",
+    "threads_rows": {
+     "threads_1": {
+      "wall_ms": 165.3,
+      "wall_iqr": [
+       164.5,
+       166.4
+      ],
+      "cpu_ms": 168.2,
+      "site_updates_per_s_M": 6.12,
+      "verdict": "refused"
+     },
+     "threads_2": {
+      "wall_ms": 141.5,
+      "wall_iqr": [
+       141.3,
+       143.1
+      ],
+      "cpu_ms": 199.6,
+      "site_updates_per_s_M": 8.8,
+      "verdict": "refused"
+     },
+     "threads_4": {
+      "wall_ms": 142.4,
+      "wall_iqr": [
+       142.0,
+       142.6
+      ],
+      "cpu_ms": 199.4,
+      "site_updates_per_s_M": 8.71,
+      "verdict": "refused"
+     },
+     "default": {
+      "threads": 2,
+      "wall_ms": 449.8,
+      "wall_iqr": [
+       449.5,
+       450.1
+      ],
+      "sweeps": 8960,
+      "verdict": "diagnostics_passed"
+     }
+    }
+   },
+   "elapsed_s": 11.8
+  },
+  "linux-x86_64-musl": {
+   "schema": "pbit-bench-matrix/1",
+   "label": "linux-x86_64-musl",
+   "date_utc": "2026-10-02T05:35:05Z",
+   "git_sha": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+   "runner": {
+    "RUNNER_OS": "Linux",
+    "RUNNER_ARCH": "X64",
+    "ImageOS": "ubuntu24",
+    "ImageVersion": "20260927.320.1",
+    "GITHUB_RUN_ID": "36969399069",
+    "GITHUB_RUN_ATTEMPT": "1",
+    "GITHUB_JOB": "cross",
+    "GITHUB_SHA": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
+    "GITHUB_REF_NAME": "r22-portability-matrix",
+    "GITHUB_WORKFLOW": "bench"
+   },
+   "notes": [
+    "static musl build, same VM as bench-linux-x86_64-gnu-samevm"
+   ],
+   "machine": {
+    "system": "Linux",
+    "os_release": "6.17.0-1022-azure",
+    "arch": "x86_64",
+    "python": "3.12.3",
+    "logical_cores": 2,
+    "cpu_cmd": "lscpu",
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "lscpu": {
+     "Architecture": "x86_64",
+     "CPU(s)": "2",
+     "Thread(s) per core": "2",
+     "Core(s) per socket": "1",
+     "Socket(s)": "1",
+     "Vendor ID": "GenuineIntel",
+     "Model name": "INTEL(R) XEON(R) PLATINUM 8573C",
+     "Hypervisor vendor": "Microsoft"
+    },
+    "cpu_flags": {
+     "sse4_2": true,
+     "avx": true,
+     "avx2": true,
+     "fma": true,
+     "bmi2": true,
+     "avx512f": true,
+     "avx512bw": true,
+     "avx512vl": true
+    },
+    "memory_bytes": 8322932736,
+    "os_version": "Ubuntu 24.04.5 LTS",
+    "libc": "glibc 2.39"
+   },
+   "toolchain": {
+    "binary": "rustc",
+    "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+    "commit-date": "2026-09-28",
+    "host": "x86_64-unknown-linux-gnu",
+    "release": "1.99.0",
+    "LLVM version": "23.1.1",
+    "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+   },
+   "load": {
+    "start": {
+     "loadavg": [
+      1.67822265625,
+      0.87646484375,
+      0.365234375
+     ],
+     "uptime": "05:35:05 up 4 min,  0 user,  load average: 1.68, 0.88, 0.37",
+     "t": "05:35:05"
+    },
+    "after_stats": {
+     "loadavg": [
+      1.62353515625,
+      0.87890625,
+      0.36865234375
+     ],
+     "uptime": "05:35:09 up 4 min,  0 user,  load average: 1.62, 0.88, 0.37",
+     "t": "05:35:09"
+    },
+    "after_decide": {
+     "loadavg": [
+      1.62353515625,
+      0.87890625,
+      0.36865234375
+     ],
+     "uptime": "05:35:11 up 4 min,  0 user,  load average: 1.62, 0.88, 0.37",
+     "t": "05:35:11"
+    },
+    "after_kernels": {
+     "loadavg": [
+      1.62353515625,
+      0.87890625,
+      0.36865234375
+     ],
+     "uptime": "05:35:13 up 4 min,  0 user,  load average: 1.62, 0.88, 0.37",
+     "t": "05:35:13"
+    },
+    "after_pvn": {
+     "loadavg": [
+      1.62353515625,
+      0.87890625,
+      0.36865234375
+     ],
+     "uptime": "05:35:13 up 4 min,  0 user,  load average: 1.62, 0.88, 0.37",
+     "t": "05:35:13"
+    },
+    "end": {
+     "loadavg": [
+      1.5732421875,
+      0.88134765625,
+      0.3720703125
+     ],
+     "uptime": "05:35:18 up 4 min,  0 user,  load average: 1.57, 0.88, 0.37",
+     "t": "05:35:18"
+    }
+   },
+   "errors": [],
+   "binary": {
+    "path": "target/x86_64-unknown-linux-musl/release/pbit",
+    "size_bytes": 1545968,
+    "version": "pbit 0.2.0",
+    "linkage": {
+     "file": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped",
+     "ldd": [
+      "statically linked"
+     ],
+     "glibc_symbol_versions": [],
+     "min_glibc": null
+    }
+   },
+   "stats_first": {
+    "engine": "pbit 0.2.0",
+    "machine": {
+     "os": "linux",
+     "arch": "x86_64",
+     "logical_cpus": 2
+    },
+    "build": {
+     "target_features": [],
+     "debug_assertions": false
+    },
+    "controls": {
+     "chains": {
+      "value": 4,
+      "source": "default"
+     },
+     "threads": {
+      "value": 2,
+      "source": "default"
+     },
+     "cpu_limit_pct": {
+      "value": 100,
+      "source": "default"
+     },
+     "priority": {
+      "value": "normal",
+      "source": "default"
+     },
+     "mem_limit_mb": {
+      "value": 1024,
+      "source": "default"
+     },
+     "config_file": null
+    }
+   },
+   "stats": {
+    "site_updates_per_s_1_thread": {
+     "median": 12212185,
+     "q1": 11390408.5,
+     "q3": 12272753.0,
+     "min": 10825109,
+     "max": 12299880,
+     "n": 5,
+     "values": [
+      10825109,
+      12299880,
+      12212185,
+      11955708,
+      12245626
+     ]
+    },
+    "site_updates_per_s": {
+     "median": 14486702,
+     "q1": 13850414.5,
+     "q3": 14560172.0,
+     "min": 13368990,
+     "max": 14603511,
+     "n": 5,
+     "values": [
+      14486702,
+      14331839,
+      13368990,
+      14516833,
+      14603511
+     ]
+    },
+    "threads": [
+     2
+    ],
+    "speedup": {
+     "median": 1.19,
+     "q1": 1.13,
+     "q3": 1.275,
+     "min": 1.09,
+     "max": 1.34,
+     "n": 5,
+     "values": [
+      1.34,
+      1.17,
+      1.09,
+      1.21,
+      1.19
+     ]
+    }
+   },
+   "decide_12": {
+    "cmd": "pbit demo --tasks 12 | pbit decide ",
+    "runs": [
+     {
+      "wall_ms": 16.301381999994646,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 15.011611,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 16.178147000005083,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.912711,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 15.907540999990033,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.736992,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 15.797739999982241,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.588939,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     },
+     {
+      "wall_ms": 15.718410000005179,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 14.633027,
+      "verdict": "exact",
+      "tier": "enumerate",
+      "released": 12,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": null,
+      "site_updates_per_s": null,
+      "threads": null,
+      "peak_rss_mb_self": null,
+      "stderr": null
+     }
+    ],
+    "wall_ms": {
+     "median": 15.907540999990033,
+     "q1": 15.75807499999371,
+     "q3": 16.239764499999865,
+     "min": 15.718410000005179,
+     "max": 16.301381999994646,
+     "n": 5,
+     "values": [
+      16.301381999994646,
+      16.178147000005083,
+      15.907540999990033,
+      15.797739999982241,
+      15.718410000005179
+     ]
+    },
+    "pbit_ms": {
+     "median": 14.736992,
+     "q1": 14.610983000000001,
+     "q3": 14.962161,
+     "min": 14.588939,
+     "max": 15.011611,
+     "n": 5,
+     "values": [
+      15.011611,
+      14.912711,
+      14.736992,
+      14.588939,
+      14.633027
+     ]
+    },
+    "released": {
+     "median": 12,
+     "q1": 12.0,
+     "q3": 12.0,
+     "min": 12,
+     "max": 12,
+     "n": 5,
+     "values": [
+      12,
+      12,
+      12,
+      12,
+      12
+     ]
+    },
+    "violations_max": 0,
+    "verdicts": [
+     "exact"
+    ],
+    "exit_codes": [
+     0
+    ],
+    "site_updates_per_s": null
+   },
+   "decide_300": {
+    "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+    "runs": [
+     {
+      "wall_ms": 460.47870799998236,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 452.55244,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 8952,
+      "site_updates_per_s": 8936242,
+      "threads": 2,
+      "peak_rss_mb_self": 17.148438,
+      "stderr": null
+     },
+     {
+      "wall_ms": 462.67710099999704,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 454.583414,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 9504,
+      "site_updates_per_s": 9482343,
+      "threads": 2,
+      "peak_rss_mb_self": 17.351563,
+      "stderr": null
+     },
+     {
+      "wall_ms": 462.6404050000019,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 454.493591,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 9488,
+      "site_updates_per_s": 9472831,
+      "threads": 2,
+      "peak_rss_mb_self": 16.28125,
+      "stderr": null
+     },
+     {
+      "wall_ms": 462.4570839999933,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 454.655133,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 9480,
+      "site_updates_per_s": 9463056,
+      "threads": 2,
+      "peak_rss_mb_self": 18.203125,
+      "stderr": null
+     },
+     {
+      "wall_ms": 461.15297099999,
+      "demo_exit": 0,
+      "decide_exit": 0,
+      "pbit_ms": 453.155324,
+      "verdict": "diagnostics_passed",
+      "tier": null,
+      "released": 300,
+      "escalated": 0,
+      "violations": 0,
+      "sweeps": 9000,
+      "site_updates_per_s": 8983317,
+      "threads": 2,
+      "peak_rss_mb_self": 16.835938,
+      "stderr": null
+     }
+    ],
+    "wall_ms": {
+     "median": 462.4570839999933,
+     "q1": 460.81583949998617,
+     "q3": 462.6587529999995,
+     "min": 460.47870799998236,
+     "max": 462.67710099999704,
+     "n": 5,
+     "values": [
+      460.47870799998236,
+      462.67710099999704,
+      462.6404050000019,
+      462.4570839999933,
+      461.15297099999
+     ]
+    },
+    "pbit_ms": {
+     "median": 454.493591,
+     "q1": 452.853882,
+     "q3": 454.61927349999996,
+     "min": 452.55244,
+     "max": 454.655133,
+     "n": 5,
+     "values": [
+      452.55244,
+      454.583414,
+      454.493591,
+      454.655133,
+      453.155324
+     ]
+    },
+    "released": {
+     "median": 300,
+     "q1": 300.0,
+     "q3": 300.0,
+     "min": 300,
+     "max": 300,
+     "n": 5,
+     "values": [
+      300,
+      300,
+      300,
+      300,
+      300
+     ]
+    },
+    "violations_max": 0,
+    "verdicts": [
+     "diagnostics_passed"
+    ],
+    "exit_codes": [
+     0
+    ],
+    "site_updates_per_s": {
+     "median": 9463056,
+     "q1": 8959779.5,
+     "q3": 9477587.0,
+     "min": 8936242,
+     "max": 9482343,
+     "n": 5,
+     "values": [
+      8936242,
+      9482343,
+      9472831,
+      9463056,
+      8983317
+     ]
+    }
+   },
+   "peak_rss_300": {
+    "cmd": "pbit decide --budget-ms 300 < demo300.json",
+    "method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
+    "bytes": {
+     "median": 18997248,
+     "q1": 17096704.0,
+     "q3": 19005440.0,
+     "min": 17096704,
+     "max": 19005440,
+     "n": 3,
+     "values": [
+      17096704,
+      19005440,
+      18997248
+     ]
+    },
+    "self_reported_peak_rss_mb": [
+     16.304688,
+     18.125,
+     18.117188
+    ],
+    "verdicts": [
+     "partial",
+     "diagnostics_passed",
+     "diagnostics_passed"
+    ],
+    "extra": [
+     {},
+     {},
+     {}
+    ]
+   },
+   "kernels": {
+    "skipped": "no kernels example at target/x86_64-unknown-linux-musl/release/examples/kernels (build it with -p pbit-core --example kernels)"
+   },
+   "portable_vs_native": {
+    "skipped": "no --native-dir"
+   },
+   "decide_threads": {
+    "cmd": "PBIT=target/x86_64-unknown-linux-musl/release/pbit python3 bench/decide_threads.py",
+    "exit": 0,
+    "rows": {
+     "threads_1": {
+      "wall_ms": 165.7,
+      "wall_iqr": [
+       165.2,
+       166.4
+      ],
+      "cpu_ms": 170.0,
+      "site_updates_per_s_M": 6.31,
+      "verdict": "refused"
+     },
+     "threads_2": {
+      "wall_ms": 146.5,
+      "wall_iqr": [
+       145.3,
+       149.3
+      ],
+      "cpu_ms": 206.1,
+      "site_updates_per_s_M": 8.64,
+      "verdict": "refused"
+     },
+     "threads_4": {
+      "wall_ms": 144.5,
+      "wall_iqr": [
+       143.5,
+       146.2
+      ],
+      "cpu_ms": 200.7,
+      "site_updates_per_s_M": 9.04,
+      "verdict": "refused"
+     },
+     "default": {
+      "threads": 2,
+      "wall_ms": 455.9,
+      "wall_iqr": [
+       453.9,
+       456.9
+      ],
+      "sweeps": 9080,
+      "verdict": "diagnostics_passed"
+     }
+    },
+    "stdout": [
+     "machine: Apple M4 (4P+6E), 16 GB; 300-task demo, decide --sweeps 400 --chains 4 --polish-ms 0 (fixed work), 5 runs each, medians [IQR]",
+     "--threads 1: wall ms 165.7 [165.2-166.4], CPU ms 170.0, site updates/s 6.31 M; answer identical: yes; verdict refused",
+     "--threads 2: wall ms 146.5 [145.3-149.3], CPU ms 206.1, site updates/s 8.64 M; answer identical: yes; verdict refused",
+     "--threads 4: wall ms 144.5 [143.5-146.2], CPU ms 200.7, site updates/s 9.04 M; answer identical: yes; verdict refused",
+     "default path (--budget-ms 300, 4 chains, threads 2): wall ms 455.9 [453.9-456.9], sweeps 9080, verdict diagnostics_passed"
+    ],
+    "stderr_tail": null
+   },
+   "cells": {
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "logical_cores": 2,
+    "binary_size_bytes": 1545968,
+    "stats_1t": {
+     "median": 12212185,
+     "q1": 11390408.5,
+     "q3": 12272753.0,
+     "min": 10825109,
+     "max": 12299880,
+     "n": 5,
+     "values": [
+      10825109,
+      12299880,
+      12212185,
+      11955708,
+      12245626
+     ]
+    },
+    "stats_default": {
+     "median": 14486702,
+     "q1": 13850414.5,
+     "q3": 14560172.0,
+     "min": 13368990,
+     "max": 14603511,
+     "n": 5,
+     "values": [
+      14486702,
+      14331839,
+      13368990,
+      14516833,
+      14603511
+     ]
+    },
+    "stats_default_threads": [
+     2
+    ],
+    "kernel_multispin_fast_4t": null,
+    "kernel_multispin_fast_10t": null,
+    "kernel_multispin_fast_1t": null,
+    "kernel_heatbath_fast_1t": null,
+    "decide_12_wall_ms": {
+     "median": 15.907540999990033,
+     "q1": 15.75807499999371,
+     "q3": 16.239764499999865,
+     "min": 15.718410000005179,
+     "max": 16.301381999994646,
+     "n": 5,
+     "values": [
+      16.301381999994646,
+      16.178147000005083,
+      15.907540999990033,
+      15.797739999982241,
+      15.718410000005179
+     ]
+    },
+    "decide_12_pbit_ms": {
+     "median": 14.736992,
+     "q1": 14.610983000000001,
+     "q3": 14.962161,
+     "min": 14.588939,
+     "max": 15.011611,
+     "n": 5,
+     "values": [
+      15.011611,
+      14.912711,
+      14.736992,
+      14.588939,
+      14.633027
+     ]
+    },
+    "decide_12_verdicts": [
+     "exact"
+    ],
+    "decide_12_exit_codes": [
+     0
+    ],
+    "decide_300_wall_ms": {
+     "median": 462.4570839999933,
+     "q1": 460.81583949998617,
+     "q3": 462.6587529999995,
+     "min": 460.47870799998236,
+     "max": 462.67710099999704,
+     "n": 5,
+     "values": [
+      460.47870799998236,
+      462.67710099999704,
+      462.6404050000019,
+      462.4570839999933,
+      461.15297099999
+     ]
+    },
+    "decide_300_pbit_ms": {
+     "median": 454.493591,
+     "q1": 452.853882,
+     "q3": 454.61927349999996,
+     "min": 452.55244,
+     "max": 454.655133,
+     "n": 5,
+     "values": [
+      452.55244,
+      454.583414,
+      454.493591,
+      454.655133,
+      453.155324
+     ]
+    },
+    "decide_300_verdicts": [
+     "diagnostics_passed"
+    ],
+    "decide_300_exit_codes": [
+     0
+    ],
+    "decide_300_released": {
+     "median": 300,
+     "q1": 300.0,
+     "q3": 300.0,
+     "min": 300,
+     "max": 300,
+     "n": 5,
+     "values": [
+      300,
+      300,
+      300,
+      300,
+      300
+     ]
+    },
+    "decide_300_violations_max": 0,
+    "decide_300_site_updates_per_s": {
+     "median": 9463056,
+     "q1": 8959779.5,
+     "q3": 9477587.0,
+     "min": 8936242,
+     "max": 9482343,
+     "n": 5,
+     "values": [
+      8936242,
+      9482343,
+      9472831,
+      9463056,
+      8983317
+     ]
+    },
+    "decide_300_peak_rss_bytes": {
+     "median": 18997248,
+     "q1": 17096704.0,
+     "q3": 19005440.0,
+     "min": 17096704,
+     "max": 19005440,
+     "n": 3,
+     "values": [
+      17096704,
+      19005440,
+      18997248
+     ]
+    },
+    "decide_300_peak_rss_method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
+    "native_over_portable": "no --native-dir",
+    "threads_rows": {
+     "threads_1": {
+      "wall_ms": 165.7,
+      "wall_iqr": [
+       165.2,
+       166.4
+      ],
+      "cpu_ms": 170.0,
+      "site_updates_per_s_M": 6.31,
+      "verdict": "refused"
+     },
+     "threads_2": {
+      "wall_ms": 146.5,
+      "wall_iqr": [
+       145.3,
+       149.3
+      ],
+      "cpu_ms": 206.1,
+      "site_updates_per_s_M": 8.64,
+      "verdict": "refused"
+     },
+     "threads_4": {
+      "wall_ms": 144.5,
+      "wall_iqr": [
+       143.5,
+       146.2
+      ],
+      "cpu_ms": 200.7,
+      "site_updates_per_s_M": 9.04,
+      "verdict": "refused"
+     },
+     "default": {
+      "threads": 2,
+      "wall_ms": 455.9,
+      "wall_iqr": [
+       453.9,
+       456.9
+      ],
+      "sweeps": 9080,
+      "verdict": "diagnostics_passed"
+     }
+    }
+   },
+   "elapsed_s": 12.3
+  }
+ }
+}

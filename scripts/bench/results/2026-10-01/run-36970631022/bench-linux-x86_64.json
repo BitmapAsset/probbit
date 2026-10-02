@@ -1,0 +1,1345 @@
+{
+ "schema": "pbit-bench-matrix/1",
+ "label": "linux-x86_64",
+ "date_utc": "2026-10-02T05:49:50Z",
+ "git_sha": "bef46ca8ea1a4970e7b95d5dd7bc047c00a30344",
+ "runner": {
+  "RUNNER_OS": "Linux",
+  "RUNNER_ARCH": "X64",
+  "ImageOS": "ubuntu24",
+  "ImageVersion": "20260927.320.1",
+  "GITHUB_RUN_ID": "36970631022",
+  "GITHUB_RUN_ATTEMPT": "1",
+  "GITHUB_JOB": "bench",
+  "GITHUB_SHA": "bef46ca8ea1a4970e7b95d5dd7bc047c00a30344",
+  "GITHUB_REF_NAME": "r22-portability-matrix",
+  "GITHUB_WORKFLOW": "bench"
+ },
+ "notes": [
+  "build_s=13",
+  "runner=ubuntu-latest"
+ ],
+ "machine": {
+  "system": "Linux",
+  "os_release": "6.17.0-1022-azure",
+  "arch": "x86_64",
+  "python": "3.12.3",
+  "logical_cores": 2,
+  "cpu_cmd": "lscpu",
+  "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+  "lscpu": {
+   "Architecture": "x86_64",
+   "CPU(s)": "2",
+   "Thread(s) per core": "2",
+   "Core(s) per socket": "1",
+   "Socket(s)": "1",
+   "Vendor ID": "AuthenticAMD",
+   "Model name": "AMD EPYC 9V45 96-Core Processor",
+   "Hypervisor vendor": "Microsoft"
+  },
+  "cpu_flags": {
+   "sse4_2": true,
+   "avx": true,
+   "avx2": true,
+   "fma": true,
+   "bmi2": true,
+   "avx512f": true,
+   "avx512bw": true,
+   "avx512vl": true
+  },
+  "memory_bytes": 8323969024,
+  "os_version": "Ubuntu 24.04.5 LTS",
+  "libc": "glibc 2.39"
+ },
+ "toolchain": {
+  "binary": "rustc",
+  "commit-hash": "b940084d7eb6a299eb4bfeb8e34901bc051e7ac4",
+  "commit-date": "2026-09-28",
+  "host": "x86_64-unknown-linux-gnu",
+  "release": "1.99.0",
+  "LLVM version": "23.1.1",
+  "rustc": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)"
+ },
+ "load": {
+  "start": {
+   "loadavg": [
+    0.9033203125,
+    0.27734375,
+    0.09521484375
+   ],
+   "uptime": "05:49:50 up 4 min,  0 user,  load average: 0.90, 0.28, 0.10",
+   "t": "05:49:50"
+  },
+  "after_stats": {
+   "loadavg": [
+    0.9033203125,
+    0.27734375,
+    0.09521484375
+   ],
+   "uptime": "05:49:52 up 4 min,  0 user,  load average: 0.90, 0.28, 0.10",
+   "t": "05:49:52"
+  },
+  "after_decide": {
+   "loadavg": [
+    0.9111328125,
+    0.28955078125,
+    0.10009765625
+   ],
+   "uptime": "05:49:54 up 4 min,  0 user,  load average: 0.91, 0.29, 0.10",
+   "t": "05:49:54"
+  },
+  "after_kernels": {
+   "loadavg": [
+    3.9873046875,
+    1.1376953125,
+    0.39404296875
+   ],
+   "uptime": "05:50:35 up 4 min,  0 user,  load average: 3.99, 1.14, 0.39",
+   "t": "05:50:35"
+  },
+  "after_pvn": {
+   "loadavg": [
+    6.87841796875,
+    2.6171875,
+    0.97119140625
+   ],
+   "uptime": "05:51:58 up 6 min,  0 user,  load average: 6.88, 2.62, 0.97",
+   "t": "05:51:58"
+  },
+  "end": {
+   "loadavg": [
+    6.4072265625,
+    2.59033203125,
+    0.9716796875
+   ],
+   "uptime": "05:52:02 up 6 min,  0 user,  load average: 6.41, 2.59, 0.97",
+   "t": "05:52:02"
+  }
+ },
+ "errors": [],
+ "binary": {
+  "path": "target/release/pbit",
+  "size_bytes": 1401248,
+  "version": "pbit 0.2.0",
+  "linkage": {
+   "file": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=3a4791ff347b29ab20fc5b1ff998dd05660b1d15, not stripped",
+   "ldd": [
+    "linux-vdso.so.1 (0x00007fe98a4e9000)",
+    "\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fe98a37b000)",
+    "\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fe98a292000)",
+    "\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fe98a000000)",
+    "\t/lib64/ld-linux-x86-64.so.2 (0x00007fe98a4eb000)"
+   ],
+   "glibc_symbol_versions": [
+    "2.2.5",
+    "2.3",
+    "2.3.4",
+    "2.14",
+    "2.16",
+    "2.17",
+    "2.18",
+    "2.25",
+    "2.28",
+    "2.29",
+    "2.30",
+    "2.32",
+    "2.33",
+    "2.34"
+   ],
+   "min_glibc": "2.34"
+  }
+ },
+ "stats_first": {
+  "engine": "pbit 0.2.0",
+  "machine": {
+   "os": "linux",
+   "arch": "x86_64",
+   "logical_cpus": 2
+  },
+  "build": {
+   "target_features": [],
+   "debug_assertions": false
+  },
+  "controls": {
+   "chains": {
+    "value": 4,
+    "source": "default"
+   },
+   "threads": {
+    "value": 2,
+    "source": "default"
+   },
+   "cpu_limit_pct": {
+    "value": 100,
+    "source": "default"
+   },
+   "priority": {
+    "value": "normal",
+    "source": "default"
+   },
+   "mem_limit_mb": {
+    "value": 1024,
+    "source": "default"
+   },
+   "config_file": null
+  }
+ },
+ "stats": {
+  "site_updates_per_s_1_thread": {
+   "median": 17637485,
+   "q1": 17103334.0,
+   "q3": 17767678.5,
+   "min": 16952963,
+   "max": 17889808,
+   "n": 5,
+   "values": [
+    17253705,
+    16952963,
+    17889808,
+    17645549,
+    17637485
+   ]
+  },
+  "site_updates_per_s": {
+   "median": 23339333,
+   "q1": 23097044.0,
+   "q3": 23699545.5,
+   "min": 23011872,
+   "max": 24000627,
+   "n": 5,
+   "values": [
+    23011872,
+    23182216,
+    24000627,
+    23339333,
+    23398464
+   ]
+  },
+  "threads": [
+   2
+  ],
+  "speedup": {
+   "median": 1.33,
+   "q1": 1.3250000000000002,
+   "q3": 1.355,
+   "min": 1.32,
+   "max": 1.37,
+   "n": 5,
+   "values": [
+    1.33,
+    1.37,
+    1.34,
+    1.32,
+    1.33
+   ]
+  }
+ },
+ "decide_12": {
+  "cmd": "pbit demo --tasks 12 | pbit decide ",
+  "runs": [
+   {
+    "wall_ms": 10.522428000001582,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 9.088063,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 10.505511000019396,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 9.103907,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 10.430859999985387,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 9.05987,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 10.539232000013499,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 9.165309,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   },
+   {
+    "wall_ms": 10.373764000007668,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 9.045869,
+    "verdict": "exact",
+    "tier": "enumerate",
+    "released": 12,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": null,
+    "site_updates_per_s": null,
+    "threads": null,
+    "peak_rss_mb_self": null,
+    "stderr": null
+   }
+  ],
+  "wall_ms": {
+   "median": 10.505511000019396,
+   "q1": 10.402311999996527,
+   "q3": 10.53083000000754,
+   "min": 10.373764000007668,
+   "max": 10.539232000013499,
+   "n": 5,
+   "values": [
+    10.522428000001582,
+    10.505511000019396,
+    10.430859999985387,
+    10.539232000013499,
+    10.373764000007668
+   ]
+  },
+  "pbit_ms": {
+   "median": 9.088063,
+   "q1": 9.0528695,
+   "q3": 9.134608,
+   "min": 9.045869,
+   "max": 9.165309,
+   "n": 5,
+   "values": [
+    9.088063,
+    9.103907,
+    9.05987,
+    9.165309,
+    9.045869
+   ]
+  },
+  "released": {
+   "median": 12,
+   "q1": 12.0,
+   "q3": 12.0,
+   "min": 12,
+   "max": 12,
+   "n": 5,
+   "values": [
+    12,
+    12,
+    12,
+    12,
+    12
+   ]
+  },
+  "violations_max": 0,
+  "verdicts": [
+   "exact"
+  ],
+  "exit_codes": [
+   0
+  ],
+  "site_updates_per_s": null
+ },
+ "decide_300": {
+  "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+  "runs": [
+   {
+    "wall_ms": 423.65680800000405,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 419.000661,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 14520,
+    "site_updates_per_s": 14500705,
+    "threads": 2,
+    "peak_rss_mb_self": 21.429688,
+    "stderr": null
+   },
+   {
+    "wall_ms": 422.52012199998035,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 417.940061,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 14904,
+    "site_updates_per_s": 14893883,
+    "threads": 2,
+    "peak_rss_mb_self": 21.316406,
+    "stderr": null
+   },
+   {
+    "wall_ms": 424.36705899999083,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 419.914021,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 15080,
+    "site_updates_per_s": 15067535,
+    "threads": 2,
+    "peak_rss_mb_self": 21.039063,
+    "stderr": null
+   },
+   {
+    "wall_ms": 421.5770790000022,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 417.235029,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 15128,
+    "site_updates_per_s": 15108383,
+    "threads": 2,
+    "peak_rss_mb_self": 21.035156,
+    "stderr": null
+   },
+   {
+    "wall_ms": 421.8094629999882,
+    "demo_exit": 0,
+    "decide_exit": 0,
+    "pbit_ms": 417.282844,
+    "verdict": "diagnostics_passed",
+    "tier": null,
+    "released": 300,
+    "escalated": 0,
+    "violations": 0,
+    "sweeps": 14960,
+    "site_updates_per_s": 14940381,
+    "threads": 2,
+    "peak_rss_mb_self": 21.464844,
+    "stderr": null
+   }
+  ],
+  "wall_ms": {
+   "median": 422.52012199998035,
+   "q1": 421.6932709999952,
+   "q3": 424.01193349999744,
+   "min": 421.5770790000022,
+   "max": 424.36705899999083,
+   "n": 5,
+   "values": [
+    423.65680800000405,
+    422.52012199998035,
+    424.36705899999083,
+    421.5770790000022,
+    421.8094629999882
+   ]
+  },
+  "pbit_ms": {
+   "median": 417.940061,
+   "q1": 417.2589365,
+   "q3": 419.457341,
+   "min": 417.235029,
+   "max": 419.914021,
+   "n": 5,
+   "values": [
+    419.000661,
+    417.940061,
+    419.914021,
+    417.235029,
+    417.282844
+   ]
+  },
+  "released": {
+   "median": 300,
+   "q1": 300.0,
+   "q3": 300.0,
+   "min": 300,
+   "max": 300,
+   "n": 5,
+   "values": [
+    300,
+    300,
+    300,
+    300,
+    300
+   ]
+  },
+  "violations_max": 0,
+  "verdicts": [
+   "diagnostics_passed"
+  ],
+  "exit_codes": [
+   0
+  ],
+  "site_updates_per_s": {
+   "median": 14940381,
+   "q1": 14697294.0,
+   "q3": 15087959.0,
+   "min": 14500705,
+   "max": 15108383,
+   "n": 5,
+   "values": [
+    14500705,
+    14893883,
+    15067535,
+    15108383,
+    14940381
+   ]
+  }
+ },
+ "peak_rss_300": {
+  "cmd": "pbit decide --budget-ms 300 < demo300.json",
+  "method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
+  "bytes": {
+   "median": 22052864,
+   "q1": 21991424.0,
+   "q3": 22351872.0,
+   "min": 21991424,
+   "max": 22351872,
+   "n": 3,
+   "values": [
+    22052864,
+    22351872,
+    21991424
+   ]
+  },
+  "self_reported_peak_rss_mb": [
+   21.03125,
+   21.316406,
+   20.972656
+  ],
+  "verdicts": [
+   "diagnostics_passed",
+   "diagnostics_passed",
+   "diagnostics_passed"
+  ],
+  "extra": [
+   {},
+   {},
+   {}
+  ]
+ },
+ "kernels": {
+  "cmd": "target/release/examples/kernels",
+  "checksums": [
+   "8520834"
+  ],
+  "lines": {
+   "T1 SoA f32 heat-bath LUT, splitmix": {
+    "median": 322900000.0,
+    "q1": 319050000.0,
+    "q3": 327600000.0,
+    "min": 318900000.0,
+    "max": 332300000.0,
+    "n": 5,
+    "values": [
+     332300000.0,
+     322900000.0,
+     319200000.0,
+     318900000.0,
+     322900000.0
+    ]
+   },
+   "T1 SoA f32 heat-bath LUT, Philox": {
+    "median": 229500000.0,
+    "q1": 224250000.0,
+    "q3": 234650000.0,
+    "min": 222500000.0,
+    "max": 236400000.0,
+    "n": 5,
+    "values": [
+     236400000.0,
+     232900000.0,
+     226000000.0,
+     222500000.0,
+     229500000.0
+    ]
+   },
+   "T0 multispin 64-lane, splitmix": {
+    "median": 17310000000.0,
+    "q1": 16765000000.0,
+    "q3": 17540000000.0,
+    "min": 16230000000.0,
+    "max": 17640000000.0,
+    "n": 5,
+    "values": [
+     17640000000.0,
+     17300000000.0,
+     17310000000.0,
+     16230000000.0,
+     17440000000.0
+    ]
+   },
+   "T0 multispin 64-lane, Philox": {
+    "median": 13010000000.0,
+    "q1": 12525000000.0,
+    "q3": 13140000000.0,
+    "min": 12430000000.0,
+    "max": 13250000000.0,
+    "n": 5,
+    "values": [
+     12430000000.0,
+     13030000000.0,
+     13010000000.0,
+     12620000000.0,
+     13250000000.0
+    ]
+   },
+   "T0 PT-in-a-word prefix-mask, splitm": {
+    "median": 2314000000.0,
+    "q1": 2288500000.0,
+    "q3": 2359000000.0,
+    "min": 2265000000.0,
+    "max": 2397000000.0,
+    "n": 5,
+    "values": [
+     2312000000.0,
+     2397000000.0,
+     2265000000.0,
+     2321000000.0,
+     2314000000.0
+    ]
+   },
+   "T0 multispin splitmix x 4 threads": {
+    "median": 16960000000.0,
+    "q1": 16735000000.0,
+    "q3": 17495000000.0,
+    "min": 16660000000.0,
+    "max": 17810000000.0,
+    "n": 5,
+    "values": [
+     16810000000.0,
+     17810000000.0,
+     16960000000.0,
+     16660000000.0,
+     17180000000.0
+    ]
+   },
+   "T0 multispin splitmix x10 threads": {
+    "median": 15850000000.0,
+    "q1": 15465000000.0,
+    "q3": 16030000000.0,
+    "min": 15440000000.0,
+    "max": 16070000000.0,
+    "n": 5,
+    "values": [
+     15990000000.0,
+     16070000000.0,
+     15490000000.0,
+     15440000000.0,
+     15850000000.0
+    ]
+   },
+   "fast multispin splitmix x 4 thr": {
+    "median": 22210000000.0,
+    "q1": 21165000000.0,
+    "q3": 23175000000.0,
+    "min": 20320000000.0,
+    "max": 23340000000.0,
+    "n": 5,
+    "values": [
+     23340000000.0,
+     22210000000.0,
+     20320000000.0,
+     22010000000.0,
+     23010000000.0
+    ]
+   },
+   "fast multispin splitmix x10 thr": {
+    "median": 22200000000.0,
+    "q1": 21810000000.0,
+    "q3": 22575000000.0,
+    "min": 21580000000.0,
+    "max": 22870000000.0,
+    "n": 5,
+    "values": [
+     22280000000.0,
+     21580000000.0,
+     22040000000.0,
+     22200000000.0,
+     22870000000.0
+    ]
+   },
+   "fast T1 f32 LUT, splitmix": {
+    "median": 502800000.0,
+    "q1": 500550000.0,
+    "q3": 529550000.0,
+    "min": 500000000.0,
+    "max": 537800000.0,
+    "n": 5,
+    "values": [
+     537800000.0,
+     502800000.0,
+     500000000.0,
+     501100000.0,
+     521300000.0
+    ]
+   },
+   "fast T1 f32 LUT, Philox": {
+    "median": 315100000.0,
+    "q1": 313400000.0,
+    "q3": 331150000.0,
+    "min": 311700000.0,
+    "max": 331900000.0,
+    "n": 5,
+    "values": [
+     330400000.0,
+     311700000.0,
+     315100000.0,
+     315100000.0,
+     331900000.0
+    ]
+   },
+   "fast T0 multispin, splitmix": {
+    "median": 24710000000.0,
+    "q1": 24300000000.0,
+    "q3": 25970000000.0,
+    "min": 24280000000.0,
+    "max": 26150000000.0,
+    "n": 5,
+    "values": [
+     25790000000.0,
+     24280000000.0,
+     24710000000.0,
+     24320000000.0,
+     26150000000.0
+    ]
+   },
+   "fast T0 multispin, Philox": {
+    "median": 16760000000.0,
+    "q1": 16480000000.0,
+    "q3": 17520000000.0,
+    "min": 16460000000.0,
+    "max": 17580000000.0,
+    "n": 5,
+    "values": [
+     17460000000.0,
+     16500000000.0,
+     16760000000.0,
+     16460000000.0,
+     17580000000.0
+    ]
+   }
+  }
+ },
+ "portable_vs_native": {
+  "cmd": "PBIT_DIR=target/release PBIT_NATIVE_DIR=target/native/release python3 bench/portable_vs_native.py",
+  "exit": 0,
+  "rows": {
+   "T1 SoA f32 heat-bath LUT, splitmix": {
+    "portable": 313700000.0,
+    "portable_iqr": [
+     302400000.0,
+     327600000.0
+    ],
+    "native": 354900000.0,
+    "native_iqr": [
+     351200000.0,
+     382200000.0
+    ],
+    "ratio": 1.131
+   },
+   "T1 SoA f32 heat-bath LUT, Philox": {
+    "portable": 226400000.0,
+    "portable_iqr": [
+     218400000.0,
+     234900000.0
+    ],
+    "native": 238100000.0,
+    "native_iqr": [
+     220800000.0,
+     248500000.0
+    ],
+    "ratio": 1.052
+   },
+   "T0 multispin 64-lane, splitmix": {
+    "portable": 17240000000.0,
+    "portable_iqr": [
+     16540000000.0,
+     17860000000.0
+    ],
+    "native": 17310000000.0,
+    "native_iqr": [
+     16820000000.0,
+     18340000000.0
+    ],
+    "ratio": 1.004
+   },
+   "T0 multispin 64-lane, Philox": {
+    "portable": 12910000000.0,
+    "portable_iqr": [
+     12470000000.0,
+     13480000000.0
+    ],
+    "native": 12570000000.0,
+    "native_iqr": [
+     12320000000.0,
+     13460000000.0
+    ],
+    "ratio": 0.974
+   },
+   "T0 PT-in-a-word prefix-mask, splitm": {
+    "portable": 2336000000.0,
+    "portable_iqr": [
+     2246000000.0,
+     2417000000.0
+    ],
+    "native": 3719000000.0,
+    "native_iqr": [
+     3572000000.0,
+     3914000000.0
+    ],
+    "ratio": 1.592
+   },
+   "T0 multispin splitmix x 4 threads": {
+    "portable": 16900000000.0,
+    "portable_iqr": [
+     16400000000.0,
+     17480000000.0
+    ],
+    "native": 16830000000.0,
+    "native_iqr": [
+     16100000000.0,
+     18040000000.0
+    ],
+    "ratio": 0.996
+   },
+   "T0 multispin splitmix x10 threads": {
+    "portable": 15650000000.0,
+    "portable_iqr": [
+     15100000000.0,
+     15920000000.0
+    ],
+    "native": 15200000000.0,
+    "native_iqr": [
+     15020000000.0,
+     16660000000.0
+    ],
+    "ratio": 0.971
+   },
+   "fast multispin splitmix x 4 thr": {
+    "portable": 22570000000.0,
+    "portable_iqr": [
+     21660000000.0,
+     23130000000.0
+    ],
+    "native": 24170000000.0,
+    "native_iqr": [
+     23910000000.0,
+     26220000000.0
+    ],
+    "ratio": 1.071
+   },
+   "fast multispin splitmix x10 thr": {
+    "portable": 21250000000.0,
+    "portable_iqr": [
+     20300000000.0,
+     22760000000.0
+    ],
+    "native": 24070000000.0,
+    "native_iqr": [
+     23580000000.0,
+     25770000000.0
+    ],
+    "ratio": 1.133
+   },
+   "fast T1 f32 LUT, splitmix": {
+    "portable": 509800000.0,
+    "portable_iqr": [
+     494100000.0,
+     529800000.0
+    ],
+    "native": 537500000.0,
+    "native_iqr": [
+     527400000.0,
+     575000000.0
+    ],
+    "ratio": 1.054
+   },
+   "fast T1 f32 LUT, Philox": {
+    "portable": 323200000.0,
+    "portable_iqr": [
+     305300000.0,
+     331100000.0
+    ],
+    "native": 324900000.0,
+    "native_iqr": [
+     317800000.0,
+     354400000.0
+    ],
+    "ratio": 1.005
+   },
+   "fast T0 multispin, splitmix": {
+    "portable": 24240000000.0,
+    "portable_iqr": [
+     23600000000.0,
+     25840000000.0
+    ],
+    "native": 25800000000.0,
+    "native_iqr": [
+     25080000000.0,
+     27680000000.0
+    ],
+    "ratio": 1.064
+   },
+   "fast T0 multispin, Philox": {
+    "portable": 16230000000.0,
+    "portable_iqr": [
+     14790000000.0,
+     17240000000.0
+    ],
+    "native": 16470000000.0,
+    "native_iqr": [
+     16160000000.0,
+     17810000000.0
+    ],
+    "ratio": 1.015
+   },
+   "pbit stats IR ring, 1 thread": {
+    "portable": 18210000.0,
+    "portable_iqr": [
+     17250000.0,
+     18850000.0
+    ],
+    "native": 18200000.0,
+    "native_iqr": [
+     17500000.0,
+     18930000.0
+    ],
+    "ratio": 1.0
+   },
+   "pbit stats IR ring, 4 threads": {
+    "portable": 23900000.0,
+    "portable_iqr": [
+     23200000.0,
+     24820000.0
+    ],
+    "native": 24110000.0,
+    "native_iqr": [
+     23020000.0,
+     25320000.0
+    ],
+    "ratio": 1.009
+   },
+   "pbit decide 300 tasks, 4 thr (sampler)": {
+    "portable": 14730000.0,
+    "portable_iqr": [
+     14250000.0,
+     15550000.0
+    ],
+    "native": 14770000.0,
+    "native_iqr": [
+     14330000.0,
+     15700000.0
+    ],
+    "ratio": 1.002
+   }
+  },
+  "stdout": [
+   "machine: Apple M4 (4P+6E), 16 GB, rustc 1.98.1; 5 alternating runs; medians [IQR]; ratio = native / portable",
+   "T1 SoA f32 heat-bath LUT, splitmix: portable 3.137e+08 [3.024e+08-3.276e+08] | native 3.549e+08 [3.512e+08-3.822e+08] | ratio 1.131",
+   "T1 SoA f32 heat-bath LUT, Philox: portable 2.264e+08 [2.184e+08-2.349e+08] | native 2.381e+08 [2.208e+08-2.485e+08] | ratio 1.052",
+   "T0 multispin 64-lane, splitmix: portable 1.724e+10 [1.654e+10-1.786e+10] | native 1.731e+10 [1.682e+10-1.834e+10] | ratio 1.004",
+   "T0 multispin 64-lane, Philox: portable 1.291e+10 [1.247e+10-1.348e+10] | native 1.257e+10 [1.232e+10-1.346e+10] | ratio 0.974",
+   "T0 PT-in-a-word prefix-mask, splitm: portable 2.336e+09 [2.246e+09-2.417e+09] | native 3.719e+09 [3.572e+09-3.914e+09] | ratio 1.592",
+   "T0 multispin splitmix x 4 threads: portable 1.69e+10 [1.64e+10-1.748e+10] | native 1.683e+10 [1.61e+10-1.804e+10] | ratio 0.996",
+   "T0 multispin splitmix x10 threads: portable 1.565e+10 [1.51e+10-1.592e+10] | native 1.52e+10 [1.502e+10-1.666e+10] | ratio 0.971",
+   "fast multispin splitmix x 4 thr: portable 2.257e+10 [2.166e+10-2.313e+10] | native 2.417e+10 [2.391e+10-2.622e+10] | ratio 1.071",
+   "fast multispin splitmix x10 thr: portable 2.125e+10 [2.03e+10-2.276e+10] | native 2.407e+10 [2.358e+10-2.577e+10] | ratio 1.133",
+   "fast T1 f32 LUT, splitmix: portable 5.098e+08 [4.941e+08-5.298e+08] | native 5.375e+08 [5.274e+08-5.75e+08] | ratio 1.054",
+   "fast T1 f32 LUT, Philox: portable 3.232e+08 [3.053e+08-3.311e+08] | native 3.249e+08 [3.178e+08-3.544e+08] | ratio 1.005",
+   "fast T0 multispin, splitmix: portable 2.424e+10 [2.36e+10-2.584e+10] | native 2.58e+10 [2.508e+10-2.768e+10] | ratio 1.064",
+   "fast T0 multispin, Philox: portable 1.623e+10 [1.479e+10-1.724e+10] | native 1.647e+10 [1.616e+10-1.781e+10] | ratio 1.015",
+   "pbit stats IR ring, 1 thread: portable 1.821e+07 [1.725e+07-1.885e+07] | native 1.82e+07 [1.75e+07-1.893e+07] | ratio 1.000",
+   "pbit stats IR ring, 4 threads: portable 2.39e+07 [2.32e+07-2.482e+07] | native 2.411e+07 [2.302e+07-2.532e+07] | ratio 1.009",
+   "pbit decide 300 tasks, 4 thr (sampler): portable 1.473e+07 [1.425e+07-1.555e+07] | native 1.477e+07 [1.433e+07-1.57e+07] | ratio 1.002",
+   "kernels checksum identical across builds: True | decide answer (odds+plan+gate) identical across builds: True"
+  ],
+  "stderr_tail": null,
+  "note": "the script's first line is hard-coded to the M4; the machine is the one in `machine`"
+ },
+ "decide_threads": {
+  "cmd": "PBIT=target/release/pbit python3 bench/decide_threads.py",
+  "exit": 0,
+  "rows": {
+   "threads_1": {
+    "wall_ms": 99.1,
+    "wall_iqr": [
+     99.1,
+     99.8
+    ],
+    "cpu_ms": 101.5,
+    "site_updates_per_s_M": 10.01,
+    "verdict": "refused"
+   },
+   "threads_2": {
+    "wall_ms": 84.1,
+    "wall_iqr": [
+     82.4,
+     85.1
+    ],
+    "cpu_ms": 116.6,
+    "site_updates_per_s_M": 15.27,
+    "verdict": "refused"
+   },
+   "threads_4": {
+    "wall_ms": 83.2,
+    "wall_iqr": [
+     83.1,
+     83.6
+    ],
+    "cpu_ms": 116.9,
+    "site_updates_per_s_M": 15.18,
+    "verdict": "refused"
+   },
+   "default": {
+    "threads": 2,
+    "wall_ms": 415.1,
+    "wall_iqr": [
+     414.5,
+     416.5
+    ],
+    "sweeps": 15712,
+    "verdict": "diagnostics_passed"
+   }
+  },
+  "stdout": [
+   "machine: Apple M4 (4P+6E), 16 GB; 300-task demo, decide --sweeps 400 --chains 4 --polish-ms 0 (fixed work), 5 runs each, medians [IQR]",
+   "--threads 1: wall ms 99.1 [99.1-99.8], CPU ms 101.5, site updates/s 10.01 M; answer identical: yes; verdict refused",
+   "--threads 2: wall ms 84.1 [82.4-85.1], CPU ms 116.6, site updates/s 15.27 M; answer identical: yes; verdict refused",
+   "--threads 4: wall ms 83.2 [83.1-83.6], CPU ms 116.9, site updates/s 15.18 M; answer identical: yes; verdict refused",
+   "default path (--budget-ms 300, 4 chains, threads 2): wall ms 415.1 [414.5-416.5], sweeps 15712, verdict diagnostics_passed"
+  ],
+  "stderr_tail": null
+ },
+ "attached": {
+  "checks": {
+   "build": "success",
+   "native_build": "success",
+   "pack_zip": "skipped",
+   "callers": "success",
+   "install_sh": "success",
+   "npm": "success",
+   "npm_windows": "skipped",
+   "install_ps1_pwsh": "skipped",
+   "install_ps1_ps51": "skipped",
+   "ps_callers": "skipped",
+   "rss_powershell": "skipped",
+   "cross_darwin": "skipped"
+  }
+ },
+ "cells": {
+  "cpu_model": "AMD EPYC 9V45 96-Core Processor",
+  "logical_cores": 2,
+  "binary_size_bytes": 1401248,
+  "stats_1t": {
+   "median": 17637485,
+   "q1": 17103334.0,
+   "q3": 17767678.5,
+   "min": 16952963,
+   "max": 17889808,
+   "n": 5,
+   "values": [
+    17253705,
+    16952963,
+    17889808,
+    17645549,
+    17637485
+   ]
+  },
+  "stats_default": {
+   "median": 23339333,
+   "q1": 23097044.0,
+   "q3": 23699545.5,
+   "min": 23011872,
+   "max": 24000627,
+   "n": 5,
+   "values": [
+    23011872,
+    23182216,
+    24000627,
+    23339333,
+    23398464
+   ]
+  },
+  "stats_default_threads": [
+   2
+  ],
+  "kernel_multispin_fast_4t": {
+   "median": 22210000000.0,
+   "q1": 21165000000.0,
+   "q3": 23175000000.0,
+   "min": 20320000000.0,
+   "max": 23340000000.0,
+   "n": 5,
+   "values": [
+    23340000000.0,
+    22210000000.0,
+    20320000000.0,
+    22010000000.0,
+    23010000000.0
+   ]
+  },
+  "kernel_multispin_fast_10t": {
+   "median": 22200000000.0,
+   "q1": 21810000000.0,
+   "q3": 22575000000.0,
+   "min": 21580000000.0,
+   "max": 22870000000.0,
+   "n": 5,
+   "values": [
+    22280000000.0,
+    21580000000.0,
+    22040000000.0,
+    22200000000.0,
+    22870000000.0
+   ]
+  },
+  "kernel_multispin_fast_1t": {
+   "median": 24710000000.0,
+   "q1": 24300000000.0,
+   "q3": 25970000000.0,
+   "min": 24280000000.0,
+   "max": 26150000000.0,
+   "n": 5,
+   "values": [
+    25790000000.0,
+    24280000000.0,
+    24710000000.0,
+    24320000000.0,
+    26150000000.0
+   ]
+  },
+  "kernel_heatbath_fast_1t": {
+   "median": 502800000.0,
+   "q1": 500550000.0,
+   "q3": 529550000.0,
+   "min": 500000000.0,
+   "max": 537800000.0,
+   "n": 5,
+   "values": [
+    537800000.0,
+    502800000.0,
+    500000000.0,
+    501100000.0,
+    521300000.0
+   ]
+  },
+  "decide_12_wall_ms": {
+   "median": 10.505511000019396,
+   "q1": 10.402311999996527,
+   "q3": 10.53083000000754,
+   "min": 10.373764000007668,
+   "max": 10.539232000013499,
+   "n": 5,
+   "values": [
+    10.522428000001582,
+    10.505511000019396,
+    10.430859999985387,
+    10.539232000013499,
+    10.373764000007668
+   ]
+  },
+  "decide_12_pbit_ms": {
+   "median": 9.088063,
+   "q1": 9.0528695,
+   "q3": 9.134608,
+   "min": 9.045869,
+   "max": 9.165309,
+   "n": 5,
+   "values": [
+    9.088063,
+    9.103907,
+    9.05987,
+    9.165309,
+    9.045869
+   ]
+  },
+  "decide_12_verdicts": [
+   "exact"
+  ],
+  "decide_12_exit_codes": [
+   0
+  ],
+  "decide_300_wall_ms": {
+   "median": 422.52012199998035,
+   "q1": 421.6932709999952,
+   "q3": 424.01193349999744,
+   "min": 421.5770790000022,
+   "max": 424.36705899999083,
+   "n": 5,
+   "values": [
+    423.65680800000405,
+    422.52012199998035,
+    424.36705899999083,
+    421.5770790000022,
+    421.8094629999882
+   ]
+  },
+  "decide_300_pbit_ms": {
+   "median": 417.940061,
+   "q1": 417.2589365,
+   "q3": 419.457341,
+   "min": 417.235029,
+   "max": 419.914021,
+   "n": 5,
+   "values": [
+    419.000661,
+    417.940061,
+    419.914021,
+    417.235029,
+    417.282844
+   ]
+  },
+  "decide_300_verdicts": [
+   "diagnostics_passed"
+  ],
+  "decide_300_exit_codes": [
+   0
+  ],
+  "decide_300_released": {
+   "median": 300,
+   "q1": 300.0,
+   "q3": 300.0,
+   "min": 300,
+   "max": 300,
+   "n": 5,
+   "values": [
+    300,
+    300,
+    300,
+    300,
+    300
+   ]
+  },
+  "decide_300_violations_max": 0,
+  "decide_300_site_updates_per_s": {
+   "median": 14940381,
+   "q1": 14697294.0,
+   "q3": 15087959.0,
+   "min": 14500705,
+   "max": 15108383,
+   "n": 5,
+   "values": [
+    14500705,
+    14893883,
+    15067535,
+    15108383,
+    14940381
+   ]
+  },
+  "decide_300_peak_rss_bytes": {
+   "median": 22052864,
+   "q1": 21991424.0,
+   "q3": 22351872.0,
+   "min": 21991424,
+   "max": 22351872,
+   "n": 3,
+   "values": [
+    22052864,
+    22351872,
+    21991424
+   ]
+  },
+  "decide_300_peak_rss_method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
+  "native_over_portable": {
+   "T1 SoA f32 heat-bath LUT, splitmix": 1.131,
+   "T1 SoA f32 heat-bath LUT, Philox": 1.052,
+   "T0 multispin 64-lane, splitmix": 1.004,
+   "T0 multispin 64-lane, Philox": 0.974,
+   "T0 PT-in-a-word prefix-mask, splitm": 1.592,
+   "T0 multispin splitmix x 4 threads": 0.996,
+   "T0 multispin splitmix x10 threads": 0.971,
+   "fast multispin splitmix x 4 thr": 1.071,
+   "fast multispin splitmix x10 thr": 1.133,
+   "fast T1 f32 LUT, splitmix": 1.054,
+   "fast T1 f32 LUT, Philox": 1.005,
+   "fast T0 multispin, splitmix": 1.064,
+   "fast T0 multispin, Philox": 1.015,
+   "pbit stats IR ring, 1 thread": 1.0,
+   "pbit stats IR ring, 4 threads": 1.009,
+   "pbit decide 300 tasks, 4 thr (sampler)": 1.002
+  },
+  "threads_rows": {
+   "threads_1": {
+    "wall_ms": 99.1,
+    "wall_iqr": [
+     99.1,
+     99.8
+    ],
+    "cpu_ms": 101.5,
+    "site_updates_per_s_M": 10.01,
+    "verdict": "refused"
+   },
+   "threads_2": {
+    "wall_ms": 84.1,
+    "wall_iqr": [
+     82.4,
+     85.1
+    ],
+    "cpu_ms": 116.6,
+    "site_updates_per_s_M": 15.27,
+    "verdict": "refused"
+   },
+   "threads_4": {
+    "wall_ms": 83.2,
+    "wall_iqr": [
+     83.1,
+     83.6
+    ],
+    "cpu_ms": 116.9,
+    "site_updates_per_s_M": 15.18,
+    "verdict": "refused"
+   },
+   "default": {
+    "threads": 2,
+    "wall_ms": 415.1,
+    "wall_iqr": [
+     414.5,
+     416.5
+    ],
+    "sweeps": 15712,
+    "verdict": "diagnostics_passed"
+   }
+  }
+ },
+ "elapsed_s": 131.9
+}
