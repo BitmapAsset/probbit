@@ -8,10 +8,7 @@ accelerators) are its own.
 
 ## Program
 
-Remarks tagged R19.n were measured in 0.2.0 development round n (2026-09-30 to 2026-10-01); `P2.x`-style ids name
-items of that round's work plan.
-
-JSON Schema (draft 2020-12, hand-written, R19.8): `docs/pbit-ir.schema.json`; this page is normative where they differ, and
+JSON Schema (draft 2020-12, hand-written): `docs/pbit-ir.schema.json`; this page is normative where they differ, and
 test `ir_schema_matches_the_parser` keeps every object's field list equal to the parser's.
 
 ```json
@@ -32,7 +29,7 @@ test `ir_schema_matches_the_parser` keeps every object's field list equal to the
   adds `table[x_i][x_j]`. Negative Potts = soft "differ" (colouring); a table expresses Ising / max-cut couplings.
 - `caps[]`: at most `limit` of the listed (variable, value) pairs may hold at once (hard). `value` + optional `vars` is
   shorthand for "at most `limit` of these variables (default: all) take this value"; `members` lists pairs explicitly.
-  Cardinality (R19.5, the first IR v2 construct; still `pbit_ir: 1`, a v1 program parses and answers unchanged): a `value` cap
+  Cardinality (the first IR v2 construct; still `pbit_ir: 1`, a v1 program parses and answers unchanged): a `value` cap
   may carry `min` = "at least `min` of these variables (those able to take the value) take it", alone or with `limit` (a
   range; `min` = `limit` = exactly k). It lowers to one more cap: at most |M| - `min` of those M variables take any of their
   other allowed values (each variable holds one value), so enumeration, the frontier / components tiers, the sampler and the
@@ -40,27 +37,27 @@ test `ir_schema_matches_the_parser` keeps every object's field list equal to the
   schema error. Test `run_cardinality_min_and_range_caps_match_brute_force` (>= 2 a, 1..2 b, exactly one c among three,
   6 variables x 3 values: odds = brute force to print rounding; sampler at defaults, seeds 1..5: 5/5 `diagnostics_passed`,
   0 violations, max TV 0.0016).
-- `all_different[]` (R19.5): `{"vars": [ids]}` (>= 2 distinct ids) = no two of these variables take the same value; lowered to
+- `all_different[]`: `{"vars": [ids]}` (>= 2 distinct ids) = no two of these variables take the same value; lowered to
   one cap per value with limit 1 over the listed variables able to take it.
-- `implies[]` (R19.5): `{"if": {"var": x, "value": a}, "then": {"var": y, "in": [values]}}` (x != y) = whenever x takes a, y
+- `implies[]`: `{"if": {"var": x, "value": a}, "then": {"var": y, "in": [values]}}` (x != y) = whenever x takes a, y
   takes one of `in`; lowered to one cap with limit 1 over (x, a) and y's allowed values outside `in` (y holds exactly one value,
   so the two cannot both hold). Hard, like every cap. Test `run_all_different_and_implies_match_brute_force` (5 variables x 4
   values, one all_different + two implications: n_feasible, log Z and odds = brute force; sampler at defaults, seeds 1..5: 5/5
   `diagnostics_passed`, 0 violations, max TV 0.0010).
-- `tables[]` (R19.5): `{"vars": [1 to 3 distinct ids], "forbid": [[one value per var], ...]}` or `"allow"` instead of
+- `tables[]`: `{"vars": [1 to 3 distinct ids], "forbid": [[one value per var], ...]}` or `"allow"` instead of
   `"forbid"` (exactly one). A forbidden tuple = one cap with limit arity - 1 over its (var, value) pairs (all of them at once
   is the only way to exceed it); `allow` forbids every other tuple of the variables' allowed values (at most 100,000 tuples,
   else exit 2 code `limit`); tuples naming a value a variable cannot take are dropped. Test `run_tables_match_brute_force`
   (4 variables x 3 values: an allow-list on a pair, a forbid-list on a triple, an arity-1 forbid: n_feasible, log Z and odds
   = brute force).
-- `precedes[]` (R19.5): `{"before": x, "after": y, "gap": g}` (x != y; `gap` a non-negative integer, default 1), the
+- `precedes[]`: `{"before": x, "after": y, "gap": g}` (x != y; `gap` a non-negative integer, default 1), the
   (job, slot) scheduling pattern: values are read as ordered slots (their order in `values`) and slot(y) >= slot(x) + g
   (`gap` 0 = not earlier, 1 = strictly later). Lowered to one cap (limit 1) per violating (slot of x, slot of y) pair, so
   O(k^2) caps per precedence. Test `run_precedes_matches_brute_force` (4 jobs x 5 slots, three precedences + one
-  all_different: n_feasible, log Z and odds = brute force). Long chains (R19.5 finding, fixed in R19.6, BENCHMARKS "Known
+  all_different: n_feasible, log Z and odds = brute force). Long chains (found and fixed during 0.2.0, BENCHMARKS "Known
   failure modes"): 20 jobs x 30 slots in one chain was refused after 15.2 s; the arc-consistent start (below) now starts its
   chains and the call stays near the budget (0.54 s at 200 ms: `refused` by the gate, honestly; `diagnostics_passed` at 3000 ms).
-- `linear[]` (R19.7): `{"terms": [[var id, value name, weight], ...], "limit": L}` = the linear rule
+- `linear[]`: `{"terms": [[var id, value name, weight], ...], "limit": L}` = the linear rule
   `sum of weight x [var = value] <= L` with whole-number weights 0..=1,000,000 and `limit` 0..2^53 (knapsack: one per budget,
   terms `[item, "in", weight]`; bin packing: one per bin, terms `[item, bin, size]`; multi-dimensional: several over the same
   (var, value) pairs). Each (var, value) at most once per rule (else `value`); a term with weight 0, or a value its var cannot
@@ -80,7 +77,7 @@ test `ir_schema_matches_the_parser` keeps every object's field list equal to the
   the same tiers as any cap. Their caps often overlap (one (variable, value) in several caps); then the frontier DP, which
   needs every pair in at most one cap, declines and enumeration, the components tier or the general sampler answer.
   Examples: worker quotas (`value` form), one-hot sudoku rows (`limit` 1 per digit), job-shop slot capacity.
-- `start` (R19.6, optional warm start): `{"var": "value", ...}` naming EVERY variable once, each on an allowed value (and its
+- `start` (optional warm start): `{"var": "value", ...}` naming EVERY variable once, each on an allowed value (and its
   `clamp`, if any), with every rule satisfied (all caps and constructs, checked before the compile pass); anything else exits 2
   (`schema` for a non-object / non-string value / duplicate key, `value` with path `start.<var>` for an unknown var or value or a
   forbidden value, path `start` for a missing variable or a broken rule). Chain 0 starts from it, then its 5 uniform
@@ -97,21 +94,22 @@ The distribution is `P(x) ∝ exp(log w(x))` over the assignments that satisfy e
 
 **Wire format (both JSON documents: this one and the router's, README "Problem format") is strict.** Every field listed
 here is type-checked when present; `null` means absent for optional fields; anything else that does not match is an error,
-never ignored or coerced:
+never ignored or coerced. Encoding: UTF-8; one leading byte-order mark is skipped (since 0.3.0: Windows PowerShell 5.1 adds
+one to every pipe).
 
 | Document | Fields (all others rejected) |
 |---|---|
-| program | `pbit_ir` (number, must be 1), `values` (non-empty array of distinct strings, at most 65,535), `vars` (non-empty array), `pairs` (array), `caps` (array), `all_different` (array, R19.5), `implies` (array, R19.5), `tables` (array, R19.5), `precedes` (array, R19.5), `linear` (array, R19.7), `start` (object, R19.6), `comment` (string, ignored) |
+| program | `pbit_ir` (number, must be 1), `values` (non-empty array of distinct strings, at most 65,535), `vars` (non-empty array), `pairs` (array), `caps` (array), `all_different` (array), `implies` (array), `tables` (array), `precedes` (array), `linear` (array), `start` (object), `comment` (string, ignored) |
 | `vars[]` | `id` (string, unique; default `x<index>`), `h` (object: value name -> number, each key once), `allowed` / `forbid` (arrays of distinct value names; `allowed` non-empty), `clamp` (a value name) |
 | `pairs[]` | `i`, `j` (two different var ids), exactly one of `potts` (number) or `table` (k arrays of k numbers) |
-| `caps[]` | `limit` (integer 0..2^53) and/or (`value` form only) `min` (integer 0..2^53, at least; R19.5), exactly one of `members` (array of `[var id, value name]`) or `value` (a value name, with optional `vars`: distinct var ids) |
+| `caps[]` | `limit` (integer 0..2^53) and/or (`value` form only) `min` (integer 0..2^53, at least), exactly one of `members` (array of `[var id, value name]`) or `value` (a value name, with optional `vars`: distinct var ids) |
 | `linear[]` | `terms` (array of `[var id, value name, weight]`, weight an integer 0..=1,000,000, each (var, value) once), `limit` (integer 0..2^53) |
 | router problem | `workers` (non-empty array, at most 65,535), `tasks` (non-empty array; tasks x workers at most 20,000,000), `affinity` (number >= 0, default 0), `comment` (string, ignored) |
 | `workers[]` | `id` (string, unique), exactly one of `cap` / `capacity` (integer 0..2^53) |
 | `tasks[]` | `id` (string, unique; default `task<index>`), `scores` (object: worker id -> number, each key once), `allowed` (non-empty array of distinct worker ids), `group` (string or number), `clamp` (a worker id), `text` (string, ignored) |
 
 Numbers: any JSON number that is a finite double; `1e309` (which parses to infinity) is rejected (it aborted the process,
-exit 134, before R19). Arrays and objects may nest at most 256 deep (the parser is recursive). Empty domains are errors: an
+exit 134, before 0.2.0). Arrays and objects may nest at most 256 deep (the parser is recursive). Empty domains are errors: an
 empty `values`, an empty `allowed`, or a variable / task left with no allowed value after `allowed`, `forbid` and `scores`.
 
 **CLI (`pbit decide`, `pbit run`, `pbit ir`): bad input = exit 2 and ONE JSON object on stdout**
@@ -125,7 +123,7 @@ size limits in "Limits in v1", stdin above `--max-input-mb`). Unreadable stdin a
 the offending field (`""` = the whole document, as for JSON syntax errors and non-finite numbers, whose message gives the byte
 offset). Flag errors keep their convention: exit 2, a message on stderr, nothing on stdout. The same strict reader parses
 both front-ends (`pbit-cli/src/json.rs`; CLI test `input_contract_rejects_malformed_documents`, which includes the 2026-09-30 external
-review's E15 cases: `"allowed": "A"` used to enable every scored worker and answer `exact`; a cap object where the caps array
+review's cases: `"allowed": "A"` used to enable every scored worker and answer `exact`; a cap object where the caps array
 belongs was dropped; duplicate value names emitted duplicate keys).
 
 **Library (`pbit_ir::Model::new`, `pbit_decide::Problem`):** typed Rust values, so there is no schema to check; `Model::new`
@@ -141,7 +139,7 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
   same-group pairs; log Z) below ~1e9 x (input size), far inside the double range (1.8e308). Caps and limits are integers
   0..2^53. Above the limit a value is rejected, not clamped: rescale your scores.
 - **Arithmetic** stays in log space: Gibbs conditionals and enumeration subtract the running max before `exp`; the frontier DP
-  carries log weights and merges by log-sum-exp (R19: it used linear weights scaled per layer, which underflowed past ~745
+  carries log weights and merges by log-sum-exp (before 0.2.0 it used linear weights scaled per layer, which underflowed past ~745
   nats; with weights of +-1000 it returned NaN marginals labelled `exact` and the CLI aborted, exit 134: pbit-ir test
   `frontier_is_exact_in_log_space_for_huge_weight_spreads`, which fails on the old DP; cost +9% / +12% wall on the
   42 / 60-task demos at `--frontier-states 4194304`, identical printed odds and log Z).
@@ -150,7 +148,7 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
   that cannot be estimated (`rhat` / `tv_bound` infinite: too few samples, chains stuck at different values) appears only on
   a refusal (exit 3): it prints as `null` and is named in `gate.non_finite` (e.g. `["rhat", "tv_bound"]`). Any other
   non-finite computed number means no answer: ONE `{"error":{"code":"numeric","path","message"}}` object on stdout, exit 3
-  (before R19 it printed `null` with exit 0). Telemetry rates are 0 when no time elapsed (they divided by zero).
+  (before 0.2.0 it printed `null` with exit 0). Telemetry rates are 0 when no time elapsed (they divided by zero).
 - **Fuzz test** (CLI `fuzz_inputs_never_crash_and_outputs_stay_finite_json`): 10,000 seeded documents (programs and router
   problems with weights from -1e9 to 1e9, 5e-324, -0.0, plus 1 draw in 30 out of contract: 1e9+1, 1e15, 1e308, 1e309, -1e400;
   a third malformed by truncation, byte edits, an inserted `1e999`, duplicated slices or 300-deep nesting) through `pbit run` /
@@ -169,7 +167,7 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
      Cost (`bench/csp_gap_probe.py`): a search for the first plan is also how infeasibility is proved, so hard
      infeasible CSPs came back `refused` (exit 3) instead of `infeasible` (exit 1). Fallback in the current build: with a wall-clock budget,
      on a program that is not a partition, each chain's feasible-start search stops at HALF of its slice of `--budget-ms` (the budget /
-     ceil(chains / threads)); if any chain finds no start, all samples are dropped and the exact search runs again past its gap budget until the end of `--budget-ms`, counted from the start of the sampling phase, or half a budget after the fallback starts if later, and a HARD stop since R19.6 (proof -> `infeasible`; a program
+     ceil(chains / threads)); if any chain finds no start, all samples are dropped and the exact search runs again past its gap budget until the end of `--budget-ms`, counted from the start of the sampling phase, or half a budget after the fallback starts if later, and a hard stop since 0.2.0 (proof -> `infeasible`; a program
      it enumerates in time -> `exact`; else `refused`, whose reason names `--op exact`). A proof that takes P needs a budget of
      about 2 x (P + 0.1 s): the tier's first attempt (~0.1 s) and the start search's half come first (random 3-colourings,
      150-200 vertices, mean degree 4.6: P = 1.9 s refused at 3.4 s, `infeasible` at 4.2 s; P = 0.19 / 0.25 s refused at 500 / 600 ms,
@@ -186,7 +184,7 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
      at-most-600 cap gave log Z 406.99 instead of 415.89). When the raw space (product of allowed values) exceeds `--exact-limit`
      the frontier runs before enumeration, which would otherwise spend its node budget first (80 / 300-variable team
      rosters: 169 ms / 1.09 s → 1.8 / 57 ms);
-  2b. else (R19.4, inference compiler) the components tier: the variables split into connected components of pairs AND caps
+  2b. else (inference compiler) the components tier: the variables split into connected components of pairs AND caps
      (two variables are linked when a pair or a cap mentions both); log Z is the sum of the components' log Z and each
      variable's odds and MAP value come from its own component. A cap-free component whose pairs form a tree (pairs =
      variables - 1) is solved by sum-product (odds, log Z) and max-product (MAP) in log space; a two-value component with
@@ -198,14 +196,14 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
      occupancy, enumerate, frontier}; one infeasible component makes the whole program `infeasible` (exit 1). It declines (and the sampler runs)
      when one component cannot be solved, the program is a single non-tree component (the whole-program tiers above already
      tried it), or the forest work (sum over edges of |values(i)| x |values(j)|) exceeds 5e7. When the raw space
-     exceeds `--exact-limit` it runs FIRST, before the frontier DP and the whole-program enumeration (R19.5: 100,000
+     exceeds `--exact-limit` it runs FIRST, before the frontier DP and the whole-program enumeration (100,000
      independent two-value variables took 4,441.9 ms in the frontier DP vs 32.5 ms here, medians N = 5, same log Z), else
      after them; `--frontier-states 0` switches it off too (the earlier path). Measured (Apple M4, medians of N = 5, load 3.6-11): the external review's chain100 / chain1000 sampled
      281.9 / 281.3 ms -> forest 0.055 / 0.390 ms; four independent 8-variable rings with overlapping caps (non-partition,
      2^32 raw space) sampled 385.5 ms -> components 0.057 ms (odds within print rounding of a per-block brute force);
   3. else run 4 constraint-preserving Gibbs chains for `--budget-ms` (default 200) and apply the diagnostics gate
      (`tier: "sample"`, `gate` object).
-- `exact`: enumeration, plus (R19.4) the components tier with enumeration per component (no frontier): a decomposable program
+- `exact`: enumeration, plus the components tier with enumeration per component (no frontier): a decomposable program
   is solved component by component, and a forest by sum-/max-product (chain1000: 0.47 ms). Whole-program enumeration is
   exhaustive, so use `exact` only on small or decomposable programs (an earlier build gave no answer within 60 s on a loose
   100,000-variable path program; with `--exact-ms 1000` it answers `declined` in 1.1 s).
@@ -240,7 +238,7 @@ Every control below works on both `pbit run` (this format) and `pbit decide` (th
   (`--sweeps 400`, N = 5) CPU/wall went from 2.26 to 1.04 and the plan from 707.77 to 705.12 log w (median; `bench/polish_threads.py`).
   With a wall-clock `--budget-ms`, the budget is the deadline of the whole sampling phase: each chain gets
   budget / ceil(chains / threads), so fewer threads = fewer sweeps per chain = a looser (honestly reported) bound (`pbit run`; the
-  router sampler of `pbit decide` instead stops the r-th chain of a worker at call start + (r + 1) slices since R19.9, so a chain's
+  router sampler of `pbit decide` instead stops the r-th chain of a worker at call start + (r + 1) slices since 0.2.0, so a chain's
   overrun is charged to the worker's next chains: 100,000 chains sampled 354-432 -> 269-318 ms on 200 at loads 3.5-4.2, with no
   chain sweeping, BENCHMARKS §6). In the current build
   that slice includes the chain's feasible-start search (before, a 200-job schedule sampled for 1.75 s on a 1 s budget:
@@ -249,9 +247,9 @@ Every control below works on both `pbit run` (this format) and `pbit decide` (th
   was 2.4 s; `--op sample`: 504 ms inside the run, 0.58 s wall). The exact tiers,
   the gate and the polish run outside the budget (200-job schedule, `--budget-ms 1000`: 1.29 s wall), except the
   fallback of `--op decide` (the start search stops at half the slice and the fallback stops HARD at the end of the
-  sampling budget or half a budget after it starts, whichever is later; before R19.6 its deadline counted from the start of the call and was consulted only between plans, so a
+  sampling budget or half a budget after it starts, whichever is later; before 0.2.0 its deadline counted from the start of the call and was consulted only between plans, so a
   program with many plans ran on toward `--exact-limit`: 20 x 30 precedence chain, ~7 s past a 200 ms budget).
-  R19.6: under `--op decide` with a wall-clock budget and no `--exact-ms`, a program whose raw space (product of domain
+  Under `--op decide` with a wall-clock budget and no `--exact-ms`, a program whose raw space (product of domain
   sizes) exceeds `--exact-limit` gets the exact tiers before the sampler for at most `--budget-ms` (from the start of the
   call); past it they decline as at `--exact-ms`, the sampler then gets its full budget, and the sampled answer carries
   `telemetry.exact_budget_reached: true`. So such a call takes at most about 2 x `--budget-ms` plus gate and polish
@@ -265,7 +263,7 @@ Every control below works on both `pbit run` (this format) and `pbit decide` (th
   before declining (`--budget-ms 200`, loose 3-colourings: 0.44 / 0.73 / 1.66 s wall at 300 / 1,000 / 3,000
   variables vs 0.29-0.35 s for `--op sample`). Lower `--exact-limit`, or use `--op sample`, to keep such calls near the budget (3,000 variables at
   `--exact-limit 1000` / `20000`: 0.38 / 0.39 s), or cap them with `--exact-ms N` (below).
-- `--deadline-ms N` (R19.6, P2.1; `pbit run` only, opt-in): a whole-call wall-clock target counted from before parsing. The
+- `--deadline-ms N` (`pbit run` only, opt-in): a whole-call wall-clock target counted from before parsing. The
   exact tiers stop at N/4 under `--op decide` (N under `--op exact`; the smaller of this and `--exact-ms`); the sampler then
   gets 0.6 of the time left (at most `--budget-ms` when that flag is also given; otherwise `--budget-ms` is replaced) and the
   polish at most 0.1; the rest is the reserve for the gate, which is not bounded, so the answer reports `deadline: {"ms": N,
@@ -276,11 +274,11 @@ Every control below works on both `pbit run` (this format) and `pbit decide` (th
 - `--exact-ms N` (opt-in; absent = no cap, output unchanged): a wall-clock stop for the exact tiers that run before the
   sampler (enumeration / MRV search and the frontier DP, together), counted from the start of the call; the clock is read every 64
   search nodes and per DP step. Past it they decline as at `--exact-limit`: `--op decide` (and `pbit decide --mode auto`) goes on to
-  the sampler with the full `--budget-ms`; `--op exact` answers `declined` (exit 3, the reason names `--exact-ms`); `pbit decide
-  --mode exact` exits 2. A sampled answer then carries `telemetry.exact_ms` and `telemetry.exact_ms_reached` (only when the flag is
-  given). Not capped by `--exact-ms`: the no-start fallback above (it stops hard at the end of the sampling budget, R19.6). The router's
+  the sampler with the full `--budget-ms`; `--op exact` and `pbit decide --mode exact` answer `declined` (exit 3, the reason names
+  `--exact-ms`; `decide --mode exact` exited 2 with an empty stdout before 0.3.0). A sampled answer then carries `telemetry.exact_ms` and `telemetry.exact_ms_reached` (only when the flag is
+  given). Not capped by `--exact-ms`: the no-start fallback above (it stops hard at the end of the sampling budget). The router's
   lowering for its components tier (O(group size^2) pairs) runs only under `--mode auto` with `--frontier-states` > 0 and stops at the
-  cap (clock read per group member, R19.8); what still runs past it is one `Model::new` of the lowered pairs (one group of 3,000 tasks:
+  cap (clock read per group member); what still runs past it is one `Model::new` of the lowered pairs (one group of 3,000 tasks:
   `pbit decide --exact-ms 50` 741 ms whole call vs 618 ms under `--mode sample`, N = 5 medians; answers identical at fixed work). Loose 3-colourings at `--budget-ms 200`
   (re-run on the final binary of an earlier build, medians of 5): `--op decide` 430 / 699 / 1,480 ms at 300 / 1,000 / 3,000 variables ->
   341 / 347 / 346 ms at `--exact-ms 50` (`--op sample`: 292 / 296 / 296 ms). A cap shorter than a program's exact time turns its exact answer into a sampled one.
@@ -343,21 +341,21 @@ caps; tuned on exact oracles; a diagnostic, not a proof: it cannot see a mode no
 `declined` (exit 3; `--op exact` stopped at `--exact-ms`, or ran out of its node budget, ~9.2e18 nodes: unreachable in practice, inferred). Every document
 has `engine`, `op`, `program` (vars, values, pairs, caps counts), `verdict`, `ms`; `infeasible`, `declined` and a no-start
 `refused` add only `reason`. Answers add `plan` (the best plan seen, or the exact MAP), `plan_logw`, `violations` (of `plan`),
-`compiled` (R19.3: {pairs_dropped, caps_dropped}: pairs whose every entry is exactly 0 and caps whose limit reaches their
-number of distinct member variables are removed before tier selection; R19.4 adds tables_folded: tables that are a sum of one
+`compiled` ({pairs_dropped, caps_dropped}: pairs whose every entry is exactly 0 and caps whose limit reaches their
+number of distinct member variables are removed before tier selection; tables_folded: tables that are a sum of one
 term per end, t[a][b] = u[a] + w[b] exactly in f64 (constant tables included), are folded into the two variables' unaries;
 none of this changes any odds, log Z or plan beyond float summation order; `program` counts the compiled program, so the
 input had program.pairs + pairs_dropped + tables_folded pairs and program.caps + caps_dropped caps),
 `marginals` (per variable, values sorted by probability), `released`, `escalated`; exact tiers add `tier`, `logz`, `top_plans`
 and `n_feasible` or `frontier_states` or `components`. Sampled answers add `tier`, `sampled_best_logw`, `gate` (rhat, tv_bound, tv_tol,
 frozen_saturated_caps, frozen_escalated (variables the frozen rule escalates; on programs that are not partitions only the
-stuck parts' connected components, forced variables included while anything is stuck), min_batches, samples, sweeps, chains, budget_ms (echoed even under `--sweeps`), seed, and gate/2+: version ("gate/3" since R19.3: every release also needs the variable's own
+stuck parts' connected components, forced variables included while anything is stuck), min_batches, samples, sweeps, chains, budget_ms (echoed even under `--sweeps`), seed, and gate/2+: version ("gate/3" since 0.2.0: every release also needs the variable's own
 indicator split-R-hat < 1.05, whole answers every variable's; reason `item_rhat`), item_rhat_max (largest finite per-variable
 indicator R-hat) and item_rhat_infinite (variables whose R-hat is infinite: chains holding different values throughout),
-occupancy_rhat_max / occupancy_rhat_infinite (R19.3: per capacity constraint, split-R-hat of its load trace across chains,
+occupancy_rhat_max / occupancy_rhat_infinite (per capacity constraint, split-R-hat of its load trace across chains,
 largest finite value and count of infinite ones; a variable is released only if every constraint it belongs to is below 1.05,
-reason `item_rhat`), mode_transitions (R19.3: accepted collective moves summed over chains: global_flips, label_swaps, and chains_without = chains
-that accepted none; all 0 with `--collective off`; Wolff cluster and three-cycle moves are NOT counted (checked R19.9); present when the
+reason `item_rhat`), mode_transitions (accepted collective moves summed over chains: global_flips, label_swaps, and chains_without = chains
+that accepted none; all 0 with `--collective off`; Wolff cluster and three-cycle moves are NOT counted (checked); present when the
 sampler tracks them per chain), assumptions
 (strings: what a sampled release assumes and does not check), mcse_tv_short / mcse_tv_long (the two batch-means MCSEs, max over
 variables), min_batches_long (the long pass; gate/2 requires both passes to have ≥ 8 batches per chain), worst (id, value, pooled_mean, chain_means,
@@ -366,7 +364,7 @@ chain_rows: the worst item's per-chain estimates), non_finite (only on a refusal
 `telemetry`: chains, threads (= min(`--threads`, chains)), sweeps, site_updates_per_s, sample_ms, gate_ms, polish_ms, polish_sweeps,
 cpu_limit_pct, mem_limit_mb, traj_rows, exact_ms and exact_ms_reached (only with `--exact-ms`; `exact_ms_reached` = the exact tiers ran and the clock at the
 sampler's start was past the cap; always false under `--op sample` / `--mode sample`, where no exact tier runs), exact_budget_reached
-(R19.6; only when true: `--op decide` stopped the exact tiers at `--budget-ms`, see Resource controls), and on Unix
+(only when true: `--op decide` stopped the exact tiers at `--budget-ms`, see Resource controls), and on Unix
 process_cpu_ms and peak_rss_mb (getrusage; matches `/usr/bin/time -l` on macOS) and nice (getpriority); all three null on
 Windows. `pbit decide` reports the same `telemetry` on its sampler path (`sweeps` = all sweeps incl. burn-in, as `pbit run`); its
 document differs: `tasks` / `workers` / `affinity` instead of `op` / `program`, `odds` instead of `marginals`, no `tier` or
@@ -375,12 +373,57 @@ or a document that breaks the input contract above: structured error on stdout; 
 parse or is out of range, a value flag given twice (`--progress` too in the current build), `--mode` other than auto / exact /
 sample: message on stderr).
 
-Every `pbit run` answer (exact, sampled, refused, infeasible, declined) ends with `phases` (R19.6, P2.1): an array of
+Every `pbit run` answer (exact, sampled, refused, infeasible, declined) ends with `phases`: an array of
 `{"phase": name, "ms": wall}` in the order parse (reading stdin JSON), compile (validation, lowering, compile pass), exact
 (the exact tiers; on a sampled answer the time before the sampler), sample (the chains, including their start search), gate,
 polish (measured wall time; `telemetry.polish_ms` is the configured budget), total (= parse + compile + the answer's `ms`).
 Exact answers have sample = gate = polish = 0. Example (20 x 30 precedence chain, defaults, M4): parse 0.8, compile 2.7, exact
 200.0, sample 200.6, gate 88.9, polish 51.5, total 544.6 ms. Test `run_reports_phase_times`.
+
+## Summary (`--summary`, decide and run)
+
+The same answer without its per-item tables, for agents and dashboards: every field of the full document except `plan`,
+`odds` / `marginals`, `released`, `escalated`, `release_reason` and `top_plans`, plus
+
+- `summary`: 1 (the summary format's version), right after `engine`;
+- `counts`, right after the verdict (and its `tier` / `reason`): `tasks` (decide) or `vars` (run), and, when the full document
+  lists them, `released` and `escalated`;
+- `worst_released`, `worst_escalated` (when the full document has `released`): up to 5 items each, `{id, value, p, odds,
+  reason, bar}`: `value` is the item's value in the plan and `p` that value's probability, `odds` the item's two most likely
+  values, `reason` its `release_reason` (sampled answers), `bar` the error bar the gate compares with `tv_tol` (z x the larger
+  of the two batch-means MCSEs; `null` when it cannot be estimated; sampled answers only). Order: largest `bar` first on a
+  sampled answer; on an exact answer the smallest gap between the top two odds first.
+
+Verdict and exit code are the full document's. With `--pretty` and a terminal on stderr a boxed summary is drawn there
+too (not with `NO_COLOR`, `--plain` or `PBIT_THEME=plain`). Test `summary_is_the_answer_without_the_tables`.
+
+## Visuals and agents
+
+Everything visual goes to stderr, only when stderr is a terminal, never with `NO_COLOR` (non-empty), `--plain` or
+`PBIT_THEME=plain` (anything but `neon`), and never changes stdout: `--top` (decide, run) draws a monitor at 10 Hz (tier,
+sweeps against the budget, site updates/s, CPU, peak RSS, the gate) and erases it at exit; `pbit demo --live` (default when
+stdout and stderr are both terminals) tells the router story with a live field drawn from the chains' states; `pbit` and
+`pbit --help` at a terminal print the hero screen on stdout (exit 0; piped, `--help` prints the usage and a bare `pbit`
+exits 2). `--top` with `--progress` is a flag error (both write stderr). Test `a_terminal_on_stderr_never_changes_stdout`
+runs every command with stderr on a pseudo-terminal and compares stdout with a piped run.
+
+`pbit mcp` serves `pbit decide`, `pbit run`, `pbit stats` and `pbit demo` as Model Context Protocol tools on stdio, with
+this document's schema (plus a `flags` object) as `pbit_run`'s input; see docs/agents.md.
+
+## Modelling
+
+- One entity, one variable: decisions of one entity tied together by `implies` (per message: an action, its tool, its
+  length) freeze single-site moves, because no single variable can change without breaking an implication; the gate then
+  refuses at every budget (correctly) and the refused plan can be far from the best. One variable per entity whose values are
+  the allowed combinations, each with its combined score, mixes: an external tester's day plan (120 variables, 203 caps) was
+  refused at `--budget-ms 2000` with plan log-weight 65.37; as 20 product variables it passed the gate at `--budget-ms 20`
+  with 93.25 (27.9 nats better; re-run on 0.3.0, M4, load ~4).
+- Plan or marginals: `plan` is one joint plan that satisfies every rule at once; `marginals` are each variable's
+  probabilities over all plans. A variable's plan value need not be its most likely value (the plan must fit every other
+  variable). Act on the plan when the variables must be consistent with each other; use the marginals for one variable's
+  uncertainty or to rank variables for review.
+- Budgets: `--budget-ms` bounds the sampling phase; parsing, the exact tiers, the gate and the polish come on top (each in
+  `phases`). `--deadline-ms` targets the whole `pbit run` call.
 
 ## Limits in v1 (measured or stated)
 
@@ -394,18 +437,18 @@ Exact answers have sample = gate = polish = 0. Example (20 x 30 precedence chain
   0.6 MB amplifier (500 x 65,535 = 32.8 million pairs, 4.1 GB). Within the bounds memory still grows with n x k and with the
   caps (below): a program near both bounds can need several GB.
 
-- Dense domains (FINDING, R19.6; a documented v1 limit since R19.7: sparse domains are not built): memory and per-step cost scale with n x k even when each
+- Dense domains (a documented v1 limit: sparse domains are not built): memory and per-step cost scale with n x k even when each
   variable allows a few values. k = 65,535 values, 3 allowed per variable, unaries only (`pbit run`, seed 1, M4, load ~10, N = 1): n = 50: `decide` exact (forest) 141 MB peak RSS, 27.5 ms; `--op sample` 1,083 MB,
   860.8 ms (gate 513.3 ms, polish 120.1 ms at a 50 ms polish budget). n = 200: `decide` 512 MB, 125.5 ms; `--op sample`
   3,584 MB, 1,851.9 ms (sample 238.4, gate 999.2, polish 549.7 ms). So at large k the gate and the polish overrun their budgets
   and `--deadline-ms` cannot be met; keep k small (one value per slot actually used) until sparse domains land. Where it goes
   (n = 200, `--op sample`): `--polish-ms 0` 2,435 MB / 1,204 ms vs 3,444 MB / 1,751 ms with the default 50 ms polish (polish
   526 ms): the polish (`anneal_on`) built one scaled copy of the whole model per temperature (5), outside its clock; the other
-  ~2.4 GB and the ~0.9 s gate are the sampler's and gate's dense per-(variable, value) arrays. Polish FIXED in R19.7 (the
+  ~2.4 GB and the ~0.9 s gate are the sampler's and gate's dense per-(variable, value) arrays. Polish fixed in 0.2.0 (the
   chain carries the temperature, `Chain::beta`; no copies; same plans bit for bit, test `anneal_beta_matches_scaled_clones`):
   n = 200 `--op sample` median of 5 (load 17-22): polish 50.1 ms at its 50 ms budget, peak RSS 2,322 MB with or without it,
   total 1,280 ms (polish off 1,220 ms); n = 50: polish 50.1 ms, 621 MB (was 120.1 ms, 1,083 MB). The gate (0.5-0.9 s) and the
-  dense arrays remain: **sparse per-variable domains are a v1 limit** (not done in R19): `Model` stores allowed / h / cap
+  dense arrays remain: **sparse per-variable domains are a v1 limit** (not done): `Model` stores allowed / h / cap
   memberships for all n x k pairs, the sampler and gate keep per-(variable, value) statistics. Programs with k in the
   thousands should list only the values actually used (or split them into several variables).
 - Fixed in the current build (was a known false refusal, found by a kill test): on the router and any partition program, what-if clamps (or
@@ -422,15 +465,15 @@ Exact answers have sample = gate = polish = 0. Example (20 x 30 precedence chain
   bit-identical to the IR's with the accelerators off (acceptance `ir_lowering_bit_identical`). `pbit run` samples with
   site + swap Gibbs plus, with `--collective on` (the default; `Model::collective` in the library, off by default there),
   a global two-value flip and a label swap per sweep; both samplers stay bit-identical with it on
-  (`ir_lowering_bit_identical_collective`). `--cluster on` (default since R19.4) adds a Wolff cluster move (probability 1/2
-  per sweep) and `--cycles on` (default since R19.5) max(n/4, 1) three-cycle rotations per sweep, attempted only when the
+  (`ir_lowering_bit_identical_collective`). `--cluster on` (default since 0.2.0) adds a Wolff cluster move (probability 1/2
+  per sweep) and `--cycles on` (default since 0.2.0) max(n/4, 1) three-cycle rotations per sweep, attempted only when the
   program has k > 2 values and at least one cap (two values cannot hold three distinct values; without caps site moves already
   connect every state, and the answer is then byte-identical to `--cycles off` at fixed work). Library defaults
   (`Model::cluster` / `Model::cycles`) stay off.
 - A feasible start is found by augmenting-path matching when every (variable, value) pair is in at most one `cap`
   (quotas; failure proves `infeasible`, exit 1), otherwise by a randomised depth-first search that branches on the
   variable with the fewest feasible values, each attempt capped at 2M nodes or 5e8 capacity checks, retried in ascending value
-  order and with 4 fresh tie-breaks; under `--budget-ms` the search stops at the chain's deadline. R19.6: if the program has
+  order and with 4 fresh tie-breaks; under `--budget-ms` the search stops at the chain's deadline. If the program has
   two-variable forbid caps (limit 1; `precedes`, binary `tables`, hand-written pair caps) and root arc consistency over them
   removes at least one value, an arc-consistent search runs first (MAC: AC-3 over those caps after every assignment, plus
   forward checking on full caps; same random value order and tie-break, same budgets). Programs where nothing is pruned skip

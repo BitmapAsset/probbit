@@ -58,6 +58,14 @@ class PbitWrapper(unittest.TestCase):
         a = pbit.decide(doc, budget_ms=50)
         self.assertEqual(sorted(a["plan"]), sorted(t["id"] for t in doc["tasks"]))
 
+    def test_switches_take_no_value(self):
+        # pretty=True became `--pretty on` (exit 2: unknown argument "on"); a boolean switch is now the bare flag, False omits it
+        doc = pbit.demo(tasks=12, seed=1)
+        a = pbit.decide(doc, pretty=True, summary=True)
+        self.assertEqual(a["summary"], 1); self.assertIn("counts", a); self.assertNotIn("plan", a)
+        b = pbit.decide(doc, pretty=False, summary=False, collective=False)
+        self.assertIn("plan", b); self.assertEqual(a["verdict"], b["verdict"])
+
     def test_deadline(self):
         a = pbit.run(load("denoise-8x12.json"), deadline_ms=500)  # `met` depends on machine load; the contract is the field
         self.assertEqual(a["deadline"]["ms"], 500); self.assertIsInstance(a["deadline"]["met"], bool)

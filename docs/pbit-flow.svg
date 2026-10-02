@@ -20,7 +20,7 @@
 
   <!-- 2. PROCESSOR -->
   <rect x="60" y="240" width="1480" height="500" rx="14" fill="#0c1120" stroke="#5ee7ff" stroke-width="2.5" filter="url(#glow)"/>
-  <text x="84" y="272" fill="#5ee7ff" font-size="15" font-weight="700">2 · THE pbit PROCESSOR  — one static Rust binary, zero dependencies, runs on any Mac / Linux / Windows CPU you download it to</text>
+  <text x="84" y="272" fill="#5ee7ff" font-size="15" font-weight="700">2 · THE pbit PROCESSOR  — one Rust binary, zero dependencies, built for macOS, Linux and Windows on x86_64 and arm64</text>
 
   <!-- decode -->
   <rect x="84" y="292" width="300" height="118" rx="10" fill="#111a2e" stroke="#2b3550" stroke-width="2"/>
@@ -45,7 +45,7 @@
   <rect x="704" y="292" width="360" height="76" rx="10" fill="#111a2e" stroke="#2b3550" stroke-width="2"/>
   <text x="720" y="318" fill="#ffffff" font-size="15" font-weight="700">EXACT UNIT</text>
   <text x="720" y="340" fill="#c3cad9" font-size="13">enumerates every feasible plan · exact odds</text>
-  <text x="720" y="358" fill="#8b95ad" font-size="13">12 tasks × 6 workers: 180,540 plans in ~15 ms</text>
+  <text x="720" y="358" fill="#8b95ad" font-size="13">12 tasks × 6 workers: 180,540 plans in 8-9 ms (M4)</text>
 
   <!-- pbit unit -->
   <rect x="704" y="420" width="360" height="160" rx="10" fill="#141127" stroke="#ff4fd8" stroke-width="2"/>
@@ -53,13 +53,13 @@
   <text x="720" y="470" fill="#c3cad9" font-size="13">4 chains on 4 cores, constraint-preserving Gibbs:</text>
   <text x="720" y="488" fill="#c3cad9" font-size="13">site · swap · exact two-group joint moves</text>
   <text x="720" y="512" fill="#ffffff" font-size="13" font-weight="700">every sample obeys every rule, by construction</text>
-  <text x="720" y="536" fill="#8b95ad" font-size="13">300 tasks: ~36k joint samples in 200 ms</text>
+  <text x="720" y="536" fill="#8b95ad" font-size="13">300 tasks: 23-27k joint samples in 200 ms (M4)</text>
   <text x="720" y="556" fill="#8b95ad" font-size="13">registers = chains · clock = wall-clock budget</text>
   <line x1="1064" y1="500" x2="1130" y2="500" stroke="#ff4fd8" stroke-width="3" marker-end="url(#arrm)"/>
 
   <!-- gate -->
   <rect x="1134" y="420" width="382" height="160" rx="10" fill="#141127" stroke="#ff4fd8" stroke-width="2"/>
-  <text x="1150" y="446" fill="#ff4fd8" font-size="15" font-weight="700">CERTIFICATION GATE  (the fault flag)</text>
+  <text x="1150" y="446" fill="#ff4fd8" font-size="15" font-weight="700">DIAGNOSTICS GATE  (gate/3, the fault flag)</text>
   <text x="1150" y="470" fill="#c3cad9" font-size="13">split R-hat across chains</text>
   <text x="1150" y="488" fill="#c3cad9" font-size="13">error bar per task (dual-batch MCSE, ±0.05)</text>
   <text x="1150" y="506" fill="#c3cad9" font-size="13">frozen-saturated-worker detector</text>
@@ -78,7 +78,7 @@
   <rect x="84" y="608" width="1432" height="112" rx="10" fill="#0a0f1c" stroke="#2b3550" stroke-width="2" stroke-dasharray="6 5"/>
   <text x="100" y="634" fill="#5ee7ff" font-size="15" font-weight="700">3 · BARE METAL SUBSTRATE  (pbit-core)</text>
   <text x="100" y="658" fill="#c3cad9" font-size="13">p-bit kernels on your CPU: 64 probabilistic bits packed per 64-bit word, one shared random number per site · f32 heat-bath kernel</text>
-  <text x="100" y="678" fill="#c3cad9" font-size="13">Philox4x32 counter RNG: reproducible, seedable, stream-splittable → the same seed gives the same decision on any machine</text>
+  <text x="100" y="678" fill="#c3cad9" font-size="13">Philox4x32 counter RNG: reproducible, seedable, stream-splittable → with fixed work (--sweeps) the same seed gives the same decision</text>
   <text x="100" y="700" fill="#8b95ad" font-size="13">future hardware: pbit-ir lowers the same problem to a one-hot p-bit / QUBO topology that a real p-bit chip samples natively (not required today)</text>
   <line x1="884" y1="580" x2="884" y2="604" stroke="#8b95ad" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arr)"/>
   <line x1="1315" y1="580" x2="1315" y2="604" stroke="#8b95ad" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arr)"/>
@@ -89,9 +89,9 @@
   <rect x="60" y="784" width="1480" height="150" rx="12" fill="#0f1524" stroke="#2b3550" stroke-width="2"/>
   <text x="84" y="816" fill="#5ee7ff" font-size="15" font-weight="700">4 · THE DECISION, BACK IN YOUR APP</text>
   <text x="84" y="844" fill="#ffffff" font-size="16">plan  {T001: "human", T002: "codex", …}   →  0 rule violations, always</text>
-  <text x="84" y="870" fill="#ffffff" font-size="16">odds  {T001: {human 0.52, local-gemma 0.48}, …}   →  calibrated per task, checked against exact oracles</text>
+  <text x="84" y="870" fill="#ffffff" font-size="16">odds  {T001: {human 0.52, local-gemma 0.48}, …}   →  Monte-Carlo estimates with an error bar per task, checked against exact oracles</text>
   <text x="84" y="896" fill="#ffffff" font-size="16">released [ … ]   act on these now      escalated [ … ]   hand to a human or a bigger model</text>
   <text x="84" y="922" fill="#8b95ad" font-size="14">gate stats travel with every answer (R-hat, error bound, frozen workers, samples, seed) so the decision is auditable and reproducible</text>
 
-  <text x="1540" y="980" fill="#3a4560" font-size="13" text-anchor="end">quantum-inspired p-bits on any CPU · annealer-class sampling, no chip needed · Apache-2.0</text>
+  <text x="1540" y="980" fill="#3a4560" font-size="13" text-anchor="end">quantum-inspired p-bits on the CPU you have · no chip needed · Apache-2.0</text>
 </svg>

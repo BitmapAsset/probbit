@@ -5,6 +5,18 @@
 
 ![pbit](docs/pbit-hero-1600x900.jpg)
 
+## First five minutes
+
+```sh
+pbit                                         # at a terminal: the spec line of this machine and three commands to try
+pbit demo                                    # 300 agent tasks routed live: a field of p-bits, the gate, the verdict (~5 s)
+pbit demo | pbit decide --summary --pretty   # the same router as one compact JSON answer, plus a boxed summary on stderr
+pbit demo | pbit decide --top > answer.json  # the full answer, with a live monitor while it runs (tier, updates/s, gate)
+claude mcp add pbit -- pbit mcp              # hand the processor to an agent: tools pbit_decide, pbit_run, pbit_stats, pbit_demo
+```
+Visuals go to stderr, only at a terminal; `NO_COLOR`, `--plain` or `PBIT_THEME=plain` turn them off. Piped, every command
+writes exactly one JSON document, the same bytes as 0.2.1 apart from the version and the timings. Install: [below](#install).
+
 `pbit` is a **software processor built from p-bits**: bits that are 1 with a probability you set, coupled so that they
 sample whole configurations together. You give it a *program* (variables, their allowed values, scores, pairwise
 couplings, hard caps) and it returns three things:
@@ -46,12 +58,22 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-- **Prebuilt binaries** for Linux x86_64, macOS (Apple silicon and Intel) and Windows x86_64 are attached to every tagged
-  release on the [Releases page](https://github.com/BitmapAsset/pbit/releases), each with a `.sha256` beside it. Unpack
-  and put `pbit` on your `PATH`.
-- **From source** with stable Rust: `cargo install --git https://github.com/BitmapAsset/pbit pbit-cli` installs the `pbit`
-  binary; or clone and `cargo build --release -p pbit-cli` (it lands in `target/release/pbit`). Nothing is downloaded after
-  the clone: there are no external crates.
+Today, from source with Rust 1.78 or later: `cargo install --git https://github.com/BitmapAsset/pbit pbit-cli` installs the
+`pbit` binary; or clone and `cargo build --release -p pbit-cli` (it lands in `target/release/pbit`). Nothing is downloaded
+after the clone: there are no external crates.
+
+After the first public release (none exists yet; the commands below are tested against a local server, PORTABILITY.md):
+
+| how | command |
+|---|---|
+| Linux, macOS (no sudo) | `curl -fsSL https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.sh \| sh` |
+| Windows PowerShell | `irm https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.ps1 \| iex` |
+| npm | `npm i -g pbit` |
+| crates.io | `cargo install pbit-cli` |
+| by hand | archives for Linux x86_64 (glibc or static musl), Linux arm64 (static), macOS (Apple silicon and Intel) and Windows x86_64 on the [Releases page](https://github.com/BitmapAsset/pbit/releases), each with a `.sha256` |
+
+The installers check the archive's SHA-256 before installing anything; at a terminal, `install.sh` ends with pbit's own
+hero screen.
 
 ## 60-second tour
 
@@ -104,7 +126,11 @@ stats` measures that rate on your machine (a re-run: 2.24e7 / 7.54e7 at 1 / 4 th
 ### The instruction set (`pbit-ir`, JSON v1: [docs/pbit-ir-json.md](docs/pbit-ir-json.md))
 - **Variables**: categorical, each with its allowed values (`allowed`, `forbid`).
 - **Weights**: unary log-weights per value; pairwise couplings (`potts` for "same / differ", `table` for Ising-style couplings).
-- **Hard constraints**: at-most-k caps over any set of (variable, value) pairs; `clamp` forces a value (the what-if).
+- **Hard constraints**, all lowered to caps so every tier runs them: `caps` with `limit` (at most k), `min` (at least k) or
+  both (exactly k) over any set of (variable, value) pairs; `all_different`; `implies` (if x = a then y in a set);
+  `tables` (allowed or forbidden tuples of 1-3 variables); `precedes` (values read as ordered slots: slot(y) >= slot(x) +
+  gap); `linear` (Σ weight x [var = value] <= L: cost budgets, knapsack, bin capacity; [examples/knapsack-20.json](examples/knapsack-20.json));
+  `clamp` forces a value (the what-if); `start` gives chain 0 a warm start.
 - **Instructions**: `decide` (exact tiers, then sampler + gate), `exact`, `sample`; every answer carries marginals.
 - **Front-ends** lower onto it. The assignment router (`pbit decide`) lowers bit-identically: the acceptance test
   `ir_lowering_bit_identical` pins the router engine's gate digests. `pbit run` executes any program.
@@ -200,9 +226,33 @@ Linux behaviour of `--priority` and the CPU telemetry is unmeasured; on Windows 
 ## Use it from anything (the JSON contract)
 
 `pbit decide` reads one problem document on stdin and writes one decision document on stdout (`decide`, `run`, `demo` and `stats`
-write exactly one JSON document on stdout; `pbit ir` writes pbit-ir v0 text, `pbit version` one line, `--help` the usage). Exit code 0 = a plan was
+write exactly one JSON document on stdout; `pbit ir` writes pbit-ir v0 text, `pbit version` one line, `--help` the usage; only a
+`pbit demo` whose stdout and stderr are both a terminal shows the live view instead). Exit code 0 = a plan was
 returned (verdict `exact`, `diagnostics_passed` or `partial`), 3 = `refused` (the whole queue should be escalated; the plan is still
-in the output as a best effort), 1 = `infeasible` (no plan satisfies the rules), 2 = bad input.
+in the output as a best effort) or `declined` (an exact-only mode could not answer), 1 = `infeasible` (no plan satisfies the rules),
+2 = bad input. Agents: `pbit mcp` serves the same commands over the Model Context Protocol ([docs/agents.md](docs/agents.md)).
+
+`--budget-ms` bounds the sampling phase only. A call also parses, tries the exact tiers, runs the gate and polishes the plan,
+so its total is longer: the 300-task `--hard` demo took 206-216 ms in all at `--budget-ms 50` (sampling 53-54 ms, the
+default 50 ms polish, the rest parsing, the exact tiers and the gate; M4, load ~3, N = 3). Every `pbit run` answer lists
+each phase in `phases`, and `pbit run --deadline-ms N` targets the whole call.
+
+`--summary` prints the answer without its per-item tables: the verdict, `counts` (items, released, escalated), the gate,
+the telemetry and the items to look at first: `worst_released` and `worst_escalated` (up to 5 each, largest error bar first;
+on an exact answer the closest odds), each with its plan `value`, that value's probability `p`, its top two odds and its `bar`.
+Same verdict, same exit code (docs/pbit-ir-json.md "Summary").
+
+### Modelling notes
+- **One entity, one variable.** Decisions that belong to one entity and are tied together by `implies` (an action, its tool
+  and its length for each message) freeze single-site moves: no single variable can change without breaking an implication,
+  so the chains cannot move and the gate refuses at every budget (correctly), with a plan that may be far from the best.
+  Make the entity ONE variable whose values are the allowed combinations, each with its combined score. Measured on an
+  external tester's day-planning program (120 variables, 203 caps): refused at `--budget-ms 2000` with plan log-weight 65.37;
+  as 20 product variables: `diagnostics_passed` at `--budget-ms 20`, plan log-weight 93.25 (27.9 nats better).
+- **Plan or odds.** `plan` is one joint plan that obeys every rule at once; `odds` (`marginals` on `pbit run`) are each
+  item's probabilities over all plans. They can disagree: an item's plan value need not be its most likely value, because
+  the plan has to fit every other item (quotas, affinity). Act on the plan when the items must be consistent with each other
+  (assignments under quotas); use the odds to see how sure one item is, or to rank items for a person to review.
 
 Problem:
 ```json
@@ -342,10 +392,10 @@ What it does **not** do, also measured:
   1,000-task queues at 200 ms. On the 16 oracle queues of BENCHMARKS §2.1, 51% of tasks were released (58% on the 0.1.0 gate) and 4 of
   the 9 queues that released nothing were refused needlessly (3 of 8 on 0.1.0; an earlier build measured a whole-answer false-refusal rate of 0.3-0.5 at
   300 tasks).
-- **Constraints the router JSON cannot express today**: cost budgets (Σ cost ≤ B), deadlines and ordering, overflow/deferral
-  (every task must go somewhere), objectives that are not per-item scores plus pairwise same-group bonuses. The general
-  `pbit-ir` format (`pbit run`) expresses unit-time windows and precedence as pair caps (BENCHMARKS §4.3); cost budgets and
-  overflow are still missing.
+- **The router document (`pbit decide`) expresses allowed sets, per-worker quotas, clamps and same-group affinity only.**
+  Cost budgets (`linear`), ordering (`precedes`), `all_different`, implications and tuple tables are in the general `pbit-ir`
+  format (`pbit run`). Missing in both: overflow / deferral as a rule (every task must go somewhere; model it as an extra
+  "nobody" value with its own score), and objectives beyond per-value scores and pairwise terms.
 - **No real traffic yet.** The demo's scores are a seeded stub. Calibration is on synthetic exact-oracle families.
 - **Nothing beyond the CPU's own compute, and no special hardware.** A Metal GPU path was measured and rejected (a
   decision is ~4k sites, too small to feed a GPU). Unmeasured: x86-64, Linux, Windows, CP-SAT, annealing hardware, real
@@ -393,7 +443,7 @@ and §6 "Where it loses". In short:
   faster per puzzle) and tiny inputs (the exact tier is 34-37x faster than sampling at 12 tasks, §6).
 
 ## The hardware hand-off
-`pbit ir` prints a program in a text form that lowers to a binary one-hot QUBO with slack bits, in which the energy of every
+`pbit ir` prints a router document in a text form that lowers to a binary one-hot QUBO with slack bits, in which the energy of every
 feasible plan equals −log w exactly (acceptance test `ir_round_trip_and_lowering_exact`; `examples/hardware_lowering`).
 That is the input a p-bit or annealing chip takes, after minor embedding on real hardware *(unmeasured)*. No hardware has
 been run; embedding cost and hardware speed are unmeasured. The CPU path does not sample the QUBO: on three 34-bit
@@ -416,13 +466,15 @@ or Windows.
   a flag: safe, but it does not lower false refusals, because the worst item's error bar comes from slow mixing, not
   sampling noise. Next is an exact k-group block move that unfreezes strongly coupled, saturated instances, and a gate
   statistic that is not set by the slowest item.
-- Cost budgets and overflow (an explicit "nobody" worker) in the model (unit-time windows and precedence exist in `pbit-ir`).
-- Per-item error bars (σ, R̂) in the JSON output, so integrators can set their own release thresholds.
+- Overflow (an explicit "nobody" worker) in the router document (cost budgets, windows and precedence exist in `pbit-ir`).
+- Per-item error bars (σ, R̂) for every item in the JSON output, so integrators can set their own release thresholds
+  (`--summary` reports the bar of the 5 worst released and escalated items).
 - The sampling phase at 100,000 chains overruns `--budget-ms` (269-318 ms for 200 in 0.2.0 at loads 3.5-4.2, 354-448 before: the
   chains' builds alone exceed it, and no chain sweeps: `sweeps` is 0;
   the gate takes 84-100 ms there; BENCHMARKS §6). `--deadline-ms` (`pbit run`) bounds the whole call.
 - A CP-SAT baseline (ILP baselines: router BENCHMARKS §2.2; scheduling §4.3).
-- Native Python bindings and an MCP server (today: `python/pbit.py`, a stdlib-only subprocess wrapper with typed errors; `python/examples/`).
+- Native Python bindings (today: `python/pbit.py`, a stdlib-only subprocess wrapper with typed errors, `python/examples/`, and
+  the MCP server `pbit mcp`, docs/agents.md).
 - Real routing logs: the scorer side has never been validated on real traffic.
 - Hardware backend through `pbit-ir` when a p-bit fabric is available.
 

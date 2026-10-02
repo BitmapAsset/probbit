@@ -3,6 +3,64 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.0 - 2026-10-02
+
+### Added
+- **Hero screen.** At a terminal, `pbit` and `pbit --help` print a 9-line screen and exit 0: the wordmark, the status line
+  `PROCESSOR ONLINE · 0.3.0 · exact → sample → gate`, a spec line (os/arch, logical CPUs, target features and the site
+  updates/s of a 30 ms self-test, cached for a day in `$XDG_CACHE_HOME/pbit/stats.json` or `~/.cache/pbit/stats.json`), three
+  commands to try and the usage. Piped, `pbit --help` prints the usage as before (now listing the new flags and `pbit mcp`)
+  and a bare `pbit` still exits 2.
+- **`pbit demo --live`**, the default when stdout and stderr are both terminals: the router story inside the binary (no
+  cargo needed). The queue and its rules, what a per-task argmax router breaks, the exact tiers and what they decline, then
+  a field of p-bits (one per task and worker, half-block cells sized to the terminal) drawn from the current states of four
+  real chains, the gate re-run every 200 sweeps on the samples so far, the ladder refused → partial → passed, a 3-line verdict
+  stamp, and the command that gives the final look as JSON: the chains are recorded exactly as `pbit decide --sweeps 3200
+  --polish-ms 0` records them (unit test `live_stepper_matches_sample_on`). Deterministic under `--seed` (fixed work per
+  frame); 20 frames per second; `--tasks` defaults to 300 in this mode; stdout, when not a terminal, gets the problem
+  document. The renderer took 2.0-2.4% of the process CPU on an Apple M4.
+- **`--top`** (`decide`, `run`): a monitor on stderr redrawn at 10 Hz (tier, sweeps against the budget, site updates/s, CPU,
+  peak RSS, the gate once it ran), erased at exit. Only with a terminal on stderr; `--top --progress` is a flag error.
+- **`--summary`** (`decide`, `run`): the answer without its per-item tables: verdict, `counts`, the gate, telemetry and the
+  items to look at first (`worst_released`, `worst_escalated`: up to 5 each, with plan value, its probability, the top two
+  odds, the release reason and the error bar). Same verdict and exit code. With `--pretty` and a terminal on stderr, a boxed
+  summary there too. docs/pbit-ir-json.md "Summary".
+- **`pbit mcp`**: a Model Context Protocol server on stdio (hand-written JSON-RPC 2.0, no crates). Checked against the MCP
+  specification revision 2026-07-28: requests with per-request metadata are served statelessly (`server/discover`,
+  `tools/list`, `tools/call`, `ping`), and `initialize` serves the handshake revisions 2025-11-25 back to 2024-11-05. Tools
+  `pbit_decide`, `pbit_run`, `pbit_stats`, `pbit_demo` take the commands' own documents (plus a `flags` object) and return
+  the commands' own JSON. Tested by a dependency-free Python client (`python/test_mcp.py`); docs/agents.md "MCP: one line per
+  agent" (Claude Code, Codex CLI, Cursor, mcporter, LangChain).
+- `--plain` on every command and `PBIT_THEME=neon|plain`; `NO_COLOR` is honoured. One palette (`theme.rs`: cyan #00F0FF,
+  magenta #FF2A6D, yellow #F9F002 in 256 colours, with a 16-colour fallback) for the hero, `--top`, `--live` and the summary
+  box; at a terminal, `install.sh` ends with the hero screen.
+- `pbit_decide::Chain::set_group_pairs`, for callers that step router chains themselves.
+
+### Changed
+- `pbit decide --mode exact` that cannot answer (stopped by `--exact-ms`, or the feasible set too large) prints a `declined`
+  document and exits 3, as `pbit run --op exact` does. It printed a line on stderr and exited 2 with an empty stdout.
+- One leading UTF-8 byte-order mark on stdin is skipped. Windows PowerShell 5.1 adds one to every pipe, so `pbit demo | pbit
+  decide` exited 2 there (`bad JSON: unexpected character`).
+- Python wrapper: a boolean switch passes the bare flag (`pretty=True` -> `--pretty`, `summary=True` -> `--summary`; False
+  leaves it out). It became `--pretty on`, exit 2. `collective`, `cluster` and `cycles` still map to `on` / `off`.
+- Crates: the path dependencies carry `version = "0.3.0"` and the workspace declares `rust-version = "1.78"`; `cargo
+  publish --dry-run -p pbit-core -p pbit-ir -p pbit-decide -p pbit-cli` passes (nothing is published). The npm wrapper
+  (`npm/package.json`), the installers' examples and the benchmark workflow point at v0.3.0.
+- release.yml: static musl archives for x86_64 and aarch64 Linux, the Windows binary links the C runtime statically (no
+  VCRUNTIME140.dll), and the macOS Intel build is smoke-tested under Rosetta 2. CI builds these four targets on every push
+  and pull request (no tag, no release).
+- `run_deadline_ms_bounds_the_whole_call` allows 1,800 ms when `CI` is set (a 600 ms deadline took 990 ms on the macOS
+  Intel runner; the deadline is a target, not a hard bound on a slow CPU).
+- Documentation: "First five minutes" and an install table in the README; the instruction set lists every construct
+  (`min`, `all_different`, `implies`, `tables`, `precedes`, `linear`; cost budgets are expressible in `pbit run`
+  programs); budget semantics; modelling notes (one variable per entity instead of `implies` chains; plan or odds);
+  docs/pbit-ir-json.md without internal round tags; USE-CASES says `pbit ir` reads router documents only; the flow figure's
+  source drops retired wording.
+
+Every document of `decide`, `run`, `stats`, `demo` and `ir` is unchanged: stdout is byte-identical to 0.2.1 apart from the
+version and the timings (golden digests in `stdout_matches_the_0_2_1_goldens`; the engine's own golden digests are
+unchanged).
+
 ## 0.2.1 - 2026-10-01
 
 ### Fixed (found by the 2026-10-01 independent review)
