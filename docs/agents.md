@@ -4,7 +4,7 @@
 what kind of answer it is. Anything that can start a process can use it: a shell, Python, Node, PowerShell, a CI job, or
 an agent harness with a shell tool. No server, no bindings, no network. The document formats are in the README
 ("Use it from anything": the router document of `pbit decide`) and in [pbit-ir-json.md](pbit-ir-json.md) (programs for
-`pbit run`).
+`pbit run`, and the Decision API request of `pbit evaluate`).
 
 | exit | meaning | what to do |
 |---|---|---|
@@ -80,7 +80,7 @@ mark with `[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)` a
 ## MCP: one line per agent
 
 `pbit mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (JSON-RPC 2.0, one message per
-line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its four tools take the
+line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its five tools take the
 commands' own documents and return the commands' own JSON, byte for byte:
 
 | tool | arguments | returns |
@@ -89,6 +89,7 @@ commands' own documents and return the commands' own JSON, byte for byte:
 | `pbit_run` | a pbit-ir program ([pbit-ir.schema.json](pbit-ir.schema.json)) plus optional `flags` | `pbit run` |
 | `pbit_stats` | optional `sweeps`, `chains`, `threads` | `pbit stats` |
 | `pbit_demo` | optional `tasks`, `seed`, `hard` | `pbit demo` (a router document) |
+| `pbit_evaluate` | a System One request plus the optional `pbit` block ([pbit-ir-json.md](pbit-ir-json.md#decision-api-pbit-evaluate)) plus optional `flags` | `pbit evaluate` |
 
 `flags` are the command's flags without the dashes: `{"budget_ms": 200, "seed": 3, "summary": true}`; `summary: true`
 returns the compact answer (README, "First five minutes"). `infeasible` and `refused` / `declined` are answers; bad input
@@ -101,13 +102,67 @@ is served by the revision negotiated there. Tested by `python3 python/test_mcp.p
 
 | agent | one line | checked |
 |---|---|---|
-| Claude Code | `claude mcp add pbit -- pbit mcp` | a real call on 2026-10-02 (Claude Code 2.1.284, which opened with `initialize` 2025-11-25): `pbit_demo` then `pbit_decide` with `summary`, 12 and 29 ms |
+| Claude Code | `claude mcp add pbit -- pbit mcp` | real calls on 2026-10-02 (Claude Code 2.1.284, which opened with `initialize` 2025-11-25): `pbit_demo` then `pbit_decide` with `summary`, 12 and 29 ms; `pbit_evaluate` on the 12-question example with `summary` (found through its tool search): `exact`, the 5 moved answers reported back, 3.3 ms inside the answer |
 | Codex CLI | `codex mcp add pbit -- pbit mcp` (writes `[mcp_servers.pbit]` with `command = "pbit"`, `args = ["mcp"]` to `~/.codex/config.toml`) | the entry it writes (codex-cli 0.141.0); no model call |
 | Cursor | `.cursor/mcp.json`: `{"mcpServers": {"pbit": {"command": "pbit", "args": ["mcp"]}}}` | not run here |
 | mcporter (and harnesses that read its config) | `config/mcporter.json`: `{"mcpServers": {"pbit": {"command": "pbit", "args": ["mcp"]}}}`, then `mcporter call pbit.pbit_demo tasks=3` | `mcporter list pbit` and that call (mcporter 0.7.3) |
 | LangChain | a tool around [python/pbit.py](../python/pbit.py): `@tool def route(doc: dict) -> dict: return pbit.decide(doc, summary=True)` | the wrapper's own tests; LangChain itself not run here |
 
 Use the full path of the binary (`pbit.exe` on Windows) where `pbit` is not on the agent's `PATH`.
+
+## After a judge: `pbit evaluate`
+
+A decision model (a judge) answers each question on its own. `pbit evaluate` takes the judge's request, the judge's
+probabilities and your rules over question ids, and returns the most likely answer set that obeys every rule in the judge's
+response shape, with odds and the gate's verdict; without rules it returns the judge's own answers. Format and invariants:
+[pbit-ir-json.md, "Decision API"](pbit-ir-json.md#decision-api-pbit-evaluate). The example request,
+[examples/evaluate/support-12.json](../examples/evaluate/support-12.json), has 12 questions, the judge's answers and 12 rules.
+Measured on an Apple M4 (load 2.0-3.6).
+
+Shell:
+
+```sh
+pbit evaluate --summary --pretty < examples/evaluate/support-12.json   # exact, 5 of 12 answers moved, 0 violations; 1.24 ms (median of 7)
+pbit evaluate --program < examples/evaluate/support-12.json | pbit run # the compiled pbit-ir program: the same answer
+```
+
+Python (stdlib only; the judge is a callable or a System One URL, called with `urllib`; the key comes from the environment
+variable you name):
+
+```python
+import pbit
+answer = pbit.evaluate(request)          # the request carries the judge's answers (pbit.judge or pbit.weights)
+# or let pbit ask the judge first (the request then carries no answers, only its pbit.rules):
+answer = pbit.evaluate(request, judge="http://127.0.0.1:8080", auth_env="JUDGE_KEY")   # POST <url>/v1/systemone
+answer = pbit.evaluate(request, judge=lambda ask: {"urgent": 0.41, "team": {"billing": 0.48, "technical": 0.44}})
+moved = [q for q, a in answer["answers"].items() if a["pbit"]["changed"]]
+```
+
+A URL without a path gets TypeSafe's `/v1/systemone`; a URL with a path is used as is (Workers AI:
+`https://api.cloudflare.com/client/v4/accounts/<account id>/ai/run/@cf/cloudflare/clef`, whose REST envelope is unwrapped).
+That path is documented from the vendors' published schemas and tested against a local mock (`python/mock_judge.py`); it was not
+exercised against a vendor. Against the mock: the judge received the request untouched (no `pbit` block), the round trip took
+7.0 ms (Python 3.9.6). Judge failures raise `pbit.PbitJudgeError`.
+
+MCP: tool `pbit_evaluate` takes the same request with optional `flags` (`{"summary": true}`, `{"program": true}`); over pipes
+8.0 ms per call (`python/test_mcp.py` checks it against the CLI).
+
+Browser: `sh playground/build.sh` (needs `rustup target add wasm32-unknown-unknown`), then open `playground/index.html` from
+disk: no server, no framework. The page runs the 300-task router demo and the evaluate example with an editable JSON box,
+then shows the verdict, the odds table and the timing. The module (`pbit-wasm`, 830,233 bytes) runs the CLI's own code
+without threads; at fixed work its documents equal the CLI's at `--threads 4` (test `pbit-wasm/tests/no_threads.rs`). The
+300-task demo at `--sweeps 3200 --polish-ms 0`: 531.4 ms in headless Chrome against 346.2 / 132.7 ms native at
+`--threads 1` / `4` (medians of 5); the evaluate example 4.6 ms. JavaScript, as the page does it:
+
+```js
+const { instance } = await WebAssembly.instantiate(bytes, { pbit: { now_ms: () => performance.now() } });
+const call = (op, text) => { const x = instance.exports, input = new TextEncoder().encode(text), p = x.pbit_alloc(input.length);
+  new Uint8Array(x.memory.buffer, p, input.length).set(input); const n = x.pbit_call(op, p, input.length);   // 0 decide, 1 run, 2 evaluate, 3 demo
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(x.memory.buffer, x.pbit_out_ptr(), n))); };
+const answer = call(2, JSON.stringify(request));   // flags go in a "flags" object, as in pbit mcp
+```
+
+Agent runtimes with a decision-model slot (see the provider package).
 
 ## For agents with a shell tool
 

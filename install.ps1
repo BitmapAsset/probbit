@@ -2,10 +2,10 @@
 # and installs pbit.exe. No administrator rights needed.
 #
 #   irm https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.ps1 | iex
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.ps1))) -Version v0.3.0
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.ps1))) -Version v0.4.0
 #
 # Parameters (each also read from the environment variable named after it):
-#   -Version       PBIT_VERSION        release tag, e.g. v0.3.0 (default: the latest release)
+#   -Version       PBIT_VERSION        release tag, e.g. v0.4.0 (default: the latest release)
 #   -InstallDir    PBIT_INSTALL_DIR    where pbit.exe goes (default: $HOME\.local\bin)
 #   -DownloadBase  PBIT_DOWNLOAD_BASE  the archive is fetched from <DownloadBase>/<tag>/pbit-<tag>-<target>.zip
 #                                      (default: https://github.com/BitmapAsset/pbit/releases/download); needs -Version
@@ -37,7 +37,7 @@ $customBase = [bool]$DownloadBase
 if (-not $DownloadBase) { $DownloadBase = "https://github.com/$Repo/releases/download" }
 $DownloadBase = $DownloadBase.TrimEnd('/')
 if (-not $Version) {
-    if ($customBase) { throw 'pbit install: set -Version (or PBIT_VERSION), e.g. v0.3.0, together with -DownloadBase' }
+    if ($customBase) { throw 'pbit install: set -Version (or PBIT_VERSION), e.g. v0.4.0, together with -DownloadBase' }
     $Version = (Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$Repo/releases/latest").tag_name
     if (-not $Version) { throw 'pbit install: no published release found (set -Version)' }
 }

@@ -2,10 +2,10 @@
 # pbit installer: fetches a prebuilt release archive, checks its SHA-256 and installs the `pbit` binary. Never uses sudo.
 #
 #   curl -fsSL https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.sh | PBIT_VERSION=v0.3.0 sh
+#   curl -fsSL https://raw.githubusercontent.com/BitmapAsset/pbit/main/install.sh | PBIT_VERSION=v0.4.0 sh
 #
 # Environment (all optional):
-#   PBIT_VERSION        release tag, e.g. v0.3.0 (default: the latest release)
+#   PBIT_VERSION        release tag, e.g. v0.4.0 (default: the latest release)
 #   PBIT_INSTALL_DIR    where `pbit` goes (default: /usr/local/bin if you can write there, else ~/.local/bin)
 #   PBIT_DOWNLOAD_BASE  the archive is fetched from $PBIT_DOWNLOAD_BASE/<tag>/pbit-<tag>-<target>.tar.gz
 #                       (default: https://github.com/BitmapAsset/pbit/releases/download); needs PBIT_VERSION
@@ -86,7 +86,7 @@ main() {
 
     version="${PBIT_VERSION:-}"
     if [ -z "$version" ]; then
-        [ -z "${PBIT_DOWNLOAD_BASE:-}" ] || die "set PBIT_VERSION (e.g. v0.3.0) together with PBIT_DOWNLOAD_BASE"
+        [ -z "${PBIT_DOWNLOAD_BASE:-}" ] || die "set PBIT_VERSION (e.g. v0.4.0) together with PBIT_DOWNLOAD_BASE"
         version=$(latest_tag) || exit 1
         [ -n "$version" ] || die "no published release found (set PBIT_VERSION)"
     fi

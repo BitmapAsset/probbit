@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.4.0 - unreleased
+
+### Added
+- **`pbit evaluate`**, the decision-API adapter: a System One request (`model`, `state`, `questions` keyed by id, types `noul`,
+  `choice` and `score`, `images`; the shape published by TypeSafe's OpenAPI 0.2.0 and the Workers AI `clef` schemas) plus an
+  optional `pbit` block (`judge`: the judge's System One response; or `weights` / `logw` per question; `floor`; `rules`: the pbit-ir
+  constructs over question ids). It compiles to a pbit-ir program (one variable per question, log-weight = ln max(p, 1e-6)), runs
+  it as `pbit run` does with every `pbit run` flag, and answers in the judge's response shape (`model`, `answers`, `usage`) plus
+  the `pbit run` document; each answer carries a `pbit` object (`value`, `p`, `judge`, `changed`, `released`). `--program` prints
+  the compiled program. Same exit codes, error objects, `--summary`, `--pretty` and terminal rules as `pbit run`.
+  docs/pbit-ir-json.md "Decision API"; tests in `pbit-cli/tests/evaluate.rs`.
+- **MCP tool `pbit_evaluate`** in `pbit mcp` (the same contract; its input schema carries the pbit-ir rule definitions).
+- **Python `pbit.evaluate(request, judge=None)`**: the judge is a callable (returning a System One response or per-question
+  probabilities) or the URL of a System-One-compatible server, called with `urllib` (a key from an environment variable the
+  caller names; the Workers AI REST envelope is unwrapped); `PbitJudgeError` for judge failures. `python/mock_judge.py`: a stdlib
+  System One server for tests and demos.
+- **Single-threaded engine path and an injected clock** (`pbit_core::rt`): the engine's `Instant` (std's where it exists; on
+  wasm32-unknown-unknown a millisecond clock the embedder installs) and a per-thread switch that runs every parallel section of
+  the command paths (chains, gate passes, polish, the exact tiers' deep-stack thread) in order on the calling thread. At fixed
+  work the answers equal those on any number of threads.
+- **`pbit-wasm`** (not published; no dependencies): `decide`, `run`, `evaluate` and `demo` as JSON-in / JSON-out functions for
+  wasm32-unknown-unknown over a small C ABI, running the CLI's own front-end code without threads (830,233-byte module).
+  **`playground/index.html`**: one static page, no server or framework, that runs the 300-task demo and `evaluate` with an
+  editable JSON box; `playground/build.sh` builds the module; CI job `wasm` builds it and runs it under Node.
+
+### Changed
+- `pbit decide`'s pipeline moved from `main.rs` to `router.rs` (the browser build shares it); output unchanged (golden tests).
+
 ## 0.3.0 - 2026-10-02
 
 ### Added

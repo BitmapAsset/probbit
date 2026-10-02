@@ -397,6 +397,83 @@ The same answer without its per-item tables, for agents and dashboards: every fi
 Verdict and exit code are the full document's. With `--pretty` and a terminal on stderr a boxed summary is drawn there
 too (not with `NO_COLOR`, `--plain` or `PBIT_THEME=plain`). Test `summary_is_the_answer_without_the_tables`.
 
+## Decision API (`pbit evaluate`)
+
+Decision models (judges: a hosted System One API, a local server, a Workers AI model) answer each question about a piece of
+content on its own: text in, a probability per option out, no rules, no joint answer, no refusal. `pbit evaluate` is the layer
+after any of them: it reads the judge's request plus the judge's probabilities and the workflow's rules, and returns the most
+likely answer set that obeys every rule, in the judge's response shape, with odds per option and the gate's verdict.
+
+**Request** = a System One request plus one optional `pbit` block. The System One fields were checked against the published
+schemas on 2026-10-02: TypeSafe's OpenAPI 0.2.0 (`https://api.typesafe.ai/openapi.json`, `POST /v1/systemone`) and the Workers AI
+input / output schemas of `@cf/cloudflare/clef` and `clef-flash` (`https://developers.cloudflare.com/workers-ai/models/clef/`).
+Both agree:
+
+| field | type | pbit |
+|---|---|---|
+| `model` | string | echoed when `pbit.judge` has no `model` (else the judge's, else `"pbit"`) |
+| `state` | string, object or array | accepted, never read |
+| `images` | array (a Workers AI extension) | accepted, never read |
+| `questions` | object: question id -> question (at least one) | one pbit variable per question |
+| `questions.<id>.type` | `noul` (yes / no), `choice`, `score` | anything else: exit 2, code `value` |
+| `questions.<id>.instructions` | any JSON | accepted, never read |
+| `questions.<id>.criteria` | `choice`: object option -> description; `score`: array of level descriptions, lowest first; `noul`: optional object with `true` / `false` | the options: `choice` the keys in order, `score` the levels `"0"` .. `"L-1"`, `noul` `"false"`, `"true"` |
+
+`pbit` (all optional; strict like every pbit document): `judge` = the judge's System One response, of which only `answers`
+(`type`, `noul` = P(yes), `probabilities` keyed by option or level), `model` and `usage` are read; `weights` = per question id
+a probability (`noul`: P(true)) or probabilities keyed by option, as a judge returns them; `logw` = per question id natural-log
+weights keyed by option (a missing option 0); `floor` = the probability floor (default 1e-6, 0 < floor <= 1); `rules` = the
+pbit-ir constructs over question ids and option names: `caps`, `implies`, `tables`, `precedes`, `linear`, `all_different` and the
+soft `pairs`, exactly as in a program. One weight source per question (a second is exit 2); a question with none has uniform
+weights.
+
+**Compilation** (no new engine code): one variable per question, its options as its allowed values, log-weight = ln max(p,
+floor): p = 0 becomes ln 1e-6 = -13.815511, so a rule can still force an answer the judge ruled out. The value alphabet lists the
+score levels first in order (`precedes` and `linear` read values as ordered slots), then `false`, `true`, then the choice options
+in order of first appearance; value names are shared, so a cap on `"true"` without `vars` counts every yes / no question. The
+program runs exactly as `pbit run` runs it, with every `pbit run` flag; `--program` prints it instead (`pbit evaluate --program |
+pbit run` gives the same document minus `model`, `answers` and `usage`: test `the_program_round_trips_through_run`, exact and
+sampled, exits 0 and 3).
+
+**Response** = `engine`, `model`, `answers` (keyed by question id, in request order), `usage` (the judge's, else zeros), then
+every field of the `pbit run` document (`op`, `program`, `compiled`, `verdict`, `tier`, `plan`, `plan_logw`, `violations`,
+`marginals`, `released`, `escalated`, the gate, `telemetry`, `phases`). Each answer has the judge's shape filled from the joint
+answer: `noul` = P(true) under the rules; `choice` = the joint answer's option, `confidence` = its probability, `probabilities`
+per option; `score` = the expected level under the rules, `confidence` = the joint level's probability, `legend`, `probabilities`
+per level. Plus `pbit`: `value` (the joint answer's option), `p` (its probability), `judge` (the judge's own answer: its most
+likely option; on an exact tie the tied option the plan holds, so a tie is no change; null without weights), `changed` and
+`released`. `confidence` has no published vendor formula; here it is pbit's probability of the returned option. The joint answer
+is the most likely record, so an option can differ from its question's most likely option under the rules (the 12-question
+example: `sla` is `24h` with probability 0.363 while `4h` has 0.604, because the record with `urgent` = false leaves `sla` free;
+"Modelling" below). No `answers` when there is no plan (`infeasible`, `declined`, a refusal before sampling).
+
+**Exit codes and errors** as `pbit run`: 0 an answer, 1 `infeasible` (the rules admit no record), 2 bad input (one error object;
+paths inside the request, e.g. `pbit.rules.implies[0].then.var`, `questions.a.type`) or a bad flag (stderr), 3 `refused` /
+`declined` (every answer present with `released: false`, all in `escalated`).
+
+**Invariants** (pbit-cli/tests/evaluate.rs):
+- no rules = the judge (`without_rules_the_answer_is_the_judge_argmax_with_the_same_probabilities`): 150 random requests of 1-12
+  questions, every answer = the judge's argmax, `changed` false, `exact`, and the probabilities equal the judge's to print
+  precision (largest gap 1.1e-16; probabilities with 4 decimals that sum to 1). A judge's p = 0 prints as 0.000001 (the floor)
+  and the other options shrink by at most 1e-6 per such option: (0.7, 0.3, 0) prints as (0.699999, 0.3, 0.000001).
+- with rules, answers move only where the judge's record breaks a rule (`with_rules_only_broken_components_move`): 300 random
+  requests (3-12 questions, 1-4 rules each: implies, forbidden pairs, all_different), 235 answered: in every rule-connected group
+  of questions whose judge record obeys its rules nothing moved (120 groups); in every group where it broke one at least one
+  answer moved and the group's answer is the most likely assignment that obeys its rules (191 groups, each checked by brute
+  force); nothing moved outside them; `violations` 0; `changed` marks exactly the moved answers.
+- the refusal (`a_refusal_keeps_the_exit_code_and_releases_nothing`): 40 questions under a tight cap at `--op sample --sweeps 30`:
+  `refused`, exit 3, every answer present and unreleased; no plan at all (the rules admit none): `infeasible`, exit 1, no `answers`.
+- bad input (`bad_requests_are_one_error_object_located_in_the_request`): 16 malformed requests, each exit 2 with one error object
+  at the right path; a bad flag prints a stderr line only.
+- the vendor shape (`answers_have_the_vendor_shape`) and the weight sources (`weights_judge_and_logw_are_the_same_program`: the
+  judge's answers, `weights` and `logw` compile to the same program).
+
+Measured (Apple M4, load 2.1, medians of 7, `examples/evaluate/support-12.json`: 12 questions, 10 implications, a forbidden pair
+and a linear budget): `exact` (enumeration), 5 of 12 answers moved, 0 violations, 1.24 ms inside the answer, 3.4 ms for the whole
+process; without its rules 4.62 / 6.6 ms (the joint space of 248,832 records is enumerated whole); `--op sample --sweeps 2000`:
+`diagnostics_passed`, 2.62 / 5.5 ms; at `--sweeps 400` the gate refuses (1,440 samples, bound 0.071 > 0.05). MCP: tool
+`pbit_evaluate` (docs/agents.md). Python: `pbit.evaluate(request, judge=...)` with a callable or a System One URL (python/pbit.py).
+
 ## Visuals and agents
 
 Everything visual goes to stderr, only when stderr is a terminal, never with `NO_COLOR` (non-empty), `--plain` or
@@ -407,8 +484,9 @@ stdout and stderr are both terminals) tells the router story with a live field d
 exits 2). `--top` with `--progress` is a flag error (both write stderr). Test `a_terminal_on_stderr_never_changes_stdout`
 runs every command with stderr on a pseudo-terminal and compares stdout with a piped run.
 
-`pbit mcp` serves `pbit decide`, `pbit run`, `pbit stats` and `pbit demo` as Model Context Protocol tools on stdio, with
-this document's schema (plus a `flags` object) as `pbit_run`'s input; see docs/agents.md.
+`pbit mcp` serves `pbit decide`, `pbit run`, `pbit stats`, `pbit demo` and `pbit evaluate` as Model Context Protocol tools on
+stdio, with this document's schema (plus a `flags` object) as `pbit_run`'s input and the Decision API request (whose `rules` take
+this document's rule definitions) as `pbit_evaluate`'s; see docs/agents.md.
 
 ## Modelling
 

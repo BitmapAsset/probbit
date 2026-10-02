@@ -19,6 +19,7 @@ Speed and memory per platform: [BENCHMARK-MATRIX.md](BENCHMARK-MATRIX.md). Workf
 | `aarch64-unknown-linux-musl` | `ubuntu-latest`, linked with `gcc-aarch64-linux-gnu` | not run | exit 0 under `qemu-aarch64-static` | none: `statically linked` | 1.48 MB |
 | `x86_64-pc-windows-msvc` | `windows-latest` (Server 2025) | pass: 127, 1 ignored (run 2, `--no-fail-fast`); run 1: 1 failure, a timing bound (Findings 4) | exit 0 in Git Bash and PowerShell 7.6; Windows PowerShell 5.1 adds a byte-order mark to the pipe (Findings 1): pipe through `cmd` | `KERNEL32`, `ntdll`, `bcryptprimitives`, **`VCRUNTIME140`** and the UCRT (`api-ms-win-crt-*`) | 0.97 MB |
 | `wasm32-wasip1` | `ubuntu-latest` | n/a | not built or run | `cargo check -p pbit-ir -p pbit-decide`: pass | n/a |
+| `wasm32-unknown-unknown` (0.4.0) | local M4; CI job `wasm` (`ubuntu-latest`) | `pbit-wasm` tests run natively | 300-task demo `diagnostics_passed` in Chrome and Node (`playground/check.mjs`) | the page's `pbit.now_ms` import only | 830,233 bytes (`pbit-wasm`) |
 
 Not reached tonight: Linux x86_64 on WSL2 (a Windows desktop with an RTX 4070) and a Linux VirtualBox VM (CPU only):
 pending, both machines offline. No Linux aarch64 machine was run natively (only `qemu-aarch64-static`), and no large or
@@ -97,12 +98,18 @@ and examples were not built on these toolchains. The runners used 1.99.0, the lo
 
 ## WebAssembly
 
-`cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide` passes (exit 0, no warnings shown, 0.69 s). A check does
-not run anything. Both crates use `std::thread` (the chains and the gate's worker pool) and `std::time::Instant` (budgets
-and deadlines): on `wasm32-wasip1` a thread spawn fails at run time, and on `wasm32-unknown-unknown` (a browser)
-`Instant::now()` panics. A playground needs a single-threaded path and a clock passed in. Inferred from the source, not
-run; nothing was changed.
+`cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide` passes (exit 0, no warnings shown, 0.69 s; this run predates
+0.4.0). Both crates use `std::thread` (the chains and the gate's worker pool) and `std::time::Instant` (budgets and deadlines):
+on `wasm32-wasip1` a thread spawn fails at run time, and on `wasm32-unknown-unknown` (a browser) `Instant::now()` panics.
 
+0.4.0 adds both missing pieces (`pbit_core::rt`): a per-thread switch that runs every parallel section of the command paths in
+order on the calling thread, and the engine's `Instant`, which is std's natively and on `wasm32-unknown-unknown` reads a clock
+the embedder installs (`performance.now()` in a page). `pbit-wasm` builds for `wasm32-unknown-unknown` (`playground/build.sh`;
+830,233 bytes, release, symbol names stripped, an 8 MiB stack: `.cargo/config.toml`) and runs in Chrome and Node. Measured on an
+Apple M4 (medians of 5, load 3.4-3.6): the 300-task demo at `--sweeps 3200 --polish-ms 0` took 531.4 ms in headless Chrome and
+533.3 ms in Node 26, against 346.2 ms native at `--threads 1` and 132.7 ms at `--threads 4`; the documents equal the native ones
+(timings and `telemetry.threads` aside; `process_cpu_ms`, `peak_rss_mb` and `nice` are null there, as on Windows). Not run:
+`wasm32-wasip1`, other browsers, other machines.
 ## Installers and packages
 
 No release exists yet, so every installer was tested against a local server that serves an archive packed the way

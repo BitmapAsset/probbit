@@ -12,7 +12,8 @@ pbit                                         # at a terminal: the spec line of t
 pbit demo                                    # 300 agent tasks routed live: a field of p-bits, the gate, the verdict (~5 s)
 pbit demo | pbit decide --summary --pretty   # the same router as one compact JSON answer, plus a boxed summary on stderr
 pbit demo | pbit decide --top > answer.json  # the full answer, with a live monitor while it runs (tier, updates/s, gate)
-claude mcp add pbit -- pbit mcp              # hand the processor to an agent: tools pbit_decide, pbit_run, pbit_stats, pbit_demo
+pbit evaluate --summary --pretty < examples/evaluate/support-12.json   # after a decision model: its answers + your rules
+claude mcp add pbit -- pbit mcp              # hand the processor to an agent: pbit_decide, pbit_run, pbit_evaluate, ...
 ```
 Visuals go to stderr, only at a terminal; `NO_COLOR`, `--plain` or `PBIT_THEME=plain` turn them off. Piped, every command
 writes exactly one JSON document, the same bytes as 0.2.1 apart from the version and the timings. Install: [below](#install).
@@ -204,7 +205,7 @@ What to use it for, and what not to promise: [USE-CASES.md](USE-CASES.md).
 
 ## Controls and monitoring
 
-Every control works on `pbit decide` and `pbit run`, from a flag; chains, threads, CPU limit, memory limit and priority
+Every control works on `pbit decide` and `pbit run` (and `pbit evaluate`, which takes every `pbit run` flag), from a flag; chains, threads, CPU limit, memory limit and priority
 also from a `PBIT_*` environment variable or `pbit.json` (flag > environment > file > default). Measured effects
 (BENCHMARKS §5):
 
@@ -225,8 +226,8 @@ Linux behaviour of `--priority` and the CPU telemetry is unmeasured; on Windows 
 
 ## Use it from anything (the JSON contract)
 
-`pbit decide` reads one problem document on stdin and writes one decision document on stdout (`decide`, `run`, `demo` and `stats`
-write exactly one JSON document on stdout; `pbit ir` writes pbit-ir v0 text, `pbit version` one line, `--help` the usage; only a
+`pbit decide` reads one problem document on stdin and writes one decision document on stdout (`decide`, `run`, `evaluate`, `demo`
+and `stats` write exactly one JSON document on stdout; `pbit ir` writes pbit-ir v0 text, `pbit version` one line, `--help` the usage; only a
 `pbit demo` whose stdout and stderr are both a terminal shows the live view instead). Exit code 0 = a plan was
 returned (verdict `exact`, `diagnostics_passed` or `partial`), 3 = `refused` (the whole queue should be escalated; the plan is still
 in the output as a best effort) or `declined` (an exact-only mode could not answer), 1 = `infeasible` (no plan satisfies the rules),
@@ -326,6 +327,29 @@ decision = json.loads(r.stdout)          # r.returncode: 0 plan, 3 refused, 1 in
 Build the binary once with `cargo build --release -p pbit-cli` (it lands in `target/release/pbit`). There are no native Python
 bindings and no MCP server yet; every script in `bench/` is an example of the subprocess pattern. `pbit <command> --help`
 lists every flag of a command with its default, and the exit codes.
+
+## After any judge: `pbit evaluate`
+
+Decision models (TypeSafe's Jev, Cloudflare's Clef and Clef-flash, local System One servers) are judges: content in, a
+probability per option for each question out, each question on its own, no rules, no joint answer, no refusal. `pbit evaluate`
+is the layer after any of them. It reads the judge's System One request (the shape both vendors publish: `model`, `state`,
+`questions` keyed by id with types `noul`, `choice`, `score`) plus a `pbit` block with the judge's answers and your rules over
+question ids, compiles it to a pbit-ir program (one variable per question, log-weight = ln max(p, 1e-6), the rules as written)
+and answers in the judge's response shape: the most likely answer set that obeys every rule, odds per option under the rules,
+and per answer whether pbit moved it from the judge's own answer, plus the whole `pbit run` document (verdict, gate,
+`violations`, released / escalated). Without rules it returns the judge's answers and the same probabilities (150 random
+requests: largest gap 1.1e-16); with rules only rule-connected questions whose judge answers break a rule move, each group to
+its most likely rule-abiding assignment (191 groups checked by brute force). docs/pbit-ir-json.md "Decision API".
+
+```sh
+pbit evaluate --summary --pretty < examples/evaluate/support-12.json   # 12 questions, 12 rules: exact, 5 answers moved, 1.24 ms
+```
+
+From Python (`pbit.evaluate(request, judge=<a callable or a System One URL>)`, stdlib `urllib`), MCP (tool `pbit_evaluate`) and
+a browser (`playground/index.html`: the CLI's code compiled to WebAssembly without threads, 830 KB; the 300-task router demo at
+3,200 sweeps in 531 ms in Chrome against 346 / 133 ms native at 1 / 4 threads, Apple M4): [docs/agents.md](docs/agents.md),
+"After a judge". The refusal is the point: when the gate does not pass, the verdict is `refused` (exit 3) and every answer is
+marked unreleased instead of guessed.
 
 ## Library API (Rust)
 
@@ -484,7 +508,11 @@ or Windows.
 - [docs/pbit-ir-json.md](docs/pbit-ir-json.md): the `pbit-ir` JSON v1 wire format, instructions, resource controls, limits.
 - [docs/pbit-ir.schema.json](docs/pbit-ir.schema.json): a JSON Schema of that wire format (the page above is normative; a test
   keeps every object's fields equal to the parser's).
-- [python/](python/): `pbit.py`, a zero-dependency subprocess wrapper, its tests and three examples.
+- [docs/agents.md](docs/agents.md): calling pbit from a shell, Python, Node, PowerShell, MCP agents and a browser, and
+  `pbit evaluate` after a decision model.
+- [python/](python/): `pbit.py`, a zero-dependency subprocess wrapper (with `evaluate` and a stdlib mock judge), its tests and
+  three examples.
+- [playground/](playground/): one static page that runs pbit in a browser (`pbit-wasm`, built by `playground/build.sh`).
 - [bench/](bench/): the scripts behind BENCHMARKS §2 and §5 (Python 3; the ILP baselines need `numpy` and `scipy >= 1.9`).
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md).
 

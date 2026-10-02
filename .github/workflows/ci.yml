@@ -26,6 +26,20 @@ jobs:
         run: cargo run --release -p pbit-cli -- stats --pretty
       - name: agent_router example
         run: cargo run --release --example agent_router
+  wasm:
+    # pbit-wasm, the browser build (wasm32-unknown-unknown, no threads): built as playground/build.sh builds it, then loaded by
+    # Node with the playground's own loader and run on the 300-task demo (--sweeps 3200) and the evaluate example; check.mjs
+    # exits 1 unless both answer with 0 violations. The no-thread = 4-thread equality runs natively in `test` (pbit-wasm tests).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: build
+        run: sh playground/build.sh
+      - name: run under Node
+        run: node --version && node playground/check.mjs playground/pbit.wasm
   release-targets:
     # The release archives' targets that `test` does not build (release.yml runs only on tags): built here, so a tag is
     # never the first build of a target. Static musl (x86_64 runs here, aarch64 is cross-linked), macOS x86_64 under
