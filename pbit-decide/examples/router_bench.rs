@@ -33,7 +33,7 @@ fn demo(n: usize, seed: u64, hard: bool) -> Problem {
             if pii && w != 3 && w != 5 { allowed[i * a + w] = false; } if prod && (w == 2 || w == 3) { allowed[i * a + w] = false; } } }
     let cap = W.iter().map(|&c| (c as f64 * scale).ceil().max(1.0) as usize).collect();
     let lam = if hard { 2.5 } else if n <= 12 { 0.8 } else { 1.2 };
-    Problem { t: n, a, h, allowed, cap, group: (0..n).map(|i| i / 3).collect(), lam, clamp: vec![None; n], block_moves: false, pair_swaps: false }
+    Problem { t: n, a, h, allowed, cap, group: (0..n).map(|i| i / 3).collect(), lam, clamp: vec![None; n], block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false }
 }
 #[derive(Default)]
 struct Agg { ms: Vec<f64>, gap: Vec<f64>, top1: Vec<f64>, maxtv: Vec<f64>, cert: usize, rel: usize, bad: usize, runs: usize, viol: usize, t: usize }
@@ -53,11 +53,11 @@ fn with_oracle(fam: &str, id: u64, p: &Problem, em: &[f64], opt: f64, bud: f64, 
     // pbit: forced sampler (exact_limit 0) = `pbit decide --mode sample`, then the CLI's polish of the best plan
     let t0 = Instant::now(); let (d, g) = decide_gated(p, 0, 0, Some(bud), 1 + id, &GATE).unwrap(); let g = g.unwrap();
     let pp = polish_plan(p, Some(&d.map), pol, 1 + id).unwrap(); let pms = ms(t0);
-    let tv = tvs(&d.marg, em, p.t, p.a); let rel = g.certified_tasks(&GATE); let nrel = rel.iter().filter(|&&r| r).count();
+    let tv = tvs(&d.marg, em, p.t, p.a); let rel = g.released_tasks(&GATE); let nrel = rel.iter().filter(|&&r| r).count();
     let nbad = rel.iter().zip(&tv).filter(|(&r, &v)| r && v > 0.05).count(); let mtv = tv.iter().cloned().fold(0.0, f64::max);
     let mtop = agree(&argmax_rows(&d.marg, p.t, p.a), &etop);
-    println!("{fam},{id},{},pbit,{pms:.1},{},{:.4},{mtop:.4},{mtv:.4},{},{nrel},{nbad}", p.t, p.violations(&pp.1), opt - pp.0, g.certified(&GATE) as u8);
-    let a = &mut agg[3]; a.ms.push(pms); a.gap.push(opt - pp.0); a.top1.push(mtop); a.maxtv.push(mtv); a.cert += g.certified(&GATE) as usize; a.rel += nrel; a.bad += nbad; a.viol += p.violations(&pp.1); a.runs += 1; a.t += p.t;
+    println!("{fam},{id},{},pbit,{pms:.1},{},{:.4},{mtop:.4},{mtv:.4},{},{nrel},{nbad}", p.t, p.violations(&pp.1), opt - pp.0, g.diagnostics_passed(&GATE) as u8);
+    let a = &mut agg[3]; a.ms.push(pms); a.gap.push(opt - pp.0); a.top1.push(mtop); a.maxtv.push(mtv); a.cert += g.diagnostics_passed(&GATE) as usize; a.rel += nrel; a.bad += nbad; a.viol += p.violations(&pp.1); a.runs += 1; a.t += p.t;
     // greedy + polish for the SAME wall time the pbit path used
     let t0 = Instant::now(); let gx = p.feasible_init().unwrap(); let gp = polish_plan(p, Some(&gx), (pms - ms(t0)).max(1.0), 1 + id).unwrap(); let gpms = ms(t0);
     println!("{fam},{id},{},greedy+polish,{gpms:.1},{},{:.4},{:.4},,,,", p.t, p.violations(&gp.1), opt - gp.0, agree(&gp.1, &etop));
@@ -65,7 +65,7 @@ fn with_oracle(fam: &str, id: u64, p: &Problem, em: &[f64], opt: f64, bud: f64, 
 }
 fn summary(label: &str, agg: &[Agg; 4]) {
     for (k, name) in ["exact (frontier tier)", "greedy", "greedy+polish, equal time", "pbit (sampler+gate+polish)"].iter().enumerate() { let a = &agg[k]; if a.runs == 0 { continue; }
-        println!("# {label} | {name} | runs {} | ms p50 {:.3} p95 {:.3} | gap nats p50 {:.3} max {:.3} | top1 vs exact odds {:.3} | violations {} | maxTV p50 {} | certified {} | released {} of {} | wrong {}",
+        println!("# {label} | {name} | runs {} | ms p50 {:.3} p95 {:.3} | gap nats p50 {:.3} max {:.3} | top1 vs exact odds {:.3} | violations {} | maxTV p50 {} | passed {} | released {} of {} | wrong {}",
             a.runs, q(&a.ms, 0.5), q(&a.ms, 0.95), q(&a.gap, 0.5), q(&a.gap, 1.0), mean(&a.top1), a.viol,
             if a.maxtv.is_empty() { "-".into() } else { format!("{:.2e}", q(&a.maxtv, 0.5)) }, if k == 3 { a.cert.to_string() } else { "-".into() },
             if k == 3 { a.rel.to_string() } else { "-".into() }, a.t, if k == 3 { a.bad.to_string() } else { "-".into() }); }
@@ -78,7 +78,7 @@ fn main() {
             let sh: f64 = (0..n * 6).filter(|&k| p.allowed[k]).map(|k| p.h[k]).sum(); println!("sig n={n} seed={s} hard={hd}: sum_h={sh:.2} allowed={} cap={:?} lam={}", p.allowed.iter().filter(|&&v| v).count(), p.cap, p.lam); }
         return;
     }
-    println!("fam,id,t,method,ms,viol,gap_nats,top1_vs_exact,maxTV,certified,released,wrong");
+    println!("fam,id,t,method,ms,viol,gap_nats,top1_vs_exact,maxTV,diagnostics_passed,released,wrong");
     if only.is_empty() || only == "A" {
         let mut agg: [Agg; 4] = Default::default();
         for k in 7000..7000 + ninst {
@@ -106,16 +106,16 @@ fn main() {
             let t0 = Instant::now(); let gx = p.feasible_init().unwrap(); let gms = ms(t0);
             let t0 = Instant::now(); let (d, g) = decide_gated(&p, 0, 0, Some(bud), 1 + s, &GATE).unwrap(); let g = g.unwrap();
             let pp = polish_plan(&p, Some(&d.map), pol, 1 + s).unwrap(); let pms = ms(t0);
-            let nrel = g.certified_tasks(&GATE).iter().filter(|&&r| r).count();
+            let nrel = g.released_tasks(&GATE).iter().filter(|&&r| r).count();
             let t0 = Instant::now(); let gx2 = p.feasible_init().unwrap(); let gp = polish_plan(&p, Some(&gx2), (pms - ms(t0)).max(1.0), 1 + s).unwrap(); let gpms = ms(t0);
             println!("C,{},300,frontier_tier,{dms:.2},{},,,,,,", 7 + s, if dec { "solved" } else { "declined" });
             println!("C,{},300,greedy,{gms:.3},{},logw={:.3},{:.4},,,,", 7 + s, p.violations(&gx), p.logw(&gx), agree(&gx, &rtop));
             println!("C,{},300,greedy+polish,{gpms:.1},{},logw={:.3},{:.4},,,,", 7 + s, p.violations(&gp.1), gp.0, agree(&gp.1, &rtop));
-            println!("C,{},300,pbit,{pms:.1},{},logw={:.3},{:.4},,{},{nrel},", 7 + s, p.violations(&pp.1), pp.0, agree(&argmax_rows(&d.marg, p.t, p.a), &rtop), g.certified(&GATE) as u8);
-            rows.push([gms, p.logw(&gx), gpms, gp.0, pms, pp.0, nrel as f64, g.certified(&GATE) as u8 as f64]);
+            println!("C,{},300,pbit,{pms:.1},{},logw={:.3},{:.4},,{},{nrel},", 7 + s, p.violations(&pp.1), pp.0, agree(&argmax_rows(&d.marg, p.t, p.a), &rtop), g.diagnostics_passed(&GATE) as u8);
+            rows.push([gms, p.logw(&gx), gpms, gp.0, pms, pp.0, nrel as f64, g.diagnostics_passed(&GATE) as u8 as f64]);
         }
         let col = |j: usize| rows.iter().map(|r| r[j]).collect::<Vec<_>>();
-        println!("# C demo T=300 ({} seeds, ref {ref_ms} ms) | greedy ms p50 {:.3} logw p50 {:.2} | greedy+polish ms p50 {:.1} logw p50 {:.2} | pbit ms p50 {:.1} logw p50 {:.2} | pbit certified {} released p50 {}",
+        println!("# C demo T=300 ({} seeds, ref {ref_ms} ms) | greedy ms p50 {:.3} logw p50 {:.2} | greedy+polish ms p50 {:.1} logw p50 {:.2} | pbit ms p50 {:.1} logw p50 {:.2} | pbit passed {} released p50 {}",
             rows.len(), q(&col(0), 0.5), q(&col(1), 0.5), q(&col(2), 0.5), q(&col(3), 0.5), q(&col(4), 0.5), q(&col(5), 0.5), col(7).iter().sum::<f64>(), q(&col(6), 0.5));
     }
 }

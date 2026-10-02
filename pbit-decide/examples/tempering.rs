@@ -15,6 +15,6 @@ fn main() {
             ("ladder12+pairs", sample_tempered(&pp, &(0..12).map(|k| k as f64 / 11.0).collect::<Vec<_>>(), bud, 1 + sd).unwrap()),
         ];
         for (name, s) in runs { let g = gate_stats(&base.p, &s);
-            println!("{lam:>3} {cp}/{cb} {sd}    | {name:<16} {:>9} {:>7.4} {:>7.4} {:>6.3} {:>6.3}  {}", s.sweeps / 4, mean_tv(&s.marg, &ex.marg, base.p.a), max_tv(&s.marg, &ex.marg, base.p.a), g.rhat, 2.0 * g.sig_tv_max, if g.certified(&GATE) { "CERT" } else { "refuse" }); }
+            println!("{lam:>3} {cp}/{cb} {sd}    | {name:<16} {:>9} {:>7.4} {:>7.4} {:>6.3} {:>6.3}  {}", s.sweeps / 4, mean_tv(&s.marg, &ex.marg, base.p.a), max_tv(&s.marg, &ex.marg, base.p.a), g.rhat, 2.0 * g.sig_tv_max, if g.diagnostics_passed(&GATE) { "CERT" } else { "refuse" }); }
     } }
 }

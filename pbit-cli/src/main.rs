@@ -1,14 +1,16 @@
-//! `pbit` — a virtual probabilistic (p-bit) processor for certified joint decisions.
+//! `pbit` — a virtual probabilistic (p-bit) processor for joint decisions: exact where structure allows, sampled with
+//! published diagnostics otherwise.
 //!
 //! JSON problem in on stdin, JSON decision out on stdout. Zero external crates.
 //!
-//!   pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--pretty]
+//!   pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--pretty]
 //!   pbit demo   [--tasks N] [--seed N] [--hard] # emit an agent-routing problem as JSON; --hard = tight quotas + strong affinity
 //!   pbit ir                                   # emit the problem in pbit-ir v0 (the hardware-facing text form)
-//!   pbit run [--op decide|exact|sample] [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--pretty]  # a general pbit-ir JSON program
+//!   pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--pretty]  # a general pbit-ir JSON program
 //!   --progress [MS] (decide, run): one JSONL telemetry line on stderr every MS ms (default 100) while the decision runs
 //!   pbit stats [--sweeps N]                  # the processor's spec sheet: machine, build, effective controls + source, measured updates/s
 //!   pbit version
+//!   pbit <command> --help | -h               # usage, every flag with its default, exit codes
 mod json;
 mod run;
 mod sys;
@@ -28,6 +30,11 @@ fn budget_ms(args: &[String]) -> f64 {
 }
 /// `--polish-ms inf` / `NaN` hung `pbit decide` and `pbit run` (the polish loops while elapsed < the budget) and `-7` ran
 /// (echoed in telemetry); the same range as --budget-ms, else exit 2
+/// R19.6 (P2.1) `--deadline-ms N` (`pbit run` only): a whole-call wall-clock target, see `run::run`.
+fn deadline_ms(args: &[String]) -> Option<f64> {
+    args.iter().any(|a| a == "--deadline-ms").then(|| { let x: f64 = arg(args, "--deadline-ms", 0.0);
+        if !(x.is_finite() && x > 0.0 && x <= 1e9) { fail("--deadline-ms must be a number of milliseconds above 0, at most 1e9") } x })
+}
 fn polish_ms_arg(args: &[String]) -> f64 {
     let x: f64 = arg(args, "--polish-ms", 50.0);
     if !(x.is_finite() && (0.0..=1e9).contains(&x)) { fail("--polish-ms must be a number of milliseconds from 0 to 1e9") } x
@@ -54,46 +61,82 @@ fn emit_raw(s: &str) {
 }
 fn emit(s: &str) { emit_raw(&format!("{s}\n")) }
 
-/// JSON problem -> Problem. See README "Problem format".
-fn from_json(j: &Json) -> Result<Named, String> {
-    let ws = j.get("workers").and_then(Json::as_arr).ok_or("missing \"workers\" array")?;
+/// JSON problem -> Problem. See README "Problem format"; the strict contract (types, unknown fields, duplicates, empty domains,
+/// structured errors) is docs/pbit-ir-json.md "Input contract".
+fn from_json(j: &Json) -> Result<Named, json::InErr> {
+    use json::{arr, at, fields, ix, opt, req, schema, text, value, weight};
+    fields(j, "", &["workers", "tasks", "affinity", "comment"])?;
+    if let Some(c) = opt(j, "comment") { text(c, "comment")?; }
+    let ws = arr(req(j, "workers", "")?, "workers")?;
     // Ids go through hash indexes (worker / task duplicate checks, worker and group lookups were linear scans: O(n^2))
     use std::collections::{HashMap, HashSet};
     let mut workers = vec![]; let mut cap = vec![]; let mut windex: HashMap<String, usize> = HashMap::new();
-    for w in ws { let id = w.get("id").and_then(Json::as_str).ok_or("worker without \"id\"")?;
-        let c = w.get("cap").or(w.get("capacity")).and_then(Json::as_f64).ok_or(format!("worker {id}: missing \"cap\""))?;
-        if c < 0.0 || c.fract() != 0.0 { return Err(format!("worker {id}: cap must be a non-negative integer")); }
-        if windex.insert(id.to_string(), workers.len()).is_some() { return Err(format!("duplicate worker id {id}")); }
-        workers.push(id.to_string()); cap.push(c as usize); }
-    let a = workers.len(); if a == 0 { return Err("no workers".into()); }
+    for (wi, w) in ws.iter().enumerate() { let wp = ix("workers", wi); fields(w, &wp, &["id", "cap", "capacity"])?;
+        let id = text(req(w, "id", &wp)?, &at(&wp, "id"))?;
+        if opt(w, "cap").is_some() && opt(w, "capacity").is_some() { return Err(schema(&wp, format!("worker {id}: give \"cap\" or \"capacity\", not both"))); }
+        let ck = if opt(w, "capacity").is_some() { "capacity" } else { "cap" };
+        let c = json::count(opt(w, ck).ok_or_else(|| schema(&at(&wp, "cap"), format!("worker {id}: missing \"cap\"")))?, &at(&wp, ck))?;
+        if windex.insert(id.to_string(), workers.len()).is_some() { return Err(value(&at(&wp, "id"), format!("duplicate worker id {id}"))); }
+        workers.push(id.to_string()); cap.push(c); }
+    let a = workers.len(); if a == 0 { return Err(value("workers", "no workers")); }
     let widx = |id: &str| windex.get(id).copied();
-    let ts = j.get("tasks").and_then(Json::as_arr).ok_or("missing \"tasks\" array")?;
-    let t = ts.len(); if t == 0 { return Err("no tasks".into()); }
+    let ts = arr(req(j, "tasks", "")?, "tasks")?;
+    let t = ts.len(); if t == 0 { return Err(value("tasks", "no tasks")); }
     let (mut h, mut allowed, mut group, mut clamp, mut tasks) = (vec![f64::NEG_INFINITY; t * a], vec![false; t * a], vec![usize::MAX; t], vec![None; t], vec![]);
     let mut gids: Vec<String> = vec![]; let mut gindex: HashMap<String, usize> = HashMap::new(); let mut tseen: HashSet<String> = HashSet::with_capacity(t);
-    for (i, tk) in ts.iter().enumerate() {
-        let id = tk.get("id").and_then(Json::as_str).map(|s| s.to_string()).unwrap_or_else(|| format!("task{i}"));
-        if !tseen.insert(id.clone()) { return Err(format!("duplicate task id {id}")); }
-        let sc = tk.get("scores").and_then(Json::as_obj).ok_or(format!("task {id}: missing \"scores\" object"))?;
-        let allow: Option<Vec<&str>> = tk.get("allowed").and_then(Json::as_arr).map(|v| v.iter().filter_map(Json::as_str).collect());
-        for (wid, v) in sc { let k = widx(wid).ok_or(format!("task {id}: unknown worker {wid} in scores"))?;
-            let x = v.as_f64().ok_or(format!("task {id}: score for {wid} is not a number"))?;
+    for (i, tk) in ts.iter().enumerate() { let tp = ix("tasks", i);
+        fields(tk, &tp, &["id", "scores", "allowed", "group", "clamp", "text"])?;
+        if let Some(x) = opt(tk, "text") { text(x, &at(&tp, "text"))?; }
+        let id = match opt(tk, "id") { Some(x) => text(x, &at(&tp, "id"))?.to_string(), None => format!("task{i}") };
+        if !tseen.insert(id.clone()) { return Err(value(&at(&tp, "id"), format!("duplicate task id {id}"))); }
+        let sp = at(&tp, "scores");
+        let sc = json::keyed(opt(tk, "scores").ok_or_else(|| schema(&sp, format!("task {id}: missing \"scores\" object")))?, &sp)?;
+        // `allowed` must be an array of distinct worker ids: `"allowed": "A"` (a string) used to be ignored, enabling every scored worker
+        let ap = at(&tp, "allowed");
+        let allow: Option<Vec<&str>> = opt(tk, "allowed").map(|v| json::names(v, &ap)).transpose()?;
+        if allow.as_ref().is_some_and(|al| al.is_empty()) { return Err(value(&ap, format!("task {id}: \"allowed\" is empty (a task needs at least one worker)"))); }
+        for (wid, v) in sc { let k = widx(wid).ok_or_else(|| value(&at(&sp, wid), format!("task {id}: unknown worker {wid} in scores")))?;
+            let x = weight(v, &at(&sp, wid))?;
             if allow.as_ref().map_or(true, |al| al.contains(&wid.as_str())) { h[i * a + k] = x; allowed[i * a + k] = true; } }
-        if let Some(al) = &allow { for wid in al { let k = widx(wid).ok_or(format!("task {id}: unknown worker {wid} in allowed"))?;
+        if let Some(al) = &allow { for (q, wid) in al.iter().enumerate() { let k = widx(wid).ok_or_else(|| value(&ix(&ap, q), format!("task {id}: unknown worker {wid} in allowed")))?;
             if !allowed[i * a + k] { h[i * a + k] = 0.0; allowed[i * a + k] = true; } } }
-        if !(0..a).any(|k| allowed[i * a + k]) { return Err(format!("task {id}: no allowed worker with a score")); }
-        if let Some(g) = tk.get("group").filter(|g| !g.is_null()) { let gs = match g { Json::Str(s) => s.clone(), Json::Num(x) => format!("{x}"), _ => return Err(format!("task {id}: group must be a string or number")) };
+        if !(0..a).any(|k| allowed[i * a + k]) { return Err(value(&tp, format!("task {id}: no allowed worker with a score"))); }
+        if let Some(g) = opt(tk, "group") { let gs = match g { Json::Str(s) => s.clone(), Json::Num(x) => format!("{x}"), _ => return Err(schema(&at(&tp, "group"), format!("task {id}: group must be a string or number"))) };
             group[i] = match gindex.get(&gs) { Some(&k) => k, None => { gindex.insert(gs.clone(), gids.len()); gids.push(gs); gids.len() - 1 } }; }
-        if let Some(c) = tk.get("clamp").filter(|c| !c.is_null()) { let cid = c.as_str().ok_or(format!("task {id}: clamp must be a worker id"))?;
-            let k = widx(cid).ok_or(format!("task {id}: unknown clamp worker {cid}"))?;
-            if !allowed[i * a + k] { return Err(format!("task {id}: clamp to {cid} but {cid} is not allowed")); } clamp[i] = Some(k); }
+        if let Some(c) = opt(tk, "clamp") { let cp = at(&tp, "clamp"); let cid = c.as_str().ok_or_else(|| schema(&cp, format!("task {id}: clamp must be a worker id")))?;
+            let k = widx(cid).ok_or_else(|| value(&cp, format!("task {id}: unknown clamp worker {cid}")))?;
+            if !allowed[i * a + k] { return Err(value(&cp, format!("task {id}: clamp to {cid} but {cid} is not allowed"))); } clamp[i] = Some(k); }
         tasks.push(id);
     }
     for v in h.iter_mut() { if *v == f64::NEG_INFINITY { *v = 0.0; } } // disallowed entries never read; keep finite
-    let lam = j.get("affinity").and_then(Json::as_f64).unwrap_or(0.0);
-    if lam < 0.0 { return Err("affinity must be >= 0".into()); }
-    Ok(Named { p: Problem { t, a, h, allowed, cap, group, lam, clamp, block_moves: false, pair_swaps: false }, tasks, workers })
+    let lam = opt(j, "affinity").map(|x| weight(x, "affinity")).transpose()?.unwrap_or(0.0);
+    if lam < 0.0 { return Err(value("affinity", "affinity must be >= 0")); }
+    Ok(Named { p: Problem { t, a, h, allowed, cap, group, lam, clamp, block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false }, tasks, workers })
 }
+/// Bad input (JSON, schema, values): ONE structured error object on stdout, a human line on stderr, exit 2.
+fn bad_input(what: &str, e: json::InErr) -> ! {
+    eprintln!("pbit: {what}{}{}", if e.path.is_empty() { String::new() } else { format!("{}: ", e.path) }, e.msg);
+    emit(&json::write(&e.to_json(), false)); std::process::exit(2)
+}
+/// Emit a decision; returns its exit code. Every number in it must be finite (docs/pbit-ir-json.md "Numeric contract"). A
+/// gate diagnostic that could not be estimated (R-hat / bound infinite: too few samples, chains stuck at different values) is
+/// allowed only on a refusal (exit 3): it prints as null and is named in `gate.non_finite`. Any other non-finite number = no
+/// answer: ONE structured `numeric` error on stdout, exit 3 (it used to print `null`, or a literal `inf`, with exit 0).
+fn finish(mut doc: Json, code: i32, pretty: bool) -> i32 {
+    let mut bad = vec![]; json::non_finite(&doc, "", &mut bad);
+    if !bad.is_empty() {
+        if code == 3 && bad.iter().all(|p| p.starts_with("gate.")) {
+            if let Json::Obj(v) = &mut doc { if let Some((_, Json::Obj(g))) = v.iter_mut().find(|(k, _)| k == "gate") {
+                g.push(("non_finite".to_string(), Json::Arr(bad.iter().map(|p| jstr(&p["gate.".len()..])).collect()))); } }
+        } else {
+            let e = json::InErr { code: "numeric", path: bad[0].clone(), msg: format!("{} computed quantit{} not finite (first: {}); no answer is emitted", bad.len(), if bad.len() == 1 { "y is" } else { "ies are" }, bad[0]) };
+            eprintln!("pbit: numeric failure: {}", e.msg); emit(&json::write(&e.to_json(), false)); return 3;
+        }
+    }
+    emit(&json::write(&doc, pretty)); code
+}
+/// stdin -> a parsed document, or `bad_input`
+fn read_doc() -> Json { json::parse(&read_stdin()).unwrap_or_else(|e| bad_input(if e.code == "schema" { "" } else { "bad input: " }, e)) }
 
 fn odds(n: &Named, marg: &[f64]) -> Json {
     Json::Obj(n.tasks.iter().enumerate().map(|(i, id)| { let mut row: Vec<(usize, f64)> = (0..n.p.a).filter(|&k| n.p.allowed[i * n.p.a + k]).map(|k| (k, marg[i * n.p.a + k])).collect();
@@ -112,7 +155,68 @@ fn arg<T: std::str::FromStr>(args: &[String], name: &str, default: T) -> T {
 }
 /// Flags taking a value, per command (the controls are shared by decide, run and stats).
 const CONTROLS: [&str; 5] = ["--chains", "--threads", "--cpu-limit", "--mem-limit-mb", "--priority"];
-const SEARCH: [&str; 8] = ["--budget-ms", "--seed", "--exact-limit", "--exact-ms", "--frontier-states", "--polish-ms", "--polish-sweeps", "--sweeps"];
+/// Per command: (flags taking a value, switches); `check_flags` enforces exactly these and `help` lists exactly these (R19.8).
+fn flags_of(cmd: &str) -> (Vec<&'static str>, Vec<&'static str>) {
+    match cmd {
+        "decide" => ([&SEARCH[..], &CONTROLS[..], &["--mode"]].concat(), vec!["--pretty", "--progress"]),
+        "run" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms"]].concat(), vec!["--pretty", "--progress"]),
+        "stats" => ([&CONTROLS[..], &["--sweeps"]].concat(), vec!["--pretty"]),
+        "demo" => (vec!["--tasks", "--seed"], vec!["--hard"]),
+        _ => (vec![], vec![]),
+    }
+}
+/// One line per flag for `help` (R19.8, P3.1); `help` panics on a flag without a line (test `every_command_has_help`).
+const FLAG_HELP: [(&str, &str); 23] = [
+    ("--budget-ms", "N    sampler wall-clock budget, ms (default 200)"), ("--seed", "N    random seed (default 7)"),
+    ("--exact-limit", "N    plans the exact enumeration may count before it declines (default 2000000)"),
+    ("--exact-ms", "N    wall-clock cap on the exact tiers that run before the sampler (opt-in; absent = no cap)"),
+    ("--frontier-states", "N    state cap of the frontier DP and the components tier (default 4096; 0 = off)"),
+    ("--polish-ms", "N    plan polish budget, ms (default 50; 0 = off)"), ("--polish-sweeps", "N    fixed-work plan polish (deterministic)"),
+    ("--sweeps", "N    fixed work per chain instead of the wall-clock budget (with --polish-ms 0: a pure function of input + seed)"),
+    ("--collective", "on|off    global two-value flips + label swaps (default on)"), ("--cluster", "on|off    Wolff cluster move (default on)"),
+    ("--cycles", "on|off    three-cycle rotations (default on)"), ("--chains", "N    sampler chains (default 4)"),
+    ("--threads", "N    worker threads for the chains, the gate and the polish (default min(cores, 4))"),
+    ("--cpu-limit", "PCT    per-thread duty cycle 1..100 (default 100)"), ("--mem-limit-mb", "N    cap on stored samples (default 1024; 0 = none)"),
+    ("--priority", "low|normal    OS scheduling priority (default normal)"), ("--mode", "auto|exact|sample    which tiers may answer (default auto)"),
+    ("--op", "decide|exact|sample    decide = exact tiers, then the sampler; exact / sample = only those (default decide)"),
+    ("--deadline-ms", "N    whole-call deadline (exact N/4, then sampler + polish); answer has `deadline` + `phases`"),
+    ("--pretty", "indented JSON"), ("--progress", "[MS]    one JSONL telemetry line on stderr every MS ms (default 100)"),
+    ("--tasks", "N    tasks to generate (default 12)"), ("--hard", "tight quotas + strong affinity"),
+];
+/// `pbit <command> --help` / `-h` (R19.8, P3.1): what it does, every flag it accepts, exit codes. None = not a command.
+fn help(cmd: &str) -> Option<String> {
+    let (what, usage) = match cmd {
+        "decide" => ("Route tasks to workers: a router document (workers + caps, tasks + allowed + scores, affinity; README) on stdin,\n  a JSON decision on stdout. Exact where structure allows, else sampled with the diagnostics gate.", "pbit decide [flags] < router.json"),
+        "run" => ("Run a pbit-ir program (variables, values, scores, rules; docs/pbit-ir-json.md) on stdin; JSON answer on stdout.", "pbit run [flags] < program.json"),
+        "demo" => ("Emit a synthetic agent-routing document (JSON) for `pbit decide`.", "pbit demo [flags] > router.json"),
+        "ir" => ("Print a router document as pbit-ir v0 text (the hardware-facing form).", "pbit ir < router.json"),
+        "stats" => ("The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.", "pbit stats [flags]"),
+        "version" => ("Print the version.", "pbit version"), _ => return None };
+    let (vals, sw) = flags_of(cmd); let mut h = format!("usage: {usage}\n  {what}\n");
+    if !vals.is_empty() || !sw.is_empty() { h.push_str("flags:\n"); }
+    for f in vals.iter().chain(&sw) {
+        let d = if cmd == "stats" && *f == "--sweeps" { "N    sweeps of the throughput measurement (default 2000)" }
+            else { FLAG_HELP.iter().find(|(k, _)| k == f).unwrap_or_else(|| panic!("no help line for {f}")).1 };
+        h.push_str(&format!("  {f} {d}\n")); }
+    if ["decide", "run", "stats"].contains(&cmd) { h.push_str("controls: flag > PBIT_* environment > pbit.json > default.\n"); }
+    if ["decide", "run"].contains(&cmd) { h.push_str("exit: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object\n  on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.\n"); }
+    Some(h)
+}
+const SEARCH: [&str; 11] = ["--budget-ms", "--seed", "--exact-limit", "--exact-ms", "--frontier-states", "--polish-ms", "--polish-sweeps", "--sweeps", "--collective", "--cluster", "--cycles"];
+/// `--collective on|off` (default on, R19 P1.1): the sampler's global two-value flip (`Problem::collective` / `Model::collective`).
+fn collective_arg(args: &[String]) -> bool {
+    match arg(args, "--collective", "on".to_string()).as_str() { "on" => true, "off" => false, _ => fail("--collective must be on or off") }
+}
+/// `--cluster on|off` (DEFAULT ON since R19.4, P1.4: the frozen-threshold holdout's rare-modes family gave 8/8 false whole
+/// answers without it and 0/20 with it; R19 P1.1(d)): the sampler's Wolff cluster move (`Problem::cluster` / `Model::cluster`).
+fn cluster_arg(args: &[String]) -> bool {
+    match arg(args, "--cluster", "on".to_string()).as_str() { "on" => true, "off" => false, _ => fail("--cluster must be on or off") }
+}
+/// `--cycles on|off` (default on since R19.5, P1.4 calibration): the sampler's three-cycle rotations (`Problem::cycles` /
+/// `Model::cycles`; attempted only with k > 2 values and caps).
+fn cycles_arg(args: &[String]) -> bool {
+    match arg(args, "--cycles", "on".to_string()).as_str() { "on" => true, "off" => false, _ => fail("--cycles must be on or off") }
+}
 /// Unknown arguments exit 2. They were ignored: a typo (`--budgetms 5`), or `"--budget-ms 50"` passed as ONE argument by
 /// a shell that did not split it (zsh `$var`), ran the whole decision on defaults without a word. `values` take the next argument,
 /// `switches` none; `--progress` takes an optional number.
@@ -133,7 +237,7 @@ fn check_flags(args: &[String], values: &[&str], switches: &[&str]) {
 fn config() -> Option<json::Json> {
     let path = std::env::var("PBIT_CONFIG").ok().or_else(|| std::path::Path::new("pbit.json").exists().then(|| "pbit.json".to_string()))?;
     let src = std::fs::read_to_string(&path).unwrap_or_else(|e| fail(&format!("config {path}: {e}")));
-    Some(json::parse(&src).unwrap_or_else(|e| fail(&format!("config {path}: bad JSON: {e}"))))
+    Some(json::parse(&src).unwrap_or_else(|e| fail(&format!("config {path}: {}", e.msg))))
 }
 /// A config-file value as text (numbers must be whole; anything else fails the caller's parse).
 fn cfg_val(key: &str) -> Option<String> {
@@ -171,7 +275,7 @@ fn monitor(args: &[String], n_vars: usize) -> Option<Monitor> {
     let h = std::thread::spawn(move || { let t0 = std::time::Instant::now(); let (mut lt, mut ls) = (0.0f64, 0u64);
         while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = rx.recv_timeout(std::time::Duration::from_millis(every)) {
             let (t, s) = (t0.elapsed().as_secs_f64(), pbit_ir::PROGRESS_SWEEPS.load(Relaxed)); let u = sys::usage();
-            let line = obj(vec![("event", jstr("progress")), ("ms", num((t * 1e3).round())), ("sweeps", num(s as f64)), ("site_updates_per_s", num(((s - ls) as f64 * n_vars as f64 / (t - lt)).round())),
+            let line = obj(vec![("event", jstr("progress")), ("ms", num((t * 1e3).round())), ("sweeps", num(s as f64)), ("site_updates_per_s", num(if t > lt { ((s - ls) as f64 * n_vars as f64 / (t - lt)).round() } else { 0.0 })),
                 ("process_cpu_ms", u.map_or(Json::Null, |u| num(u.0.round()))), ("peak_rss_mb", u.map_or(Json::Null, |u| num(u.1)))]);
             eprintln!("{}", json::write(&line, false)); (lt, ls) = (t, s); } });
     Some(Monitor { tx: Some(tx), h: Some(h) })
@@ -184,13 +288,31 @@ fn priority(args: &[String]) {
         Some(_) => fail("--priority / PBIT_PRIORITY must be low or normal") }
 }
 /// The processor controls shared by `pbit decide` and `pbit run`: (chains, threads, cpu_limit_pct).
+/// R19.8: `--threads` also bounds the gate's per-chain passes (`pbit_ir::GATE_THREADS`; one thread per chain before).
 fn controls(args: &[String]) -> (usize, usize, u32) {
-    (ctl(args, "--chains", "PBIT_CHAINS", 4), ctl(args, "--threads", "PBIT_THREADS", std::thread::available_parallelism().map_or(1, |n| n.get()).min(4)),
-     { let c = ctl(args, "--cpu-limit", "PBIT_CPU_LIMIT", 100); if c > 100 { fail("--cpu-limit / PBIT_CPU_LIMIT must be 1..=100"); } c as u32 })
+    let r = (ctl(args, "--chains", "PBIT_CHAINS", 4), ctl(args, "--threads", "PBIT_THREADS", std::thread::available_parallelism().map_or(1, |n| n.get()).min(4)),
+     { let c = ctl(args, "--cpu-limit", "PBIT_CPU_LIMIT", 100); if c > 100 { fail("--cpu-limit / PBIT_CPU_LIMIT must be 1..=100"); } c as u32 });
+    pbit_ir::GATE_THREADS.store(r.1, std::sync::atomic::Ordering::Relaxed); r
 }
 
+/// R19 P1.3(b-d), the inference compiler's components tier on the lowered router program (`pbit decide`, mode auto,
+/// `--frontier-states` > 0): independent groups solved one by one (two-worker groups with uniform affinity and whole-worker
+/// caps by the occupancy-count DP, cap-free trees by sum-/max-product, the rest by enumeration / the frontier DP). Prints the
+/// exact (or infeasible) answer and exits; returns if the tier declines.
+#[allow(clippy::too_many_arguments)]
+fn components_tier(n: &Named, lowered: &pbit_ir::Model, exact_limit: u64, fr_states: usize, hard: Option<std::time::Instant>, t0: std::time::Instant, out: &mut Vec<(&str, Json)>, pretty: bool) -> bool {
+    let p = &n.p; if fr_states == 0 { return false; }
+    let Some(c) = pbit_ir::exact_components_until(lowered, exact_limit, fr_states, hard) else { return false };
+    let parts = obj(vec![("count", num(c.components as f64)), ("forest", num(c.forest as f64)), ("occupancy", num(c.occupancy as f64)), ("enumerate", num(c.enumerated as f64)), ("frontier", num(c.frontier as f64))]);
+    if c.infeasible { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no plan satisfies every rule (one independent component has no feasible plan)")), ("components", parts), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
+        std::process::exit(finish(obj(std::mem::take(out)), 1, pretty)); }
+    out.extend([("verdict", jstr("exact")), ("tier", jstr(if c.forest == c.components { "forest" } else if c.occupancy == c.components { "occupancy" } else { "components" })), ("plan", plan(&n, &c.map)), ("plan_logw", num(c.map_logw)), ("violations", num(p.violations(&c.map) as f64)),
+        ("odds", odds(&n, &c.marg)), ("released", ids(&n, &vec![true; p.t], true)), ("escalated", Json::Arr(vec![])), ("logz", num(c.logz)),
+        ("top_plans", Json::Arr(vec![obj(vec![("p", num((c.map_logw - c.logz).exp())), ("plan", plan(&n, &c.map))])])), ("components", parts), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
+    let code = finish(obj(std::mem::take(out)), 0, pretty); if code != 0 { std::process::exit(code); } true
+}
 fn decide_cmd(args: &[String]) {
-    check_flags(args, &[&SEARCH[..], &CONTROLS[..], &["--mode"]].concat(), &["--pretty", "--progress"]);
+    let (v, w) = flags_of("decide"); check_flags(args, &v, &w);
     let budget: f64 = budget_ms(args); let seed: u64 = arg(args, "--seed", 7);
     let exact_limit: u64 = arg(args, "--exact-limit", 2_000_000); let polish_ms: f64 = polish_ms_arg(args);
     // Any other --mode value (`foo`, `EXACT`, or `--pretty` swallowed as the value) used to run the sampler silently (exit 0)
@@ -200,24 +322,32 @@ fn decide_cmd(args: &[String]) {
     let polish_sweeps: usize = arg(args, "--polish-sweeps", 0);
     let fr_states: usize = arg(args, "--frontier-states", FRONTIER_MAX_STATES); let sweeps: usize = arg(args, "--sweeps", 0);
     let (chains, threads, cpu_pct) = controls(args); priority(args);
-    let src = read_stdin(); let j = json::parse(&src).unwrap_or_else(|e| fail(&format!("bad JSON: {e}")));
-    let n = from_json(&j).unwrap_or_else(|e| fail(&format!("bad problem: {e}"))); let p = &n.p;
+    let j = read_doc();
+    let mut n = from_json(&j).unwrap_or_else(|e| bad_input("bad problem: ", e)); n.p.collective = collective_arg(args); n.p.cluster = cluster_arg(args); n.p.cycles = cycles_arg(args); let p = &n.p;
     let _mon = monitor(args, p.t); let t0 = std::time::Instant::now();
     let xms = exact_ms(args); let hard = xms.map(|x| t0 + std::time::Duration::from_secs_f64(x / 1e3));
     let mut out: Vec<(&str, Json)> = vec![("engine", jstr(&format!("pbit {VERSION}"))), ("tasks", num(p.t as f64)), ("workers", num(p.a as f64)), ("affinity", num(p.lam))];
+    // R19 P1.3: the lowered program; when its raw space exceeds --exact-limit the components tier goes BEFORE the
+    // whole-program enumeration, which would spend its node budget first (the external review's router32 inputs: 154 ms -> 0.4 ms)
+    // R19.8 (P2.3 item 2): lowered only when that tier can run (auto, --frontier-states > 0: `--mode sample` / `exact` paid
+    // the O(group size^2) lowering for nothing) and within --exact-ms (`lower_until`; past the cap the tier is skipped, as it
+    // would decline, and the whole-program tiers decline at their first clock read)
+    let lowered = if mode == "auto" && fr_states > 0 { p.lower_until(hard).map(|m| m.compiled().0) } else { None };
+    let comp_first = lowered.as_ref().is_some_and(|l| (0..l.n).map(|i| l.cand_count(i) as f64).product::<f64>() > exact_limit as f64);
+    if let Some(l) = lowered.as_ref().filter(|_| comp_first) { if components_tier(&n, l, exact_limit, fr_states, hard, t0, &mut out, pretty) { return; } }
     // 1. exact enumeration when the feasible set is small enough (or forced)
     if mode == "exact" || mode == "auto" {
         let lim = if mode == "exact" { u64::MAX / 128 } else { exact_limit };
         if let Some(e) = exact_within(p, 5, lim, hard) {
             if e.n_feasible == 0 { out.push(("verdict", jstr("infeasible"))); out.push(("reason", jstr("no plan satisfies every rule (allowed sets + capacities + clamps)"))); out.push(("ms", num(t0.elapsed().as_secs_f64() * 1e3)));
-                emit(&json::write(&obj(out), pretty)); std::process::exit(1); }
+                std::process::exit(finish(obj(out), 1, pretty)); }
             let best = &e.top[0].1;
             out.extend([("verdict", jstr("exact")), ("tier", jstr("enumerate")), ("plan", plan(&n, best)), ("plan_logw", num(p.logw(best))), ("violations", num(p.violations(best) as f64)),
                 ("odds", odds(&n, &e.marg)), ("released", ids(&n, &vec![true; p.t], true)), ("escalated", Json::Arr(vec![])),
                 ("n_feasible", num(e.n_feasible as f64)), ("logz", num(e.logz)),
                 ("top_plans", Json::Arr(e.top.iter().map(|(pr, x)| obj(vec![("p", num(*pr)), ("plan", plan(&n, x))])).collect())),
                 ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-            emit(&json::write(&obj(out), pretty)); return;
+            let c = finish(obj(out), 0, pretty); if c != 0 { std::process::exit(c); } return;
         }
         if mode == "exact" { if hard.is_some_and(|h| std::time::Instant::now() >= h) { fail("--mode exact: the enumeration did not finish within --exact-ms; raise it, or use auto or sample"); }
             fail("feasible set too large for --mode exact; use auto or sample"); }
@@ -228,8 +358,11 @@ fn decide_cmd(args: &[String]) {
             ("odds", odds(&n, &f.marg)), ("released", ids(&n, &vec![true; p.t], true)), ("escalated", Json::Arr(vec![])), ("logz", num(f.logz)),
             ("top_plans", Json::Arr(vec![obj(vec![("p", num((f.map_logw - f.logz).exp())), ("plan", plan(&n, &f.map))])])),
             ("frontier_states", num(f.max_states as f64)), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-        emit(&json::write(&obj(out), pretty)); return;
-    } }
+        let c = finish(obj(out), 0, pretty); if c != 0 { std::process::exit(c); } return;
+    }
+    // 2b. the components tier after the whole-program tiers (see `components_tier`)
+    if let Some(l) = lowered.as_ref().filter(|_| !comp_first) { if components_tier(&n, l, exact_limit, fr_states, hard, t0, &mut out, pretty) { return; } }
+    }
     // 3. the p-bit sampler with the certification gate, with the processor controls of `pbit run` (--chains, --threads,
     // --cpu-limit, fixed-work --sweeps); with --sweeps and --polish-ms 0 the answer is a pure function of (problem, seed, chains).
     // Only a run whose exact tiers could run can have hit the cap (was also true under --mode sample)
@@ -237,30 +370,30 @@ fn decide_cmd(args: &[String]) {
     let (mem_mb, max_rows) = mem_limit(args, chains, p.t);
     let Some(s) = sample_on(p, chains, threads, sweeps, if sweeps > 0 { None } else { Some(budget) }, seed, false, auto_group_pairs(p), cpu_pct, max_rows) else {
         out.push(("verdict", jstr("infeasible"))); out.push(("reason", jstr("no feasible initial assignment (allowed sets + capacities + clamps)"))); out.push(("ms", num(t0.elapsed().as_secs_f64() * 1e3)));
-        emit(&json::write(&obj(out), pretty)); std::process::exit(1); };
+        std::process::exit(finish(obj(out), 1, pretty)); };
     let sample_s = ts.elapsed().as_secs_f64(); let tg = std::time::Instant::now();
     let g = gate_stats(p, &s); let gate_ms = tg.elapsed().as_secs_f64() * 1e3;
-    let rel = g.certified_tasks(&GATE); let nrel = rel.iter().filter(|&&r| r).count();
-    let whole = g.certified(&GATE);
-    let verdict = if whole { "certified" } else if nrel > 0 { "partial" } else { "refused" };
+    let rel = g.released_tasks(&GATE); let nrel = rel.iter().filter(|&&r| r).count();
+    let whole = g.diagnostics_passed(&GATE);
+    let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
     // The default --polish-ms polish is wall-clock, so its plan can vary; --polish-sweeps (parsed above) is fixed work
     // The polish runs on --threads workers (it used 4 threads whatever --threads said)
     let (plw, px) = if polish_sweeps > 0 || polish_ms > 0.0 { polish_plan_on(p, Some(&s.best.1), if polish_sweeps > 0 { 0.0 } else { polish_ms }, polish_sweeps, threads, seed).unwrap_or((s.best.0, s.best.1.clone())) }
         else { (s.best.0, s.best.1.clone()) };
     let released_mask: Vec<bool> = if whole { vec![true; p.t] } else { rel.clone() };
+    let (g2, reasons) = run::gate2(&g, &s, p.a, &n.tasks, &n.workers);
     out.extend([("verdict", jstr(verdict)), ("plan", plan(&n, &px)), ("plan_logw", num(plw)), ("violations", num(p.violations(&px) as f64)),
-        ("odds", odds(&n, &s.marg)), ("released", ids(&n, &released_mask, true)), ("escalated", ids(&n, &released_mask, false)),
-        ("gate", obj(vec![("rhat", num(g.rhat)), ("tv_bound", num(g.tv_bound(&GATE))), ("tv_tol", num(GATE.tv_tol)), ("frozen_saturated_workers", num(g.frozen as f64)),
+        ("odds", odds(&n, &s.marg)), ("released", ids(&n, &released_mask, true)), ("escalated", ids(&n, &released_mask, false)), ("release_reason", reasons),
+        ("gate", obj([vec![("rhat", num(g.rhat)), ("tv_bound", num(g.tv_bound(&GATE))), ("tv_tol", num(GATE.tv_tol)), ("frozen_saturated_workers", num(g.frozen as f64)),
             ("min_batches", num(g.min_batches as f64)), ("batch_ratio", num(if g.sig_tv_max > 0.0 { g.sig_tv_long.iter().cloned().fold(0.0, f64::max) / g.sig_tv_max } else { 0.0 })),
-            ("samples", num(s.n as f64)), ("sweeps", num(s.sweeps as f64)), ("chains", num(chains as f64)), ("budget_ms", num(budget)), ("seed", num(seed as f64))])),
+            ("samples", num(s.n as f64)), ("sweeps", num(s.sweeps as f64)), ("chains", num(chains as f64)), ("budget_ms", num(budget)), ("seed", num(seed as f64)), ("collective", Json::Bool(p.collective)), ("cluster", Json::Bool(p.cluster)), ("cycles", Json::Bool(p.cycles))], g2].concat())),
         // The same telemetry object as `pbit run`
-        ("telemetry", obj([vec![("chains", num(chains as f64)), ("threads", num(threads.clamp(1, chains) as f64)), ("sweeps", num(s.sweeps as f64)), ("site_updates_per_s", num((s.sweeps as f64 * p.t as f64 / sample_s).round())),
+        ("telemetry", obj([vec![("chains", num(chains as f64)), ("threads", num(threads.clamp(1, chains) as f64)), ("sweeps", num(s.sweeps as f64)), ("site_updates_per_s", num(if sample_s > 0.0 { (s.sweeps as f64 * p.t as f64 / sample_s).round() } else { 0.0 })),
             ("sample_ms", num(sample_s * 1e3)), ("gate_ms", num(gate_ms)), ("polish_ms", num(if polish_sweeps > 0 { 0.0 } else { polish_ms })), ("polish_sweeps", num(polish_sweeps as f64)),
             ("process_cpu_ms", sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", sys::usage().map_or(Json::Null, |u| num(u.1))), ("nice", sys::nice().map_or(Json::Null, |v| num(v as f64))), ("cpu_limit_pct", num(cpu_pct as f64)),
             ("mem_limit_mb", num(mem_mb as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / p.t).sum::<usize>() as f64))], exact_cap(xms, reached)].concat())),
         ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-    emit(&json::write(&obj(out), pretty));
-    if verdict == "refused" { std::process::exit(3); }
+    let c = finish(obj(out), if verdict == "refused" { 3 } else { 0 }, pretty); if c != 0 { std::process::exit(c); }
 }
 
 /// Where a control's value comes from (same precedence as `ctl`): "flag" > "env" > "file" > "default".
@@ -271,7 +404,7 @@ fn source(args: &[String], name: &str, env: &str) -> &'static str {
 /// from, and a measured self-test (400-spin ring, 4 chains x `--sweeps` fixed work, IR sampler) at 1 thread and at the effective
 /// thread count, after one discarded warm-up pass. Nothing is applied (e.g. --priority low is reported, not set).
 fn stats_cmd(args: &[String]) {
-    check_flags(args, &[&CONTROLS[..], &["--sweeps"]].concat(), &["--pretty"]);
+    let (v, w) = flags_of("stats"); check_flags(args, &v, &w);
     let (chains, threads, cpu) = controls(args); let sweeps: usize = arg(args, "--sweeps", 2000).max(1);
     let prio = args.iter().position(|a| a == "--priority").and_then(|k| args.get(k + 1)).cloned().or_else(|| std::env::var("PBIT_PRIORITY").ok()).or_else(|| cfg_val("priority")).unwrap_or_else(|| "normal".into());
     if !["low", "normal"].contains(&prio.as_str()) { fail("--priority / PBIT_PRIORITY must be low or normal") } // a bad value used to be echoed
@@ -302,7 +435,7 @@ fn stats_cmd(args: &[String]) {
 
 /// The agent-routing demo as a JSON problem: agent tasks x workers under PII / prod-DB policy, quotas and same-workflow affinity.
 fn demo_cmd(args: &[String]) {
-    check_flags(args, &["--tasks", "--seed"], &["--hard"]);
+    let (v, w) = flags_of("demo"); check_flags(args, &v, &w);
     const W: [(&str, usize); 6] = [("opus", 2), ("sonnet", 2), ("luna-pro", 3), ("local-gemma", 2), ("codex", 2), ("human", 3)];
     const CUST: [&str; 8] = ["acme", "globex", "initech", "umbrella", "hooli", "stark", "wayne", "wonka"];
     const TPL: [(&str, bool, bool, [f64; 6]); 8] = [
@@ -333,21 +466,24 @@ fn demo_cmd(args: &[String]) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() >= 2 && args[1..].iter().any(|a| a == "--help" || a == "-h") { if let Some(h) = help(&args[0]) { emit_raw(&h); return; } }
     match args.first().map(|s| s.as_str()) {
         Some("decide") => decide_cmd(&args),
         Some("demo") => demo_cmd(&args),
-        Some("ir") => { check_flags(&args, &[], &[]); let src = read_stdin(); let j = json::parse(&src).unwrap_or_else(|e| fail(&format!("bad JSON: {e}")));
-            let n = from_json(&j).unwrap_or_else(|e| fail(&format!("bad problem: {e}"))); emit_raw(&pbit_decide::ir::to_ir(&n.p)); }
-        Some("run") => { check_flags(&args, &[&SEARCH[..], &CONTROLS[..], &["--op"]].concat(), &["--pretty", "--progress"]); let src = read_stdin(); let j = json::parse(&src).unwrap_or_else(|e| fail(&format!("bad JSON: {e}")));
-            let p = run::from_json(&j).unwrap_or_else(|e| fail(&format!("bad program: {e}")));
+        Some("ir") => { check_flags(&args, &[], &[]); let j = read_doc();
+            let n = from_json(&j).unwrap_or_else(|e| bad_input("bad problem: ", e)); emit_raw(&pbit_decide::ir::to_ir(&n.p)); }
+        Some("run") => { let (v, w) = flags_of("run"); check_flags(&args, &v, &w); let tp = std::time::Instant::now(); let j = read_doc();
+            let tc = std::time::Instant::now(); let parse_ms = (tc - tp).as_secs_f64() * 1e3;
+            let mut p = run::from_json(&j).unwrap_or_else(|e| bad_input("bad program: ", e)); let compile_ms = tc.elapsed().as_secs_f64() * 1e3; p.m.collective = collective_arg(&args); p.m.cluster = cluster_arg(&args); p.m.cycles = cycles_arg(&args);
             priority(&args); let (chains, threads, cpu_pct) = controls(&args);
             let op: String = arg(&args, "--op", "decide".to_string()); if !["decide", "exact", "sample"].contains(&op.as_str()) { fail("--op must be decide, exact or sample"); }
-            let mon = monitor(&args, p.m.n);
-            let (doc, code) = run::run(&p, &op, budget_ms(&args), arg(&args, "--seed", 7), arg(&args, "--exact-limit", 2_000_000), polish_ms_arg(&args), arg(&args, "--polish-sweeps", 0), arg(&args, "--sweeps", 0), arg(&args, "--frontier-states", pbit_ir::FRONTIER_MAX_STATES),
-                chains, threads, cpu_pct, mem_limit(&args, chains, p.m.n), exact_ms(&args)); drop(mon);
-            emit(&json::write(&doc, args.iter().any(|a| a == "--pretty"))); if code != 0 { std::process::exit(code); } }
+            let mon = monitor(&args, p.m.n); let dl = deadline_ms(&args);
+            if dl.is_some() && arg::<usize>(&args, "--sweeps", 0) > 0 { fail("--deadline-ms needs a wall-clock budget: drop --sweeps"); }
+            let (mut doc, code) = run::run(&p, &op, budget_ms(&args), arg(&args, "--seed", 7), arg(&args, "--exact-limit", 2_000_000), polish_ms_arg(&args), arg(&args, "--polish-sweeps", 0), arg(&args, "--sweeps", 0), arg(&args, "--frontier-states", pbit_ir::FRONTIER_MAX_STATES),
+                chains, threads, cpu_pct, mem_limit(&args, chains, p.m.n), exact_ms(&args), dl.map(|d| (tp, d, args.iter().any(|a| a == "--budget-ms")))); drop(mon); run::phases(&mut doc, parse_ms, compile_ms, dl);
+            let c = finish(doc, code, args.iter().any(|a| a == "--pretty")); if c != 0 { std::process::exit(c); } }
         Some("stats") => stats_cmd(&args),
         Some("version") | Some("--version") | Some("-V") => { check_flags(&args, &[], &[]); emit(&format!("pbit {VERSION}")) }
-        _ => { let _ = std::io::stderr().write_all(b"usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--progress [MS]] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard]\n       pbit ir < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--progress [MS]] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit version\n"); std::process::exit(2) }
+        _ => { let _ = std::io::stderr().write_all(b"usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--progress [MS]] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard]\n       pbit ir < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--progress [MS]] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit version\n"); std::process::exit(2) }
     }
 }

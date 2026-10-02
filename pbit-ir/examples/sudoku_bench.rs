@@ -28,7 +28,7 @@ impl S {
 fn model(g: &[u8; 81]) -> Model {
     let mut units: Vec<Vec<usize>> = (0..9).map(|r| (0..9).map(|c| r * 9 + c).collect()).collect();
     units.extend((0..9).map(|c| (0..9).map(|r| r * 9 + c).collect::<Vec<_>>())); units.extend((0..9).map(|b| (0..9).map(|q| (b / 3 * 3 + q / 3) * 9 + b % 3 * 3 + q % 3).collect::<Vec<_>>()));
-    let caps = units.iter().flat_map(|u| (0..9).map(move |d| Cap { members: u.iter().map(|&c| (c, d)).collect(), limit: 1 })).collect();
+    let caps = units.iter().flat_map(|u| (0..9).map(move |d| Cap { weights: vec![], members: u.iter().map(|&c| (c, d)).collect(), limit: 1 })).collect();
     let clamp = g.iter().map(|&d| if d > 0 { Some(d as usize - 1) } else { None }).collect();
     Model::new(81, 9, vec![0.0; 729], vec![true; 729], clamp, vec![], caps).unwrap()
 }
@@ -52,10 +52,10 @@ fn main() {
             let m = model(&pz); let t = Instant::now(); let e = exact(&m, 1, 2_000_000); let pe = t.elapsed().as_secs_f64() * 1e3; // MRV enumeration
             let (en, eerr) = e.map_or((0, f64::NAN), |e| (e.n_feasible, e.marg.iter().zip(&ex).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max))); t_ex.push(pe);
             let t = Instant::now(); let smp = sample(&m, 4, 0, Some(ms), 11 + k, true, false).unwrap(); let gs = gate_stats(&m, &smp);
-            let whole = gs.certified(&GATE); let rel = if whole { vec![true; 81] } else { gs.certified_tasks(&GATE) }; let pb = t.elapsed().as_secs_f64() * 1e3;
+            let whole = gs.diagnostics_passed(&GATE); let rel = if whole { vec![true; 81] } else { gs.released_tasks(&GATE) }; let pb = t.elapsed().as_secs_f64() * 1e3;
             let (mut fr, mut mx, mut nr, mut nb) = (0, 0.0f64, 0, 0);
             for c in 0..81 { if !rel[c] { continue; } nr += 1; if pz[c] == 0 { nb += 1; } let tv = 0.5 * (0..9).map(|d| (smp.marg[c * 9 + d] - ex[c * 9 + d]).abs()).sum::<f64>(); mx = mx.max(tv); if tv > 0.05 { fr += 1; } }
-            let verdict = if whole { "certified" } else if nr > 0 { "partial" } else { "refused" };
+            let verdict = if whole { "diagnostics_passed" } else if nr > 0 { "partial" } else { "refused" };
             println!("{class},{k},{givens},{sols},{dfs_u:.3},{dfs_c:.3},{pe:.3},{en},{eerr:.1e},{verdict},{nr},{nb},{},{fr},{mx:.4},{pb:.1}", 81 - nr);
             fr_total += fr; rel_total += nr; t_dfs.push(dfs_u); t_pb.push(pb);
         }

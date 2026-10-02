@@ -8,15 +8,15 @@ fn main() {
     let ninst: u64 = env("NINST", 16); let s0: u64 = env("SEED0", 7000); let maxs: usize = env("MAXS", 1 << 16);
     if std::env::var("ANYTIME").is_ok() {
         // the shipped anytime sampler (25 ms slices, deadline 1 s, whole-answer stop rule) on the same instances
-        println!("blocks,inst,st,t,certified_at_ms,ms,max_tv,released");
+        println!("blocks,inst,st,t,passed_at_ms,ms,max_tv,released");
         for &nbk in &blocks { for k in s0..s0 + ninst {
             let st = (k % 8) as usize; let seed = 9000 + 131 * k;
             let ins = match st { 0 => build_sat(nbk, 0.8, seed, true), 1 => build_sat(nbk, 2.0, seed, true), 2 => build(nbk, 4, 3, 0.8, seed, true),
                 3 => build(nbk, 4, 3, 2.0, seed, true), 4 => build(nbk, 5, 5, 4.0, seed, true), 5 => build(nbk, 4, 4, 0.5, seed, false),
                 6 => build(8, 3, 5, 2.0, seed, true), _ => build(8, 3, 5, 4.0, seed, true) };
             let a = decide_anytime(&ins.p, 1000.0, 25.0, 1.0, 1 + k, &GATE, false, None).unwrap(); let ex = exact_dp(&ins);
-            let rel = a.gate.certified_tasks(&GATE).iter().filter(|&&r| r).count();
-            println!("{nbk},{k},{st},{},{},{:.1},{:.4},{rel}", ins.p.t, a.certified_at_ms.map_or("NA".into(), |m| format!("{m:.1}")), a.decision.ms, max_tv(&a.decision.marg, &ex.marg, ins.p.a));
+            let rel = a.gate.released_tasks(&GATE).iter().filter(|&&r| r).count();
+            println!("{nbk},{k},{st},{},{},{:.1},{:.4},{rel}", ins.p.t, a.passed_at_ms.map_or("NA".into(), |m| format!("{m:.1}")), a.decision.ms, max_tv(&a.decision.marg, &ex.marg, ins.p.a));
         } }
         return;
     }
@@ -25,7 +25,7 @@ fn main() {
         println!("t,cap,lam,verdict_tier,verdict_forced,marg_bit_identical,ms_tier,ms_forced");
         for &(t, lam) in &[(120usize, 1.0f64), (300, 1.0), (300, 2.0)] { let cap = (t + 5) / 6 + 1; let p = dispatch(t, 6, cap, 3, lam, 5 + t as u64).p;
             let (a, _) = decide_gated(&p, 1, 3000, None, 9, &GATE).unwrap(); let (b, _) = decide_gated(&p, 0, 3000, None, 9, &GATE).unwrap();
-            let v = |d: &Decision| match d.verdict { Verdict::Exact => "exact", Verdict::Certified { .. } => "certified", Verdict::Unmixed { .. } => "refused" };
+            let v = |d: &Decision| match d.verdict { Verdict::Exact => "exact", Verdict::DiagnosticsPassed { .. } => "diagnostics_passed", Verdict::Unmixed { .. } => "refused" };
             let same = a.marg.iter().zip(&b.marg).all(|(x, y)| x.to_bits() == y.to_bits());
             println!("{t},{cap},{lam},{},{},{same},{:.1},{:.1}", v(&a), v(&b), a.ms, b.ms); }
         return;
@@ -43,7 +43,7 @@ fn main() {
             for q in 0..np { for k in 0..n { let i = q * n + k; let forb = 3 * q + ((g().abs() * 7.0) as usize % 3);
                 let mut el: Vec<usize> = (3 * q..3 * q + 3).filter(|&x| x != forb).collect(); if q > 0 { el.push(3 * np + q - 1); } if q < np - 1 { el.push(3 * np + q); }
                 for &x in &el { allowed[i * a + x] = true; h[i * a + x] = 1.2 * g(); } } }
-            let p = Problem { t, a, h, allowed, cap, group: (0..t).map(|i| i / 3).collect(), lam, clamp: vec![None; t], block_moves: false, pair_swaps: false };
+            let p = Problem { t, a, h, allowed, cap, group: (0..t).map(|i| i / 3).collect(), lam, clamp: vec![None; t], block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false };
             let t0 = std::time::Instant::now(); let fe = exact_frontier(&p, maxs); let ms = t0.elapsed().as_secs_f64() * 1e3;
             let t1 = std::time::Instant::now(); let en = if t <= 12 { exact(&p, 1, 1 << 26) } else { None }; let me = t1.elapsed().as_secs_f64() * 1e3;
             let (err, dz) = match (&fe, &en) { (Some(f), Some(e)) => (format!("{:.2e}", f.marg.iter().zip(&e.marg).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max)), format!("{:.2e}", f.logz - e.logz)), _ => ("NA".into(), "NA".into()) };
@@ -60,7 +60,7 @@ fn main() {
                 3 => build(nbk, 4, 3, 2.0, seed, true), 4 => build(nbk, 5, 5, 4.0, seed, true), 5 => build(nbk, 4, 4, 0.5, seed, false),
                 6 => build(8, 3, 5, 2.0, seed, true), _ => build(8, 3, 5, 4.0, seed, true) };
             let (d, _) = decide_gated(&ins.p, 1, 0, Some(200.0), 1 + k, &GATE).unwrap(); let ex = exact_dp(&ins); let mo = exact_map_logw(&ins);
-            let v = match d.verdict { Verdict::Exact => "exact", Verdict::Certified { .. } => "certified", Verdict::Unmixed { .. } => "refused" };
+            let v = match d.verdict { Verdict::Exact => "exact", Verdict::DiagnosticsPassed { .. } => "diagnostics_passed", Verdict::Unmixed { .. } => "refused" };
             println!("{nbk},{k},{st},{},{:.3},{},{v},{:.2},{:.2e},{:.2e},{}", ins.p.lam, rho(&ins), ins.p.t, d.ms, max_tv(&d.marg, &ex.marg, ins.p.a), mo - d.map_logw, ins.p.violations(&d.map));
         } }
         return;

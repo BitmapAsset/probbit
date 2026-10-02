@@ -1,4 +1,4 @@
-//! Certified AI-agent task router: a queue of agent tasks x workers (models + a human queue), hard policy rules
+//! AI-agent task router (gated sampled odds): a queue of agent tasks x workers (models + a human queue), hard policy rules
 //! (PII stays on-prem or with humans, prod-DB migrations never go to cheap models), per-hour quotas, same-customer
 //! context affinity, stub-judge logits.  `cargo run --release --example agent_router`
 use pbit_core::Philox4x32;
@@ -36,7 +36,7 @@ fn queue(n: usize, cap: [usize; 6], lam: f64, seed: u64) -> Queue {
         }
     }
     let group = (0..n).map(|i| i / 3).collect();
-    Queue { p: Problem { t: n, a, h, allowed, cap: cap.to_vec(), group, lam, clamp: vec![None; n], block_moves: false, pair_swaps: false }, name, tpl }
+    Queue { p: Problem { t: n, a, h, allowed, cap: cap.to_vec(), group, lam, clamp: vec![None; n], block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false }, name, tpl }
 }
 
 fn top2(m: &[f64], i: usize, a: usize) -> (usize, usize) {
@@ -56,7 +56,7 @@ fn audit(q: &Queue, x: &[usize]) -> String {
 fn main() {
     let seed: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(7);
     let t_all = Instant::now();
-    println!("=== pbit-decide :: Certified AI-agent task router (agent-router demo, seed {seed}) ===");
+    println!("=== pbit-decide :: AI-agent task router (agent-router demo, seed {seed}) ===");
     let sq = queue(12, [2, 2, 3, 2, 2, 3], 0.8, seed); let p = &sq.p; let a = p.a;
     println!("\n[1] QUEUE  {} tasks -> {} workers, quotas (tasks/hour): {}", p.t, a,
         (0..a).map(|w| format!("{}={}", W[w], p.cap[w])).collect::<Vec<_>>().join(" "));
@@ -82,11 +82,11 @@ fn main() {
     println!("      knock-on reassignments: {}  (violations {})", if moved.is_empty() { "none".into() } else { moved.join(", ") }, p.with_clamp(ci, 5).violations(&ec.top[0].1));
 
     let (d4, g4) = decide_gated(p, 0, 0, Some(50.0), seed, &GATE).unwrap(); let g4 = g4.unwrap();
-    let rel = g4.certified_tasks(&GATE); let nrel = rel.iter().filter(|&&c| c).count();
+    let rel = g4.released_tasks(&GATE); let nrel = rel.iter().filter(|&&c| c).count();
     let tvr = (0..p.t).filter(|&i| rel[i]).map(|i| tv(&d4.marg, &ex.marg, i, a)).fold(0.0, f64::max);
     let agree = (0..p.t).filter(|&i| rel[i] && top2(&d4.marg, i, a).0 == top2(&ex.marg, i, a).0).count();
     println!("\n[4] HONESTY CHECK  same 12 tasks, exact switched off, 4-chain sampler + gate, 50 ms budget ({} samples, {:.0} ms)", d4.samples, d4.ms);
-    println!("    released {}/{} tasks individually (R-hat {:.4}); max TV vs exact over released tasks = {:.4} (gate promised <= {})",
+    println!("    released {}/{} tasks individually (R-hat {:.4}); max TV vs exact over released tasks = {:.4} (gate tolerance {})",
         nrel, p.t, g4.rhat, tvr, GATE.tv_tol);
     println!("    released tasks whose top worker matches exact: {}/{} ; worst TV over ALL tasks = {:.4}", agree, nrel, max_tv(&d4.marg, &ex.marg, a));
 
@@ -97,14 +97,14 @@ fn main() {
     let mut runs = vec![];
     for b in [25.0, 200.0] {
         let (d, g) = decide_gated(bp, 0, 0, Some(b), seed, &GATE).unwrap(); let g = g.unwrap();
-        let rel = g.certified_tasks(&GATE); let n = rel.iter().filter(|&&c| c).count();
+        let rel = g.released_tasks(&GATE); let n = rel.iter().filter(|&&c| c).count();
         println!("    budget {:>3.0} ms ({} samples): whole-answer error bound {:.3} -> {} ; R-hat {:.4} ; released {}/{} tasks, escalated {} ; best plan violations {}",
-            b, d.samples, g.tv_bound(&GATE), if g.certified(&GATE) { "CERTIFIED" } else { "whole answer NOT certified" }, g.rhat, n, bp.t, bp.t - n, bp.violations(&d.map));
+            b, d.samples, g.tv_bound(&GATE), if g.diagnostics_passed(&GATE) { "DIAGNOSTICS PASSED" } else { "whole answer: diagnostics NOT passed" }, g.rhat, n, bp.t, bp.t - n, bp.violations(&d.map));
         runs.push((b, d, g, rel));
     }
     let a = decide_anytime(bp, 500.0, 25.0, 1.0, seed, &GATE, false, None).unwrap();
-    println!("    ANYTIME (sample in 25 ms slices, stop when the whole answer is certified, deadline 500 ms): {} after {:.0} ms ({} looks)",
-        if a.certified_at_ms.is_some() { "CERTIFIED" } else { "not certified by the deadline" }, a.decision.ms, a.looks);
+    println!("    ANYTIME (sample in 25 ms slices, stop when the whole answer passes the diagnostics, deadline 500 ms): {} after {:.0} ms ({} looks)",
+        if a.passed_at_ms.is_some() { "DIAGNOSTICS PASSED" } else { "diagnostics not passed by the deadline" }, a.decision.ms, a.looks);
     // the 5 hardest tasks = largest error bar at 200 ms; show both budgets so the escalation reason is visible
     let (d, g, rel) = (&runs[1].1, &runs[1].2, &runs[1].3); let (g0, rel0) = (&runs[0].2, &runs[0].3);
     let mut hard: Vec<usize> = (0..bp.t).collect(); hard.sort_by(|&u, &v| g.sig_tv[v].partial_cmp(&g.sig_tv[u]).unwrap());
@@ -121,7 +121,7 @@ fn main() {
     println!("    (quota 3) with the next pod; workflows of 5 prefer one worker (lam {}). This shape has an EXACT answer (transfer-matrix DP),", pp.lam);
     println!("    so every released task can be checked. {} workers, {:.0}% full.", pp.a, 100.0 * pp.t as f64 / pp.cap.iter().sum::<usize>() as f64);
     for b in [200.0, 1000.0] {
-        let (d, g) = decide_gated(pp, 0, 0, Some(b), seed, &GATE).unwrap(); let g = g.unwrap(); let rel = g.certified_tasks(&GATE);
+        let (d, g) = decide_gated(pp, 0, 0, Some(b), seed, &GATE).unwrap(); let g = g.unwrap(); let rel = g.released_tasks(&GATE);
         let n = rel.iter().filter(|&&r| r).count(); let bad = (0..pp.t).filter(|&i| rel[i] && tv(&d.marg, &pe.marg, i, pp.a) > GATE.tv_tol).count();
         let worst = (0..pp.t).filter(|&i| rel[i]).map(|i| tv(&d.marg, &pe.marg, i, pp.a)).fold(0.0, f64::max);
         let ratio = g.sig_tv_long.iter().cloned().fold(0.0, f64::max) / g.sig_tv_max;
@@ -138,14 +138,14 @@ fn main() {
     let s = sample_opts(tp, 4, 0, Some(1000.0), 9, true, false, true).unwrap(); let g = gate_stats(tp, &s);
     let r3 = g.rhat < 1.05 && 3.0 * g.sig_tv_max <= 0.05 && g.min_batches >= 8;
     println!("\n[7] THE TRAP  {} tasks, every shared specialist is full in every plan, workflows of 5 but dedicated quota 3 (lam {})", tp.t, tp.lam);
-    println!("    4 chains agree: R-hat {:.3}, naive error bar {:.3} -> the earlier gate would say: {}", g.rhat, 3.0 * g.sig_tv_max, if r3 { "CERTIFIED" } else { "refuse" });
+    println!("    4 chains agree: R-hat {:.3}, naive error bar {:.3} -> the earlier gate would say: {}", g.rhat, 3.0 * g.sig_tv_max, if r3 { "DIAGNOSTICS PASSED" } else { "refuse" });
     println!("    truth (exact DP): worst task off by {:.2}. The current gate: frozen full specialists = {}, error bar {:.3} -> {}",
-        max_tv(&s.marg, &te.marg, tp.a), g.frozen, g.tv_bound(&GATE), if g.certified(&GATE) { "CERTIFIED" } else { "REFUSED: escalate the whole queue (it knows it does not know)" });
+        max_tv(&s.marg, &te.marg, tp.a), g.frozen, g.tv_bound(&GATE), if g.diagnostics_passed(&GATE) { "DIAGNOSTICS PASSED" } else { "REFUSED: escalate the whole queue (the frozen-capacity check catches this trap)" });
 
     println!("\n[8] WHAT THIS PROVES / WHAT IT DOES NOT");
     println!("    Proves: given a judge's scores, the router returns only rule-abiding plans (0 PII leaks, 0 quota overflow),");
     println!("    its per-task odds match exact enumeration where exact is possible, and at real size it releases only the tasks");
-    println!("    whose own error bar passes the gate, escalating tasks whose odds are not yet pinned down (the two-way splits) instead of guessing.");
+    println!("    whose own error bar passes the gate, escalating tasks whose odds are not yet pinned down (the two-way splits); the gate is a heuristic with published counterexamples (README: Known failure modes).");
     println!("    Does NOT prove: that the judge scores are good (here they are a seeded stub: template fit + Gaussian noise),");
     println!("    anything about real production traffic, or real-world latency/cost savings. Sampler budgets are wall-clock, so");
     println!("    counts in [4]-[7] can differ slightly run to run.   total runtime {:.1} s", t_all.elapsed().as_secs_f64());

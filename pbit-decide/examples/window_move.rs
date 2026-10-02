@@ -25,10 +25,10 @@ fn main() {
                 let t0 = std::time::Instant::now();
                 let s = sample_opts(p, 4, sweeps, bud, 1 + k, true, false, gp).unwrap(); let g = gate_stats(p, &s); let ms = t0.elapsed().as_secs_f64() * 1e3;
                 let tvs: Vec<f64> = (0..p.t).map(|i| 0.5 * (0..na).map(|a| (s.marg[i * na + a] - ex.marg[i * na + a]).abs()).sum::<f64>()).collect();
-                let mx = tvs.iter().cloned().fold(0.0, f64::max); let rel = g.certified_tasks(&GATE);
+                let mx = tvs.iter().cloned().fold(0.0, f64::max); let rel = g.released_tasks(&GATE);
                 let nrel = rel.iter().filter(|&&r| r).count(); let bad = rel.iter().zip(&tvs).filter(|(&r, &v)| r && v > GATE.tv_tol).count();
                 println!("{k},{st},{},{:.3},{wk},{wr},{},{},{mx:.5},{:.5},{:.5},{:.5},{},{},{nrel},{bad},{ms:.1}", p.lam, rho(&ins), bud.unwrap_or(0.0), s.sweeps / 4,
-                    tvs.iter().sum::<f64>() / tvs.len() as f64, g.rhat, g.sig_tv_max, g.frozen, g.certified(&GATE) as u8);
+                    tvs.iter().sum::<f64>() / tvs.len() as f64, g.rhat, g.sig_tv_max, g.frozen, g.diagnostics_passed(&GATE) as u8);
             }
         }
     }

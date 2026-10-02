@@ -19,7 +19,7 @@ fn main() {
         for r in 0..reps {
             let sd = 1 + k + r * 7919;
             let s = if sweeps > 0 { sample_opts(p, 4, sweeps, None, sd, true, false, gp) } else { sample_opts(p, 4, 0, Some(bud), sd, true, false, gp) }.unwrap();
-            let g = gate_stats(p, &s); let zc: f64 = env("Z", GATE.z); let rel = g.certified_tasks(&GateCfg { z: zc, ..GATE });
+            let g = gate_stats(p, &s); let zc: f64 = env("Z", GATE.z); let rel = g.released_tasks(&GateCfg { z: zc, ..GATE });
             let long = g.sig_tv_long.iter().cloned().fold(0.0, f64::max);
             let (mut nr, mut nb, mut mrt, mut mrz, mut nz3, mut wt, mut wtv, mut wb) = (0, 0, 0.0f64, 0.0f64, 0, 0, 0.0, 0.0);
             for i in 0..p.t { let tv = 0.5 * (0..na).map(|a| (s.marg[i * na + a] - ex.marg[i * na + a]).abs()).sum::<f64>();

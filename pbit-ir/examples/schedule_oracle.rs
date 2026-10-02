@@ -28,9 +28,9 @@ fn gen(n: usize, t: usize, cap: usize, deg: f64, seed: u64, id: u64) -> Inst {
 fn model(p: &Inst) -> Model {
     let (n, t) = (p.n, p.t);
     let allowed: Vec<bool> = (0..n * t).map(|q| { let (lo, hi) = p.win[q / t]; (lo..=hi).contains(&(q % t)) }).collect();
-    let mut caps: Vec<Cap> = (0..t).map(|s| Cap { members: (0..n).filter(|&i| allowed[i * t + s]).map(|i| (i, s)).collect(), limit: p.cap }).collect();
-    for j in 0..n { for &i in &p.pred[j] { for a in 0..t { for b in 0..=a { if allowed[i * t + a] && allowed[j * t + b] { caps.push(Cap { members: vec![(i, a), (j, b)], limit: 1 }); } } } } }
-    Model::new(n, t, p.h.clone(), allowed, vec![None; n], vec![], caps).unwrap()
+    let mut caps: Vec<Cap> = (0..t).map(|s| Cap { weights: vec![], members: (0..n).filter(|&i| allowed[i * t + s]).map(|i| (i, s)).collect(), limit: p.cap }).collect();
+    for j in 0..n { for &i in &p.pred[j] { for a in 0..t { for b in 0..=a { if allowed[i * t + a] && allowed[j * t + b] { caps.push(Cap { weights: vec![], members: vec![(i, a), (j, b)], limit: 1 }); } } } } }
+    let mut m = Model::new(n, t, p.h.clone(), allowed, vec![None; n], vec![], caps).unwrap(); m.collective = std::env::var("COLLECTIVE").as_deref() == Ok("1"); m
 }
 fn logw(p: &Inst, x: &[usize]) -> f64 { x.iter().enumerate().map(|(i, &s)| p.h[i * p.t + s]).sum() }
 /// can job i sit in slot s given the other jobs' slots (window, precedence both ways, capacity with i removed from its slot)?
@@ -96,8 +96,8 @@ fn main() {
         let t0 = Instant::now(); let c = Chain::new(&m, 60, 0); let dt = t0.elapsed().as_secs_f64() * 1e3;
         println!("n={n} caps={} greedy plan exists: {}; start search: {} after {dt:.1} ms; ascending-order retries: {}", m.caps.len(), greedy(&p, None).is_some(),
             c.as_ref().map_or("gave up".to_string(), |c| format!("found (violations {})", m.violations(&c.x))), START_FALLBACKS.load(std::sync::atomic::Ordering::Relaxed));
-        if c.is_some() { let t1 = Instant::now(); if let Some(s) = sample(&m, 4, 0, Some(ms), 60, true, false) { let g = gate_stats(&m, &s); let rel = if g.certified(&GATE) { n } else { g.certified_tasks(&GATE).iter().filter(|&&r| r).count() };
-            println!("  sampler {ms} ms budget: {:.0} ms total (4 chain starts incl.), violations {}, gate: certified {} released {rel}/{n} rhat {:.4} frozen {}", t1.elapsed().as_secs_f64() * 1e3, s.viol, g.certified(&GATE), g.rhat, g.frozen); } else { println!("  sampler: no start"); } }
+        if c.is_some() { let t1 = Instant::now(); if let Some(s) = sample(&m, 4, 0, Some(ms), 60, true, false) { let g = gate_stats(&m, &s); let rel = if g.diagnostics_passed(&GATE) { n } else { g.released_tasks(&GATE).iter().filter(|&&r| r).count() };
+            println!("  sampler {ms} ms budget: {:.0} ms total (4 chain starts incl.), violations {}, gate: diagnostics_passed {} released {rel}/{n} rhat {:.4} frozen {}", t1.elapsed().as_secs_f64() * 1e3, s.viol, g.diagnostics_passed(&GATE), g.rhat, g.frozen); } else { println!("  sampler: no start"); } }
         return;
     }
     println!("machine: Apple M4 (4P+6E); sampler 4 chains / 4 threads; gate z=3 tol 0.05; budget {ms} ms per method; beta {BETA}");
@@ -108,11 +108,11 @@ fn main() {
             let p = gen(n, t, cap, 1.0, 2026, (n * 100 + cap) as u64 * 1000 + inst); let m = model(&p);
             let t1 = Instant::now(); let ex = match exact(&m, 1, 1 << 23) { Some(x) if x.n_feasible > 0 => x, _ => continue }; let exm = t1.elapsed().as_secs_f64() * 1e3; used += 1;
             let map = m.logw(&ex.top[0].1); assert_eq!(m.violations(&ex.top[0].1), 0);
-            let s = sample(&m, 4, 0, Some(ms), 40 + inst, true, false).unwrap(); let g = gate_stats(&m, &s); let whole = g.certified(&GATE);
-            let mask = if whole { vec![true; n] } else { g.certified_tasks(&GATE) };
+            let s = sample(&m, 4, 0, Some(ms), 40 + inst, true, false).unwrap(); let g = gate_stats(&m, &s); let whole = g.diagnostics_passed(&GATE);
+            let mask = if whole { vec![true; n] } else { g.released_tasks(&GATE) };
             let tv: Vec<f64> = (0..n).map(|i| 0.5 * (0..t).map(|c| (s.marg[i * t + c] - ex.marg[i * t + c]).abs()).sum::<f64>()).collect();
             let (mut nr, mut nf, mut mx) = (0, 0, 0.0f64); for i in 0..n { if mask[i] { nr += 1; mx = mx.max(tv[i]); if tv[i] > 0.05 { nf += 1; } } }
-            let verdict = if whole { "certified" } else if nr > 0 { "partial" } else { "refused" }; if whole { certs += 1; } if nr == 0 { refused += 1; } rel += nr; fr += nf;
+            let verdict = if whole { "diagnostics_passed" } else if nr > 0 { "partial" } else { "refused" }; if whole { certs += 1; } if nr == 0 { refused += 1; } rel += nr; fr += nf;
             let gr = greedy(&p, None).map(|mut x| { repair(&p, &mut x); assert_eq!(m.violations(&x), 0); map - logw(&p, &x) });
             let rs = restarts(&p, ms, 90 + inst).0.map(|b| map - b); let pb = pbit_plan(&m, ms, 60 + inst).map(|(lw, x)| { assert_eq!(m.violations(&x), 0); map - lw });
             match gr { Some(v) => g1.push(v), None => gfail += 1 } if let Some(v) = rs { g2.push(v); } if let Some(v) = pb { g3.push(v); }
@@ -120,7 +120,7 @@ fn main() {
             println!("{n},{t},{cap},{inst},{},{},{exm:.1},{verdict},{nr},{nf},{mx:.4},{map:.4},{},{},{}", p.pred.iter().map(|v| v.len()).sum::<usize>(), ex.n_feasible, f(gr), f(rs), f(pb));
         }
         let opt = |v: &[f64]| v.iter().filter(|&&g| g < 1e-9).count();
-        println!("SUMMARY A n={n} t={t} cap={cap}: {used} feasible instances; certified {certs}, refused {refused}, released {rel} jobs, FALSE releases {fr}; optimal plans (gap < 1e-9): greedy+repair {}/{} (greedy failed {gfail}), restarts@{ms}ms {}/{}, pbit@{ms}ms {}/{}; mean gap {:.4} / {:.4} / {:.4}",
+        println!("SUMMARY A n={n} t={t} cap={cap}: {used} feasible instances; passed {certs}, refused {refused}, released {rel} jobs, FALSE releases {fr}; optimal plans (gap < 1e-9): greedy+repair {}/{} (greedy failed {gfail}), restarts@{ms}ms {}/{}, pbit@{ms}ms {}/{}; mean gap {:.4} / {:.4} / {:.4}",
             opt(&g1), g1.len(), opt(&g2), g2.len(), opt(&g3), g3.len(), g1.iter().sum::<f64>() / g1.len().max(1) as f64, g2.iter().sum::<f64>() / g2.len().max(1) as f64, g3.iter().sum::<f64>() / g3.len().max(1) as f64);
     }
     println!("B: n,t,cap,seed,prec_edges,greedy_repair_logw,greedy_repair_ms,restarts_logw,restarts_runs,pbit_anneal_from_greedy_logw (equal time {ms} ms)");

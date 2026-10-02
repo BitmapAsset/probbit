@@ -34,7 +34,7 @@ fn queue(n: usize, cap: [usize; 6], lam: f64, seed: u64) -> Queue {
         }
     }
     let group = (0..n).map(|i| i / 3).collect();
-    Queue { p: Problem { t: n, a, h, allowed, cap: cap.to_vec(), group, lam, clamp: vec![None; n], block_moves: false, pair_swaps: false }, name, tpl }
+    Queue { p: Problem { t: n, a, h, allowed, cap: cap.to_vec(), group, lam, clamp: vec![None; n], block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false }, name, tpl }
 }
 
 fn main() {
@@ -44,9 +44,9 @@ fn main() {
         let q = queue(n, *c, lam, 31 + sd * 7 + n as u64); let p = &q.p;
         let Some(ex) = exact(p, 1, 20_000_000) else { continue }; if ex.n_feasible == 0 { continue; }
         for b in [25.0, 100.0] {
-            let (d, g) = decide_gated(p, 0, 0, Some(b), 3 + sd, &GATE).unwrap(); let g = g.unwrap(); let rel = g.certified_tasks(&GATE);
+            let (d, g) = decide_gated(p, 0, 0, Some(b), 3 + sd, &GATE).unwrap(); let g = g.unwrap(); let rel = g.released_tasks(&GATE);
             let tv: Vec<f64> = (0..p.t).map(|i| 0.5 * (0..p.a).map(|k| (d.marg[i * p.a + k] - ex.marg[i * p.a + k]).abs()).sum::<f64>()).collect();
-            let mx = tv.iter().cloned().fold(0.0, f64::max); let cert = g.certified(&GATE);
+            let mx = tv.iter().cloned().fold(0.0, f64::max); let cert = g.diagnostics_passed(&GATE);
             println!("{n},{lam},{ci},{sd},{b},{},{},{},{},{},{mx:.4}", ex.n_feasible, rel.iter().filter(|&&r| r).count(), rel.iter().zip(&tv).filter(|(&r, &v)| r && v > 0.05).count(), cert as u8, (cert && mx > 0.05) as u8);
         } } } } }
 }

@@ -29,18 +29,18 @@ fn main() {
             let tvs: Vec<f64> = (0..ins.p.t).map(|i| 0.5 * (0..na).map(|a| (s.marg[i * na + a] - ex.marg[i * na + a]).abs()).sum::<f64>()).collect();
             let mx = tvs.iter().cloned().fold(0.0, f64::max); let good = tvs.iter().filter(|&&v| v <= 0.05).count();
             print!("{k},{st},{lam},{:.3},{bud},{},{mx:.5},{:.5},{:.5},{:.5},{},{good}", rho(&ins), s.sweeps / 4, tvs.iter().sum::<f64>() / tvs.len() as f64, g.rhat, g.sig_tv_max, g.min_batches);
-            for &z in &zs { let c = GateCfg { z, ..GATE }; print!(",{}", g.certified(&c) as u8); }
+            for &z in &zs { let c = GateCfg { z, ..GATE }; print!(",{}", g.diagnostics_passed(&c) as u8); }
             for &z in &zs { for &gd in &guards {
                 let ok = g.rhat < gd && g.min_batches >= GATE.min_batches && g.frozen == 0 && g.sig_tv_long.iter().cloned().fold(0.0, f64::max) <= BATCH_RATIO_MAX * g.sig_tv_max;
                 let rel: Vec<bool> = g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&sg, &l)| ok && z * sg.max(l) <= GATE.tv_tol).collect();
                 print!(",{},{}", rel.iter().filter(|&&r| r).count(), rel.iter().zip(&tvs).filter(|(&r, &v)| r && v > 0.05).count()); } }
             // variants: r = whole answer + strict R-hat 1.005; b = batch size n^(2/3); pb = per-ticket (guard 1.002) with n^(2/3)
             let g67 = gate_stats_with(&ins.p, &s, 2.0 / 3.0);
-            for &z in &zs { let c = GateCfg { z, ..GATE }; let r = g.certified(&c) && g.rhat < 1.005; let b = g.certified(&c) && g67.certified(&c);
+            for &z in &zs { let c = GateCfg { z, ..GATE }; let r = g.diagnostics_passed(&c) && g.rhat < 1.005; let b = g.diagnostics_passed(&c) && g67.diagnostics_passed(&c);
                 let ok = g.rhat < 1.002 && g.min_batches >= GATE.min_batches;
                 let rel: Vec<bool> = g.sig_tv.iter().zip(&g67.sig_tv).map(|(&a, &b)| ok && z * a.max(b) <= GATE.tv_tol).collect();
                 print!(",{},{},{},{}", r as u8, b as u8, rel.iter().filter(|&&r| r).count(), rel.iter().zip(&tvs).filter(|(&r, &v)| r && v > 0.05).count()); }
-            let rl = g.certified_tasks_local(&GATE);
+            let rl = g.released_tasks_local(&GATE);
             let hy = g.rhat < 1.005; // hybrid candidate: local rule + run-wide logw R-hat < 1.005
             println!(",{:.5},{},{},{},{},{},{}", g67.sig_tv_max, ins.p.t, g.frozen, rl.iter().filter(|&&r| r).count(), rl.iter().zip(&tvs).filter(|(&r, &v)| r && v > 0.05).count(),
                 if hy { rl.iter().filter(|&&r| r).count() } else { 0 }, if hy { rl.iter().zip(&tvs).filter(|(&r, &v)| r && v > 0.05).count() } else { 0 });

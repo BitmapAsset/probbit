@@ -18,7 +18,7 @@ fn build(capp: usize, capb: usize, lam: f64, seed: u64) -> Inst {
         let mut el = vec![2 * b, 2 * b + 1]; if b > 0 { el.push(2 * B + b - 1); } if b < B - 1 { el.push(2 * B + b); }
         for &a in &el { allowed[i * na + a] = true; h[i * na + a] = 1.2 * g(); } } }
     let group = (0..t).map(|i| i / 5).collect();
-    Inst { p: Problem { t, a: na, h, allowed, cap, group, lam, clamp: vec![None; t], block_moves: std::env::var("BLOCK").is_ok(), pair_swaps: std::env::var("PAIRS").is_ok() }, capb }
+    Inst { p: Problem { t, a: na, h, allowed, cap, group, lam, clamp: vec![None; t], block_moves: std::env::var("BLOCK").is_ok(), pair_swaps: std::env::var("PAIRS").is_ok(), collective: false, cluster: false, cycles: false }, capb }
 }
 // per-block enumeration: W[l][r], Wm[k][a][l][r] with agents local idx 0,1 private, 2 left bridge, 3 right bridge
 struct Blk { w: Vec<f64>, wm: Vec<f64>, agents: Vec<Option<usize>> }
@@ -83,8 +83,8 @@ fn main() {
             let bl = bridge_tv(&ins, &ex, bud);
             let cd = chain_disagreement(&s, ins.p.a);
             println!("{:>4} {:>4} {:>5.2} {:>4.1} | {:>4}ms {:>12} {:>7.4} {:>7.4} {:>12.4} {:>6.3} {:>8.3}  {:>10}  {:>10}", cp, cbr, tight, lam, bud, s.sweeps / 4,
-                mean_tv(&s.marg, &ex.marg, ins.p.a), max_tv(&s.marg, &ex.marg, ins.p.a), bl, rh, cd, if rh < RHAT_REFUSE { "certified" } else { "UNMIXED" },
-                if rh < RHAT_REFUSE && cd < 0.10 { "certified" } else { "UNMIXED" });
+                mean_tv(&s.marg, &ex.marg, ins.p.a), max_tv(&s.marg, &ex.marg, ins.p.a), bl, rh, cd, if rh < RHAT_REFUSE { "diagnostics_passed" } else { "UNMIXED" },
+                if rh < RHAT_REFUSE && cd < 0.10 { "diagnostics_passed" } else { "UNMIXED" });
         }
         println!("      (exact DP {:.0} ms)", dpms);
     }

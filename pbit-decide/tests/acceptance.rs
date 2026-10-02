@@ -61,7 +61,7 @@ fn acc6_mcse_gate_calibrated_on_oracle() {
     for (lam, cp, cb, pairs, sw) in [(0.5, 5, 5, false, 3000usize), (0.8, 4, 4, false, 3000), (0.8, 5, 5, false, 6000), (2.0, 4, 3, true, 4000), (4.0, 4, 3, false, 300), (4.0, 4, 3, false, 3000), (6.0, 3, 5, false, 3000)] {
         let ins = build(10, cp, cb, lam, 555 + (lam * 10.0) as u64, pairs); let ex = exact_dp(&ins);
         let s = sample(&ins.p, 4, sw, None, 3, true, false).unwrap(); let g = gate_stats(&ins.p, &s);
-        let mx = max_tv(&s.marg, &ex.marg, ins.p.a); let c = g.certified(&GATE);
+        let mx = max_tv(&s.marg, &ex.marg, ins.p.a); let c = g.diagnostics_passed(&GATE);
         println!("lam {lam} cap {cp}/{cb} pairs {pairs} sweeps {sw}: maxTV {mx:.4} R-hat {:.3} 2*sigTV {:.4} -> {}", g.rhat, 2.0 * g.sig_tv_max, if c { "CERTIFIED" } else { "refused" });
         if c { cert += 1; assert!(mx <= 0.05, "false certification: maxTV {mx}"); }
         if lam >= 4.0 && !pairs { assert!(!c || mx <= 0.05); }
@@ -100,16 +100,16 @@ fn acc7_frozen_split_is_refused_and_gpair_is_exact() {
     let s = sample_opts(&trap.p, 4, 20_000, None, 9, true, false, true).unwrap(); let g = gate_stats(&trap.p, &s);
     let mx = max_tv(&s.marg, &ex.marg, trap.p.a);
     println!("trap: maxTV {mx:.3} R-hat {:.4} bound {:.4} frozen {}", g.rhat, g.tv_bound(&GATE), g.frozen);
-    assert!(!g.certified(&GATE) || mx <= 0.05, "false certification: maxTV {mx}");
-    assert!(g.certified_tasks(&GATE).iter().zip(0..).all(|(&r, i)| !r || 0.5 * (0..trap.p.a).map(|a| (s.marg[i * trap.p.a + a] - ex.marg[i * trap.p.a + a]).abs()).sum::<f64>() <= 0.05));
+    assert!(!g.diagnostics_passed(&GATE) || mx <= 0.05, "false certification: maxTV {mx}");
+    assert!(g.released_tasks(&GATE).iter().zip(0..).all(|(&r, i)| !r || 0.5 * (0..trap.p.a).map(|a| (s.marg[i * trap.p.a + a] - ex.marg[i * trap.p.a + a]).abs()).sum::<f64>() <= 0.05));
     let ok = build(5, 3, 5, 4.0, 4247, true); let ex = exact_dp(&ok);
     let s = sample_opts(&ok.p, 4, 20_000, None, 9, true, false, true).unwrap();
     let mx = max_tv(&s.marg, &ex.marg, ok.p.a); println!("gpair nb=5: maxTV {mx:.4}"); assert!(mx <= 0.02, "gpair biased? maxTV {mx}");
     // saturation (rho = 1): certified => within tolerance
     let sat = build_sat(20, 2.0, 9031, true); let ex = exact_dp(&sat);
     let s = sample(&sat.p, 4, 30_000, None, 3, true, false).unwrap(); let g = gate_stats(&sat.p, &s);
-    let mx = max_tv(&s.marg, &ex.marg, sat.p.a); println!("sat: maxTV {mx:.4} cert {}", g.certified(&GATE));
-    assert!(!g.certified(&GATE) || mx <= 0.05);
+    let mx = max_tv(&s.marg, &ex.marg, sat.p.a); println!("sat: maxTV {mx:.4} cert {}", g.diagnostics_passed(&GATE));
+    assert!(!g.diagnostics_passed(&GATE) || mx <= 0.05);
 }
 
 /// Shipped options. decide_anytime on exact-oracle instances: a certificate must be within tolerance and released tickets
@@ -123,9 +123,9 @@ fn acc8_anytime_polish_autogpair() {
         assert_eq!(auto_group_pairs(&ins.p), lam >= 2.0);
         let a = decide_anytime(&ins.p, 400.0, 25.0, 1.0, seed, &GATE, false, None).unwrap();
         let mx = max_tv(&a.decision.marg, &ex.marg, na);
-        println!("lam {lam}: anytime cert {:?} after {:.0} ms, {} looks, maxTV {mx:.4}", a.certified_at_ms, a.decision.ms, a.looks);
-        if a.certified_at_ms.is_some() { assert!(mx <= 0.05, "false anytime certificate {mx}"); }
-        let rel = a.gate.certified_tasks(&GATE);
+        println!("lam {lam}: anytime cert {:?} after {:.0} ms, {} looks, maxTV {mx:.4}", a.passed_at_ms, a.decision.ms, a.looks);
+        if a.passed_at_ms.is_some() { assert!(mx <= 0.05, "false anytime certificate {mx}"); }
+        let rel = a.gate.released_tasks(&GATE);
         for i in 0..ins.p.t { if rel[i] { assert!(0.5 * (0..na).map(|q| (a.decision.marg[i * na + q] - ex.marg[i * na + q]).abs()).sum::<f64>() <= 0.05); } }
         let start = a.decision.map.clone(); let pol = polish_plan(&ins.p, Some(&start), 60.0, seed).unwrap();
         assert_eq!(ins.p.violations(&pol.1), 0); assert!(pol.0 >= ins.p.logw(&start) - 1e-9);
@@ -159,14 +159,16 @@ fn acc10_frontier_exact_and_window_move() {
     WINDOW_K.store(16, Ordering::Relaxed);
     let s = sample_opts(&trap.p, 4, 3000, None, 9, true, false, true); WINDOW_K.store(0, Ordering::Relaxed);
     let s = s.unwrap(); let g = gate_stats(&trap.p, &s); let mx = max_tv(&s.marg, &ex.marg, trap.p.a);
-    println!("window move on the trap: maxTV {mx:.4} frozen {} bound {:.4} certified {}", g.frozen, g.tv_bound(&GATE), g.certified(&GATE));
-    assert!(mx < 0.035 && g.frozen == 0 && g.certified(&GATE), "window move: maxTV {mx} frozen {}", g.frozen);
+    println!("window move on the trap: maxTV {mx:.4} frozen {} bound {:.4} certified {}", g.frozen, g.tv_bound(&GATE), g.diagnostics_passed(&GATE));
+    assert!(mx < 0.035 && g.frozen == 0 && g.diagnostics_passed(&GATE), "window move: maxTV {mx} frozen {}", g.frozen);
 }
 
 const GOLDEN_EXACT: Option<[u64; 3]> = Some([0xe1103c5aab070900, 0xf0acfbd4d1871c16, 0x34c366ce59dcb885]);
 /// Re-pinned with `pbit_ir::FORCED_CAPS_PARTITION` on: cases 1 (0xbb9a05a399f9e9f4 -> now) and 4 (0xccdc575f31a766c0 -> now)
 /// moved (a cap filled by forced legal tickets is no longer called frozen; case 1 certifies, see `forced_caps_do_not_freeze_the_gate`).
-const GOLDEN_GATE: Option<[u64; 7]> = Some([0x81dca6f953ee6f7d, 0xaa917ded9cc365f5, 0x8665356ade9a50f7, 0x8553b053831fdf0d, 0x7a8591ebf0436b01, 0x1710deb19fdb868a, 0x7b8bf0d8d2759157]);
+/// Re-pinned R19.3 (P1.2: partition programs also count free tasks that never moved in any chain): the T=200 A=59 and T=60 A=3
+/// cases (0x8553b053831fdf0d -> now, 0x7a8591ebf0436b01 -> now; frozen now 23 and 5, every other statistic unchanged; neither passes after).
+const GOLDEN_GATE: Option<[u64; 7]> = Some([0x81dca6f953ee6f7d, 0xaa917ded9cc365f5, 0x8665356ade9a50f7, 0xc975cf2b77f9ef09, 0x08d4ae7f7dfbc7c4, 0x1710deb19fdb868a, 0x7b8bf0d8d2759157]);
 /// The assignment Problem is a front-end of the general IR. Through `Problem::lower`, the IR's enumeration, its sampler
 /// (site + swap moves; the assignment-only accelerators are off here) and its certification gate reproduce this crate's
 /// results BIT FOR BIT: log Z, marginals, top plans, per-chain trajectories and traces, and every gate statistic.
@@ -202,11 +204,40 @@ fn ir_lowering_bit_identical() {
         let mut dg: u64 = 0xcbf29ce484222325; let mut feed = |x: u64| { for b in x.to_le_bytes() { dg = (dg ^ b as u64).wrapping_mul(0x100000001b3); } };
         for v in [g1.rhat, g1.sig_tv_max, g1.min_ess, g1.chain_dis].iter().chain(&g1.sig_tv).chain(&g1.sig_tv_long).chain(&g1.rhat_task) { feed(v.to_bits()); }
         for v in [g1.min_batches, g1.frozen, g1.worst_task] { feed(v as u64); }
-        println!("case {n}: T={} A={} bit-identical (exact {}, samples {}, frozen {}, certified {}) gate digest {dg:#018x}", p.t, p.a, has_exact, s1.n, g1.frozen, g1.certified(&GATE));
+        println!("case {n}: T={} A={} bit-identical (exact {}, samples {}, frozen {}, certified {}) gate digest {dg:#018x}", p.t, p.a, has_exact, s1.n, g1.frozen, g1.diagnostics_passed(&GATE));
         digests.push(dg);
     }
     if let Some(want) = GOLDEN_GATE { assert_eq!(digests, want.to_vec(), "gate digests moved"); }
     if let Some(want) = GOLDEN_EXACT { assert_eq!(ex_digests, want.to_vec(), "enumeration digests moved"); }
+}
+
+/// R19 P1.1(a): with the global two-value flip on (`Problem::collective` -> `Model::collective`) the router sampler and the
+/// IR sampler stay bit-identical through the lowering. A custom case has free two-worker tasks over different worker pairs in
+/// one group (pairs whose affinity term changes under the flip), binding caps and three-worker tasks; the flip must fire there.
+#[test]
+fn ir_lowering_bit_identical_collective() {
+    let _serial = HEAVY.lock().unwrap_or_else(|e| e.into_inner());
+    use pbit_decide::oracle::*;
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let mut c = dispatch(16, 3, 7, 8, 0.6, 13).p; for i in 0..12 { c.allowed[i * 3 + 2] = false; } c.allowed[12 * 3] = false;
+    let mut cases: Vec<Problem> = vec![c, r1_instance(), dispatch(9, 4, 4, 3, 1.5, 21).p, build(8, 3, 5, 4.0, 4250, true).p];
+    let mut fired = false;
+    for (n, p) in cases.iter_mut().enumerate() {
+        p.block_moves = false; p.pair_swaps = false;
+        let mut q = p.clone(); q.collective = false; let off = sample(&q, 4, 2000, None, 7 + n as u64, true, true).unwrap();
+        // R19.2 c5: also the Wolff cluster move (`Problem::cluster`), alone and with the collective moves
+        for (coll, clu, cyc) in [(true, false, false), (true, true, false), (false, true, false), (false, false, true), (true, true, true)] {
+            p.collective = coll; p.cluster = clu; p.cycles = cyc; let m = p.lower(); assert_eq!((m.collective, m.cluster, m.cycles), (coll, clu, cyc));
+            let s1 = sample(p, 4, 2000, None, 7 + n as u64, true, true).unwrap(); let s2 = pbit_ir::sample(&m, 4, 2000, None, 7 + n as u64, true, true).unwrap();
+            assert_eq!(bits(&s1.marg), bits(&s2.marg), "case {n} ({coll}, {clu}, {cyc}) marg"); assert_eq!(s1.traj, s2.traj, "case {n} traj"); assert_eq!(s1.plans, s2.plans);
+            for (a, b) in s1.trace.iter().zip(&s2.trace) { assert_eq!(bits(a), bits(b), "case {n} trace"); }
+            assert_eq!((s1.n, s1.viol, s1.best.0.to_bits(), &s1.best.1), (s2.n, s2.viol, s2.best.0.to_bits(), &s2.best.1));
+            assert_eq!(s1.moves, s2.moves, "case {n}: mode-transition counters");
+            if bits(&off.marg) != bits(&s1.marg) { fired = true; }
+            println!("case {n}: T={} A={} collective {coll} cluster {clu} cycles {cyc} bit-identical (samples {}), differs from all-off: {}", p.t, p.a, s1.n, bits(&off.marg) != bits(&s1.marg));
+        }
+    }
+    assert!(fired, "the flip never changed a run");
 }
 
 /// The frontier-DP exact tier runs on the IR (`exact_frontier(p)` = `pbit_ir::exact_frontier(&p.lower())`: components
@@ -248,7 +279,7 @@ fn forced_caps_do_not_freeze_the_gate() {
         let (d, g) = decide_gated(p, 0, 20000, None, 11 + n as u64, &GATE).unwrap(); let g = g.unwrap();
         let tv = (0..p.t).map(|i| 0.5 * (0..p.a).map(|a| (d.marg[i * p.a + a] - e.marg[i * p.a + a]).abs()).sum::<f64>()).fold(0.0, f64::max);
         assert_eq!(g.frozen, 0, "case {n}: a cap filled by forced members was called frozen");
-        assert!(g.certified(&GATE), "case {n}: not certified (rhat {}, tv bound {})", g.rhat, g.tv_bound(&GATE));
+        assert!(g.diagnostics_passed(&GATE), "case {n}: not certified (rhat {}, tv bound {})", g.rhat, g.tv_bound(&GATE));
         assert!(tv <= 0.05, "case {n}: certified but max TV {tv} vs exact");
     }
 }
@@ -262,7 +293,7 @@ fn exact_pass_two_is_not_cut_short() {
     let (t, a) = (10usize, 10usize);
     let allowed: Vec<bool> = (0..t * a).map(|q| q / a < 7 || q % a == q / a).collect();
     let p = Problem { t, a, h: (0..t * a).map(|q| 0.01 * (q % 7) as f64).collect(), allowed, cap: vec![1; a], group: vec![usize::MAX; t], lam: 0.0,
-        clamp: vec![None; t], block_moves: false, pair_swaps: false };
+        clamp: vec![None; t], block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false };
     let full = exact(&p, 1, 1 << 20).unwrap(); assert_eq!(full.n_feasible, 5040);
     let mut answered = 0;
     for lim in [5040u64, 15_000, 15_921, 16_000, 20_000, 25_000, 31_000] {
@@ -284,6 +315,100 @@ fn logw_matches_the_pairwise_definition_bit_for_bit() {
         for _ in 0..20 {
             let x: Vec<usize> = (0..t).map(|_| { r = r.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (r >> 33) as usize % a }).collect();
             assert_eq!(p.logw(&x).to_bits(), naive(&p, &x).to_bits(), "t={t} a={a} group size {gs}");
+            // R19.8: both paths at every size (the threshold LOGW_PAIRWISE_MAX only picks one)
+            assert_eq!(p.logw_by(&x, true).to_bits(), p.logw_by(&x, false).to_bits(), "paths t={t} a={a} group size {gs}");
         }
     }
+}
+
+/// R19.8 (P2.3 item 2): `lower_until` gives the `lower` program without a deadline or before it, and None once it passed.
+#[test]
+fn lower_until_honours_the_deadline() {
+    let p = dispatch(60, 5, 14, 20, 0.7, 3).p;
+    let (a, b) = (p.lower(), p.lower_until(Some(Instant::now() + std::time::Duration::from_secs(600))).expect("before the deadline"));
+    assert_eq!((a.n, a.k, a.pairs.len(), a.caps.len()), (b.n, b.k, b.pairs.len(), b.caps.len())); assert_eq!(a.pairs.len(), 3 * 190);
+    assert_eq!(a.logw(&vec![0; 60]).to_bits(), b.logw(&vec![0; 60]).to_bits());
+    assert!(p.lower_until(Some(Instant::now())).is_none());
+    assert!(p.lower_until(None).is_some());
+}
+
+/// R19.9 (finding 1): the enumeration keeps per-(group, worker) counts of assigned mates and a per-(task, worker) memo of
+/// the affinity fold instead of scanning every group mate at every node (199.9 s -> seconds on a near-saturated 3,000-task
+/// group). Reference = the R19.8 enumeration verbatim (mates scan, same passes, same top-k upkeep): plan count, log Z,
+/// every marginal and the top plans with their odds must match to the last bit. lam values are not exact in binary
+/// (a count-times-lam product would differ in the last bits); group ids are sparse; some tasks are ungrouped.
+#[test]
+fn enumeration_affinity_memo_is_bit_identical() {
+    struct R<'a> { p: &'a Problem, mates: Vec<Vec<usize>>, x: Vec<usize>, load: Vec<usize>, pass: u8, mx: f64, sum: f64,
+        marg: Vec<f64>, top: Vec<(f64, Vec<usize>)>, n: u64 }
+    impl R<'_> {
+        fn dfs(&mut self, i: usize, lw: f64) {
+            let p = self.p;
+            if i == p.t {
+                self.n += 1;
+                if self.pass == 0 { if lw > self.mx { self.mx = lw; } return; }
+                let w = (lw - self.mx).exp(); self.sum += w;
+                for j in 0..p.t { self.marg[j * p.a + self.x[j]] += w; }
+                if self.top.len() < 5 || lw > self.top.last().unwrap().0 {
+                    self.top.push((lw, self.x.clone())); self.top.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap()); self.top.truncate(5); }
+                return;
+            }
+            for a in 0..p.a {
+                if !p.ok(i, a) || self.load[a] >= p.cap[a] { continue; }
+                let mut d = p.h[i * p.a + a];
+                for &j in &self.mates[i] { if j < i && self.x[j] == a { d += p.lam; } }
+                self.x[i] = a; self.load[a] += 1; self.dfs(i + 1, lw + d); self.load[a] -= 1;
+            }
+        }
+    }
+    let mut r = 20261001u64; let mut rnd = |m: usize| { r = r.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (r >> 33) as usize % m };
+    let (mut feasible, mut with_mates) = (0, 0);
+    for case in 0..240usize {
+        let (t, a) = (4 + case % 6, 2 + case % 3);
+        let lam = [0.37, -1.3, 2.1, 0.1, -0.05][case % 5];
+        let mut p = dispatch(t, a, t, 1, lam, case as u64 + 1).p;
+        for v in p.allowed.iter_mut() { *v = rnd(5) != 0; }
+        for i in 0..t { let k = rnd(a); p.allowed[i * a + k] = true; } // every task keeps one worker
+        for c in p.cap.iter_mut() { *c = 1 + rnd(t); }
+        let ng = 1 + rnd(3);
+        for g in p.group.iter_mut() { *g = if rnd(4) == 0 { usize::MAX } else { 1000 + 7 * rnd(ng) }; }
+        let e = exact(&p, 5, 1 << 40).expect("small programs enumerate");
+        let mut s = R { p: &p, mates: p.mates(), x: vec![0; t], load: vec![0; a], pass: 0, mx: f64::NEG_INFINITY, sum: 0.0,
+            marg: vec![0.0; t * a], top: vec![], n: 0 };
+        s.dfs(0, 0.0);
+        if s.n == 0 { assert_eq!(e.n_feasible, 0, "case {case}"); continue; }
+        feasible += 1; if s.mates.iter().any(|m| !m.is_empty()) { with_mates += 1; }
+        s.pass = 1; s.n = 0; s.dfs(0, 0.0);
+        let z = s.sum; for m in s.marg.iter_mut() { *m /= z; }
+        let logz = s.mx + z.ln();
+        assert_eq!(e.n_feasible, s.n, "case {case}");
+        assert_eq!(e.logz.to_bits(), logz.to_bits(), "case {case}: logz");
+        for (u, v) in e.marg.iter().zip(&s.marg) { assert_eq!(u.to_bits(), v.to_bits(), "case {case}: marginal"); }
+        assert_eq!(e.top.len(), s.top.len(), "case {case}");
+        for ((po, xo), (lw, x)) in e.top.iter().zip(&s.top) { assert_eq!(po.to_bits(), (lw - logz).exp().to_bits(), "case {case}: top odds"); assert_eq!(xo, x); }
+        // a capped memo (shorter chunks, the fold continues past them) gives the same bits
+        for m in [0, 1, 2 * t * a] {
+            let f = exact_memo_capped(&p, 5, 1 << 40, m).expect("small programs enumerate");
+            assert_eq!((f.n_feasible, f.logz.to_bits()), (e.n_feasible, e.logz.to_bits()), "case {case}: memo cap {m}");
+            for (u, v) in f.marg.iter().zip(&e.marg) { assert_eq!(u.to_bits(), v.to_bits(), "case {case}: memo cap {m}"); }
+        }
+    }
+    assert!(feasible >= 150 && with_mates >= 150, "too few informative cases: {feasible} feasible, {with_mates} with mates");
+}
+
+/// R19.9 (finding 2): `sample_on`'s wall-clock budget is a deadline per worker, not a slice per chain. Each chain used to time
+/// its own budget / ceil(chains / threads) slice and checked the clock every 8 sweeps, so with thousands of chains every chain
+/// overran its few microseconds and nothing charged the overrun (100,000 chains on 200 ms: ~460 ms of sampling). Now the r-th
+/// chain of a worker stops at call start + (r + 1) slices (CLI A/B, BENCHMARKS §6: 100,000 chains sampled 431.5 -> 269.4 ms on
+/// 200 ms; the rest is the chains' builds, which every chain needs). A LOOSE guard, not a separation: at 32,000 chains the
+/// builds alone fill a 60 ms budget on an Apple M4 (CLI old 89.8 vs new 88.9 ms), so both pass. It pins that the budget stays
+/// a deadline within 3x at many chains and that every chain is still in the output.
+#[test]
+fn sample_on_budget_is_a_deadline_at_many_chains() {
+    let p = dispatch(24, 5, 10, 3, 1.0, 1).p;
+    let t0 = Instant::now();
+    let s = sample_on(&p, 32_000, 4, 0, Some(60.0), 1, false, false, 100, 0).expect("chains start");
+    let ms = t0.elapsed().as_secs_f64() * 1e3;
+    assert_eq!(s.moves.len(), 32_000, "every chain is in the output");
+    assert!(ms < 180.0, "sampling took {ms:.1} ms for a 60 ms budget");
 }

@@ -16,11 +16,11 @@ fn main() {
         let row = |mode: &str, cert: bool, t: f64, looks: usize, m: &[f64], rel: &[bool]| { let tv = tvs(m);
             println!("{k},{st},{mode},{},{t:.1},{looks},{:.5},{},{}", cert as u8, tv.iter().cloned().fold(0.0, f64::max), rel.iter().filter(|&&r| r).count(), rel.iter().zip(&tv).filter(|(&r, &v)| r && v > 0.05).count()); };
         let s = sample(&ins.p, 4, 0, Some(dl), 3 + k, true, false).unwrap(); let g = gate_stats(&ins.p, &s);
-        row("fixed", g.certified(&GATE), dl, 1, &s.marg, &g.certified_tasks(&GATE));
+        row("fixed", g.diagnostics_passed(&GATE), dl, 1, &s.marg, &g.released_tasks(&GATE));
         for (mode, asp, gr) in [("any", false, 1.0), ("any_geo", false, 1.5)] {
             let a = decide_anytime(&ins.p, dl, sl, gr, 3 + k, &GATE, asp, None).unwrap();
             let c = GateCfg { z: look_z(&GATE, a.looks, asp), ..GATE };
-            row(mode, a.certified_at_ms.is_some(), a.decision.ms, a.looks, &a.decision.marg, &a.gate.certified_tasks(&c));
+            row(mode, a.passed_at_ms.is_some(), a.decision.ms, a.looks, &a.decision.marg, &a.gate.released_tasks(&c));
         }
     }
 }

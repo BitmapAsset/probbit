@@ -8,7 +8,7 @@ fn main() {
     for &nb in &nbs { for gp in [false, true] {
         let ins = build(nb, 3, 5, lam, 4242 + nb as u64, true); let ex = exact_dp(&ins);
         let s = sample_opts(&ins.p, 4, 0, Some(1500.0), 9, true, false, gp).unwrap(); let g = gate_stats(&ins.p, &s);
-        println!("nb {nb:2} gpair {gp:5}: sweeps/ch {:>7} meanTV {:.4} maxTV {:.4} rhat {:.3} bound {:.3} frozen {} cert {}", s.sweeps / 4, mean_tv(&s.marg, &ex.marg, ins.p.a), max_tv(&s.marg, &ex.marg, ins.p.a), g.rhat, g.tv_bound(&GATE), g.frozen, g.certified(&GATE));
+        println!("nb {nb:2} gpair {gp:5}: sweeps/ch {:>7} meanTV {:.4} maxTV {:.4} rhat {:.3} bound {:.3} frozen {} cert {}", s.sweeps / 4, mean_tv(&s.marg, &ex.marg, ins.p.a), max_tv(&s.marg, &ex.marg, ins.p.a), g.rhat, g.tv_bound(&GATE), g.frozen, g.diagnostics_passed(&GATE));
         if std::env::var("BRIDGE").is_ok() { let t = ins.p.t;
             for b in 0..nb - 1 { let a = 2 * nb + b; let mut h = vec![0.0f64; 11]; let mut n = 0.0f64;
                 for tr in &s.traj { for row in tr.chunks(t) { h[row.iter().filter(|&&v| v as usize == a).count()] += 1.0; n += 1.0; } }

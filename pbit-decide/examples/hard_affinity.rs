@@ -16,8 +16,8 @@ fn main() {
         for &bud in &[50.0, 200.0, 1000.0] { for (mv, gp) in [("pairs", false), ("pairs+gpair", true)] {
             let s = sample_opts(&ins.p, 4, 0, Some(bud), 9 + sd, true, false, gp).unwrap(); let g = gate_stats(&ins.p, &s);
             let tvs: Vec<f64> = (0..ins.p.t).map(|i| 0.5 * (0..na).map(|a| (s.marg[i * na + a] - ex.marg[i * na + a]).abs()).sum::<f64>()).collect();
-            let rel = g.certified_tasks(&GATE);
-            println!("{nb},{lam},{cp},{cb},{sd},{bud},{mv},{},{:.4},{:.4},{:.4},{:.4},{},{},{}", s.sweeps / 4, tvs.iter().sum::<f64>() / tvs.len() as f64, tvs.iter().cloned().fold(0.0, f64::max), g.rhat, g.tv_bound(&GATE), g.certified(&GATE) as u8,
+            let rel = g.released_tasks(&GATE);
+            println!("{nb},{lam},{cp},{cb},{sd},{bud},{mv},{},{:.4},{:.4},{:.4},{:.4},{},{},{}", s.sweeps / 4, tvs.iter().sum::<f64>() / tvs.len() as f64, tvs.iter().cloned().fold(0.0, f64::max), g.rhat, g.tv_bound(&GATE), g.diagnostics_passed(&GATE) as u8,
                 rel.iter().filter(|&&r| r).count(), rel.iter().zip(&tvs).filter(|(&r, &v)| r && v > 0.05).count());
         } }
     } }

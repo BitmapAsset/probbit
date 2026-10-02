@@ -1,6 +1,6 @@
 [package]
 name = "pbit-ir"
-description = "pbit-ir: the instruction set of the pbit virtual p-bit processor. Constrained categorical fields, exact enumeration, constraint-preserving Gibbs, certification gate."
+description = "pbit-ir: the instruction set of the pbit virtual p-bit processor. Constrained categorical fields, exact enumeration, constraint-preserving Gibbs, diagnostics gate."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

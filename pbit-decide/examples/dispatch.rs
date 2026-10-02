@@ -61,13 +61,13 @@ fn main() {
     println!("    latency p50: 1 chain single-thread = {:.1} ms ; 4 chains on 4 threads (+R-hat, plan table) = {:.1} ms", pct(&mut st, 0.5), pct(&mut mt, 0.5));
     let ab = argmax_plan(&big.p);
     println!("    judge argmax plan violations = {} ; pbit-decide best-seen plan violations = {} ; best-seen logw {:.2} (a sample, not the optimum: see polish_plan) vs judge-argmax logw(unconstrained) {:.2}", big.p.violations(&ab), big.p.violations(&dd.map), dd.map_logw, big.p.logw(&ab));
-    match dd.verdict { Verdict::Certified { rhat } => println!("    R-hat-only verdict: CERTIFIED (split R-hat {:.3} < {})", rhat, RHAT_REFUSE),
+    match dd.verdict { Verdict::DiagnosticsPassed { rhat } => println!("    R-hat-only verdict: DIAGNOSTICS PASSED (split R-hat {:.3} < {})", rhat, RHAT_REFUSE),
         Verdict::Unmixed { rhat } => println!("    R-hat-only verdict: UNMIXED -> escalate (R-hat {:.3})", rhat), Verdict::Exact => {} }
     for sw in [2000usize, 8000] {
         let (gd, g) = decide_gated(&big.p, 0, sw, None, seed + 7, &GATE).unwrap(); let g = g.unwrap();
-        let cov = g.certified_tasks(&GATE).iter().filter(|&&c| c).count();
-        println!("    calibrated gate, {:>4} sweeps/chain ({:.0} ms): error bound {:.3} -> {} ; per-ticket release: {}/{} tickets certified, rest escalated", sw, gd.ms, g.tv_bound(&GATE),
-            if g.certified(&GATE) { "CERTIFIED" } else { "whole answer refused" }, cov, big.p.t);
+        let cov = g.released_tasks(&GATE).iter().filter(|&&c| c).count();
+        println!("    calibrated gate, {:>4} sweeps/chain ({:.0} ms): error bound {:.3} -> {} ; per-ticket release: {}/{} tickets released, rest escalated", sw, gd.ms, g.tv_bound(&GATE),
+            if g.diagnostics_passed(&GATE) { "DIAGNOSTICS PASSED" } else { "whole answer refused" }, cov, big.p.t);
     }
     println!("    top plan empirical frequency = {:.5} over {} samples (at T=200 no single plan has meaningful mass; use marginals/conditionals)", dd.top[0].0, dd.samples);
 
@@ -78,14 +78,14 @@ fn main() {
     for sw in [40usize, 400, 4000] {
         let (dh, g) = decide_gated(&hard.p, 0, sw, None, seed, &GATE).unwrap(); let g = g.unwrap();
         println!("    {:>5} sweeps: R-hat {:.3}, per-ticket error bound {:.3} (worst {}) -> {}", sw, g.rhat, g.tv_bound(&GATE), hard.tickets[g.worst_task],
-            match dh.verdict { Verdict::Certified { .. } => "CERTIFIED", _ => "UNMIXED: refusing to give odds, escalate to a human / bigger budget" });
+            match dh.verdict { Verdict::DiagnosticsPassed { .. } => "DIAGNOSTICS PASSED", _ => "UNMIXED: refusing to give odds, escalate to a human / bigger budget" });
     }
     // ---------- 4. the case the old R-hat-only gate got wrong ----------
     use pbit_decide::oracle::{build, exact_dp};
     let ins = build(20, 4, 3, 2.0, 3677, false); let ex = exact_dp(&ins);
     let t0 = Instant::now(); let s = sample(&ins.p, 4, 7300, None, 43, true, false).unwrap(); let ms = t0.elapsed().as_secs_f64() * 1e3; let g = gate_stats(&ins.p, &s);
     println!("\n[9] WHY THE GATE CHANGED  T=200 chain-of-blocks (exact answer known by DP), lam=2, tight shared agents, 4 x 7300 sweeps ({:.0} ms)", ms);
-    println!("    old gate (R-hat only): R-hat {:.3} -> {}", g.rhat, if g.rhat < 1.05 { "would CERTIFY" } else { "refuse" });
-    println!("    calibrated gate: per-ticket error bound {:.3} > {} -> {}", g.tv_bound(&GATE), GATE.tv_tol, if g.certified(&GATE) { "CERTIFIED" } else { "REFUSE" });
+    println!("    old gate (R-hat only): R-hat {:.3} -> {}", g.rhat, if g.rhat < 1.05 { "would PASS" } else { "refuse" });
+    println!("    calibrated gate: per-ticket error bound {:.3} > {} -> {}", g.tv_bound(&GATE), GATE.tv_tol, if g.diagnostics_passed(&GATE) { "DIAGNOSTICS PASSED" } else { "REFUSE" });
     println!("    truth (exact DP): mean TV {:.3}, worst ticket off by TV {:.3}  -> refusing was right", mean_tv(&s.marg, &ex.marg, ins.p.a), max_tv(&s.marg, &ex.marg, ins.p.a));
 }

@@ -63,7 +63,7 @@
   <text x="1150" y="470" fill="#c3cad9" font-size="13">split R-hat across chains</text>
   <text x="1150" y="488" fill="#c3cad9" font-size="13">error bar per task (dual-batch MCSE, ±0.05)</text>
   <text x="1150" y="506" fill="#c3cad9" font-size="13">frozen-saturated-worker detector</text>
-  <text x="1150" y="532" fill="#5ee7ff" font-size="13" font-weight="700">certified  →  all tasks released</text>
+  <text x="1150" y="532" fill="#5ee7ff" font-size="13" font-weight="700">diagnostics passed  →  all tasks released</text>
   <text x="1150" y="550" fill="#ffd166" font-size="13" font-weight="700">partial    →  release sure tasks, escalate rest</text>
   <text x="1150" y="568" fill="#ff6b6b" font-size="13" font-weight="700">refused    →  it knows it does not know</text>
 

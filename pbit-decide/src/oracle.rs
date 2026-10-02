@@ -17,7 +17,7 @@ pub fn build(nblocks: usize, capp: usize, capb: usize, lam: f64, seed: u64, pair
         let mut el = vec![2 * b, 2 * b + 1]; if b > 0 { el.push(2 * b_ + b - 1); } if b < b_ - 1 { el.push(2 * b_ + b); }
         for &a in &el { allowed[i * na + a] = true; h[i * na + a] = 1.2 * g(); } } }
     let group = (0..t).map(|i| i / 5).collect();
-    Inst { p: Problem { t, a: na, h, allowed, cap, group, lam, clamp: vec![None; t], block_moves: false, pair_swaps }, capb, nb: b_ }
+    Inst { p: Problem { t, a: na, h, allowed, cap, group, lam, clamp: vec![None; t], block_moves: false, pair_swaps, collective: false, cluster: false, cycles: false }, capb, nb: b_ }
 }
 struct Blk { w: Vec<f64>, wm: Vec<f64>, agents: Vec<Option<usize>> }
 fn enum_block(ins: &Inst, b: usize) -> Blk {

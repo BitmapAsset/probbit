@@ -16,7 +16,7 @@ fn main() {
             let s = sample(&ins.p, 4, 0, Some(bud), 42 + sd, true, false).unwrap();
             let g = gate_stats(&ins.p, &s); let g2 = gate_stats_with(&ins.p, &s, 2.0 / 3.0); let na = ins.p.a;
             let tvs: Vec<f64> = (0..ins.p.t).map(|i| 0.5 * (0..na).map(|a| (s.marg[i * na + a] - ex.marg[i * na + a]).abs()).sum::<f64>()).collect();
-            let tc = g.certified_tasks(&GATE);
+            let tc = g.released_tasks(&GATE);
             let (wt, mx) = tvs.iter().enumerate().fold((0, 0.0), |b, (i, &v)| if v > b.1 { (i, v) } else { b });
             println!("{lam},{cp},{cb},{tight:.3},{bud},{},{sd},{},{:.5},{:.5},{:.4},{:.5},{:.1},{:.4},{},{wt},{},{:.5},{},{},{},{}", pairs as u8, s.sweeps / 4,
                 tvs.iter().sum::<f64>() / tvs.len() as f64, mx, g.rhat, g.sig_tv_max, g.min_ess, g.chain_dis, g.min_batches, g.worst_task, g2.sig_tv_max, g2.min_batches, tc.iter().filter(|&&c| c).count(), tc.iter().zip(&tvs).filter(|(&c, &v)| c && v > 0.05).count(), tvs.iter().filter(|&&v| v <= 0.05).count());

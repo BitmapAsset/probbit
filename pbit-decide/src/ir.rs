@@ -4,7 +4,8 @@
 use crate::Problem;
 
 pub fn to_ir(p: &Problem) -> String {
-    let mut s = format!("pbit-ir v0\nvars {} {}\nlam {:016x}\nflags {} {}\n", p.t, p.a, p.lam.to_bits(), p.block_moves as u8, p.pair_swaps as u8);
+    let mut s = format!("pbit-ir v0\nvars {} {}\nlam {:016x}\nflags {} {}{}\n", p.t, p.a, p.lam.to_bits(), p.block_moves as u8, p.pair_swaps as u8,
+        { let ext = [p.collective, p.cluster, p.cycles]; ext.iter().rposition(|&f| f).map_or(String::new(), |e| ext[..=e].iter().map(|&f| format!(" {}", f as u8)).collect()) });
     s += "cap"; for c in &p.cap { s += &format!(" {c}"); } s += "\n";
     for i in 0..p.t {
         s += &format!("var {} group {} clamp {}", i, if p.group[i] == usize::MAX { -1i64 } else { p.group[i] as i64 }, p.clamp[i].map_or(-1i64, |c| c as i64));
@@ -28,7 +29,7 @@ pub fn from_ir(src: &str) -> Result<Problem, String> {
         for kv in &w[6..] { let (k, x) = kv.split_once(':').ok_or(e("kv"))?; let k: usize = k.parse().unwrap();
             allowed[i * a + k] = true; h[i * a + k] = f64::from_bits(u64::from_str_radix(x, 16).map_err(|x| x.to_string())?); } }
     if ln.next() != Some("end") { return Err(e("missing end")); }
-    Ok(Problem { t, a, h, allowed, cap, group, lam, clamp, block_moves: fl[0] == 1, pair_swaps: fl[1] == 1 })
+    Ok(Problem { t, a, h, allowed, cap, group, lam, clamp, block_moves: fl[0] == 1, pair_swaps: fl[1] == 1, collective: fl.get(2) == Some(&1), cluster: fl.get(3) == Some(&1), cycles: fl.get(4) == Some(&1) })
 }
 
 /// Binary lowering: one p-bit s_{i,a} per allowed (task, agent) + bounded-binary slack bits per agent for capacity.

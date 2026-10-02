@@ -8,10 +8,15 @@ purpose), but not always on an idle machine: during some runs fseventsd used ~19
 processes; sections give the load where it was recorded.
 Format: median [interquartile range] over N runs, unless a cell says p50/p95 or min-max. Each table ends with what it lets us claim
 and what it does not.
+Rows and sentences tagged R19.n were measured in 0.2.0 development round n (2026-09-30 to 2026-10-01); `P1.x`-style ids
+name items of that round's work plan; short hex ids name development builds. R19.10 is the final 0.2.0 build.
 
-**Certified / released** (every section): an item's odds passed the gate, i.e. a 3σ Monte-Carlo error bound of at most 0.05 total
-variation from multi-chain batch means, plus split R-hat, batch-size stability and frozen-resource checks, calibrated against exact
-oracles. It is a statistical check, not a proof. **Oracles**: router family A (§2.1) is checked against a transfer-matrix DP
+**Vocabulary (0.2.0).** The 0.1.0 verdict `certified` is retired; it is now `diagnostics_passed` (same test). Where a section
+below says "certified", "certificate" or "false certificate", read: the whole answer passed the gate's diagnostics, and a false
+one is a whole answer that passed with a released item outside tolerance. Those measurements were taken under the old name and
+were not re-run for the rename. **Released** (every section): an item's odds passed the gate, i.e. a 3σ Monte-Carlo error bound
+of at most 0.05 total variation from multi-chain batch means, plus split R-hat, batch-size stability and frozen-resource checks,
+tuned against exact oracles. It is a diagnostic, not a proof, and it has counterexamples: see [Known failure modes](#known-failure-modes). **Oracles**: router family A (§2.1) is checked against a transfer-matrix DP
 (`pbit-decide/src/oracle.rs`), separate code from the sampler and the exact tiers. Every other oracle is pbit's own exact tier
 (`pbit_ir::exact` enumeration for max-cut, colouring and scheduling; the frontier DP for router family B), not an independent
 solver. Cross-checks: that enumeration equals an independent bitmask DFS on 20 sudokus (counts and per-cell odds, §4) and the
@@ -29,13 +34,13 @@ The p-bit literature counts "flips/s" (p-bit updates per second). Ours, from the
 | `pbit-core` heat-bath, f32 lookup table, one lattice (fast path) | 1 | 9.13e8 [9.01e8-9.15e8] |
 | `pbit-ir` general sampler, 400-spin ring program (`pbit stats`) | 1 | 2.28e7 [2.23e7-2.31e7] |
 | same | 4 | 7.68e7 [7.63e7-7.74e7] |
-| router sampler, 300-task demo (`pbit decide`, 2,000 sweeps) | 4 | 5.31e7 [5.18e7-5.40e7] |
+| router sampler, 300-task demo (`pbit decide`, 2,000 sweeps) | 4 | 5.31e7 [5.18e7-5.40e7] (0.1.x moves; R19.2 same session, N = 5, load ~8: `--collective off` 5.36e7 [5.22e7-5.74e7], `on` (the 0.2.0 default) 5.11e7 [5.00e7-5.40e7], -4.7%) |
 
 Claim: the substrate's structured kernels reach ~1.5e11 replica-site updates/s on a Mac mini; a sparse general program (the
 400-spin ring) runs at ~2.3e7 updates/s per thread, denser ones slower (router ~1.3e7 per thread, the G1-like max-cut ~3e6, §3).
 The first four rows are standalone kernels (`pbit-core/examples/kernels`); `pbit decide` / `pbit run` use only pbit-core's RNG. Not claimed: that a general program gets kernel speed (the general sampler is ~40x slower per
 thread than the one-lattice heat-bath kernel and ~1,600x slower than the multispin figure); the multispin rate counts 64
-independent replicas per word, so one problem does not get 64x faster; FPGA/ASIC p-bit numbers *(lit.)*, not quoted here, are not
+packed replicas per word that share one random draw per site (so they are not independent samples), and one problem does not get 64x faster; FPGA/ASIC p-bit numbers *(lit.)*, not quoted here, are not
 comparable to these without the same problem and metric. The fast multispin path stops scaling past 4 threads on the M4
 (1.48e11 at 4 and 10 threads; the older multispin path goes 9.37e10 -> 1.27e11), likely memory-bound (inferred).
 
@@ -55,18 +60,22 @@ tasks; exact odds and optimum by transfer-matrix DP).
 | exact frontier tier | 3.17 / 5.65 | 0 (0) | 100% (odds error 3.7e-15) | all, exact |
 | greedy | 0.025 / 0.042 | 176.5 (1,060) | 51.9% (a plan, no odds) | none |
 | greedy+polish, equal time | 259.0 / 267.4 | 0.151 (26.3) | 79.2% (a plan, no odds) | none |
-| pbit | 258.9 / 267.3 | 0.011 (3.93) | 96.6% | 1,580 of 2,720 (0 wrong); 7/16 queues certified whole |
+| pbit (0.1.0 gate) | 258.9 / 267.3 | 0.011 (3.93) | 96.6% | 1,580 of 2,720 (0 wrong); 7/16 queues certified whole |
+| pbit (current gate/3; re-run R19.10, HEAD 3312bda, load ~3.5) | 262.9 / 281.0 | 0.000 (4.03) | 96.6% | 1,395 of 2,720 (0 wrong); 6/16 queues passed whole |
 
 A replication on a later build gave the same exact, greedy and pbit rows (pbit released 1,590, 0 wrong);
-greedy+polish, being wall-clock bound, came out at 0.081 nats median instead of 0.151.
+greedy+polish, being wall-clock bound, came out at 0.081 nats median instead of 0.151 (0.117 in the R19.10 re-run). The ms
+columns are p50 / p95 over the 16 queues (one run each), not repeats. The current-gate row is lower in coverage, not in
+correctness: gate/3's never-moved and indicator rules (R19.3) refuse more (Known failure modes), and 0 released task was wrong.
 
 B: `pbit demo --tasks N` queues, N = 12 / 18 / 24 / 30, 4 seeds each (336 tasks; exact odds from the frontier tier with a raised cap).
 The exact tier answers in 0.17 / 1.47 / 5.83 ms at N = 12 / 18 / 24 and declines N = 30 at its default 4,096-state cap. Greedy is
 2.95 / 6.68 / 8.14 / 9.14 nats (median) below the optimum. Greedy+polish and pbit both reach the optimum on 16/16 queues. pbit
 certified 16/16 and released 336/336 tasks, 0 wrong; its odds name the exact most likely worker for 98.6-100% of tasks, while a
 single optimal plan agrees on 71-78%. Claim: on these queues with an oracle, pbit's released odds were not once wrong (1,916 released
-tasks, 0 wrong) and its plan was at least as close to the optimum as greedy+polish at equal time (0.011 vs 0.151 nats median on A).
-Not claimed: coverage everywhere (A: 58% of tasks released; nothing was released on the 4 saturated queues, whose odds were within
+tasks on the 0.1.0 gate; 1,731 = 1,395 A + 336 B on the current gate, R19.10 re-run, B unchanged at 16/16 and 336/336; 0 wrong both) and its plan was at least as close to the optimum as greedy+polish at equal time (0.011 vs 0.151 nats median on A).
+Not claimed: coverage everywhere (A: 58% of tasks released on the 0.1.0 gate, 51% on gate/3; on gate/3, 9 queues released
+nothing, 4 of them inside tolerance (max TV 0.012-0.042: the two A1 saturated queues, A4 seed 7012 and A6 seed 7006). On 0.1.0: nothing was released on the 4 saturated queues, whose odds were within
 0.011-0.087 TV, i.e. two of them were refused needlessly, nor on the 4 strong-affinity T = 80 queues, off by 0.04-0.44, one of them
 (0.041; 0.042 in a later re-run) also needlessly: 3 of the 8 zero-release queues were inside tolerance) or that the
 plan is optimal (up to 3.93 nats short on A).
@@ -110,21 +119,32 @@ queues it still declines pay +22.5 to +33.2 ms at 42-60 tasks and +3.6 to +5.9 m
 48-task queue is exact in 416 ms, slower than sampling it, and 300 tasks pay +114 ms. The default stays 4,096: which cap is better
 depends on your queue sizes (unmeasured on real traffic). Load average was ~9.7 during the cap run (another process was busy). Claim: small queues get exact answers in milliseconds, and the sampled path is budget-bound at ~0.3 s with a tight p95.
 Not claimed: that the sampled path is fast; it spends its whole budget by design.
+
+Re-run on the final 0.2.0 build (R19.10, HEAD 4a97099, same script, N = 20, load 3.6-4.3):
+pbit ms p50 / p95 8.0 / 8.4 (12 tasks, exact x20), 27.3 / 28.1 (24, exact x20), 294.1 / 295.1 (30, `diagnostics_passed` x20),
+309.4 / 310.7 (300, `diagnostics_passed` x20), 354.0 / 354.6 (300 `--hard`: partial x19, refused x1); wall 10.1 / 29.6 / 298.0 /
+314.3 / 358.7 ms p50. Same verdicts except one `--hard` refusal (wall-clock budget at the release threshold), and 2-12% slower than
+the table, which was measured on an earlier build with no load recorded. An old-vs-new A/B (§6, "Tiny exact inputs since R19.9")
+attributes the 12- and 24-task exact rows to R19.9's enumeration change (+5-12%); the sampled rows are the same in the binaries
+before and after R19.9 (N = 7), so their +2-3.5% against the table is an earlier build or load, not separated.
 ## §3 Max-cut: odds vs brute force, and cut value vs simulated annealing (re-runs of `maxcut_oracle.rs` and `maxcut_gset.rs`)
 Odds vs brute force (`cargo run --release -p pbit-ir --example maxcut_oracle`, 2.3 s): random 3-regular graphs n = 12 / 16,
 coupling 0.3 / 0.7 / 1.5 per cut edge, fields 0 or uniform ±0.2, 4 chains x 500 or 5,000 sweeps, 6 instances per setting =
 144 runs, each checked against the exact marginals from enumerating all 2^n states.
 
-| sweeps per chain | runs | certified | false certificates | released spins | wrong released spins |
-|---|---|---|---|---|---|
-| 500 | 72 | 11 | 0 | 417 | 0 |
-| 5,000 | 72 | 61 | 0 | 929 | 0 |
+| sweeps per chain | runs | passed (`diagnostics_passed`) | false passes | released spins | wrong released spins | 0.1.0 gate: passed / released / wrong |
+|---|---|---|---|---|---|---|
+| 500 | 72 | 0 | 0 | 0 | 0 | 11 / 417 / 0 |
+| 5,000 | 72 | 61 | 0 | 929 | 0 | 61 / 929 / 0 |
 
-Claim: on these frustrated Ising programs no certificate and no released spin was wrong (tolerance 0.05 TV), and more work buys
-coverage (at coupling 1.5 and 500 sweeps the gate released nothing). Not claimed: correctness beyond n = 16 (brute force stops there).
+Counts, not timings: N = 72 runs per row (12 settings x 6 instances), one run each. The current-gate columns were re-run in R19.10
+(HEAD 2d386d2, Apple M4, load ~2-3); the last column is the 0.1.0 record, whose 500-sweep row
+this table showed until R19.10 without saying so (0.2.0's dual-pass batch rule refuses every 500-sweep run: 7 long batches).
+Claim: on these frustrated Ising programs no passed whole answer and no released spin was wrong (tolerance 0.05 TV) under either
+gate, and more work buys coverage (500 sweeps release nothing at all now; 0.1.0 released nothing there only at coupling 1.5). Not claimed: correctness beyond n = 16 (brute force stops there).
 
 `cargo run --release -p pbit-ir --example maxcut_gset`. The graphs are generated with the shapes of the Gset recipes, NOT the
-Gset files, so literature best cuts do not apply. Equal wall time (200 ms), 4 threads per method, 5 seeds, best cut median [IQR].
+Gset files, so literature best cuts do not apply. Equal wall time (200 ms), 4 threads per method, 5 seeds (N = 5 runs per method, one per seed), best cut median [IQR].
 
 | graph | pbit sample (beta 2) | pbit sample 100 ms + anneal 100 ms | pbit anneal only | simulated annealing (geometric beta 0.2 -> 5, untuned), 4 restarts |
 |---|---|---|---|---|
@@ -138,7 +158,9 @@ flip attempts/s (a cheaper operation than a heat-bath update). Claim: pbit's ann
 that pbit finds better cuts. SA wins both, and a dedicated max-cut heuristic would likely win by more (unmeasured).
 ## §4 Sudoku vs backtracking, and graph colouring vs exact odds (re-runs of `sudoku_bench.rs` and `colouring_oracle.rs`)
 `cargo run --release -p pbit-ir --example sudoku_bench`. "Unique" puzzles have one solution; "open" puzzles have extra givens
-removed (4,849 to 305,753 solutions). DFS = bitmask backtracking with minimum-remaining-values.
+removed (4,849 to 305,753 solutions). DFS = bitmask backtracking with minimum-remaining-values. N = the puzzles in the row
+(20 / 10 / 10), one timed run per puzzle and method: a cell is the median [IQR] (or the median) ACROSS puzzles, not repeats of
+one puzzle, and the last column is the per-puzzle ratio, median (range).
 
 | task | bitmask DFS (MRV) | pbit | pbit / DFS |
 |---|---|---|---|
@@ -157,9 +179,12 @@ moved the exact search's stop checks out of its hot path, the IR exact tier is *
 4 colouring programs. The cause is inferred (code layout from the `#[cold]` split), not proven. The table above is not re-run:
 the DFS still wins by more than an order of magnitude *(inferred from the ratios: ~14x / ~37x)*. Measured later (`N=3`: 6 puzzles,
 1 run, final binary): 13.3-15.6x on open puzzles, ~37x on unique ones; counts identical, odds error 0, sampler refused 6/6.
+Re-run of the full bench on the final 0.2.0 build (R19.10, HEAD 70db37b, load 3.0-4.5): 20/20 refused,
+0 released, 0 false; exact odds error 0 and counts equal to the DFS on all 20; DFS solve + prove 0.011 [0.008-0.022] ms; sampler + gate
+127.8 [127.0-128.2] ms across puzzles (the table's 114.7 ms is from an earlier build; gate/3 runs more checks; not separated from load).
 
 pbit's exact odds equal the DFS odds on all 20 puzzles (error 0). Claim: pbit expresses sudoku as a program, gives exact
-per-cell odds on puzzles with many solutions, and its sampler refuses rather than guess. Not claimed: speed. A dedicated
+per-cell odds on puzzles with many solutions, and its sampler refuses these programs (20/20) instead of releasing odds. Not claimed: speed. A dedicated
 backtracker is 15-102x faster at the same exact job (per puzzle, re-runs above), and the sampler cannot certify these frozen, one-hot-constrained
 programs at all (later re-run: 20/20 refused, 0 released). A puzzle that unit propagation (naked singles) solves is the exception in
 the current build: every cell is then a proven constant and `--op sample` certifies it (the CLI test's puzzle); none of these 20 is one.
@@ -167,7 +192,8 @@ the current build: every cell is then a proven constant and `--op sample` certif
 Graph colouring (`cargo run --release -p pbit-ir --example colouring_oracle`): random G(n, p) with mean degree 3, two vertices
 pre-coloured by clamps, soft colour preferences. The IR's exact tier (pbit's own enumeration, see Oracles above) gives the
 reference odds; the sampler (4 chains, 100 ms) is
-scored on every vertex it releases.
+scored on every vertex it releases. N = the graphs column (one exact run and one sampler run per graph): the time is the median
+[IQR] across those graphs; the verdict and vertex columns are totals over them.
 
 | setting | graphs | colourings (median, range) | exact tier ms, median [IQR] | sampler verdicts | released vertices | outside ±0.05 TV |
 |---|---|---|---|---|---|---|
@@ -195,7 +221,9 @@ Unit-time jobs are variables, time slots are values. Hard rules: a release/deadl
 precedence i -> j as pair caps (at most one of (i, a), (j, b) for every a >= b; O(T^2) caps per edge). Soft: weighted completion
 time plus noise. Baseline: greedy list scheduling (topological, heaviest ready job first, best slot not later than its latest
 start) + repair (move / swap hill climbing); "restarts" repeats it with random ready-job orders for the same wall time.
-M4, load average 5-7 from another process; sampler 4 chains / 4 threads, 100 ms per method.
+M4, load average 5-7 from another process; sampler 4 chains / 4 threads, 100 ms per method. N = the instances column (one run
+per instance and method): the exact-tier time is the median [IQR] across instances; the other columns are totals or counts. The
+second table lists every seed (N = 5 per setting) instead of a median.
 
 | setting | instances | schedules (median, range) | exact tier ms, median [IQR] | sampler verdicts | released jobs | outside ±0.05 TV | MAP found: greedy+repair / restarts / pbit |
 |---|---|---|---|---|---|---|---|
@@ -242,6 +270,162 @@ watch the budget then, so a `--budget-ms` shorter than that was overrun). It now
 was 2.42 s, median of 3; 0.845 s with the clock read every 4,096 nodes, ~170 ms apart here, now every 64). `--op sample`
 (no exact tiers): 504 ms inside the run, 0.575 s wall.
 
+**How to read the times in §4.4-4.10 (program families, R19.7).** Each `bench/*.py` family script times ONE subprocess run per
+call (`time.time()` around `pbit run`): a default-run time is N = 1 per instance and a range spans the instances, not repeats;
+a "median ms" column is the median over the sampler seeds (1..4, one run each) of one instance. None of these is a median [IQR]
+of repeated runs of one configuration, so read them as orders of magnitude, not as A/B timings (checked in R19.9 from the scripts).
+
+### 4.4 Knapsack and bin packing through IR `linear` rules (R19.7, weighted caps)
+
+`linear: [{"terms": [[var, value, weight], ...], "limit": L}]` lowers to one weighted cap. Two generated programs, exact
+enumeration vs the sampler at defaults (`pbit run --op sample --seed S`, S = 1..5; Apple M4, load 8.5-9.1, single runs):
+
+| program | exact (`--op exact`) | default `pbit run` | sampler verdicts | released | max \|odds - exact\| released | tv_bound | wall |
+|---|---|---|---|---|---|---|---|
+| knapsack20 (weights 1..9, limit 40% of total) | 242,272 plans, 27.8 ms | exact (enumerate) 27.4 ms | 5/5 diagnostics_passed | 20/20 | 0.0015-0.0018 | 0.0025-0.0028 | ~330 ms |
+| bins10x3 (sizes 1..5, cap ceil(total/3)+1, 5 Potts pairs) | 6,672 plans, 3.1 ms | exact (enumerate) 2.8 ms | 5/5 diagnostics_passed | 10/10 | 0.0011-0.0016 | 0.0031-0.0034 | ~284 ms |
+
+Beyond enumeration, against an independent DP (`python3 bench/knapsack.py`, stdlib; weights 1..20, h_in ~ U(0, 1.5), budget
+40% of the total weight; oracle = log-space forward/backward DP over the used capacity + max-product for the optimum; baseline =
+greedy by h_in / weight; 3 instances per size, sampler seeds 1..4; Apple M4, load 10-14):
+
+| n | default `pbit run` | default plan vs DP optimum | greedy vs optimum | sampler (`--op sample`, 4 seeds x 3 instances) | released | max \|odds - DP\| | median wall |
+|---|---|---|---|---|---|---|---|
+| 20 | exact (enumerate), 25.8-27.6 ms | equal (3/3) | 0 to -0.24 nats | 12/12 diagnostics_passed | 240/240 | 0.0027 | ~335 ms |
+| 40 | sampled, 416-425 ms | equal (3/3) | 0 to -0.29 nats | 12/12 diagnostics_passed | 480/480 | 0.0033 | ~340 ms |
+| 80 | sampled, 453-463 ms | equal (3/3) | 0 to -0.07 nats | 12/12 diagnostics_passed | 960/960 | 0.0060 | ~342 ms |
+
+Totals: 36 sampled answers, 1,680 released items, 0 outside 0.05 of the DP, 0 false `diagnostics_passed`. Test
+`run_knapsack_example_matches_dp` pins `examples/knapsack-20.json` (exact tier = an in-test Rust DP: odds 5.1e-7, log Z, plan).
+What it allows: knapsack / bin-packing rules run on every tier unchanged, and the sampler's odds on these programs match
+enumeration or the DP well inside the 0.05 tolerance. What it forbids: claims beyond n = 80 single-budget knapsacks
+(multi-budget and bin packing beyond 10 x 3 have no independent oracle run yet), and any speed claim against a DP. Where it
+loses: a pure knapsack is solved exactly by the O(n x budget) DP (its wall time was not measured here; the table has 80 x 640
+cells); pbit samples it in ~0.45 s. Enumeration answers n = 20 and the 10 x 3 bins in 3-28 ms; the sampler is the fallback.
+
+Bin packing (`python3 bench/binpacking.py`, stdlib): n items of size 1..6 into 3 bins of capacity ceil(total / 3) + 2, one
+`linear` rule per bin, preferences h(item, bin) ~ U(-0.5, 0.5); oracle = exact forward/backward DP over the vector of bin
+loads (log Z, P(item in bin), optimum); baseline = largest-first greedy (each item, largest first, onto its preferred bin that still fits). 2 instances per size,
+sampler seeds 1..4 (Apple M4, load ~6):
+
+| n (raw space) | default `pbit run` | plan vs DP optimum | greedy vs optimum | sampler | released | max \|odds - DP\| |
+|---|---|---|---|---|---|---|
+| 12 (531,441) | exact (enumerate), 10.0-12.6 ms | equal (2/2) | 0 to -0.39 nats | 8/8 diagnostics_passed | 96/96 | 0.0016 |
+| 24 (2.8e11) | sampled, 357-387 ms | equal (2/2) | -0.34 to -0.80 nats | 8/8 diagnostics_passed | 192/192 | 0.0030 |
+| 36 (1.5e17) | sampled, 370-371 ms | equal (2/2) | -1.48 to -2.45 nats | 8/8 diagnostics_passed | 288/288 | 0.0051 |
+
+24 sampled answers, 576 released, 0 outside 0.05, 0 false (n = 36: same machine and load). What it
+allows: bin capacities written as `linear` rules, with sampled odds within 0.0051 of an exact load-vector DP on 3 bins up to 36
+items, and the default plan equal to the DP optimum on all 6 instances. What it forbids: claims past 3 bins x 36 items (no
+oracle run there) and any speed claim against the DP (its wall time was not compared). Where it loses: this DP is exact for preference-only bin packing
+(no pair terms) with a few bins; pbit's case is the same rule next to pairs / quotas / precedences the DP does not model.
+
+### 4.5 Ising-MRF image denoising (R19.7, P2.2; `python3 bench/denoise.py`, stdlib)
+
+The classic p-bit demo. 8 x 12 binary image (a filled ellipse), each pixel flipped with probability 0.1; program = one {0, 1}
+variable per pixel, unary +-1.1 toward the observed pixel, Potts +0.7 between 4-neighbours (`examples/denoise-8x12.json` =
+image 1). Oracle: row transfer matrix (256 states per row): exact log Z, per-pixel odds, exact MAP (Viterbi). Baseline: ICM
+(iterated conditional modes from the noisy image). pbit: `pbit run` at defaults; `pbit run --op sample --seed 1..4`. Pixel
+errors are against the CLEAN image (Apple M4, load ~6):
+
+| image | noisy | ICM | exact MAP | exact MPM | default `pbit run` (sampled, ~285 ms): plan errors, plan = exact MAP? | sampler: verdicts | released | max \|odds - exact\| | sampler MPM errors |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 11 | 4 | 8 | 10 | 8, yes | 4/4 diagnostics_passed | 384/384 | 0.0048 | 10 |
+| 2 | 7 | 9 | 7 | 7 | 7, yes | 4/4 diagnostics_passed | 384/384 | 0.0042 | 7 |
+| 3 | 12 | 7 | 5 | 4 | 5, yes | 4/4 diagnostics_passed | 384/384 | 0.0035 | 4 |
+
+Totals: 12 sampled answers, 1,152 pixels released, 0 outside 0.05 of the transfer matrix, 0 false. What it allows: pbit
+reproduces this model's exact posterior odds and its exact MAP image. What it forbids: "pbit denoises better than ICM": pixel
+error measures the model (eta, J), not the solver; on image 1 ICM's local optimum is closer to the clean image (4 vs 8 errors)
+than the model's own exact MAP. Where it loses: a transfer matrix answers an 8-wide grid exactly (and faster, in a compiled
+language); pbit samples it (~265-285 ms). Test `run_ising_denoise_matches_brute_force` (4 x 4, exact vs 2^16 brute force +
+sampler at fixed work).
+
+### 4.6 Tree-structured probabilistic inference (R19.7, P2.2; `python3 bench/tree_infer.py`, stdlib)
+
+Random trees (parent of node i uniform in 0..i-1), 3 values, unaries and per-edge 3 x 3 tables ~ U(-1, 1). Independent oracle:
+log-space two-pass sum-product in Python. pbit: `pbit run` at defaults (the inference compiler's forest tier) and
+`pbit run --op sample --seed 1..4` (2 instances per size; Apple M4, load ~4):
+
+| n | default `pbit run` | \|log Z - oracle\| | max \|odds - oracle\| | default wall | sampler | released | max \|odds - oracle\| released | sampler wall |
+|---|---|---|---|---|---|---|---|---|
+| 200 | exact (forest) | <= 4.2e-7 | 5.0e-7 (the CLI prints 6 decimals) | 4.0-4.5 ms | 8/8 diagnostics_passed | 1,600/1,600 | 0.0094 | ~260 ms |
+| 1,000 | exact (forest) | <= 4.6e-7 | 5.0e-7 | 11.2-11.5 ms | 8/8 diagnostics_passed | 8,000/8,000 | 0.0249 | ~267 ms |
+
+What it allows: tree-shaped programs are answered exactly at defaults, matching an independent sum-product to print
+precision, ~23-65x faster than sampling them. What it forbids: reading the sampler's 0.0249 worst item at n = 1,000 as typical
+precision (within the 0.05 tolerance, but 5x the n = 20 knapsack's); loopy graphs get no exact tier unless enumeration,
+components, the frontier or the count DP apply.
+
+### 4.7 Budgeted selection with pair correlations (portfolio shape; R19.7, P2.2; `python3 bench/portfolio.py`, stdlib)
+
+n assets in a sector chain: in / out, h_in ~ U(-0.2, 1.0), cost 1..10, one `linear` budget (35% of the total cost), Potts
+J_i ~ U(-0.6, 0.6) between neighbours. No exact tier of pbit applies (a weighted rule plus pairs), so defaults sample.
+Independent oracle: exact DP over (position, choice, used budget) for log Z, P(in) and the optimum. Baseline: greedy by
+h_in / cost, ignoring the pairs (scored with them). 2 instances per size, sampler seeds 1..4 (Apple M4, load ~4):
+
+| n | default `pbit run` (sampled) | plan vs DP optimum | greedy vs optimum | sampler | released | max \|odds - DP\| |
+|---|---|---|---|---|---|---|
+| 30 | 406-427 ms | equal (2/2) | -1.69 to -1.92 nats | 8/8 diagnostics_passed | 240/240 | 0.0032 |
+| 60 | 412-413 ms | equal (2/2) | -2.05 to -4.78 nats | 8/8 diagnostics_passed | 480/480 | 0.0036 |
+
+16 answers, 720 released, 0 outside 0.05, 0 false. What it allows: a budget and correlations in one program, with checked odds
+and the optimum on these instances. What it forbids: general portfolio claims (real covariance is dense, not a chain; dense
+pair graphs have no independent oracle here). Where it loses: this chain-plus-budget shape has an exact O(n x budget) DP, which
+pbit does not detect (a mixed weighted-cap + forest tier would; not built).
+
+### 4.8 3-SAT solution counting and sampling (R19.7, P2.2; `python3 bench/sat.py`, stdlib)
+
+Planted random 3-SAT at clause ratio 4.0 (satisfiable by construction), uniform over the solutions; one IR `tables` forbid per
+clause (its falsifying tuple). Oracle: brute force over 2^n. Baseline: WalkSAT (p = 0.5), which finds ONE solution. 2 instances
+per size, sampler seeds 1..4 (Apple M4, load ~4):
+
+| n | m | solutions | WalkSAT flips to a solution | default `pbit run` | sampler (`--op sample`) |
+|---|---|---|---|---|---|
+| 14 | 56 | 10 / 18 | 10 / 10 | exact (enumerate): the count and every odd = brute force (print precision), 2.6-3.5 ms | 8/8 **refused**, 0 released |
+| 18 | 72 | 22 / 5 | 27 / 161 | exact (enumerate), 2.8-3.0 ms | 8/8 **refused**, 0 released |
+
+What it allows: exact solution counts and per-variable odds over the solutions for small formulas, in milliseconds. What it
+forbids: "pbit samples SAT solutions": near the threshold the solutions are few and isolated (no single-variable or swap move
+connects them), and the gate refuses every sampled answer (16/16; 0 wrong, 0 false) instead of reporting one cluster as the
+answer. Where it loses: finding one solution is WalkSAT's job (10-161 flips here); formulas past `--exact-limit` get a refusal.
+MaxSAT (soft clauses) is not expressible in v1 (no soft ternary terms; an auxiliary-variable encoding was not built).
+
+### 4.9 Agentic tool-call planner (R19.7, P2.2; the AI demo; `python3 bench/agent_planner.py`, stdlib)
+
+One variable per step over {search, read, code, test, ask, stop}; unaries = a policy's per-step scores (search/read favoured
+early, code/test later); a `table` pair between consecutive steps = transition preferences (search->read, read->code,
+code->test, test->stop, repeats penalised); rules: at most 2 search and 1 ask (value caps), stop is absorbing and test needs
+code or test just before it (`implies`), no test first (`forbid`), and a token budget (`linear`: search 3, read 2, code 5,
+test 4, ask 1, stop 0 <= 3 x steps). Oracle: brute force over 6^T by the rules' direct meaning; baseline: greedy step by step.
+2 instances per size, sampler seeds 1..4 (Apple M4, load ~3; `examples/agent-plan-6.json`):
+
+| steps | feasible plans | default `pbit run` | plan = optimum | greedy vs optimum | sampler | released | max \|odds - brute\| |
+|---|---|---|---|---|---|---|---|
+| 6 | 1,921 | exact (enumerate), odds <= 4.9e-7, 3.0-5.4 ms | 2/2 | -1.53 to -1.89 nats | 8/8 diagnostics_passed | 48/48 | 0.0019 |
+| 7 | 6,001 | exact (enumerate), odds <= 4.9e-7, 3.6-3.8 ms | 2/2 | -1.64 to -2.15 nats | 8/8 diagnostics_passed | 56/56 | 0.0029 |
+
+What it allows: a planner's soft policy and hard rules (quotas, ordering, absorbing stop, a token budget) in one program, with
+the exact best plan and per-step odds of each action in milliseconds at this size. What it forbids: claims about long
+horizons (no oracle past 7 steps here) or about a real agent's policy (the scores are synthetic). Where it loses: a
+step-indexed DP over (step, last action, budget, counts) solves this exact shape too; pbit's case is that the rules are data,
+not code.
+
+### 4.10 Assignment with side constraints (R19.7, P2.2; `python3 bench/assign_side.py`, stdlib)
+
+n tasks onto 3 workers: scores ~ U(-1, 1); a per-worker effort budget (`linear`, efforts 1..4); n/3 conflict pairs that may not
+share a worker (`all_different`); one implication; a value cap on worker C. Oracle: brute force over 3^n by the rules' direct
+meaning (no ILP baseline: scipy / HiGHS are not installed on this machine); baseline: greedy by best score. 2 instances per
+size, sampler seeds 1..4 (Apple M4, load ~6):
+
+| n | feasible plans | default `pbit run` | plan = optimum | greedy vs optimum | sampler | released | max \|odds - brute\| |
+|---|---|---|---|---|---|---|---|
+| 8 | 378 / 608 | exact (enumerate), odds <= 4.8e-7, 2.8-4.7 ms | 2/2 | 0 to -0.46 nats | 8/8 diagnostics_passed | 64/64 | 0.0024 |
+| 12 | 15,637 / 27,682 | exact (enumerate), odds <= 4.9e-7, 5.0-6.1 ms | 2/2 | -0.07 to -1.71 nats | 8/8 diagnostics_passed | 96/96 | 0.0029 |
+
+What it allows: assignment with budgets, conflicts, implications and quotas in one program, exact at this size. What it
+forbids: any comparison with an ILP solver (not run here; §2.2 has the router-vs-ILP comparison on a machine with scipy).
+
 ## §5 Processor controls
 
 ### 5.1 `--threads` on the router (`bench/decide_threads.py`, N = 5)
@@ -253,6 +437,7 @@ was 2.42 s, median of 3; 0.845 s with the clock read every 4,096 nodes, ~170 ms 
 | 2 | 58.5 [57.8-59.1] | 79.9 | 27.08 M | identical |
 | 4 | 50.9 [50.1-51.7] | 83.6 | 47.40 M | identical |
 
+Wall ms is the median [IQR] of N = 5; the CPU and rate columns are medians of the same 5 runs (the script prints no IQR for them).
 Claim: at fixed work (fixed `--sweeps`, and `--polish-ms 0` or the newer `--polish-sweeps`) the answer is bit-identical at 1, 2 and
 4 threads (tested; chains are seeded per chain, not per thread), and the sampler scales 3.2x on 4 threads. With the default wall-clock polish only the polished plan can vary (in the current build). Not
 claimed: wall time scales the same way; the serial part (exact tiers' decline, parse, gate: ~40 ms here, inferred as wall
@@ -311,7 +496,7 @@ about Linux or Windows (Linux unmeasured; Windows exits 2).
 Native / portable ratio on 16 metrics (pbit-core kernels, `pbit stats`, router sampler): 0.975 to 1.012. For example the
 older (not the §1 fast-path) heat-bath f32 LUT kernel ran at 5.36e8 updates/s/thread in both builds, and the older
 64-lane multispin kernel at 2.41e10/thread
-(64 independent replicas per word, not one problem 64x faster). Kernel checksums and the router's answer are identical
+(64 packed replicas per word sharing one random draw per site, not independent and not one problem 64x faster). Kernel checksums and the router's answer are identical
 across the two builds. Claim: on Apple silicon the portable default loses nothing measurable. Not claimed: anything about
 x86-64, where `native` can enable AVX2/AVX-512 (unmeasured).
 
@@ -336,9 +521,307 @@ the CPU (earlier build).
 | 4 | before | 100.1 | 282.9 | 2.83 | 707.32 (707.27-707.86) |
 | 4 | after | 99.5 | 282.4 | 2.84 | 707.27 (706.96-707.93) |
 
+Wall and CPU are medians of N = 5 per row (the script prints no IQR for them); plan log w is the median (min-max) of the same runs.
 Claim: `--threads 1` now means one thread through the whole answer, and 4 threads are unchanged. Not claimed: that it is free:
 at the same wall time one thread polishes a quarter as long per chain, so the plan was 2.65 log w lower (the ILP optimum of
 this queue is 708.31, §2.2). The load average was ~4.5 during this run (another process was busy; alternating runs).
+
+## §5b Inference compiler tiers (R19.3-R19.4): exact answers where structure allows
+
+Before = the R19.3 binary (copied before the change), after = R19.4, same machine (Apple M4, 16 GB, macOS), `pbit run` /
+`pbit decide` at defaults, `ms` field of the answer, medians of N = 5 (one binary at a time, alternated per input), load 3.6-18
+(the machine is shared). No IQR was kept for this table: the before / after medians differ by 3-4 orders of magnitude, far
+outside any run-to-run spread measured elsewhere in this file, so the medians alone carry the comparison. Inputs: `pbit-cli/tests/stress/` and two generated programs not in the repo (blocks4, const_tables32).
+
+| Input | Structure | Before: verdict, tier, median ms | After: verdict, tier, median ms | Exactness check |
+|---|---|---|---|---|
+| chain100 (`pbit run`) | path, 100 two-value vars | `diagnostics_passed`, sample, 281.9 | `exact`, forest, 0.055 | odds vs transfer matrix <= 5.1e-7 (print rounding) |
+| chain1000 (`pbit run`) | path, 1,000 vars | `diagnostics_passed`, sample, 281.3 | `exact`, forest, 0.390 | IR test on a random 1,000-var table chain: log Z vs transfer matrix, 4e-13 absolute |
+| blocks4 (`pbit run`) | 4 independent 8-var rings, overlapping caps (non-partition, 2^32 raw space) | `diagnostics_passed`, sample, 385.5 | `exact`, components (4 enumerated), 0.057 | per-block Python brute force, max diff 4.6e-7 |
+| asymmetric-router32 h0.03 (`pbit decide`) | one 32-task group, 2 workers, uniform affinity | `diagnostics_passed`, sample, 428.8 | `exact`, occupancy, 0.092 | P(B) vs ESP oracle <= 5.1e-7, 20/20 seeds |
+| asymmetric-router32 h0.06 | same | `diagnostics_passed`, sample, 426.4 | `exact`, occupancy, 0.087 | same |
+| heterogeneous-router32 | same, per-task scores | `diagnostics_passed`, sample, 423.4 | `exact`, occupancy, 0.086 | same |
+| const_tables32 (`pbit run`) | 32 independent vars + 496 constant tables (0.5) | `diagnostics_passed`, sample, 385.7 | `exact`, frontier (496 tables folded), 0.045 | log Z = table-free log Z + 248 |
+| review case E17 (R19.3) | 32 vars + 496 `potts: 0` pairs | sample, 115.7 (single run) | `exact`, frontier, 0.051 (N = 7) | identical to the pair-free program |
+
+What this allows: on decomposable programs (independent parts, trees, two-value groups with one uniform coupling, factors
+that change no odds) pbit answers exactly, with log Z and an exact MAP plan, in well under a millisecond, where it used to
+spend its 200 ms sampling budget and could be wrong when the chains shared a wrong mode (the router rows are the external review's
+counterexamples). What it forbids: reading these as sampler speedups — the sampler is unchanged; `--op sample` /
+`--mode sample` still sample these inputs (and the stress tests run both paths). Where it loses: the tiers decline in
+microseconds-to-milliseconds on programs with no such structure (one component with cycles and caps, mixed couplings,
+> 2048 counted members, forest work > 5e7), and a program that is mostly decomposable with one hard part is still sampled
+WHOLE (the residual part is not yet sampled alone: R19.5+); components enumeration shares one `--exact-limit` budget.
+Bounded-width variable elimination (P1.3(e)) is not built.
+
+## Known failure modes
+
+The gate's statistics measure Monte-Carlo error AROUND the modes the chains visit. When every chain stays in the same wrong
+macroscopic mode, R-hat is ~1, batch means agree, and the bound shrinks with more sampling while the error stays ~0.5-0.87.
+These inputs are frozen in `pbit-cli/tests/stress/` (provenance: the 2026-09-30 external review) with oracles that do not use
+pbit's inference (`pbit-cli/tests/stress.rs`: occupancy count DP, brute force, transfer matrix; `stress_oracles_agree` passes).
+Measured on the R19.1 build (Apple M4, load 7-9), seeds 1..20, at defaults and at fixed work (`--sweeps 4000 --polish-ms 0`):
+
+| Input (command) | Truth | Defaults: whole answers passed / false / released items wrong | Fixed work |
+|---|---|---|---|
+| `asymmetric-router32-w0.2-h0.03.json` (`pbit decide --seed S`) | P(B) per task from the count DP | 2 / 2 / 64 of 64 (18 refused) | 2 / 2 / 64 of 64 |
+| `asymmetric-router32-w0.2-h0.06.json` (`pbit decide --seed S`) | P(B) = 0.8698133938587349 every task | 3 / 3 / 96 of 96 (17 refused) | 3 / 3 / 96 of 96 |
+| `heterogeneous-router32.json` (`pbit decide --seed S`) | count DP | 2 / 2 / 64 of 64 (18 refused) | 2 / 2 / 64 of 64 |
+| `ferro12.json` (`pbit run --op sample --seed S`) | 1/2 every spin (symmetry; brute force) | 3 / 3 / 36 of 36 (17 refused) | 3 / 3 / 36 of 36 |
+| `ferro12-w0.5-redundantcaps.json` (`pbit run --op sample --seed S`) | 1/2 every spin | 0 / 0 / 0 (20 refused) | 3 / 3 / 36 of 36 |
+| `ferro12-w1.0-redundantcaps.json` (`pbit run --op sample --seed S`) | 1/2 every spin | 2 / 2 / 24 of 24 (18 refused) | 0 / 0 / 0 (20 refused) |
+| `chain100.json` (`pbit run --op sample --seed S`): control | transfer matrix | 20 / 0 / 0 of 2,000 | 20 / 0 / 0 of 2,000 |
+
+Since R19.4 `pbit decide` answers the three router inputs EXACTLY at defaults (inference compiler, tier `occupancy`: a count
+DP over the number of tasks on B; 20/20 seeds, every P(B) within print rounding of the oracle; 426-429 ms sampled -> 0.086-0.092
+ms, medians N = 5, load 8-18), and `pbit run` answers chain100 exactly (tier `forest`, 281.9 ms -> 0.055 ms). The sampled rows
+above therefore reproduce only with `--mode sample` (router; with `--collective off --cluster off --cycles off` for the red counts, which the ignored measurement test
+`stress_gate_alone_moves_off` prints: R19.9 re-run 2 / 3 / 2 / 0 / 3 / 0 false of 20, as R19.3) or `--op sample`
+(IR), which the stress tests now run explicitly next to the defaults.
+What this table allows: a frozen, reproducible set of inputs on which the R19.1 gate passed false whole answers (counts over
+seeds 1..20, not timings). What it forbids: reading `diagnostics_passed` as a guarantee when every chain may sit in one wrong
+mode. With the current defaults these families answer exactly, and their sampled runs with the moves on give 0 false whole
+answers and 0 wrong released items (frozen corpus re-run on R19.9 HEAD 2513937: 280 runs, 9,280 released).
+
+Example (one false whole answer, deterministic; every collective move off — since R19.4 the default `--cluster on` answers this
+seed correctly, max true error 0.0021 with `--collective off` alone, checked R19.9): `target/release/pbit decide --mode sample
+--collective off --cluster off --cycles off --sweeps 4000 --seed 5 --polish-ms 0 <
+pbit-cli/tests/stress/asymmetric-router32-w0.2-h0.06.json` -> `diagnostics_passed`, 32/32 released, `tv_bound` 0.001542,
+`gate.worst.chain_means` 0.9972 / 0.9969 / 0.9969 / 0.9978 for worker A on every chain while the truth is P(A) = 0.1302. No
+partial answers occurred on these inputs: every answer the gate let through was wrong. The external review's seeds 1..100 at defaults gave
+12/100 (h = 0.03) and 14/100 (h = 0.06) whole answers, all false. R19.1 `#[ignore]`d the red tests; R19.2 un-ignored them (below).
+
+**The external review's reproduction cases on the final build (R19.10, HEAD 8e6d15a, outcomes recorded, not asserted).** The review's three launch findings, same inputs and commands:
+the wrong whole answer above is `exact` at defaults (tier occupancy, error 0.0), `diagnostics_passed` with error 0.0009
+under `--mode sample`, and STILL a false `diagnostics_passed` (error 0.8686, `tv_bound` 0.001542) when every collective move
+is turned off: the gate alone does not see it, the moves and the exact tier do. The silently ignored rule (`"allowed": "A"`)
+and the invalid output JSON (a 1e303 weight) now exit 2 with one structured error (`schema` at `tasks[0].allowed`; `limit` at
+`vars[0].h.1`). The review's 12 saved contract inputs: the 10 malformed ones exit 2 with an error object (1e309 at parse time
+gives path `""` and the byte offset in the message), the 2 valid ones give the same plan as before.
+
+**After the collective moves (R19.2, `--collective on`, the default from 0.2.0).** A global flip of every free two-value
+variable and a swap of two value labels everywhere, each a symmetric involution with a Metropolis accept and every cap checked
+(tests: incremental log-weight change = full recomputation on 4,356 random states; sampled marginals = enumeration on random
+capped programs, worst max TV 0.0065). Same inputs, same commands, seeds 1..20, defaults and fixed work: **every family 20/20
+`diagnostics_passed`, 0 false whole answers, 0 wrong released items** (640 released on each router input, 240 on ferro12 and on
+each redundant-caps input, 2,000 on chain100). The external review's scale, seeds 1..100: h = 0.03 12/100 false (384 wrong) -> 0/100 false
+(100 passed, 3,200 released, 0 wrong); h = 0.06 14/100 false (448 wrong) -> 0/100 false (3,200 released, 0 wrong), at defaults
+and at fixed work (Apple M4, load ~11). `--collective off` reproduces the table above exactly. Cost: +0.3-1.2% per sweep on a
+400-spin ring, +12.8-19.5% on ferro12 (12 variables: the flip is a large share of a tiny sweep), +14.9% on a 400-variable
+3-colouring ring (label swap), fixed work, medians of 7-9 at load 5-8; at defaults (200 ms) the sweep counts of the 300-task demo,
+asymmetric router and chain100 did not drop measurably (noise ±16% at load ~7).
+
+**Holdout calibration (R19.4, P1.4; `bench/calibrate.py`, gate/3 thresholds frozen at commit 54c9a16 before the run).**
+`python3 bench/calibrate.py --holdout --holdout-seed 20261001 --seeds 4 --per-family 5` (5 seeded programs per family,
+brute-force oracle, `pbit run --op sample`, Apple M4, load 4-11): rare modes in two weakly bridged 6-spin ferro clusters:
+**8 whole answers passed the gate, all 8 false (96 wrong released items)**, 12 refused; varying group sizes under a global
+cap: 12/20 refused, 0 false; heterogeneous groups, 3-value constrained cycles, a 7-value alphabet: 20/20, 0 false. The
+global flip maps the two clusters' (A,A) to (B,B) but never to (A,B), every chain stays in its pair of modes, and the gate's
+statistics cannot see a mode no chain visits (assumption 1). With the Wolff cluster move (`--cluster on`, a diagnostic on the
+same seed) rare-modes gave 20/20, 0 false. `--cluster on` became the default and was validated on the untouched seed
+20261002: every family 20/20 whole answers, 0 false, 0 wrong, 0 refused; control, the same seed with `--cluster off`:
+rare-modes 9/9 whole answers false (108 wrong), group-sizes 8/20 refused. No threshold was changed. The frozen corpus at the
+new defaults (seeds 1..20, defaults and sampler-forced): 0 false, 0 wrong, 0 refused. Cost at defaults (median sweeps in the
+200 ms budget, sampler forced, N = 5 alternating, load ~3): asymmetric router -20.4%, ferro12 -2.4%, 300-task demo -2.1%,
+chain100 within noise.
+
+**Harder holdout families + per-family table (R19.5, gate/3 unchanged, commit df33424).** Five new seeded families from their
+own random stream (the R19.4 five reproduce their programs byte for byte): three 4-spin ferro clusters with one positive and one
+negative bridge per cluster pair (`three-clusters-mixed`, 2 values); two 5-variable 3-value ferro clusters that both lean to
+value c under a cap that lets only one be c (`rare-behind-cap`); 3-value ferro clusters of 3 / 3 / 4 with weak mixed-sign
+bridges (`k3-clusters`); a 150-variable 4-value path with random tables, oracle = a log-space transfer matrix (`chain150-k4`);
+an 8-value alphabet with two values capped at 1 (`alphabet-8-caps`). Untouched seed 20261004 (all 10 families x 5 programs x
+seeds 1..4) + the frozen corpus (seeds 1..20); Apple M4, macOS, load 2.9-5.4, `--jobs 2`; `ms` = the answer's own `ms` (median over the row's
+`runs`, one run each, no IQR; excludes process spawn); "sampler" = `--op sample` / `--mode sample` (the gate decides); a run counts as FALSE when an answer
+called whole (`exact` / `diagnostics_passed`) has any variable more than 0.05 TV from the oracle.
+
+| family (source) | runs | defaults: whole / FALSE / tier / median ms | sampler: whole / FALSE / released / WRONG / partial / refused / median ms |
+|---|---|---|---|
+| asym-h0.03 (corpus) | 20 | 20 / 0 / occupancy / 0.105 | 20 / 0 / 640 / 0 / 0 / 0 / 259.5 |
+| asym-h0.06 (corpus) | 20 | 20 / 0 / occupancy / 0.105 | 20 / 0 / 640 / 0 / 0 / 0 / 259.3 |
+| heterogeneous (corpus) | 20 | 20 / 0 / occupancy / 0.104 | 20 / 0 / 640 / 0 / 0 / 0 / 259.4 |
+| ferro12 (corpus) | 20 | 20 / 0 / enumerate / 0.180 | 20 / 0 / 240 / 0 / 0 / 0 / 256.1 |
+| ferro12-rc-w0.5 (corpus) | 20 | 20 / 0 / enumerate / 0.179 | 20 / 0 / 240 / 0 / 0 / 0 / 255.3 |
+| ferro12-rc-w1.0 (corpus) | 20 | 20 / 0 / enumerate / 0.180 | 20 / 0 / 240 / 0 / 0 / 0 / 255.8 |
+| chain100 (corpus) | 20 | 20 / 0 / forest / 0.052 | 20 / 0 / 2,000 / 0 / 0 / 0 / 259.6 |
+| rare-modes (holdout) | 20 | 20 / 0 / enumerate / 0.138 | 20 / 0 / 240 / 0 / 0 / 0 / 258.6 |
+| hetero-groups (holdout) | 20 | 20 / 0 / enumerate / 0.031 | 20 / 0 / 240 / 0 / 0 / 0 / 280.7 |
+| constrained-cycle (holdout) | 20 | 20 / 0 / enumerate / 2.339 | 20 / 0 / 220 / 0 / 0 / 0 / 272.2 |
+| alphabet-7 (holdout) | 20 | 20 / 0 / enumerate / 14.557 | 20 / 0 / 140 / 0 / 0 / 0 / 255.4 |
+| group-sizes (holdout) | 20 | 20 / 0 / enumerate / 11.772 | 20 / 0 / 400 / 0 / 0 / 0 / 272.4 |
+| three-clusters-mixed (new) | 20 | 20 / 0 / enumerate / 0.127 | 20 / 0 / 240 / 0 / 0 / 0 / 259.0 |
+| rare-behind-cap (new) | 20 | 20 / 0 / enumerate / 1.365 | 20 / 0 / 200 / 0 / 0 / 0 / 267.8 |
+| k3-clusters (new) | 20 | 20 / 0 / enumerate / 1.289 | 20 / 0 / 200 / 0 / 0 / 0 / 257.4 |
+| chain150-k4 (new) | 20 | 20 / 0 / forest / 0.119 | 20 / 0 / 3,000 / 0 / 0 / 0 / 255.9 |
+| alphabet-8-caps (new) | 20 | 20 / 0 / enumerate / 2.977 | 20 / 0 / 120 / 0 / 0 / 0 / 270.7 |
+
+Control on the same seed with the moves off (`--extra "--collective off --cluster off"`, a diagnostic, not a tuning run):
+three-clusters-mixed 20/20 refused, rare-behind-cap 20/20 refused, k3-clusters 13 whole / 6 partial / 1 refused (166 released),
+0 false and 0 wrong in all three; chain150-k4 and alphabet-8-caps 20/20 whole as with the moves. So the three cluster families
+are hard for single-site Gibbs, the gate refused instead of guessing, and the collective moves (global flip, label swap, Wolff
+cluster) are what turns those refusals into correct whole answers. Commands, per-run records and the generated programs:
+`python3 bench/calibrate.py --holdout --holdout-seed 20261004 --seeds 4 --per-family 5 [--families ...] --out FILE` (the
+programs are written into the `--out` file). Seed 20261004 is now USED. What this allows: on these 17 families, at defaults
+and with the sampler forced, no whole answer and no released item was outside 0.05 TV. What it forbids: reading it as
+coverage of every multi-modal program; every family here is small enough for an exact oracle (k^n <= 2^20, or a chain), and
+the three families that are hard for plain Gibbs here are (inferred, not measured move by move) hard in a way whole-cluster
+flips or relabels undo. Modes that differ on part of a cluster, or that need several coordinated moves, are not represented.
+
+**Final R19.5 holdout (commit 4970ebd, untouched seed 20261008, all 12 families x 5 programs x seeds 1..4, defaults and
+sampler forced, Apple M4, load 6-9):** every family and mode 20/20 whole answers, 0 false, 0 wrong, 0 partial, 0 refused. Seeds 20261001..20261008 are USED.
+
+**IR v2 constructs through the runner (R19.5, P2.1).** Family `v2-constructs` (7 variables x 4 values; an at-least cap, an
+all_different, an implication, a forbid table, a precedence; oracle = brute force that checks each construct by its direct
+meaning, not by pbit's cap lowering), untouched seed 20261007, 5 programs x seeds 1..4, Apple M4, load ~5: defaults 20/20
+`exact` (enumerate, median 0.110 ms), sampler forced 20/20 `diagnostics_passed`, 140 released, 0 false, 0 wrong, 0 refused
+(median 295.3 ms). What it forbids: reading it as coverage of large constructed programs; these are 4^7-state programs.
+
+**FINDING (R19.5): precedence chains defeat the feasible-start search.** 20 jobs x 30 ordered slots, `all_different` +
+19 chained `precedes` (j0 < j1 < ... < j19, gap 1; random unaries; lowered to 8,865 caps). The program is feasible (j_i = s_i),
+but `pbit run` at defaults is `refused` after 15.2 s (15,178.9 / 15,178.6 / 15,245.4 ms, seeds 1..3, exit 3; the 200 ms
+budget does not bound the bounded exact search's fallback) and `--op sample` is `refused` in 200.5 ms ("no feasible start found
+within the search budget"). Never a wrong answer, but no answer either: pairwise forbid caps give the randomised depth-first
+start search no forward checking along a chain, so an early job placed late leaves later jobs no slot. On the small
+precedence test (4 jobs x 5 slots) the sampler is fine (5/5 `diagnostics_passed`, max TV <= 0.0015 vs brute force). Input: a generated
+20-job x 30-slot chain (not in the repo). Fix direction (P2.1/P2.3): bound-propagating start search (or a precedence-aware start)
+and a hard cap on the exact tiers' wall clock: the same input refuses in 7,739 ms with `--exact-ms 100` and in 200.5 ms with
+`--exact-limit 1` (seed 1, N = 1); with `--sweeps 1000` (no decide fallback) 8,034.6 ms, and 759.3 ms with `--exact-ms 100`
+added. So about 8 s is the exact tiers before the sampler (the enumeration's node budget, which `--exact-ms` bounds and
+`--budget-ms` does not), and about 7 s is the decide fallback's exact search after no chain started, which neither flag
+bounds.
+
+**FIXED (R19.6)** by three mechanisms (Apple M4 16 GB, 1-min load ~6, seeds 1..3, N = 1 each): (1) an arc-consistent (MAC) start
+search for programs whose two-variable forbid caps prune under root arc consistency; (2) under `--op decide` with a wall-clock
+budget, the exact tiers before the sampler stop at `--budget-ms` when the raw space exceeds `--exact-limit`; (3) the no-start
+fallback stops hard at the end of the sampling budget. Same input, defaults: 0.80 / 0.54 / 0.54 s wall (was 15.2 s), the
+chains start (12,416-12,536 sweeps), verdict `refused` by the gate (tv_bound 0.168 > 0.05), and that refusal is honest: an
+independent forward/backward chain DP over slots (log Z 16.892008) puts the worst item at
+TV 0.0537 from the 200 ms sample. `--op sample`: `refused` by the gate in 341 ms (was `refused`, no start). More budget buys
+the answer: `--budget-ms 1000` `partial`, 4 released, max TV 0.0073 vs the DP (2.49 s wall); `--budget-ms 3000`
+`diagnostics_passed`, 20 released, max TV 0.0112 (7.39 s wall). What it forbids: reading this as fast mixing on long chains;
+single-site moves cross a 20-job chain slowly and the gate says so.
+
+**`--cycles on` default (R19.5, P1.4; gate unchanged).** An 11th family, saturated quotas (`saturated-k3`: 12 variables, 3
+values, each variable allows 2, every value capped at 4 = n/3, so every feasible plan uses each value exactly 4 times and no
+single-variable change is feasible; random unaries and weak tables). Seed 20261005, sampler forced: `--cycles off` (the R19.4
+default) 20/20 **refused** (program 0, seed 1: `gate.frozen_saturated_caps` 3, all 12 variables escalated with `release_reason` frozen,
+although 148,134 label swaps were accepted), 0 false; the
+diagnostic `--cycles on` 16/20 whole, 0 false, 0 wrong, 4 refused (one program, every seed). `--cycles on` became the CLI
+default, attempted only with k > 2 values and at least one cap (else byte-identical to off at fixed work). Validation on the
+untouched seed 20261006 (11 families x 5 programs x seeds 1..4, Apple M4, load 6.9-14): every family 20/20 whole, 0 false, 0
+wrong, 0 refused in both modes; control, same seed, `--cycles off`: saturated-k3 20/20 refused, the other ten unchanged
+(20/20). Frozen corpus at the new defaults: 0 false / 0 wrong / 0 refused. Cost at defaults (median `gate.sweeps` in 200 ms,
+N = 5 alternating, load ~6.5): 300-task demo -13.7% sweeps (the only one of the four inputs where the move runs). Seeds
+20261005 and 20261006 are now USED. What this forbids: reading "0 refused" as "quota programs always mix": the rotation
+connects states that differ by a 3-cycle of values; quota-saturated programs whose states differ only by longer cycles of
+values within allowed sets are not represented here.
+
+**Members forced by counting read as frozen (found R19.6, fixed R19.7; a false refusal, never a wrong answer).** Holdout seed
+20261009, saturated-k3 program 3: four variables allow {a, c}, eight allow {b, c}, every value capped at 4 with n = 12, so the
+four {a, c} variables are forced to a by counting (70 plans). The chains mixed (rhat 1.000005, tv_bound 0.0024) but every item
+was refused with `release_reason` frozen: the rule read the cap on c (always 4 {b, c} occupants) as a saturated cap that never
+changes hands and the four constant variables as stuck. Over the used seeds 20261005..20261010 (saturated-k3 only, 5 programs x
+seeds 1..4 each): 8/120 sampler answers refused (2 programs x 4/4 seeds), 0 false. Fix (`pbit_ir::forced_values`, partition
+programs, at most 64 tests per gate call): a variable that every chain held at one value a is tested with a forbidden; if the
+capacitated matching (complete on partition programs: a proof) finds no plan, it is a constant like a clamp: not stuck, left out
+of the class counts, a forced member of its caps. After (same seeds and programs, Apple M4, load 6.7-8.7): **0/120 refused**,
+0 false, 0 wrong, 1,440 released. Controls: `--cycles off` on seed 20261006 still 20/20 refused, 0 false (a stuck variable that
+is not forced still counts); untouched holdout 20261011 (12 families x 5 programs x seeds 1..4, load 8.4-14.8): 0 false, 0
+wrong, 0 refused in both modes (5,380 released each); frozen corpus 0 / 0 / 0 (9,280 released, load 16-17). (That run's record
+names commit bda5f4c: the change was not yet committed, the binary had it. An independent re-run on the committed R19.7 binary b962602
+at the script's default seeds 1..20: 2,400 whole answers, 53,800 released, 0 false / 0 wrong / 0 refused; not re-run in R19.8.) Seed 20261011 is now USED. Tests: `stress_saturated_forced_by_counting_is_not_frozen` (un-ignored), `forced_by_counting_is_not_frozen`. What it
+forbids: the same claim on non-partition programs (their budgeted start search proves nothing; they are not tested).
+
+**Composition hazard (found R19.2, fixed).** Two moves that are each correct can cancel. With the opt-in Wolff cluster move
+(`--cluster on`) attempted every sweep next to the global flip, both flipped ferro12 whole every sweep, so each chain's recorded
+state stayed in one mode: `pbit run --op sample --sweeps 4000 --polish-ms 0 --cluster on --cycles on --seed S < ferro12.json`,
+seeds 1..10: 8 refused and **2 false whole answers** (seeds 8 and 9, error 0.5). The cluster move is now attempted with
+probability 1/2 per sweep (a random mixture of pi-invariant moves is pi-invariant): seeds 1..20, 20/20 `diagnostics_passed`,
+0 false, on ferro12 and on the w1.0 redundant-caps input (`stress_ferro12_all_moves`). The default path (`--cluster off`) was
+never affected.
+
+What it lets us claim: the gate is a set of diagnostics with published counterexamples; `exact` and `infeasible` remain
+proof-grade under the score model; these seven inputs are answered correctly at defaults. What it forbids: reading
+`diagnostics_passed` as "within ±0.05" on any program with well-separated modes that the moves do not connect. The gate is
+unchanged (it still measures error around the modes the chains visit); the collective moves remove these barriers (mirror
+modes of two-value variables, label-permuted modes), not every barrier: modes that differ on a subset of the variables, or by
+anything other than a global two-value flip or a label swap, can still be missed (R19 P1.2: mode-aware diagnostics).
+
+**Mode-aware gate (R19.3, gate/3): what it adds and what it does not.** Every release now also needs the variable's own
+indicator split-R-hat (half-chains, Bernoulli within-variance, values with pooled P > 0.02) below 1.05, and a whole answer needs
+every variable's (`release_reason` `item_rhat`; `gate.item_rhat_max` / `gate.item_rhat_infinite`). It sees chains that hold
+different values of a variable when their log-weight traces agree (symmetric modes), which the log-weight R-hat cannot: 8-spin
+complete ferromagnet, +2.5 nats, moves off, 4 chains, seeds 1..8: every seed whose chains split has R-hat > 10.5 on every spin
+and releases nothing (`item_rhat_sees_chains_split_between_symmetric_modes`). The indicator R-hat alone does NOT fix the table
+above: with the moves off (`--collective off --sweeps 4000 --polish-ms 0`, seeds 1..20, `stress_gate_alone_moves_off`, load
+~5) it gave the gate/2 counts, 2 / 3 / 2 / 3 / 3 false whole answers (h0.03 / h0.06 / heterogeneous / ferro12 / w0.5 redundant
+caps; w1.0: 20 refused), every released item wrong: in those runs every chain sits in the same wrong mode (assumption 1). The
+final gate/3 (with the never-moved rule below) changes one row: ferro12 0 false, 20 refused (its frozen chains never move a
+spin; the rule now reaches programs without capacity constraints, which the code classifies as partition programs). The three
+router inputs and the w0.5 input keep 2 / 3 / 2 / 3 false.
+Cost on the night's oracle suites (same binaries before/after, Apple M4, load 4-8): `maxcut_oracle` (fixed sweeps,
+deterministic) 144 runs, 61 passed, 929 released, 0 false, identical with the moves off and on (72 / 1,008 / 0); 1,000 iid fair
+bits, 4 chains, seeds 1..50: 280 and 400 sweeps refuse (fewer than 8 long batches; the external reviewer's run on the 0.1.0 gate released
+14,983 / 45,653 with 20 / 14 misses), 800 sweeps 50/50 whole, 50,000 released, 0 misses, identical. Wall-clock suites (run-to-run
+noise), released before -> after, 0 false in every run: colouring 525 -> 525 (moves on 554 -> 554), scheduling 428 -> 428,
+stuck_twins 188 -> 189 (moves on 262 -> 263), router_bench 3,111 -> 3,101 (one family-A4 run 375 -> 365).
+(R19.5: the never-moved rule now escalates per connected component on partition programs too, not every variable; on
+`router_bench` it changes nothing, family A 6/16 passed and 1,390 -> 1,380 released at wall clock, 0 wrong, because a router
+program is one component through its caps; it only frees the moving parts of decomposable programs.)
+The second gate/3 change, the never-moved test on partition programs (the router, and every program without capacity
+constraints, e.g. max-cut and ferro12), costs one run: `router_bench` family A 7 -> 6
+of 16 whole answers, 1,565 -> 1,370 released, 0 wrong before and after (the refused 200-task run was right: maxTV 0.0178). That
+is the price of not being able to tell "certain" from "stuck" from inside a run. The third, the per-constraint occupancy-count
+R-hat (members of a capacity whose load trace disagrees across chains are escalated), changed nothing further on these suites
+(scheduling 428 -> 428; stuck_twins 188 -> 188; router_bench family A 1,375 released, 0 wrong); it exists for count modes that
+per-variable indicators cannot see (a synthetic 7-vs-9-ones split: indicator R-hat < 1, occupancy R-hat infinite). None of the
+three can see a mode no chain visits: `gate.mode_transitions` reports the accepted collective moves per run (the moves-off false
+answer above reads 0 transitions on 4 chains).
+
+**Gate cost at many chains (R19.7, P2.3 started).** The chain-disagreement check compared every pair of chains (O(chains^2)).
+It now uses sign projections from 128 chains on (k <= 12; L1 diameter = max over 2^(k-1) sign vectors; equal to the pairwise
+scan up to rounding, test `chain_disagreement_projection_matches_pairs`; default 4-chain runs keep the pairwise scan and their
+bytes). Same binary, projection disabled vs enabled, `pbit demo --tasks 24 --seed 1 | pbit decide --mode sample --chains N
+--seed 1` (Apple M4, load 8.6-10.6; N = 3 pairwise, 3-5 projection): 1,000 chains gate 93.2-94.4 ->
+51.7-53.0 ms; 10,000 chains 6,463-6,495 -> 2,159-2,257 ms (one 4,321 ms outlier right after a rebuild). The rest of the
+10,000-chain gate (~2.2 s) is other per-chain work (not profiled yet: e.g. one thread per chain in the frozen check); all runs
+`refused` (the demo at 10,000 x a 200 ms budget is not mixed). Two-binary record (R19.6 b97a931 vs R19.7 b962602, same command,
+interleaved, load 2.9-5.4; the maintainer's independent re-run, not re-run in R19.8): 1,000 chains gate 90.9-95.3 vs
+46.8-55.1 ms (N = 5 each, medians 94.6 -> 54.0); 10,000 chains 6,508-6,553 vs 2,284-4,945 ms (N = 3: the gain was load-sensitive
+while one thread per chain remained; fixed by the pool below).
+
+**Gate cost at many chains (R19.8, P2.3 item 1 done).** Profiled (macOS `sample`, 10,000 chains): nearly all of the remaining gate
+was thread create / map / unmap / teardown: the two batch-means passes and the frozen check each spawned ONE THREAD PER CHAIN.
+They now run on a bounded pool (`pbit_ir::pool_map`, `--threads` workers; results combined in chain order, so every statistic is
+bit-identical: test `gate_pool_is_bit_identical`, and old vs new binary give the same bytes at fixed `--sweeps` on 4 / 37 / 1,000 /
+3,000 chains); the sign projections visit each chain once per variable (all signs) on the same pool, and the long-batch pass no
+longer recomputes the disagreement it discarded. Two binaries (R19.7 b962602 vs R19.8 c1), same command as above, interleaved
+OLD/NEW, Apple M4, load 6.2-7.2 (shared machine):
+
+| chains | gate ms OLD (median, N) | gate ms NEW (median, N) | whole call ms OLD -> NEW | peak RSS MB OLD -> NEW |
+|---:|---:|---:|---:|---:|
+| 1,000 | 54.0 (51.4-56.1, 5) | 15.9 (12.2-28.5, 5) | 307.1 -> 269.9 | 101.6 -> 50.6 |
+| 10,000 | 2,255.7 (2,224.1-4,814.1, 5) | 15.8 (15.4-16.2, 5) | 2,537.3 -> 300.7 | 840.4 -> 368.2 |
+| 100,000 | no answer in 90 s (1) | 88.5 (83.7-89.3, 5) | > 90,000 -> 583.0 | n/a -> 356.3 |
+
+What this allows: thousands of chains no longer pay seconds of gate. What it forbids: reading `--budget-ms` as a deadline at
+100,000 chains: the SAMPLING phase dominates there (R19.8: 448 ms median for a 200 ms budget). Profiled in R19.9 (macOS `sample`, 1 s at
+1 ms): chain builds and starts (`Chain::new` + the feasible start) ~29% of the sampling samples, sweeps the rest: each chain timed its own
+budget / 25,000 = 8 us slice and read the clock every 8 sweeps, so overruns were never charged to the next chains. Router `sample_on` now
+gives the r-th chain of a worker the deadline call start + (r + 1) slices (same chains, same output shape): sampling 431.5 [353.4-453.1]
+-> 269.4 [255.3-282.6] ms, whole call 571.9 -> 405.2 ms (two binaries interleaved, N = 5 medians, load 3.5-3.6;
+both `refused`; 4 chains unchanged: 200.1 ms both). These numbers move with the machine's load: the orchestrator's interleaved
+re-check (N = 5, load 4.2) read sampling 353.6 -> 318.4 ms and call 497.8 -> 459.9 ms, so the honest statement is a range: sampling
+old 354-432 ms -> new 269-318 ms, call 498-572 -> 405-460 ms (medians of N = 5, loads 3.5-4.2). At 100,000 chains on 200 ms NO chain
+sweeps in the new build: `telemetry.sweeps` is 0 (all 5 R19.9 runs and 2 R19.10 checks at load 4.1): the answer is the 100,000
+feasible starts, which the gate refuses (the old build's overrunning slices did sweep: 60,000-306,896 sweeps in total). The ~70-120 ms
+over the budget are the 100,000 builds themselves: not removable without fewer chains. Gate at 100,000 chains across runs: 84.5-100.1 ms (R19.8 / the maintainer's
+re-run, loads 3.0-10.0; 89.3 ms in the R19.9 profile run). Every run in the table is `refused` (this demo at a 200 ms budget is not mixed at any of these
+chain counts); the default 4-chain runs are byte-identical. The pool's width barely matters: at 10,000 chains `--threads`
+1 / 4 / 8 give gate 18.2 / 14.5 / 15.0 ms (N = 5 medians, load 3.0-3.2, final R19.8 binary),
+so the gate's statistics are cheap even on one thread and the old seconds were the thread churn. The IR front-end shares the
+gate: `pbit run --op sample --chains 10000 --seed 1` on the stress program ferro12, old vs new binary interleaved, N = 3, load
+7.7-8.2: gate 2,138.2 -> 4.6 ms, whole call 2,405.0 -> 281.4 ms (medians; `refused` both).
 
 ## §6 Where it loses
 - CPU cap: `--cpu-limit 25` kept the CPU share under the cap but spent 4.1x the CPU for the same work on a 2,000-spin ring
@@ -348,7 +831,20 @@ this queue is 708.31, §2.2). The load average was ~4.5 during this run (another
 - Memory cap: at 2 MB on the hard 300-task demo, 61 fewer tasks were released (5.3).
 - Tiny inputs (`bench/tiny_exact.py`, N = 7): on the 12-task demo, exact enumeration of all 180,540 feasible plans takes
   7.30 [7.29-7.32] ms. The forced sampler takes 273.6 [271.2-276.8] ms (x37) and is only approximately right (certified 7/7,
-  max TV 0.0019 vs exact). This is why `pbit decide` runs the exact tiers first.
+  max TV 0.0019 vs exact). This is why `pbit decide` runs the exact tiers first. Re-run on the final build (R19.10, N = 7, load
+  5.9): 8.16 [8.08-8.20] ms exact vs 278.2 [277.9-279.2] ms sampled (x34), 7/7 `diagnostics_passed`,
+  max TV 0.0019.
+- Small-group exact inputs since R19.9 (R19.10 FINDING): the enumeration's per-(group, worker) mate counts and affinity memo,
+  which took the near-saturated 3,000-task group from 199.9 s to 2.7 s, cost 5-22% on programs with small groups, where the old
+  per-node loop touched at most a couple of group mates. Old binary (e97c9b4, before R19.9) vs new, `pbit decide` at defaults, interleaved, N = 9 medians
+  [IQR], load 4.8, same answers: 12-task demo 7.167 [7.122-7.301] -> 8.009 [7.983-8.056] ms (+11.7%);
+  12 `--hard` 7.229 -> 7.987 ms (+10.5%); 24-task (answered by the frontier tier; the enumeration runs and declines first *(inferred)*) 26.54 -> 27.97 ms (+5.4%). Under `--mode exact`
+  (full enumeration, where the per-node cost dominates) the gap is larger: 14-task demo 1,455.1 [1,453.4-1,456.5] -> 1,773.3
+  [1,769.3-1,784.2] ms (+21.9%, N = 5 interleaved, load 3.5-3.6, same answer). A macOS `sample`
+  profile puts all of both binaries' time in the inlined `Ex::dfs`; hypothesis *(inferred)*: per candidate the new code reads
+  `cnt`, `mlen`, `moff` and `memo` where the old one scanned at most two mates. The
+  sampled path is unchanged (30 / 300 tasks: 293.8 / 306.4 -> 293.7 / 309.5 ms, N = 7, load 3.3-3.7). Not fixed: a size switch
+  (the direct fold for small groups computes the same sequential sum, so it should stay bit-identical *(inferred)*) is next-wave work.
 - Sudoku (§4): DFS backtracking does the same exact job 15-102x faster per puzzle (medians 17x open, ~50x unique), and the sampler refused all 20 generated puzzles (in the current build a puzzle that naked singles solve is certified: every cell is forced).
 - Max-cut (§3): simulated annealing finds better cuts at equal time on both Gset-like shapes (by 7 and 4 cut edges against pbit's
   anneal-only mode, by 20 and 10 against its sampler).
@@ -357,7 +853,8 @@ this queue is 708.31, §2.2). The load average was ~4.5 during this run (another
   (or greedy+polish, which beat pbit's plan at equal time on all 8 runs at 300 tasks, §2.2).
 - Scheduling, single best plan (§4.3): HiGHS proves the optimum of three 200-job programs in 0.68-0.95 s; pbit's plan is
   3.3-4.3 nats short at 2 s and 5 s budgets, and at 5 s it releases 156-173 of 200 jobs on two programs and none on the third.
-- Router, coverage (§2.1): over 16 oracle queues 58% of tasks were released. Nothing was released on saturated queues (every
+- Router, coverage (§2.1): over 16 oracle queues 51% of tasks were released on the current gate (58% on 0.1.0; re-run R19.10,
+  where one more queue, A4 seed 7012, released nothing although its odds were within 0.018). Nothing was released on saturated queues (every
   worker full; 2 of 4 refused although their odds were within 0.018) or on strong-affinity ones (3 of 4 rightly, odds off by 0.16-0.44;
   one needlessly, 0.041). Mid-size thin queues (30-36 tasks) are sampled at ~0.3 s although a larger
   frontier cap answers them exactly in 41-104 ms (§2.3).
@@ -411,7 +908,42 @@ this queue is 708.31, §2.2). The load average was ~4.5 during this run (another
   the difference)*, so `--exact-ms 50` changes nothing there. One router group of 3,000 tasks
   (`pbit decide` at the default 200 ms budget, 1 run each, machine load 5-8) took 7.55 s wall at 1,159 MB peak RSS (5,000 tasks: 12.77 s,
   1,895 MB; both `refused`), ~37x the budget: ~7 s is the enumeration counting toward `--exact-limit` (`--exact-limit 0` 0.59 s,
-  `--exact-ms 0` 0.44 s, `--mode sample` 0.46 s). Without the
+  `--exact-ms 0` 0.44 s, `--mode sample` 0.46 s). R19.8 FINDING (worse shape, N = 1, load 3.7-5.9): one NEAR-SATURATED group of
+  3,000 tasks (6 workers, caps 550 = 3,300 slots, affinity 0.01, random scores in [-1, 1]; generator in lab cycles/R19.8-c02)
+  took 199.9 s by default before `refused` (macOS `sample`: all of it in the router enumeration `Ex::dfs`). Cause (read from the
+  code): the node budget is 64 x `--exact-limit` = 128M nodes, but each node sums the affinity over every group mate (O(group
+  size)), and near saturation the bottom of the tree has one open worker, so each new plan re-descends hundreds of levels.
+  `--exact-ms 50` answers in 0.74 s. Same generator, default decide, N = 1, load ~3: 500 tasks
+  at 63% fill 1.26 s; 1,000 at 77% fill 2.83 s; 1,000 at 91% fill (cap 184) 19.76 s; 2,000 at 91% (cap 367, load 4.8) 93.98 s: near-saturation drives
+  it, and at ~91% fill the time grows faster than linearly with group size (19.8 / 94.0 / 199.9 s at 1,000 / 2,000 / 3,000). FIXED in R19.9, bit-identical: the enumeration keeps per-(group, worker) counts of
+  assigned mates (push / pop with the search) and a per-(task, worker) memo of the SAME sequential affinity fold, so every node costs
+  O(workers) instead of O(group size); every addend is the same affinity, so the sum depends only on the count, never on the mates'
+  order. `GOLDEN_EXACT` / `GOLDEN_GATE` unchanged (no re-pin); test `enumeration_affinity_memo_is_bit_identical` (240 random programs vs
+  the old enumeration, every bit, also with the memo capped); old vs new binary, timing fields removed, same answer at `--sweeps 50
+  --polish-ms 0` on 6 inputs (demo 12 / 24 `--hard`, demo 24, demo 300, the 500- and 1,000-task groups) and on the 3,000-task group (default `--exact-limit`: old 205.4 s, new 5.2 s, final binary;
+  and at `--exact-limit 1`). Default `pbit decide`, Apple M4 16 GB, wall s, N = 5 medians [IQR] (old and new
+  interleaved, the final binary re-timed alone right after):
+
+  | one group, 6 workers, affinity 0.01 | fill | old (e97c9b4) | new (R19.9 c1) | load |
+  |---|---|---|---|---|
+  | 500 tasks, caps 133 | 63% | 1.141 [1.139-1.147] | 0.294 [0.293-0.296]; final 0.295 | 6.4-6.8; 2.4 |
+  | 1,000 tasks, caps 216 | 77% | 2.557 [2.548-2.576] | 0.379 [0.368-0.379]; final 0.386 | 5.8-6.4; 2.4 |
+  | 1,000 tasks, caps 184 | 91% | 19.630 [19.581-20.243] | 0.706 [0.695-0.720]; final 0.731 | 3.9-5.9; 2.4-2.6 |
+  | 3,000 tasks, caps 550 | 91% | 199.9 (N = 1, R19.8); 205.4 at `--sweeps 50` (N = 1, R19.9) | 2.693 [2.681-2.703]; final 2.702 | 3.7-3.9; 2.5-2.6 |
+
+  Every run is `refused`, before and after (the sampler does not mix these groups in 200 ms). Peak RSS is within run-to-run noise, not a regression:
+  1.65-1.96 GB on the 3,000-task group for BOTH binaries (R19.9 read old and new 1,953-1,957 MB at `--exact-limit 1 --sweeps 50`; the
+  orchestrator's re-check read new 1,721 vs old 1,957 MB there and new 1,646-1,709 MB at default `decide`: about ±250 MB run to run on
+  either binary). The memo arena is <= 128 MB by construction (one flat arena of at most 2^24 f64 entries, past which the fold
+  continues unstored). What this allows: default `decide` on big near-saturated groups in seconds without `--exact-ms`. What it forbids: reading
+  2.7 s as the budget: the enumeration still walks its whole node budget (64 x `--exact-limit` nodes) before declining; macOS `sample` of the
+  final binary on the 3,000-task group (2 s at 1 ms): `Ex::dfs` 1,244 samples, then the sampler's per-site loops over every group mate
+  (`Chain::site` 323, `Chain::pair_e` 167, `Chain::cycle3` 148: O(group size) per site update, the second O(G) loop, NOT fixed: they cost
+  sweeps within the budget, not wall time). (An apparent run-to-run difference of that answer was the
+  `telemetry.nice` echo: zsh ran a background job at nice 5; at equal niceness the answers match bit for bit.) `--mode exact` on that group has no plan cap (u64::MAX / 128) and ran > 3 min in
+  `Ex::dfs` before it was stopped: `--exact-ms` is the control there. R19.8 also stopped the router lowering from running outside its use: `--mode sample` on that
+  group 884.6 -> 618.3 ms, `--exact-ms 0` 885.6 -> 614.9 ms, `--exact-ms 50` 898.1 -> 741.0 ms (two binaries interleaved, N = 5
+  medians, load 7.4-8.1; outputs byte-identical at fixed `--sweeps` on 5 configurations). Without the
   flag the output is unchanged (A/B vs the binary from before the flag, timing fields removed: 13 of 14 cases identical; the 14th, a wall-clock
   sampler run, differs by timing only and is identical at fixed `--sweeps`). What this allows: bounding the
   exact tiers' extra wall time on large loose programs. What it forbids: expecting exact answers from a cap shorter than the
@@ -430,7 +962,9 @@ this queue is 708.31, §2.2). The load average was ~4.5 during this run (another
   4.66 s). FIXED in the current build. The cause was not the per-temperature chain builds (an earlier reading of the code; profiled: ~20 ms
   each) but the plan score `Problem::logw`, which tested every pair of tasks for a shared group (O(t^2), ~2 s per call at 100,000
   tasks), run once per polish chain before its clock and once per sweep. It is now linear above 96 tasks (the pairwise loop stays up to 96, where it is faster; it is still 2-4% faster per polish sweep at
-  100-110 tasks, so the threshold is slightly low) and bit-identical (test), and the polish
+  100-110 tasks; R19.8 timed the two paths per call, `examples/logw_threshold.rs`, 6 workers, groups of 4 / 8, median of 7
+  alternating rounds, load ~8.6: linear / pairwise = 1.52 / 1.25 at 96 tasks, 0.96 / 0.92 at 128, 0.97 / 0.68 at 160, 0.78 / 0.63
+  at 192, 0.53 / 0.51 at 256: the crossover is between 96 and 128, so the threshold stays at 96 and raising it to 150-200 would cost) and bit-identical (test), and the polish
   stops building chains once its time share has passed. Old vs fixed binary, same input shape, `pbit decide --mode sample`, default `--budget-ms 200`,
   3 runs each (machine load 5-8): time after sampling 2,039-2,041 -> 82-86 ms (4 threads), 7,868-7,871 -> 102-109 ms (`--threads 1`)
   (re-run on the final binary, 5 interleaved runs, load ~3, median [IQR]: 2,038 [2,037-2,038] -> 86 [85-86] ms; 7,745 [7,736-7,777] ->
@@ -439,19 +973,28 @@ this queue is 708.31, §2.2). The load average was ~4.5 during this run (another
   sweeps per second, so at equal wall time its plan is better on 5 of 8 seeds (`--hard`: 7 of 8). What this allows: `--polish-ms`
   as a near-deadline on this shape (32-59 ms over at 50). What it forbids: calling it a hard deadline (each polish chain builds at
   least one chain before its first clock read).
-- Very many chains: the gate runs after `--budget-ms` and its cost grows about quadratically with `--chains` (cause, read from the code,
-  not profiled: `chain_disagreement` compares every pair of chains' marginals, and the batch statistics spawn one thread
-  per chain) (30-task demo,
-  `--mode sample`, 1 run each): 64 / 1,000 / 10,000 chains took gate 10 / 103 / 7,488 ms, wall 0.26 / 0.36 / 7.76 s, peak RSS
-  31 / 107 / 829 MB (10,000 chains: `refused`, ~33 sweeps each); 100,000 chains gave no answer within 20 s. What this forbids:
-  treating `--budget-ms` as a deadline at thousands of chains. The defaults (4 chains) are not affected.
+- Very many chains (R18 record, before R19.7-R19.8): the gate grew about quadratically with `--chains` (pairwise chain
+  disagreement + one thread per chain) (30-task demo, `--mode sample`, 1 run each): 64 / 1,000 / 10,000 chains took gate
+  10 / 103 / 7,488 ms; 100,000 chains gave no answer within 20 s. FIXED for the gate ("Known failure modes", "Gate cost at many chains (R19.8)":
+  24-task demo, 10,000 chains 2,255.7 -> 15.8 ms, 100,000 chains answer in 583 ms, N = 5). Still losing: at 100,000 chains the
+  sampling phase overruns a 200 ms `--budget-ms` (R19.8 448 ms median; R19.9 per-worker deadlines: old 354-432 -> new 269-318 ms,
+  medians of N = 5 in two interleaved runs at loads 3.5-4.2, see "Gate cost at many chains"; the rest is the per-chain build every
+  chain needs, ~11 us each on 4 workers). At 100,000 chains on 200 ms no chain sweeps at all (`sweeps` is 0 in the output): the
+  answer is the starts, which the gate refuses. The IR sampler
+  still gives each chain its own slice: `pbit run --op sample --chains 100000 --seed 1` on the stress program
+  ferro12-w0.5-redundantcaps samples 284-345 ms on the default 200 ms (R19.9: 284.0-309.9 ms, N = 3, load 4.7-5.0; orchestrator
+  re-check: 334.8-344.6 ms, N = 3, load ~4; not profiled). So
+  `--budget-ms` is not a deadline there; `--deadline-ms` (`pbit run`) is the whole-call control. The Windows many-chain overrun
+  is unmeasured here. The defaults (4 chains) are not affected.
 - Not measured: CP-SAT (OR-Tools is not installed here), ILP with per-task odds (it has none), Linux/x86-64 numbers for any table,
   an ILP baseline for scheduling above 200 jobs (4.3 has 200-job programs only).
 
 ## §7 The QUBO hand-off vs the native sampler (re-run of `cargo run --release -p pbit-decide --example hardware_lowering`, N = 1)
 One run on 3 router instances (seeds 7 / 11 / 13), each lowered to a 34-bit one-hot QUBO with slack bits (165 couplings; the
 energy of every feasible plan equals -log w exactly, acceptance test `ir_round_trip_and_lowering_exact`). Every sampler gets 20 ms
-of wall clock on this CPU; TV is against the exact odds, over the feasible samples only.
+of wall clock on this CPU; TV is against the exact odds, over the feasible samples only. Single run per sampler and seed
+(N = 1): every cell is that run's value, with no median or IQR (no repeat was run), so small differences between
+neighbouring cells are not separated from run-to-run noise.
 
 | sampler | infeasible samples (seeds 7 / 11 / 13) | TV on feasible samples (7 / 11 / 13) |
 |---|---|---|

@@ -11,6 +11,10 @@ use std::collections::HashMap;
 pub mod oracle;
 pub mod ir;
 
+/// Tasks up to which `Problem::logw` uses the pairwise loop. R19.8 re-measured (`examples/logw_threshold.rs`, 6 workers, groups
+/// of 4 / 8, median of 7 alternating rounds, load ~8.6): linear / pairwise ns per call = 1.52 / 1.25 at 96 tasks, 0.96 / 0.92 at
+/// 128, 0.97 / 0.68 at 160, 0.78 / 0.63 at 192: the crossover is between 96 and 128, so 96 stays (raising it to 150-200 would be slower).
+pub const LOGW_PAIRWISE_MAX: usize = 96;
 #[derive(Clone, Debug)]
 pub struct Problem {
     pub t: usize, pub a: usize,
@@ -24,6 +28,15 @@ pub struct Problem {
     pub block_moves: bool,
     /// Metropolis group-pair swaps: members of group g1 on agent a <-> members of g2 on agent b (inter-group modes)
     pub pair_swaps: bool,
+    /// R19 P1.1(a): one global two-value flip per sweep (every free task with exactly two allowed workers switches at once;
+    /// `pbit_ir::Chain::global_flip`). Lowered as `Model::collective`; the two samplers stay bit-identical with it on.
+    pub collective: bool,
+    /// R19 P1.1(d), WIP: one Wolff cluster move per sweep over same-group affinity bonds (`pbit_ir::Chain::cluster_move`;
+    /// lowered as `Model::cluster`; bit-identical through the lowering). Off by default.
+    pub cluster: bool,
+    /// R19 P1.1(c), WIP: max(t/4, 1) three-cycle rotations per sweep (`pbit_ir::Chain::cycle3`; lowered as `Model::cycles`;
+    /// bit-identical through the lowering). Off by default.
+    pub cycles: bool,
 }
 
 impl Problem {
@@ -42,8 +55,12 @@ impl Problem {
     /// Now O(t + same-worker mate pairs), adding the same terms in the same order (h_i, then lam once per LATER task of i's group on
     /// the same worker), so the value is bit-identical. Up to 96 tasks the pairwise loop stays (the map made the polish ~1.5x
     /// slower per sweep at 20-30 tasks and ~1.5x faster at 300; 96 ~ the geometric middle).
-    pub fn logw(&self, x: &[usize]) -> f64 {
-        if self.t <= 96 { let mut e = 0.0;
+    /// R19.8 (P2.3 item 3): the pairwise loop up to LOGW_PAIRWISE_MAX tasks, the linear path above (same bits either way).
+    pub fn logw(&self, x: &[usize]) -> f64 { self.logw_by(x, self.t <= LOGW_PAIRWISE_MAX) }
+    /// `logw` by the pairwise loop (`pairwise`) or the linear path: bit-identical, only the cost differs (for the threshold
+    /// benchmark `examples/logw_threshold.rs`).
+    pub fn logw_by(&self, x: &[usize], pairwise: bool) -> f64 {
+        if pairwise { let mut e = 0.0;
             for i in 0..self.t { e += self.h[i * self.a + x[i]];
                 for j in i + 1..self.t { if self.group[i] != usize::MAX && self.group[i] == self.group[j] && x[i] == x[j] { e += self.lam; } } }
             return e; }
@@ -64,13 +81,20 @@ impl Problem {
     /// the judge logits as unary log-weights, a Potts coupling (+lam when equal) per same-group pair, and one capacity
     /// constraint per agent over its allowed (task, agent) pairs; clamps stay clamps. Through this lowering the IR's
     /// enumeration, sampler (site + swap moves) and gate are bit-identical to this crate's (acceptance `ir_lowering_bit_identical`).
-    pub fn lower(&self) -> pbit_ir::Model {
+    pub fn lower(&self) -> pbit_ir::Model { self.lower_until(None).expect("a Problem always lowers") }
+    /// `lower` that gives up (None) once `hard` passes: the clock is read once per group member while the O(group size^2)
+    /// Potts pairs are built, and before and after `Model::new` (R19.8, P2.3 item 2: the CLI's `--exact-ms` cap did not
+    /// cover this lowering, ~200 ms on one 3,000-task group). None = `lower`.
+    pub fn lower_until(&self, hard: Option<std::time::Instant>) -> Option<pbit_ir::Model> {
+        let late = || hard.is_some_and(|h| std::time::Instant::now() >= h);
         let mut gm: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
         for i in 0..self.t { if self.group[i] != usize::MAX { gm.entry(self.group[i]).or_default().push(i); } }
         let mut pairs = vec![];
-        for mem in gm.values() { for (q, &i) in mem.iter().enumerate() { for &j in &mem[q + 1..] { pairs.push(pbit_ir::Pair { i, j, c: pbit_ir::Coupling::Potts(self.lam) }); } } }
-        let caps = (0..self.a).map(|a| pbit_ir::Cap { members: (0..self.t).filter(|&i| self.allowed[i * self.a + a]).map(|i| (i, a)).collect(), limit: self.cap[a] }).collect();
-        pbit_ir::Model::new(self.t, self.a, self.h.clone(), self.allowed.clone(), self.clamp.clone(), pairs, caps).expect("a Problem always lowers")
+        for mem in gm.values() { for (q, &i) in mem.iter().enumerate() { if late() { return None; } for &j in &mem[q + 1..] { pairs.push(pbit_ir::Pair { i, j, c: pbit_ir::Coupling::Potts(self.lam) }); } } }
+        let caps = (0..self.a).map(|a| pbit_ir::Cap { weights: vec![], members: (0..self.t).filter(|&i| self.allowed[i * self.a + a]).map(|i| (i, a)).collect(), limit: self.cap[a] }).collect();
+        if late() { return None; }
+        let mut m = pbit_ir::Model::new(self.t, self.a, self.h.clone(), self.allowed.clone(), self.clamp.clone(), pairs, caps).expect("a Problem always lowers");
+        m.collective = self.collective; m.cluster = self.cluster; m.cycles = self.cycles; if late() { None } else { Some(m) }
     }
 
     /// Feasible initial state via capacitated bipartite matching (augmenting paths), best-logit first.
@@ -112,12 +136,29 @@ pub fn exact(p: &Problem, k: usize, limit: u64) -> Option<Exact> { exact_within(
 /// `exact` that declines (None) once `hard` passes (clock read every 64 nodes, both passes): the opt-in `--exact-ms`
 /// cap of the CLI. None = `exact`.
 pub fn exact_within(p: &Problem, k: usize, limit: u64, hard: Option<std::time::Instant>) -> Option<Exact> {
-    pbit_ir::deep(p.t, || enumerate(p, k, limit, hard)) // the DFS recurses once per task; big inputs get their own stack
+    pbit_ir::deep(p.t, || enumerate(p, k, limit, hard, MEMO_MAX)) // the DFS recurses once per task; big inputs get their own stack
 }
-fn enumerate(p: &Problem, k: usize, limit: u64, hard: Option<std::time::Instant>) -> Option<Exact> {
+/// `exact` with the enumeration's affinity memo capped at `memo_max` entries (tests: the past-the-chunk fold is bit-identical).
+#[doc(hidden)]
+pub fn exact_memo_capped(p: &Problem, k: usize, limit: u64, memo_max: usize) -> Option<Exact> {
+    pbit_ir::deep(p.t, || enumerate(p, k, limit, None, memo_max))
+}
+/// Cap on the enumeration's affinity memo (f64 entries, 128 MB); larger programs get shorter chunks per (task, worker).
+const MEMO_MAX: usize = 1 << 24;
+fn enumerate(p: &Problem, k: usize, limit: u64, hard: Option<std::time::Instant>, memo_max: usize) -> Option<Exact> {
     if hard.is_some_and(|h| std::time::Instant::now() >= h) { return None; }
-    let mates = p.mates();
-    let mut st = Ex { p, mates: &mates, x: vec![0; p.t], load: vec![0; p.a], mx: f64::NEG_INFINITY, sum: 0.0,
+    // dense group index per task (usize::MAX = ungrouped: no mates, so no affinity term)
+    let mut ids: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    let gi: Vec<usize> = p.group.iter().map(|&g| if g == usize::MAX { usize::MAX } else { let n = ids.len(); *ids.entry(g).or_insert(n) }).collect();
+    // memo chunk per (task, worker): c <= min(mates before i, cap - 1); one flat zeroed arena (pages resident only once
+    // touched), at most MEMO_MAX entries: past a chunk's end the fold continues from its last entry (same bits)
+    let mut seen = vec![0usize; ids.len()]; let mut full = vec![0usize; p.t * p.a];
+    for i in 0..p.t { if gi[i] == usize::MAX { continue; } let b = seen[gi[i]]; seen[gi[i]] += 1;
+        for a in 0..p.a { if p.ok(i, a) { full[i * p.a + a] = b.min(p.cap[a].saturating_sub(1)); } } }
+    let total: usize = full.iter().sum(); let lim = if total <= memo_max { usize::MAX } else { memo_max / (p.t * p.a).max(1) };
+    let (mut moff, mut off) = (vec![0u32; p.t * p.a], 0usize);
+    let mcap: Vec<u32> = full.iter().enumerate().map(|(k, &f)| { let c = f.min(lim); moff[k] = off as u32; off += c; c as u32 }).collect();
+    let mut st = Ex { p, gi, cnt: vec![0; ids.len() * p.a], memo: vec![0.0; off], moff, mcap, mlen: vec![0; p.t * p.a], x: vec![0; p.t], load: vec![0; p.a], mx: f64::NEG_INFINITY, sum: 0.0,
         marg: vec![0.0; p.t * p.a], top: vec![], k, n: 0, limit, pass: 0, nodes: 0, node_limit: limit.saturating_mul(64).max(1_000_000), hard, cut: false, stop: 0 };
     st.stop = st.arm();
     // pass 0: find max logw (for stable exp) & count; pass 1: accumulate
@@ -132,7 +173,15 @@ fn enumerate(p: &Problem, k: usize, limit: u64, hard: Option<std::time::Instant>
     let top = st.top.into_iter().map(|(lw, x)| ((lw - logz).exp(), x)).collect();
     Some(Exact { logz, marg: st.marg, top, n_feasible: st.n })
 }
-struct Ex<'a> { p: &'a Problem, mates: &'a [Vec<usize>], x: Vec<usize>, load: Vec<usize>, mx: f64, sum: f64, marg: Vec<f64>,
+/// R19.9 (finding 1): the affinity term of task i on worker a was a scan of ALL of i's group mates per node
+/// (`d = h[i][a]; for j in mates[i] { if j < i && x[j] == a { d += lam } }`: O(group size); 199.9 s on a near-saturated
+/// 3,000-task group). The DFS assigns tasks in index order, so the mates j < i are exactly the assigned ones and the scan
+/// adds lam c times, c = assigned mates on a. Now `cnt` keeps c per (group, worker) (push / pop with the DFS) and `memo`
+/// holds the SAME sequential fold per (task, worker): f(c) = fl(..fl(fl(h + lam) + lam)..) (c adds), filled lazily into one
+/// flat arena (`moff` chunk start, `mcap` chunk length, `mlen` entries filled; a Vec per pair cost +423 MB peak RSS on the
+/// 3,000-task group from growth slack and freed fragments). Every addend is the same lam, so the value depends only on c,
+/// never on mate order: bit-identical sums.
+struct Ex<'a> { p: &'a Problem, gi: Vec<usize>, cnt: Vec<usize>, memo: Vec<f64>, moff: Vec<u32>, mcap: Vec<u32>, mlen: Vec<u32>, x: Vec<usize>, load: Vec<usize>, mx: f64, sum: f64, marg: Vec<f64>,
     top: Vec<(f64, Vec<usize>)>, k: usize, n: u64, limit: u64, pass: u8, nodes: u64, node_limit: u64,
     /// Hard stop (`exact_within`), whether it fired, and the node count that triggers the next check (`halt`): the node
     /// limit without a hard stop, so the default path keeps its single comparison (a separate clock branch cost +2.0%)
@@ -158,11 +207,21 @@ impl<'a> Ex<'a> {
                 self.top.push((lw, self.x.clone())); self.top.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap()); self.top.truncate(self.k); }
             return;
         }
+        let g = self.gi[i];
         for a in 0..p.a {
             if !p.ok(i, a) || self.load[a] >= p.cap[a] { continue; }
-            let mut d = p.h[i * p.a + a];
-            for &j in &self.mates[i] { if j < i && self.x[j] == a { d += p.lam; } }
-            self.x[i] = a; self.load[a] += 1; self.dfs(i + 1, lw + d); self.load[a] -= 1;
+            let c = if g == usize::MAX { 0 } else { self.cnt[g * p.a + a] };
+            let k = i * p.a + a; let len = self.mlen[k] as usize;
+            let d = if c == 0 { p.h[k] } else if c <= len { self.memo[self.moff[k] as usize + c - 1] } else {
+                let (off, upto) = (self.moff[k] as usize, c.min(self.mcap[k] as usize));
+                let mut v = if len == 0 { p.h[k] } else { self.memo[off + len - 1] };
+                for j in len..upto { v += p.lam; self.memo[off + j] = v; }
+                if upto > len { self.mlen[k] = upto as u32; }
+                for _ in upto.max(len)..c { v += p.lam; } // past the chunk: the same fold, not stored
+                v };
+            self.x[i] = a; self.load[a] += 1; if g != usize::MAX { self.cnt[g * p.a + a] += 1; }
+            self.dfs(i + 1, lw + d);
+            self.load[a] -= 1; if g != usize::MAX { self.cnt[g * p.a + a] -= 1; }
         }
     }
 }
@@ -178,7 +237,17 @@ pub struct Chain<'a> { pub p: &'a Problem, mates: Vec<Vec<usize>>, /// allowed a
     /// Each site update leaves pi invariant, so any fixed focus set keeps the chain exact.
     pub focus: Vec<usize>, pub focus_reps: usize,
     /// Tables + window size + moves per sweep for the frontier-DP k-group exact block heat-bath (None = off)
-    win: Option<GroupPairs>, win_k: usize, win_reps: usize }
+    win: Option<GroupPairs>, win_k: usize, win_reps: usize,
+    /// The global flip's precomputed structure (`Problem::collective`; built on first use)
+    flip: Option<Box<RouterFlip>>,
+    /// relabel scratch (`Problem::collective`, > 2 workers): per task a changed flag, the changed tasks
+    rl: (Vec<bool>, Vec<usize>),
+    /// see `pbit_ir::Chain::moves` (same counts on the same draws: the lowering identity test checks them)
+    pub moves: [u64; 2] }
+/// `pbit_ir`'s FlipPlan for the router: (task, first worker, second worker, h[second] - h[first]) per free two-worker task,
+/// mate pairs with one flipped endpoint (task, mate), mate pairs of flipped tasks whose affinity term can change
+/// (vars index of i, of j, change by [s_i * 2 + s_j]), and a per-worker load-change scratch.
+struct RouterFlip { vars: Vec<(usize, usize, usize, f64)>, pos: Vec<usize>, one: Vec<(usize, usize)>, both: Vec<(usize, usize, [f64; 4])>, dl: Vec<i64> }
 impl<'a> Chain<'a> {
     pub fn new(p: &'a Problem, seed: u64, stream: u64) -> Option<Self> {
         let mut rng = Philox4x32::new(seed, stream);
@@ -187,7 +256,7 @@ impl<'a> Chain<'a> {
         let mut gm: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
         for i in 0..p.t { if p.group[i] != usize::MAX { gm.entry(p.group[i]).or_default().push(i); } }
         let cand_of = (0..p.t).map(|i| (0..p.a).filter(|&a| p.allowed[i * p.a + a]).collect()).collect();
-        let mut c = Chain { p, mates: p.mates(), cand_of, groups: gm.into_values().collect(), cand: vec![], x, load, rng, w: vec![f64::NEG_INFINITY; p.a], gp: None, focus: vec![], focus_reps: 0, win: None, win_k: 0, win_reps: 0 };
+        let mut c = Chain { p, mates: p.mates(), cand_of, groups: gm.into_values().collect(), cand: vec![], x, load, rng, w: vec![f64::NEG_INFINITY; p.a], gp: None, focus: vec![], focus_reps: 0, win: None, win_k: 0, win_reps: 0, flip: None, rl: (vec![false; p.t], vec![]), moves: [0; 2] };
         // randomise start: a few random feasible sweeps at beta=0 (h ignored) for over-dispersion
         for _ in 0..5 { c.sweep_uniform(); }
         Some(c)
@@ -233,11 +302,112 @@ impl<'a> Chain<'a> {
     /// one sweep = T site updates + T/2 swap attempts
     pub fn sweep(&mut self) {
         for i in 0..self.p.t { self.site(i); } for _ in 0..(self.p.t / 2).max(2) { self.swap(); }
+        if self.p.collective { self.global_flip(); if self.p.a > 2 { self.relabel(); } }
+        if self.p.cluster && self.rng.f64() < 0.5 { self.cluster_move(); } // see pbit_ir::Model::cluster
+        if self.p.cycles && self.p.a > 2 { for _ in 0..(self.p.t / 4).max(1) { self.cycle3(); } } // as the IR: k > 2 and caps (every lowered router has a cap per agent)
         if self.p.block_moves { for g in 0..self.groups.len() { self.block(g); } }
         if self.p.pair_swaps && self.groups.len() > 1 { for _ in 0..self.groups.len() { self.pair_swap(); } }
         if self.gp.is_some() { for _ in 0..self.groups.len() { self.group_pair(); } }
         if self.win.is_some() { for _ in 0..self.win_reps { self.window_move(); } }
         for _ in 0..self.focus_reps { for k in 0..self.focus.len() { let i = self.focus[k]; self.site(i); } }
+    }
+    /// The router's global two-value flip (`Problem::collective`): `pbit_ir::Chain::global_flip` on this crate's state, with
+    /// the same terms summed in the same order (unary, one-flipped-endpoint mates, flipped mate pairs) and the same single
+    /// uniform draw, so it is bit-identical through `Problem::lower`. Symmetric involution + MH = detailed balance.
+    fn global_flip(&mut self) {
+        if self.flip.is_none() { self.flip = Some(Box::new(self.flip_plan())); }
+        let p = self.p; let mut f = self.flip.take().unwrap();
+        if !f.vars.is_empty() {
+            for &(i, c0, c1, _) in &f.vars { let (a, b) = if self.x[i] == c0 { (c0, c1) } else { (c1, c0) }; f.dl[a] -= 1; f.dl[b] += 1; }
+            if (0..p.a).all(|a| self.load[a] as i64 + f.dl[a] <= p.cap[a] as i64) {
+                let mut d = 0.0;
+                for &(i, c0, _, dh) in &f.vars { d += if self.x[i] == c0 { dh } else { -dh }; }
+                for &(i, j) in &f.one { let (xi, xj) = (self.x[i], self.x[j]); let v = &f.vars[f.pos[i]]; let yi = xi ^ v.1 ^ v.2;
+                    if xj == yi { d += p.lam; } else if xj == xi { d -= p.lam; } }
+                for &(a, b, t) in &f.both { let (va, vb) = (&f.vars[a], &f.vars[b]); d += t[(self.x[va.0] != va.1) as usize * 2 + (self.x[vb.0] != vb.1) as usize]; }
+                if d >= 0.0 || self.rng.f64() < d.exp() {
+                    for &(i, c0, c1, _) in &f.vars { self.x[i] ^= c0 ^ c1; } self.moves[0] += 1;
+                    for a in 0..p.a { self.load[a] = (self.load[a] as i64 + f.dl[a]) as usize; }
+                }
+            }
+            for v in f.dl.iter_mut() { *v = 0; }
+        }
+        self.flip = Some(f);
+    }
+    /// The router's label swap (`Problem::collective`, > 2 workers): `pbit_ir::Chain::relabel` on this crate's state (the
+    /// same two draws, the same changed set, the same sums in the same order), bit-identical through `Problem::lower`.
+    /// Mate pairs that both change keep their equality, so only unary terms and one-changed-endpoint mates enter dlogw.
+    fn relabel(&mut self) {
+        let p = self.p; let na = p.a; let a = self.rng.below(na); let mut b = self.rng.below(na - 1); if b >= a { b += 1; }
+        let (mut on, mut ch) = std::mem::take(&mut self.rl);
+        for i in 0..p.t { let v = self.x[i]; if (v == a || v == b) && p.clamp[i].is_none() && p.allowed[i * na + a] && p.allowed[i * na + b] { on[i] = true; ch.push(i); } }
+        if !ch.is_empty() {
+            let from_a = ch.iter().filter(|&&i| self.x[i] == a).count() as i64; let from_b = ch.len() as i64 - from_a;
+            if self.load[a] as i64 + from_b - from_a <= p.cap[a] as i64 && self.load[b] as i64 + from_a - from_b <= p.cap[b] as i64 {
+                let mut d = 0.0;
+                for &i in &ch { let (x, y) = (self.x[i], self.x[i] ^ a ^ b); d += p.h[i * na + y] - p.h[i * na + x]; }
+                for &i in &ch { let (xi, yi) = (self.x[i], self.x[i] ^ a ^ b);
+                    for &j in &self.mates[i] { if !on[j] { let xj = self.x[j]; if xj == yi { d += p.lam; } else if xj == xi { d -= p.lam; } } } }
+                if d >= 0.0 || self.rng.f64() < d.exp() {
+                    for &i in &ch { self.x[i] ^= a ^ b; } self.moves[1] += 1;
+                    self.load[a] = (self.load[a] as i64 + from_b - from_a) as usize; self.load[b] = (self.load[b] as i64 + from_a - from_b) as usize; }
+            }
+            for &i in &ch { on[i] = false; } ch.clear();
+        }
+        self.rl = (on, ch);
+    }
+    /// The router's Wolff cluster move (`Problem::cluster`): `pbit_ir::Chain::cluster_move` on this crate's state (the same
+    /// draws in the same order, the same sums), bit-identical through `Problem::lower`. Bonds = same-group mates when lam > 0.
+    fn cluster_move(&mut self) {
+        let p = self.p; let na = p.a; if na < 2 { return; }
+        let s = self.rng.below(p.t); let old = self.x[s]; let mut v = self.rng.below(na - 1); if v >= old { v += 1; }
+        let free = |i: usize, val: usize| p.clamp[i].is_none() && p.allowed[i * na + val];
+        if !free(s, v) { return; }
+        let (mut inc, mut cl) = std::mem::take(&mut self.rl); let w = p.lam;
+        inc[s] = true; cl.push(s); let mut head = 0;
+        while head < cl.len() { let i = cl[head]; head += 1;
+            for &j in &self.mates[i] { if w > 0.0 && !inc[j] && self.x[j] == old && free(j, v) && self.rng.f64() < -(-w).exp_m1() { inc[j] = true; cl.push(j); } } }
+        let nc = cl.len();
+        if self.load[v] + nc <= p.cap[v] {
+            let mut d = 0.0;
+            for &i in &cl { d += p.h[i * na + v] - p.h[i * na + old];
+                for &j in &self.mates[i] { if inc[j] { continue; } let xj = self.x[j];
+                    let cancelled = w > 0.0 && ((xj == old && free(j, v)) || (xj == v && free(j, old)));
+                    if !cancelled { if xj == v { d += w; } else if xj == old { d -= w; } } } }
+            if d >= 0.0 || self.rng.f64() < d.exp() { for &i in &cl { self.x[i] = v; } self.load[old] -= nc; self.load[v] += nc; }
+        }
+        for &i in &cl { inc[i] = false; } cl.clear();
+        self.rl = (inc, cl);
+    }
+    /// The router's three-cycle rotation (`Problem::cycles`): `pbit_ir::Chain::cycle3` on this crate's state (same three
+    /// draws, same local sums in the same order), bit-identical through `Problem::lower`. Worker loads are unchanged.
+    fn cycle3(&mut self) {
+        let p = self.p; if p.t < 3 { return; }
+        let (i, j, l) = (self.rng.below(p.t), self.rng.below(p.t), self.rng.below(p.t));
+        if i == j || j == l || i == l { return; }
+        let (a, b, c) = (self.x[i], self.x[j], self.x[l]);
+        if a == b || b == c || a == c || !p.ok(i, b) || !p.ok(j, c) || !p.ok(l, a) { return; }
+        let mates = &self.mates;
+        let local = |x: &[usize]| { let mut e = 0.0; for &v in &[i, j, l] { e += p.h[v * p.a + x[v]];
+            for &o in &mates[v] { if ((o != i && o != j && o != l) || o > v) && x[o] == x[v] { e += p.lam; } } } e };
+        let e0 = local(&self.x); let mut y = std::mem::take(&mut self.x); y[i] = b; y[j] = c; y[l] = a; let e1 = local(&y);
+        if !(e1 >= e0 || self.rng.f64() < (e1 - e0).exp()) { y[i] = a; y[j] = b; y[l] = c; }
+        self.x = y;
+    }
+    fn flip_plan(&self) -> RouterFlip {
+        let p = self.p; let na = p.a;
+        let vars: Vec<(usize, usize, usize, f64)> = (0..p.t).filter(|&i| p.clamp[i].is_none() && self.cand_of[i].len() == 2)
+            .map(|i| { let (c0, c1) = (self.cand_of[i][0], self.cand_of[i][1]); (i, c0, c1, p.h[i * na + c1] - p.h[i * na + c0]) }).collect();
+        let mut pos = vec![usize::MAX; p.t]; for (q, v) in vars.iter().enumerate() { pos[v.0] = q; }
+        let (mut one, mut both) = (vec![], vec![]);
+        for (a, &(i, c0, c1, _)) in vars.iter().enumerate() { for &j in &self.mates[i] {
+            if pos[j] == usize::MAX { one.push((i, j)); continue; }
+            if j < i { continue; }
+            let (d0, d1) = (vars[pos[j]].1, vars[pos[j]].2); let mut t = [0.0; 4];
+            for (si, &(xi, yi)) in [(c0, c1), (c1, c0)].iter().enumerate() { for (sj, &(xj, yj)) in [(d0, d1), (d1, d0)].iter().enumerate() {
+                t[si * 2 + sj] = (if yi == yj { p.lam } else { 0.0 }) - (if xi == xj { p.lam } else { 0.0 }); } }
+            if t.iter().any(|&v| v != 0.0) { both.push((a, pos[j], t)); } } }
+        RouterFlip { vars, pos, one, both, dl: vec![0; na] }
     }
     /// Reversible because we require g1 has no member on b and g2 none on a (so the reverse picks the same sets);
     /// proposal prob |S1|/|g1| * |S2|/|g2| is identical in both directions.
@@ -293,7 +463,7 @@ pub fn sample(p: &Problem, chains: usize, sweeps: usize, budget_ms: Option<f64>,
 pub fn sample_opts(p: &Problem, chains: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, threads: bool, keep_plans: bool, group_pairs: bool) -> Option<Samples> {
     let gpt = if group_pairs { GroupPairs::new(p) } else { None };
     let wt = window_tables(p);
-    let run = |c: usize| chain_samples(p, c, sweeps, budget_ms, seed, keep_plans, &gpt, &wt, 1.0, 0);
+    let run = |c: usize| chain_samples(p, c, sweeps, budget_ms.map(|b| std::time::Instant::now() + std::time::Duration::from_secs_f64(b.max(0.0) / 1e3)), seed, keep_plans, &gpt, &wt, 1.0, 0);
     let parts: Vec<Samples> = if threads {
         std::thread::scope(|sc| { let hs: Vec<_> = (0..chains).map(|c| { let run = &run; sc.spawn(move || run(c)) }).collect(); hs.into_iter().map(|h| h.join().unwrap()).collect::<Option<Vec<_>>>() })?
     } else { (0..chains).map(run).collect::<Option<Vec<_>>>()? };
@@ -302,17 +472,17 @@ pub fn sample_opts(p: &Problem, chains: usize, sweeps: usize, budget_ms: Option<
 /// One router chain (stream `c`): a pure function of (problem, seed, c, sweeps) when `budget_ms` is None. `duty` < 1
 /// (CPU limit, as `pbit_ir`): after every ~2 ms of sweeping the thread sleeps busy * (1/duty - 1); samples are unchanged.
 #[allow(clippy::too_many_arguments)]
-fn chain_samples(p: &Problem, c: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, keep_plans: bool, gpt: &Option<GroupPairs>, wt: &Option<GroupPairs>, duty: f64, max_rows: usize) -> Option<Samples> {
-    let t0 = std::time::Instant::now(); // the budget includes the start (as pbit_ir::run_chain)
+fn chain_samples(p: &Problem, c: usize, sweeps: usize, deadline: Option<std::time::Instant>, seed: u64, keep_plans: bool, gpt: &Option<GroupPairs>, wt: &Option<GroupPairs>, duty: f64, max_rows: usize) -> Option<Samples> {
+    // R19.9: a wall-clock run stops at `deadline` (set before the chain is built: the build and the start count)
     let mut ch = Chain::new(p, seed, c as u64)?; ch.gp = gpt.clone(); ch.set_window(wt); let na = p.a;
     let burn = sweeps / 10; let mut busy0 = std::time::Instant::now(); let mut stride = 1usize;
-    let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0 };
+    let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
     let mut k = 0usize;
     loop {
-        if let Some(b) = budget_ms { if k % 8 == 0 && t0.elapsed().as_secs_f64() * 1e3 >= b { break; } } else if k >= sweeps { break; }
+        if let Some(d) = deadline { if k % 8 == 0 && std::time::Instant::now() >= d { break; } } else if k >= sweeps { break; }
         ch.sweep(); k += 1; pbit_ir::progress_tick(k);
         if duty < 1.0 { let b = busy0.elapsed(); if b.as_secs_f64() >= 0.002 { std::thread::sleep(b.mul_f64(1.0 / duty - 1.0)); busy0 = std::time::Instant::now(); } }
-        let burn_now = if budget_ms.is_some() { k <= 20 } else { k <= burn };
+        let burn_now = if deadline.is_some() { k <= 20 } else { k <= burn };
         if burn_now { continue; }
         for i in 0..p.t { s.marg[i * na + ch.x[i]] += 1.0; }
         s.viol += (p.violations(&ch.x) > 0) as usize;
@@ -323,32 +493,37 @@ fn chain_samples(p: &Problem, c: usize, sweeps: usize, budget_ms: Option<f64>, s
     // As in pbit_ir::run_chain: no recorded row left `best` empty and the polish indexed an empty plan
     // (`pbit decide --budget-ms 0.01` on the 300-task demo aborted); the chain's state is feasible
     if s.n == 0 { s.best = (ch.logw(), ch.x.clone()); }
-    s.sweeps = k; Some(s)
+    s.sweeps = k; s.moves = vec![ch.moves]; Some(s)
 }
 /// Router resource controls (as `pbit_ir::sample_on`): `threads` worker threads (>= 1) run `chains` chains; worker w
 /// runs chains w, w + threads, ... and results are pooled in chain order, so with fixed `sweeps` the answer is bit-identical
 /// for every thread count (and to `sample_opts`). A wall-clock budget is the deadline of the whole call: each chain gets
 /// budget / ceil(chains / threads). `cpu_pct` in 1..=100: per-thread duty cycle; fixed `sweeps` => same answer, only slower.
+/// R19.9 (finding 2): the r-th chain of a worker stops at call start + (r + 1) x that slice, so a chain that overran its
+/// slice (its build and start, or the 8-sweep clock stride) is charged to the worker's next chains instead of each chain
+/// timing its own slice: 100,000 chains on a 200 ms budget sampled for ~460 ms. Same chains, same output shape; late
+/// chains get fewer sweeps (possibly none past the build).
 #[allow(clippy::too_many_arguments)]
 /// `max_rows` > 0 (memory limit): at most that many trajectory rows per chain (`pbit_ir::record_row`); 0 = unbounded.
 pub fn sample_on(p: &Problem, chains: usize, threads: usize, sweeps: usize, budget_ms: Option<f64>, seed: u64, keep_plans: bool, group_pairs: bool, cpu_pct: u32, max_rows: usize) -> Option<Samples> {
     let gpt = if group_pairs { GroupPairs::new(p) } else { None }; let wt = window_tables(p);
     let t = threads.clamp(1, chains.max(1)); let rounds = chains.div_ceil(t).max(1); let b = budget_ms.map(|b| b / rounds as f64);
-    let duty = cpu_pct.clamp(1, 100) as f64 / 100.0; let (gpt, wt) = (&gpt, &wt);
+    let duty = cpu_pct.clamp(1, 100) as f64 / 100.0; let (gpt, wt) = (&gpt, &wt); let t_call = std::time::Instant::now();
+    let due = move |c: usize| b.map(|b| t_call + std::time::Duration::from_secs_f64(b.max(0.0) * (c / t + 1) as f64 / 1e3));
     let mut slots: Vec<Option<Samples>> = (0..chains).map(|_| None).collect();
     std::thread::scope(|sc| {
-        let hs: Vec<_> = (0..t).map(|w| sc.spawn(move || (w..chains).step_by(t).map(|c| (c, chain_samples(p, c, sweeps, b, seed, keep_plans, gpt, wt, duty, max_rows))).collect::<Vec<_>>())).collect();
+        let hs: Vec<_> = (0..t).map(|w| sc.spawn(move || (w..chains).step_by(t).map(|c| (c, chain_samples(p, c, sweeps, due(c), seed, keep_plans, gpt, wt, duty, max_rows))).collect::<Vec<_>>())).collect();
         for h in hs { for (c, s) in h.join().unwrap() { slots[c] = s; } }
     });
     Some(pbit_ir::merge(p.t * p.a, slots.into_iter().collect::<Option<Vec<_>>>()?))
 }
 
 /// Statistics and the certification gate live in the IR (`pbit_ir`); they work on any lowered program.
-pub use pbit_ir::{split_rhat, mean_tv, max_tv, chain_disagreement, Gate, GateCfg, GATE, GATE_BS_POW, PARTIAL_RHAT, BATCH_RATIO_MAX};
+pub use pbit_ir::{split_rhat, mean_tv, max_tv, chain_disagreement, Gate, GateCfg, GATE, GATE_BS_POW, PARTIAL_RHAT, BATCH_RATIO_MAX, GATE_VERSION, GATE_ASSUMPTIONS};
 
 // ---------------- the decision API ----------------
 pub const RHAT_REFUSE: f64 = 1.05;
-pub enum Verdict { Exact, Certified { rhat: f64 }, Unmixed { rhat: f64 } }
+pub enum Verdict { Exact, DiagnosticsPassed { rhat: f64 }, Unmixed { rhat: f64 } }
 pub struct Decision { pub verdict: Verdict, pub map: Vec<usize>, pub map_logw: f64, pub top: Vec<(f64, Vec<usize>)>, pub marg: Vec<f64>, pub ms: f64, pub samples: usize }
 
 /// Router: exact if feasible set <= exact_limit, else 4-chain Gibbs with R-hat gate.
@@ -364,7 +539,7 @@ pub fn decide(p: &Problem, exact_limit: u64, sweeps: usize, seed: u64) -> Option
     let mut plans: Vec<(u32, Vec<u8>)> = s.plans.into_iter().map(|(k, v)| (v, k)).collect();
     plans.sort_by(|a, b| b.0.cmp(&a.0));
     let top = plans.into_iter().take(5).map(|(c, k)| (c as f64 / s.n as f64, k.into_iter().map(|v| v as usize).collect())).collect();
-    let verdict = if rhat < RHAT_REFUSE { Verdict::Certified { rhat } } else { Verdict::Unmixed { rhat } };
+    let verdict = if rhat < RHAT_REFUSE { Verdict::DiagnosticsPassed { rhat } } else { Verdict::Unmixed { rhat } };
     Some(Decision { verdict, map_logw: s.best.0, map: s.best.1, top, marg: s.marg, ms: t0.elapsed().as_secs_f64() * 1e3, samples: s.n })
 }
 
@@ -389,7 +564,7 @@ pub fn dispatch(t: usize, a: usize, cap: usize, group_size: usize, lam: f64, see
     }
     let agents = (0..a).map(|k| format!("A{}({}{})", k, skills[agent_skill[k]], if k == 0 { ",star" } else { "" })).collect();
     let group = (0..t).map(|i| if group_size > 1 { i / group_size } else { usize::MAX }).collect();
-    Dispatch { p: Problem { t, a, h, allowed, cap: vec![cap; a], group, lam, clamp: vec![None; t], block_moves: false, pair_swaps: false }, tickets, agents }
+    Dispatch { p: Problem { t, a, h, allowed, cap: vec![cap; a], group, lam, clamp: vec![None; t], block_moves: false, pair_swaps: false, collective: false, cluster: false, cycles: false }, tickets, agents }
 }
 
 /// Per-question ("Jev-style") independent softmax marginals, ignoring rules.
@@ -430,7 +605,7 @@ pub fn decide_gated(p: &Problem, exact_limit: u64, sweeps: usize, budget_ms: Opt
     } }
     let s = sample_on(p, 4, 4, sweeps, budget_ms, seed, false, auto_group_pairs(p), 100, 0)?;
     let g = gate_stats(p, &s);
-    let verdict = if g.certified(cfg) { Verdict::Certified { rhat: g.rhat } } else { Verdict::Unmixed { rhat: g.rhat } };
+    let verdict = if g.diagnostics_passed(cfg) { Verdict::DiagnosticsPassed { rhat: g.rhat } } else { Verdict::Unmixed { rhat: g.rhat } };
     Some((Decision { verdict, map_logw: s.best.0, map: s.best.1, top: vec![], marg: s.marg, ms: t0.elapsed().as_secs_f64() * 1e3, samples: s.n }, Some(g)))
 }
 
@@ -450,7 +625,7 @@ pub fn sample_tempered(p: &Problem, ladder: &[f64], budget_ms: f64, seed: u64) -
         let mut reps: Vec<Chain> = probs.iter().enumerate().map(|(k, q)| Chain::new(q, seed, (c * 64 + k) as u64)).collect::<Option<Vec<_>>>()?;
         let mut rng = pbit_core::Philox4x32::new(seed ^ 0xA5A5, 1000 + c as u64);
         let na = p.a; let kt = reps.len() - 1; let t0 = std::time::Instant::now();
-        let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0 };
+        let mut s = Samples { chain_marg: vec![], traj: vec![vec![]], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![vec![]], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
         let mut k = 0usize;
         loop {
             if k % 4 == 0 && t0.elapsed().as_secs_f64() * 1e3 >= budget_ms { break; }
@@ -467,8 +642,8 @@ pub fn sample_tempered(p: &Problem, ladder: &[f64], budget_ms: f64, seed: u64) -
         s.sweeps = k; Some(s)
     };
     let parts: Vec<Samples> = std::thread::scope(|sc| { let hs: Vec<_> = (0..4).map(|c| { let run = &run; sc.spawn(move || run(c)) }).collect(); hs.into_iter().map(|h| h.join().unwrap()).collect::<Option<Vec<_>>>() })?;
-    let mut out = Samples { chain_marg: vec![], traj: vec![], marg: vec![0.0; p.t * p.a], n: 0, plans: HashMap::new(), trace: vec![], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0 };
-    for s in parts { for (m, v) in out.marg.iter_mut().zip(&s.marg) { *m += v; } out.chain_marg.push(s.marg.iter().map(|v| v / (s.n as f64).max(1.0)).collect()); out.n += s.n; out.viol += s.viol; out.sweeps += s.sweeps;
+    let mut out = Samples { chain_marg: vec![], traj: vec![], marg: vec![0.0; p.t * p.a], n: 0, plans: HashMap::new(), trace: vec![], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
+    for s in parts { for (m, v) in out.marg.iter_mut().zip(&s.marg) { *m += v; } out.chain_marg.push(s.marg.iter().map(|v| v / (s.n as f64).max(1.0)).collect()); out.n += s.n; out.viol += s.viol; out.sweeps += s.sweeps; out.moves.extend(s.moves.iter().copied());
         if s.best.0 > out.best.0 { out.best = s.best; } out.trace.push(s.trace.into_iter().next().unwrap()); out.traj.push(s.traj.into_iter().next().unwrap()); }
     let n = out.n as f64; for m in out.marg.iter_mut() { *m /= n.max(1.0); }
     Some(out)
@@ -480,7 +655,9 @@ pub fn sample_tempered(p: &Problem, ladder: &[f64], budget_ms: f64, seed: u64) -
 pub static ANYTIME_FOCUS_REPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// Outcome of an anytime run: the decision, the gate at the stopping look, how many looks were taken and when the
 /// stop rule first passed (None = hit the deadline without passing).
-pub struct Anytime { pub decision: Decision, pub gate: Gate, pub samples: Samples, pub looks: usize, pub certified_at_ms: Option<f64> }
+pub struct Anytime { pub decision: Decision, pub gate: Gate, pub samples: Samples, pub looks: usize,
+    /// wall-clock ms at the look whose gate passed (`diagnostics_passed`); None = no look passed (renamed from `certified_at_ms`, R19)
+    pub passed_at_ms: Option<f64> }
 /// z used at look k (1-based). `alpha_spend = false`: constant cfg.z. `true`: z_k = cfg.z * sqrt(1 + ln k) (a crude
 /// law-of-iterated-log style inflation so repeated looks cannot ratchet a lucky early pass into a certificate).
 pub fn look_z(cfg: &GateCfg, k: usize, alpha_spend: bool) -> f64 { if alpha_spend { cfg.z * (1.0 + (k as f64).ln()).sqrt() } else { cfg.z } }
@@ -507,23 +684,23 @@ pub fn decide_anytime(p: &Problem, deadline_ms: f64, slice_ms: f64, slice_growth
                 let lw = ch.logw(); ac.trace.push(lw); if lw > ac.best.0 { ac.best = (lw, ch.x.clone()); } }
                 if ac.n == 0 { ac.best = (ch.logw(), ch.x.clone()); } }); } }); // never an empty best plan
         looks += 1;
-        let mut s = Samples { chain_marg: vec![], traj: vec![], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0 };
+        let mut s = Samples { chain_marg: vec![], traj: vec![], marg: vec![0.0; p.t * na], n: 0, plans: HashMap::new(), trace: vec![], viol: 0, best: (f64::NEG_INFINITY, vec![]), sweeps: 0, moves: vec![] };
         for ac in accs.iter_mut() { for (m, v) in s.marg.iter_mut().zip(&ac.marg) { *m += v; } s.chain_marg.push(ac.marg.iter().map(|v| v / (ac.n as f64).max(1.0)).collect());
             s.n += ac.n; s.viol += ac.viol; s.sweeps += ac.k; if ac.best.0 > s.best.0 { s.best = ac.best.clone(); }
             s.traj.push(std::mem::take(&mut ac.traj)); s.trace.push(std::mem::take(&mut ac.trace)); }
         let n = s.n as f64; for m in s.marg.iter_mut() { *m /= n.max(1.0); }
         let g = gate_stats(p, &s); let c = GateCfg { z: look_z(cfg, looks, alpha_spend), ..*cfg };
-        let pass = match per_ticket_target { None => g.certified(&c),
-            Some(f) => g.certified_tasks(&c).iter().filter(|&&r| r).count() as f64 >= f * p.t as f64 };
+        let pass = match per_ticket_target { None => g.diagnostics_passed(&c),
+            Some(f) => g.released_tasks(&c).iter().filter(|&&r| r).count() as f64 >= f * p.t as f64 };
         let ms = t0.elapsed().as_secs_f64() * 1e3;
         if pass || ms >= deadline_ms - 0.5 {
-            let verdict = if g.certified(&c) { Verdict::Certified { rhat: g.rhat } } else { Verdict::Unmixed { rhat: g.rhat } };
+            let verdict = if g.diagnostics_passed(&c) { Verdict::DiagnosticsPassed { rhat: g.rhat } } else { Verdict::Unmixed { rhat: g.rhat } };
             let d = Decision { verdict, map_logw: s.best.0, map: s.best.1.clone(), top: vec![], marg: s.marg.clone(), ms, samples: s.n };
-            return Some(Anytime { decision: d, gate: g, samples: s, looks, certified_at_ms: if pass { Some(ms) } else { None } });
+            return Some(Anytime { decision: d, gate: g, samples: s, looks, passed_at_ms: if pass { Some(ms) } else { None } });
         }
         for (ac, (tr, tc)) in accs.iter_mut().zip(s.traj.into_iter().zip(s.trace.into_iter())) { ac.traj = tr; ac.trace = tc; }
         let reps = ANYTIME_FOCUS_REPS.load(std::sync::atomic::Ordering::Relaxed);
-        if reps > 0 { let rel = g.certified_tasks(&c); let f: Vec<usize> = (0..p.t).filter(|&i| !rel[i]).collect();
+        if reps > 0 { let rel = g.released_tasks(&c); let f: Vec<usize> = (0..p.t).filter(|&i| !rel[i]).collect();
             for ch in chains.iter_mut() { ch.focus = f.clone(); ch.focus_reps = reps; } }
     }
 }

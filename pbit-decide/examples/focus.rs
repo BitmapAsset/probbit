@@ -10,7 +10,7 @@ fn main() {
         let ex = exact_dp(&ins); let na = ins.p.a;
         for reps in [0usize, 2, 8] { ANYTIME_FOCUS_REPS.store(reps, Ordering::Relaxed);
             let a = decide_anytime(&ins.p, 300.0, 25.0, 1.0, 5 + k, &GATE, false, Some(1.01)).unwrap(); // target > 1: never stops early
-            let rel = a.gate.certified_tasks(&GATE);
+            let rel = a.gate.released_tasks(&GATE);
             let tv: Vec<f64> = (0..ins.p.t).map(|i| 0.5 * (0..na).map(|q| (a.decision.marg[i * na + q] - ex.marg[i * na + q]).abs()).sum::<f64>()).collect();
             println!("{k},{st},{reps},{},{},{},{:.4}", rel.iter().filter(|&&r| r).count(), rel.iter().zip(&tv).filter(|(&r, &v)| r && v > 0.05).count(), a.decision.samples, tv.iter().cloned().fold(0.0, f64::max));
         } }

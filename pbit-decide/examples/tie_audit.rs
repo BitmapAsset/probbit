@@ -13,7 +13,7 @@ fn main() {
             6 => build(8, 3, 5, 2.0, seed, true), _ => build(8, 3, 5, 4.0, seed, true) };
         let (p, na) = (&ins.p, ins.p.a); let ex = exact_frontier(p, 1 << 16).unwrap();
         let gap = |i: usize| { let mut v: Vec<f64> = (0..na).map(|a| ex.marg[i * na + a]).collect(); v.sort_by(|a, b| b.partial_cmp(a).unwrap()); v[0] - v.get(1).copied().unwrap_or(0.0) };
-        let s = sample_opts(p, 4, 0, Some(bud), 1 + k, true, false, auto_group_pairs(p)).unwrap(); let g = gate_stats(p, &s); let rel = g.certified_tasks(&GATE);
+        let s = sample_opts(p, 4, 0, Some(bud), 1 + k, true, false, auto_group_pairs(p)).unwrap(); let g = gate_stats(p, &s); let rel = g.released_tasks(&GATE);
         let long = g.sig_tv_long.iter().cloned().fold(0.0, f64::max);
         let run_ok = g.rhat < PARTIAL_RHAT && g.min_batches >= GATE.min_batches && g.frozen == 0 && long <= BATCH_RATIO_MAX * g.sig_tv_max;
         let (mut nr, mut un, mut wb, mut et, mut wbt, mut at) = (0, 0, 0, 0, 0, 0);
