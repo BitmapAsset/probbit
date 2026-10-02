@@ -1,18 +1,18 @@
 {
-  "name": "pbit",
-  "version": "0.4.0",
-  "description": "pbit, a virtual p-bit processor for joint decisions under hard rules: installs the prebuilt pbit CLI (JSON in, JSON out).",
+  "name": "probbit",
+  "version": "0.5.0",
+  "description": "probbit, a virtual p-bit processor for joint decisions under hard rules: installs the prebuilt probbit CLI (JSON in, JSON out).",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BitmapAsset/pbit.git",
+    "url": "git+https://github.com/BitmapAsset/probbit.git",
     "directory": "npm"
   },
-  "homepage": "https://github.com/BitmapAsset/pbit#readme",
-  "bugs": "https://github.com/BitmapAsset/pbit/issues",
+  "homepage": "https://github.com/BitmapAsset/probbit#readme",
+  "bugs": "https://github.com/BitmapAsset/probbit/issues",
   "keywords": ["p-bit", "probabilistic", "decision", "constraints", "sampling", "cli"],
   "bin": {
-    "pbit": "bin/pbit.js"
+    "probbit": "bin/probbit.js"
   },
   "scripts": {
     "postinstall": "node install.js"

@@ -5,14 +5,14 @@ Instance: n items (sizes 1..6), b = 3 bins of capacity ceil(total / 3) + 2, pref
 Oracle: forward/backward over load vectors: log Z, P(item in bin) for every (item, bin), optimum (max-product).
 Usage: python3 bench/binpacking.py [--sizes 12,24] [--instances 2] [--seeds 4]"""
 import argparse, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 B = 3
 def lse2(a, b): m = max(a, b); return m + math.log(math.exp(a - m) + math.exp(b - m))
 def instance(n, seed):
     r = random.Random(seed); sz = [r.randint(1, 6) for _ in range(n)]; cap = -(-sum(sz) // B) + 2
     h = [[round(r.uniform(-0.5, 0.5), 4) for _ in range(B)] for _ in range(n)]; return sz, h, cap
 def program(sz, h, cap):
-    n = len(sz); return {"pbit_ir": 1, "comment": "bin packing: item -> bin, per bin the sizes of its items sum to <= capacity",
+    n = len(sz); return {"probbit_ir": 1, "comment": "bin packing: item -> bin, per bin the sizes of its items sum to <= capacity",
         "values": [f"b{v}" for v in range(B)], "vars": [{"id": f"i{q}", "h": {f"b{v}": h[q][v] for v in range(B)}} for q in range(n)],
         "linear": [{"terms": [[f"i{q}", f"b{v}", sz[q]] for q in range(n)], "limit": cap} for v in range(B)]}
 def dp(sz, h, cap):
@@ -50,11 +50,11 @@ def ffd(sz, h, cap):
         v = max(opts, key=lambda v: h[q][v]); load[v] += sz[q]; val += h[q][v]
     return val
 def run(prog, *args):
-    t = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--sizes', default='12,24'); ap.add_argument('--instances', type=int, default=2); ap.add_argument('--seeds', type=int, default=4); a = ap.parse_args()
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "sizes": a.sizes, "instances": a.instances, "seeds": a.seeds}))
     print("| n | inst | DP log Z | DP optimum | FFD (gap) | default: tier, plan log w (gap), ms | sampler verdicts | released | max \\|odds - DP\\| | median ms |")
     print("|---|---|---|---|---|---|---|---|---|---|")

@@ -1,40 +1,41 @@
-# pbit benchmark matrix (0.2.0, measured 2026-10-01)
+# probbit benchmark matrix (0.2.0, measured 2026-10-01)
 
-pbit 0.2.0 (main `d33e781`; this branch changes no Rust source), built and measured on every platform reachable on
+probbit 0.2.0 (main `d33e781`; this branch changes no Rust source), built and measured on every platform reachable on
 2026-10-01 (PDT): three GitHub-hosted standard runners twice, the macOS Intel runner once, a static (musl) Linux build,
 and one local Mac mini. Every cell below comes from a run made that night and traces to a JSON file in
 [scripts/bench/results/2026-10-01/](scripts/bench/results/2026-10-01/) (named in the first table; the other tables keep
 its row order). `python3 scripts/bench/render_matrix.py scripts/bench/results/2026-10-01` prints the tables from those
-files. No number here comes from an older build. Format as in [BENCHMARKS.md](BENCHMARKS.md): median [interquartile
+files. No number here comes from an older build. Those files were recorded before the 0.5.0 rename (CHANGELOG 0.5.0):
+their product, binary, asset and key names were renamed with the rest of the tree in 0.5.0; no number in them changed. Format as in [BENCHMARKS.md](BENCHMARKS.md): median [interquartile
 range] (`statistics.quantiles(n=4)`), N = 5 runs unless a header says otherwise. What builds and links where:
 [PORTABILITY.md](PORTABILITY.md).
 
-**Runs.** GitHub Actions `bench` run [36970631022](https://github.com/BitmapAsset/pbit/actions/runs/36970631022)
+**Runs.** GitHub Actions `bench` run [36970631022](https://github.com/BitmapAsset/probbit/actions/runs/36970631022)
 (2026-10-02 05:49 UTC) gives the Linux, macOS arm64, Windows and static-musl rows; run
-[36969399069](https://github.com/BitmapAsset/pbit/actions/runs/36969399069) (05:32 UTC, same Rust source) gives the
+[36969399069](https://github.com/BitmapAsset/probbit/actions/runs/36969399069) (05:32 UTC, same Rust source) gives the
 macOS Intel row, which ran once (a slow runner billed at 10x; the workflow now runs it only on request), and the first
 half of the run-to-run table. The runners compiled with rustc 1.99.0. The M4 row ran locally (rustc 1.98.1) while a
-second worker was compiling and running pbit on the same machine: 1-minute load averages 8.5 at the start, 6.4 at the
+second worker was compiling and running probbit on the same machine: 1-minute load averages 8.5 at the start, 6.4 at the
 end, recorded per block in its JSON. Runner VMs are shared; their load is not known.
 
 **What runs** (`scripts/bench/matrix_bench.py`, stdlib Python, the same script on every OS):
 
 ```sh
 cargo build --release --locked --workspace
-cargo build --release --locked -p pbit-core --example kernels
-RUSTFLAGS="-C target-cpu=native" cargo build --release --locked -p pbit-cli --target-dir target/native        # x86_64 rows, M4
-RUSTFLAGS="-C target-cpu=native" cargo build --release --locked -p pbit-core --example kernels --target-dir target/native
-python3 scripts/bench/matrix_bench.py --bin target/release/pbit --label <os-arch> --out bench-<os-arch>.json \
+cargo build --release --locked -p probbit-core --example kernels
+RUSTFLAGS="-C target-cpu=native" cargo build --release --locked -p probbit-cli --target-dir target/native        # x86_64 rows, M4
+RUSTFLAGS="-C target-cpu=native" cargo build --release --locked -p probbit-core --example kernels --target-dir target/native
+python3 scripts/bench/matrix_bench.py --bin target/release/probbit --label <os-arch> --out bench-<os-arch>.json \
     [--native-dir target/native/release]
 ```
 
-- `pbit stats`: `self_test.site_updates_per_s_1_thread` and `self_test.site_updates_per_s` at the default thread count
+- `probbit stats`: `self_test.site_updates_per_s_1_thread` and `self_test.site_updates_per_s` at the default thread count
   (`min(cores, 4)`).
-- `pbit-core/examples/kernels`: the BENCHMARKS.md §1 kernel rows, portable build.
-- `pbit demo --tasks 12 | pbit decide` and `pbit demo --tasks 300 | pbit decide --budget-ms 300`: the wall clock of both
-  processes, from Python (`time.perf_counter`), next to the `ms` pbit reports itself; released tasks, violations,
+- `probbit-core/examples/kernels`: the BENCHMARKS.md §1 kernel rows, portable build.
+- `probbit demo --tasks 12 | probbit decide` and `probbit demo --tasks 300 | probbit decide --budget-ms 300`: the wall clock of both
+  processes, from Python (`time.perf_counter`), next to the `ms` probbit reports itself; released tasks, violations,
   verdicts and exit codes of every run.
-- Peak memory of `pbit decide --budget-ms 300 < demo300.json` (N = 3): `/usr/bin/time -l` on macOS, `/usr/bin/time -v`
+- Peak memory of `probbit decide --budget-ms 300 < demo300.json` (N = 3): `/usr/bin/time -l` on macOS, `/usr/bin/time -v`
   on Linux, and on Windows `PeakWorkingSetSize` from `K32GetProcessMemoryInfo` on the exited process's handle,
   cross-checked by polling PowerShell `Get-Process` (`scripts/bench/peak_rss_windows.ps1`).
 - `bench/portable_vs_native.py` (unchanged) where a native build exists: the native / portable ratio column.
@@ -60,7 +61,7 @@ adds the Intel row).
 | Linux x86_64, WSL2 on a Windows desktop with an RTX 4070 | pending: machine offline |  |  |  |  |  |  |  |  |
 | Linux x86_64, VirtualBox VM (CPU only) | pending: machine offline |  |  |  |  |  |  |  |  |
 
-#### `pbit stats` self-test: 400-spin ring, IR sampler, site updates/s (N = 5)
+#### `probbit stats` self-test: 400-spin ring, IR sampler, site updates/s (N = 5)
 
 | platform | 1 thread | default threads | threads (= min(cores, 4)) |
 |---|---|---|---|
@@ -74,7 +75,7 @@ adds the Intel row).
 | Linux x86_64, WSL2 on a Windows desktop with an RTX 4070 | pending: machine offline |  |  |
 | Linux x86_64, VirtualBox VM (CPU only) | pending: machine offline |  |  |
 
-#### Lattice kernels (`pbit-core/examples/kernels`, portable build), updates/s (N = 5)
+#### Lattice kernels (`probbit-core/examples/kernels`, portable build), updates/s (N = 5)
 
 | platform | multispin fast, 1 thread | multispin fast, 4 threads | multispin fast, 10 threads | heat-bath f32 fast, 1 thread | native / portable (multispin 1t / 4t / heat-bath) |
 |---|---|---|---|---|---|
@@ -88,9 +89,9 @@ adds the Intel row).
 | Linux x86_64, WSL2 on a Windows desktop with an RTX 4070 | pending: machine offline |  |  |  |  |
 | Linux x86_64, VirtualBox VM (CPU only) | pending: machine offline |  |  |  |  |
 
-#### `pbit demo --tasks 12 | pbit decide`, ms (N = 5)
+#### `probbit demo --tasks 12 | probbit decide`, ms (N = 5)
 
-| platform | wall, both processes | pbit's own `ms` | verdict | exit |
+| platform | wall, both processes | probbit's own `ms` | verdict | exit |
 |---|---|---|---|---|
 | macOS arm64, Apple M4 (local) | 10.9 [10.9-11.0] | 8.2 [8.2-8.3] | exact | 0 |
 | Linux x86_64 (`ubuntu-latest`) | 10.5 [10.4-10.5] | 9.1 [9.1-9.1] | exact | 0 |
@@ -102,9 +103,9 @@ adds the Intel row).
 | Linux x86_64, WSL2 on a Windows desktop with an RTX 4070 | pending: machine offline |  |  |  |
 | Linux x86_64, VirtualBox VM (CPU only) | pending: machine offline |  |  |  |
 
-#### `pbit demo --tasks 300 | pbit decide --budget-ms 300`, ms (N = 5)
+#### `probbit demo --tasks 300 | probbit decide --budget-ms 300`, ms (N = 5)
 
-| platform | wall, both processes | pbit's own `ms` | released (min-max) | violations (max) | verdict | sampler site updates/s |
+| platform | wall, both processes | probbit's own `ms` | released (min-max) | violations (max) | verdict | sampler site updates/s |
 |---|---|---|---|---|---|---|
 | macOS arm64, Apple M4 (local) | 423.6 [422.1-426.9] | 418.0 [417.2-421.2] | 300-300 of 300 | 0 | diagnostics_passed | 4.5e7 [3.85e7-4.53e7] |
 | Linux x86_64 (`ubuntu-latest`) | 422.5 [421.7-424.0] | 417.9 [417.3-419.5] | 300-300 of 300 | 0 | diagnostics_passed | 1.49e7 [1.47e7-1.51e7] |
@@ -116,9 +117,9 @@ adds the Intel row).
 | Linux x86_64, WSL2 on a Windows desktop with an RTX 4070 | pending: machine offline |  |  |  |  |  |
 | Linux x86_64, VirtualBox VM (CPU only) | pending: machine offline |  |  |  |  |  |
 
-#### Peak memory of the 300-task `pbit decide --budget-ms 300`, MiB (N = 3)
+#### Peak memory of the 300-task `probbit decide --budget-ms 300`, MiB (N = 3)
 
-| platform | peak RSS | how | pbit's own `peak_rss_mb` | Get-Process polling (Windows, lower bound) |
+| platform | peak RSS | how | probbit's own `peak_rss_mb` | Get-Process polling (Windows, lower bound) |
 |---|---|---|---|---|
 | macOS arm64, Apple M4 (local) | 47.6 [47.0-48.0] | /usr/bin/time -l (maximum resident set size, bytes) | 47.0, 47.6, 48.0 | - |
 | Linux x86_64 (`ubuntu-latest`) | 21.0 [21.0-21.3] | /usr/bin/time -v (Maximum resident set size, KiB x 1024) | 21.0, 21.3, 21.0 | - |
@@ -146,7 +147,7 @@ adds the Intel row).
 
 #### Run to run: run 1 / run 2 medians, same source, two VMs per runner label
 
-| platform | CPU (run 1 / run 2) | `pbit stats` 1 thread | multispin fast, 1 thread | 12-task wall ms | 300-task wall ms | peak RSS MiB |
+| platform | CPU (run 1 / run 2) | `probbit stats` 1 thread | multispin fast, 1 thread | 12-task wall ms | 300-task wall ms | peak RSS MiB |
 |---|---|---|---|---|---|---|
 | Linux x86_64 (`ubuntu-latest`) | both AMD EPYC 9V45 96-Core Processor | 1.91e7 / 1.76e7 (-8%) | 2.59e10 / 2.47e10 (-5%) | 9.6 / 10.5 (+9%) | 418.8 / 422.5 (+1%) | 21.1 / 21.0 (-0%) |
 | macOS arm64 (`macos-latest`) | both Apple M1 (Virtual) | 1.25e7 / 1.32e7 (+6%) | 2.17e10 / 2e10 (-8%) | 15.5 / 17.8 (+15%) | 442.3 / 439.2 (-1%) | 30.5 / 29.8 (-3%) |
@@ -159,7 +160,7 @@ except two Windows runs (`partial`, 299 and 296 released; the Windows runner had
 per second). `cargo test --release` passes in full (127 passed, 1 ignored) on the Linux, macOS arm64 and Windows runners
 in run 2; the two failures seen (Intel in run 1, Windows in run 1 but not in run 2) are wall-clock bounds, not wrong
 answers (PORTABILITY.md, Findings 4). A small exact decision costs 10-31 ms of wall clock including two process starts
-on the standard runners (pbit's own `ms`: 9-18), 70 ms on the Intel runner; the 300-task decision with `--budget-ms 300`
+on the standard runners (probbit's own `ms`: 9-18), 70 ms on the Intel runner; the 300-task decision with `--budget-ms 300`
 returns in 420-495 ms on every standard runner and the M4 (the budget, then the gate and the 50 ms polish). Its peak
 memory is 17-48 MiB and grew with the sweeps run inside the budget (median 45,008 sweeps and 47.6 MiB on the M4 with 4
 threads; 8,720-14,960 sweeps and 17-30 MiB on the runners; `telemetry.sweeps` in each JSON). Binaries are 0.97-1.55 MB.
@@ -171,12 +172,12 @@ the portable release builds give up little. The static musl build was within 4% 
 **What it does not let us claim.** A speed ranking of platforms: the runners are shared VMs with 2 (Linux, Windows), 3
 (macOS arm64) or 4 (Intel) vCPUs, the same runner label landed on different CPUs from job to job (the two Linux jobs of
 run 2: AMD EPYC 9V45 and 7763; Windows: EPYC 9V74 in run 1, 7763 in run 2), and the same cell moved by up to 19% in
-`pbit stats` and 49% in the 12-task wall clock between the two runs (table above). Thread scaling: with 2-3 vCPUs the 4-
-and 10-thread kernel rows oversubscribe the runner, and `pbit stats`' default thread count differs by row (last column).
+`probbit stats` and 49% in the 12-task wall clock between the two runs (table above). Thread scaling: with 2-3 vCPUs the 4-
+and 10-thread kernel rows oversubscribe the runner, and `probbit stats`' default thread count differs by row (last column).
 Anything about the Intel runner beyond one run (its lower quartiles reach 54% below the median). The 12-task wall clocks
-compare process start-up as much as pbit (Windows starts processes slowest). The M4 row ran under load 6-8. GPU, Linux
+compare process start-up as much as probbit (Windows starts processes slowest). The M4 row ran under load 6-8. GPU, Linux
 on aarch64 hardware (only a qemu smoke test, PORTABILITY.md), WSL2 and VM rows: not measured, machines offline. Rosetta
-2 ran one `pbit stats` per run (1 thread 1.10e7 and 9.09e6 updates/s, 3 threads 2.00e7 and 1.42e7, runs 1 and 2;
+2 ran one `probbit stats` per run (1 thread 1.10e7 and 9.09e6 updates/s, 3 threads 2.00e7 and 1.42e7, runs 1 and 2;
 `transcripts/cross-x86_64-apple-darwin.txt`), not enough for a row.
 
 **Not run on every platform.** `bench/decide_threads.py` stops on Windows (`process_cpu_ms` is `null` there), and

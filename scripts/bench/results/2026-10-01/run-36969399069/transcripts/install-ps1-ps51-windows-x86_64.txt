@@ -1,23 +1,23 @@
 PowerShell 5.1.26100.33438 (Desktop)
 == 1. & .\install.ps1 -DownloadBase http://127.0.0.1:50061/good -Version v0.2.0 -InstallDir <tmp>\bin1
-pbit install: v0.2.0 for x86_64-pc-windows-msvc
-  fetching http://127.0.0.1:50061/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
+probbit install: v0.2.0 for x86_64-pc-windows-msvc
+  fetching http://127.0.0.1:50061/good/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
   sha256 ok  2d92b06698b3c78f38a8d6e018313e67c2c8091c0dd8914de19b002bfe07ac0a
-  installed  C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1\pbit.exe (pbit 0.2.0)
+  installed  C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1\probbit.exe (probbit 0.2.0)
 
-C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1 is on this session's PATH only. To keep it, run (or re-run this installer with -AddToPath):
-  [Environment]::SetEnvironmentVariable('Path', 'C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1;' + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
+C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1 is on this session's PATH only. To keep it, run (or re-run this installer with -AddToPath):
+  [Environment]::SetEnvironmentVariable('Path', 'C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1;' + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-$ (Get-Command pbit).Source: C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1\pbit.exe
-$ pbit version: pbit 0.2.0
-pbit: bad JSON: unexpected character 'ï' at byte 0
-$ pbit demo --tasks 12 | pbit decide | ConvertFrom-Json: exit 2, verdict , released 1 of 
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+$ (Get-Command probbit).Source: C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-216c1cbf1f214569872a604b13d639dd\bin1\probbit.exe
+$ probbit version: probbit 0.2.0
+probbit: bad JSON: unexpected character 'ï' at byte 0
+$ probbit demo --tasks 12 | probbit decide | ConvertFrom-Json: exit 2, verdict , released 1 of 
 FAIL: demo pipeline
-At D:\a\pbit\pbit\scripts\bench\test_install_ps1.ps1:26 char:59
+At D:\a\probbit\probbit\scripts\bench\test_install_ps1.ps1:26 char:59
 + ... ODE -ne 0 -or $d.verdict -ne 'exact') { throw 'FAIL: demo pipeline' }
 +                                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~
     + CategoryInfo          : OperationStopped: (FAIL: demo pipeline:String) [], RuntimeException

@@ -1,12 +1,12 @@
 #!/bin/sh
-# Pack a local pbit binary the way .github/workflows/release.yml's "package" step does (same names, layout and .sha256),
+# Pack a local probbit binary the way .github/workflows/release.yml's "package" step does (same names, layout and .sha256),
 # so install.sh, install.ps1 and the npm wrapper can be tested before any release exists. Keep in sync with release.yml.
-#   scripts/bench/package_like_release.sh <pbit binary> <target triple> <tag> <out dir>
-# Writes <out dir>/pbit-<tag>-<target>.tar.gz (.zip for *-windows-*, with 7z as release.yml does) and the .sha256 beside it.
+#   scripts/bench/package_like_release.sh <probbit binary> <target triple> <tag> <out dir>
+# Writes <out dir>/probbit-<tag>-<target>.tar.gz (.zip for *-windows-*, with 7z as release.yml does) and the .sha256 beside it.
 set -eu
 BIN=$1 TARGET=$2 TAG=$3 OUT=$4
-NAME="pbit-$TAG-$TARGET"
-STAGE=$(mktemp -d 2> /dev/null || mktemp -d -t pbitpkg)
+NAME="probbit-$TAG-$TARGET"
+STAGE=$(mktemp -d 2> /dev/null || mktemp -d -t probbitpkg)
 mkdir -p "$STAGE/$NAME" "$OUT"
 cp "$BIN" "$STAGE/$NAME/"
 cp README.md LICENSE CHANGELOG.md "$STAGE/$NAME/"

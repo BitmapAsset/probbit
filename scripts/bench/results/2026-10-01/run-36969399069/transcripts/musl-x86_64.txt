@@ -1,12 +1,12 @@
 $ rustup target add x86_64-unknown-linux-musl
 info: downloading component rust-std
-$ cargo build --release --locked -p pbit-cli --target x86_64-unknown-linux-musl
+$ cargo build --release --locked -p probbit-cli --target x86_64-unknown-linux-musl
     Finished `release` profile [optimized] target(s) in 18.87s
-$ file target/x86_64-unknown-linux-musl/release/pbit
-target/x86_64-unknown-linux-musl/release/pbit: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped
-$ ldd target/x86_64-unknown-linux-musl/release/pbit
+$ file target/x86_64-unknown-linux-musl/release/probbit
+target/x86_64-unknown-linux-musl/release/probbit: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped
+$ ldd target/x86_64-unknown-linux-musl/release/probbit
 	statically linked
 size 1545968 bytes
-$ target/x86_64-unknown-linux-musl/release/pbit version
-pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact
+$ target/x86_64-unknown-linux-musl/release/probbit version
+probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact

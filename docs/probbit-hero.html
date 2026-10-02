@@ -1,0 +1,64 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;background:#050608;width:100%;height:100%;overflow:hidden}
+  #stage{position:absolute;left:50%;top:50%;width:1600px;height:900px;transform-origin:center;background:#050608;overflow:hidden;
+         font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace}
+  #bg{position:absolute;inset:0;background:
+      radial-gradient(ellipse 55% 60% at 52% 48%, rgba(0,229,255,0.10), transparent 60%),
+      radial-gradient(ellipse 40% 40% at 58% 55%, rgba(255,0,170,0.06), transparent 65%),
+      #050608}
+  svg{position:absolute;left:0;top:0}
+  #die{position:absolute;left:520px;top:190px;width:560px;height:520px;transform:perspective(1600px) rotateX(18deg) rotateZ(-6deg) rotateY(-10deg);transform-style:preserve-3d}
+  #diebody{position:absolute;inset:0;background:linear-gradient(160deg,#0d1117 0%,#070a0f 60%,#04060a 100%);
+     border:1px solid rgba(0,229,255,0.35);box-shadow:0 0 60px rgba(0,229,255,0.18),0 0 140px rgba(0,229,255,0.10),inset 0 0 40px rgba(0,0,0,0.8)}
+  #lattice{position:absolute;left:30px;top:30px;width:500px;height:460px;display:grid;grid-template-columns:repeat(25,1fr);grid-template-rows:repeat(23,1fr);gap:4px}
+  .b{border-radius:1px;background:#0b1520}
+  .c{background:#00e5ff;box-shadow:0 0 6px #00e5ff,0 0 14px rgba(0,229,255,0.5)}
+  .m{background:#ff00aa;box-shadow:0 0 6px #ff00aa,0 0 14px rgba(255,0,170,0.5)}
+  .d{background:#0e1a26}
+  .g{position:relative;background:transparent}
+  .g::before,.g::after{content:"";position:absolute;inset:0;border-radius:1px}
+  .g::before{background:#00e5ff;transform:translate(-3px,0) scaleX(1.9);opacity:.85;mix-blend-mode:screen}
+  .g::after{background:#ff00aa;transform:translate(3px,1px) scaleX(1.6);opacity:.85;mix-blend-mode:screen}
+  #scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0 2px,rgba(0,0,0,0.28) 2px 3px);pointer-events:none}
+  #vig{position:absolute;inset:0;background:radial-gradient(ellipse 70% 70% at 50% 50%, transparent 55%, rgba(0,0,0,0.75) 100%)}
+  #grain{position:absolute;inset:0;opacity:.14;mix-blend-mode:overlay}
+  #word{position:absolute;left:72px;bottom:60px;display:flex;align-items:center;gap:14px;color:#fff;filter:drop-shadow(0 0 10px rgba(0,229,255,.45))}
+  #word svg{position:static;display:block;flex:0 0 auto;width:58px;height:58px}
+  #word b{font:700 54px/1 "Avenir Next","Helvetica Neue",sans-serif;letter-spacing:-0.025em;margin-top:-3px}
+  #word b span{color:#00F0FF}
+  .tear{position:absolute;left:0;width:1600px;height:8px;overflow:hidden}
+  .tear div{position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(0,229,255,.25),rgba(255,0,170,.2),transparent);transform:translateX(18px)}
+</style></head><body>
+<div id="stage">
+ <div id="bg"></div>
+ <svg id="traces" width="1600" height="900" viewBox="0 0 1600 900"></svg>
+ <div id="die"><div id="diebody"><div id="lattice"></div></div></div>
+ <div class="tear" style="top:262px"><div></div></div>
+ <div class="tear" style="top:611px;height:5px"><div style="transform:translateX(-26px)"></div></div>
+ <svg id="grain" width="1600" height="900"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 0.6 0 0 0 0 0.7 0 0 0 0 0.8 0 0 0 1 0"/></filter><rect width="1600" height="900" filter="url(#n)"/></svg>
+ <div id="scan"></div><div id="vig"></div>
+ <div id="word"><svg width="58" height="58" viewBox="0 0 512 512" aria-hidden="true"><defs><clipPath id="earR"><rect x="270" y="40" width="68" height="236" rx="34" transform="rotate(7 304 276)"/></clipPath></defs><g transform="rotate(-7 208 276)" fill="#fff"><rect x="174" y="40" width="68" height="236" rx="34"/></g><g clip-path="url(#earR)" fill="#fff"><rect x="250" y="177.25" width="110" height="98.75"/><rect x="250" y="131.5" width="110" height="36.75" fill-opacity="0.62"/><rect x="250" y="85.75" width="110" height="36.75" fill-opacity="0.36"/><rect x="250" y="40" width="110" height="36.75" fill-opacity="0.16"/></g><ellipse cx="256" cy="318" rx="134" ry="112" fill="#fff"/><path fill="#00F0FF" d="M157.6,463 h196.8 v14 h-196.8 Z M132,470 L164,450.16 L164,489.84 Z M380,470 L348,489.84 L348,450.16 Z"/></svg><b>probb<span>i</span>t</b></div>
+</div>
+<script>
+ // seeded RNG (mulberry32) so renders are reproducible
+ let s=0x9e3779b9; const rnd=()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
+ const L=document.getElementById('lattice');
+ for(let i=0;i<25*23;i++){const d=document.createElement('div');const r=rnd();
+   d.className='b '+(r<0.30?'c':r<0.44?'m':r<0.49?'g':r<0.70?'d':'');L.appendChild(d);}
+ // radiating circuit traces
+ const NS='http://www.w3.org/2000/svg',T=document.getElementById('traces');const cx=800,cy=450;
+ for(let i=0;i<64;i++){const a=rnd()*Math.PI*2,r0=300+rnd()*40,r1=r0+120+rnd()*380;
+   const x0=cx+Math.cos(a)*r0,y0=cy+Math.sin(a)*r0*0.85;let x1=cx+Math.cos(a)*r1,y1=cy+Math.sin(a)*r1*0.85;
+   const kink=rnd()<0.6;const mx=kink?(x0+x1)/2+(rnd()-0.5)*60:x1,my=kink?y0+(y1-y0)*0.5:y1;
+   const p=document.createElementNS(NS,'path');p.setAttribute('d',`M${x0} ${y0} L${mx} ${my} L${x1} ${y1}`);
+   const mag=rnd()<0.18;p.setAttribute('stroke',mag?'#ff00aa':'#00e5ff');p.setAttribute('stroke-width',rnd()<0.2?1.6:0.8);
+   p.setAttribute('fill','none');p.setAttribute('stroke-opacity',(0.08+rnd()*0.25).toFixed(2));T.appendChild(p);
+   const c=document.createElementNS(NS,'circle');c.setAttribute('cx',x1);c.setAttribute('cy',y1);c.setAttribute('r',rnd()<0.3?2.2:1.3);
+   c.setAttribute('fill',mag?'#ff00aa':'#00e5ff');c.setAttribute('fill-opacity','0.6');T.appendChild(c);}
+ // cover-fit the 1600x900 stage into whatever viewport Chrome gives us
+ const fit=()=>{const sc=Math.max(innerWidth/1600,innerHeight/900);
+   document.getElementById('stage').style.transform=`translate(-50%,-50%) scale(${sc})`;};
+ fit(); addEventListener('resize',fit); addEventListener('load',fit);
+</script></body></html>

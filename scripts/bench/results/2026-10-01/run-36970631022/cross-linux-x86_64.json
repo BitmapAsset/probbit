@@ -1,5 +1,5 @@
 {
- "schema": "pbit-cross/1",
+ "schema": "probbit-cross/1",
  "label": "cross-linux-x86_64",
  "date_utc": "2026-10-02T05:52:19Z",
  "outcomes": {
@@ -67,7 +67,7 @@
   "msrv.txt": [
    "rust 1.72: build FAILED, Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4): error[E0658]: use of unstable library feature 'int_roundings'",
    "rust 1.73: build ok, Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4)",
-   "rust 1.77: build FAILED, --locked (Cargo.lock as committed, lockfile v4): error: failed to parse lock file at: /home/runner/work/pbit/pbit/Cargo.lock",
+   "rust 1.77: build FAILED, --locked (Cargo.lock as committed, lockfile v4): error: failed to parse lock file at: /home/runner/work/probbit/probbit/Cargo.lock",
    "rust 1.78: build ok, --locked (Cargo.lock as committed, lockfile v4)",
    "Cargo.lock restored: 0 changes"
   ],
@@ -86,44 +86,44 @@
    "linker installed in 14 s",
    "$ rustup target add aarch64-unknown-linux-musl",
    "info: downloading component rust-std",
-   "$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p pbit-cli --target aarch64-unknown-linux-musl",
+   "$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p probbit-cli --target aarch64-unknown-linux-musl",
    "    Finished `release` profile [optimized] target(s) in 18.43s",
-   "$ file target/aarch64-unknown-linux-musl/release/pbit",
-   "target/aarch64-unknown-linux-musl/release/pbit: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=6b9608f1981e300fe1d149bd279ce6fa0ba3e383, not stripped",
+   "$ file target/aarch64-unknown-linux-musl/release/probbit",
+   "target/aarch64-unknown-linux-musl/release/probbit: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=6b9608f1981e300fe1d149bd279ce6fa0ba3e383, not stripped",
    "size 1477600 bytes",
    "qemu-user-static installed in 3 s",
-   "$ qemu-aarch64-static target/aarch64-unknown-linux-musl/release/pbit version",
-   "pbit 0.2.0",
-   "$ qemu pbit demo --tasks 12 | qemu pbit decide: exit 0, verdict exact"
+   "$ qemu-aarch64-static target/aarch64-unknown-linux-musl/release/probbit version",
+   "probbit 0.2.0",
+   "$ qemu probbit demo --tasks 12 | qemu probbit decide: exit 0, verdict exact"
   ],
   "musl-x86_64.txt": [
    "$ rustup target add x86_64-unknown-linux-musl",
    "info: downloading component rust-std",
-   "$ cargo build --release --locked -p pbit-cli --target x86_64-unknown-linux-musl",
+   "$ cargo build --release --locked -p probbit-cli --target x86_64-unknown-linux-musl",
    "    Finished `release` profile [optimized] target(s) in 18.18s",
-   "$ file target/x86_64-unknown-linux-musl/release/pbit",
-   "target/x86_64-unknown-linux-musl/release/pbit: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped",
-   "$ ldd target/x86_64-unknown-linux-musl/release/pbit",
+   "$ file target/x86_64-unknown-linux-musl/release/probbit",
+   "target/x86_64-unknown-linux-musl/release/probbit: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped",
+   "$ ldd target/x86_64-unknown-linux-musl/release/probbit",
    "\tstatically linked",
    "size 1545968 bytes",
-   "$ target/x86_64-unknown-linux-musl/release/pbit version",
-   "pbit 0.2.0",
-   "$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact"
+   "$ target/x86_64-unknown-linux-musl/release/probbit version",
+   "probbit 0.2.0",
+   "$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact"
   ],
   "wasm32-wasip1.txt": [
    "$ rustup target add wasm32-wasip1",
    "info: downloading component rust-std",
-   "$ cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide",
+   "$ cargo check --target wasm32-wasip1 -p probbit-ir -p probbit-decide",
    "exit 0",
    "first error: none",
-   "    Checking pbit-ir v0.2.0 (/home/runner/work/pbit/pbit/pbit-ir)",
-   "    Checking pbit-decide v0.2.0 (/home/runner/work/pbit/pbit/pbit-decide)",
+   "    Checking probbit-ir v0.2.0 (/home/runner/work/probbit/probbit/probbit-ir)",
+   "    Checking probbit-decide v0.2.0 (/home/runner/work/probbit/probbit/probbit-decide)",
    "    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.68s"
   ]
  },
  "bench": {
   "linux-x86_64-gnu-samevm": {
-   "schema": "pbit-bench-matrix/1",
+   "schema": "probbit-bench-matrix/1",
    "label": "linux-x86_64-gnu-samevm",
    "date_utc": "2026-10-02T05:52:06Z",
    "git_sha": "bef46ca8ea1a4970e7b95d5dd7bc047c00a30344",
@@ -242,9 +242,9 @@
    },
    "errors": [],
    "binary": {
-    "path": "target/release/pbit",
+    "path": "target/release/probbit",
     "size_bytes": 1401248,
-    "version": "pbit 0.2.0",
+    "version": "probbit 0.2.0",
     "linkage": {
      "file": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for GNU/Linux 3.2.0, BuildID[sha1]=3a4791ff347b29ab20fc5b1ff998dd05660b1d15, not stripped",
      "ldd": [
@@ -274,7 +274,7 @@
     }
    },
    "stats_first": {
-    "engine": "pbit 0.2.0",
+    "engine": "probbit 0.2.0",
     "machine": {
      "os": "linux",
      "arch": "x86_64",
@@ -359,13 +359,13 @@
     }
    },
    "decide_12": {
-    "cmd": "pbit demo --tasks 12 | pbit decide ",
+    "cmd": "probbit demo --tasks 12 | probbit decide ",
     "runs": [
      {
       "wall_ms": 19.573209000043335,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.813563,
+      "probbit_ms": 17.813563,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -381,7 +381,7 @@
       "wall_ms": 19.660393999970438,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.915416,
+      "probbit_ms": 17.915416,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -397,7 +397,7 @@
       "wall_ms": 19.761556999981167,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 18.086557,
+      "probbit_ms": 18.086557,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -413,7 +413,7 @@
       "wall_ms": 19.372113000031277,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.707783,
+      "probbit_ms": 17.707783,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -429,7 +429,7 @@
       "wall_ms": 19.614365999984784,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.905076,
+      "probbit_ms": 17.905076,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -457,7 +457,7 @@
       19.614365999984784
      ]
     },
-    "pbit_ms": {
+    "probbit_ms": {
      "median": 17.905076,
      "q1": 17.760672999999997,
      "q3": 18.0009865,
@@ -497,13 +497,13 @@
     "site_updates_per_s": null
    },
    "decide_300": {
-    "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+    "cmd": "probbit demo --tasks 300 | probbit decide --budget-ms 300",
     "runs": [
      {
       "wall_ms": 468.7279220000278,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 462.818239,
+      "probbit_ms": 462.818239,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -519,7 +519,7 @@
       "wall_ms": 476.43883099999584,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 470.172218,
+      "probbit_ms": 470.172218,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -535,7 +535,7 @@
       "wall_ms": 475.620326000012,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 469.52516,
+      "probbit_ms": 469.52516,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -551,7 +551,7 @@
       "wall_ms": 471.8144789999883,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 465.503453,
+      "probbit_ms": 465.503453,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -567,7 +567,7 @@
       "wall_ms": 470.5941310000412,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 464.308337,
+      "probbit_ms": 464.308337,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -595,7 +595,7 @@
       470.5941310000412
      ]
     },
-    "pbit_ms": {
+    "probbit_ms": {
      "median": 465.503453,
      "q1": 463.563288,
      "q3": 469.84868900000004,
@@ -649,7 +649,7 @@
     }
    },
    "peak_rss_300": {
-    "cmd": "pbit decide --budget-ms 300 < demo300.json",
+    "cmd": "probbit decide --budget-ms 300 < demo300.json",
     "method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
     "bytes": {
      "median": 21045248,
@@ -681,13 +681,13 @@
     ]
    },
    "kernels": {
-    "skipped": "no kernels example at target/release/examples/kernels (build it with -p pbit-core --example kernels)"
+    "skipped": "no kernels example at target/release/examples/kernels (build it with -p probbit-core --example kernels)"
    },
    "portable_vs_native": {
     "skipped": "no --native-dir"
    },
    "decide_threads": {
-    "cmd": "PBIT=target/release/pbit python3 bench/decide_threads.py",
+    "cmd": "PROBBIT=target/release/probbit python3 bench/decide_threads.py",
     "exit": 0,
     "rows": {
      "threads_1": {
@@ -796,7 +796,7 @@
       19.614365999984784
      ]
     },
-    "decide_12_pbit_ms": {
+    "decide_12_probbit_ms": {
      "median": 17.905076,
      "q1": 17.760672999999997,
      "q3": 18.0009865,
@@ -832,7 +832,7 @@
       470.5941310000412
      ]
     },
-    "decide_300_pbit_ms": {
+    "decide_300_probbit_ms": {
      "median": 465.503453,
      "q1": 463.563288,
      "q3": 469.84868900000004,
@@ -945,7 +945,7 @@
    "elapsed_s": 12.6
   },
   "linux-x86_64-musl": {
-   "schema": "pbit-bench-matrix/1",
+   "schema": "probbit-bench-matrix/1",
    "label": "linux-x86_64-musl",
    "date_utc": "2026-10-02T05:51:53Z",
    "git_sha": "bef46ca8ea1a4970e7b95d5dd7bc047c00a30344",
@@ -1064,9 +1064,9 @@
    },
    "errors": [],
    "binary": {
-    "path": "target/x86_64-unknown-linux-musl/release/pbit",
+    "path": "target/x86_64-unknown-linux-musl/release/probbit",
     "size_bytes": 1545968,
-    "version": "pbit 0.2.0",
+    "version": "probbit 0.2.0",
     "linkage": {
      "file": "ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=85ea1386df8c2738b288e74a66fd13f6a9490feb, not stripped",
      "ldd": [
@@ -1077,7 +1077,7 @@
     }
    },
    "stats_first": {
-    "engine": "pbit 0.2.0",
+    "engine": "probbit 0.2.0",
     "machine": {
      "os": "linux",
      "arch": "x86_64",
@@ -1162,13 +1162,13 @@
     }
    },
    "decide_12": {
-    "cmd": "pbit demo --tasks 12 | pbit decide ",
+    "cmd": "probbit demo --tasks 12 | probbit decide ",
     "runs": [
      {
       "wall_ms": 18.961402999991606,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.537871,
+      "probbit_ms": 17.537871,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -1184,7 +1184,7 @@
       "wall_ms": 19.188352000014675,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.476225,
+      "probbit_ms": 17.476225,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -1200,7 +1200,7 @@
       "wall_ms": 18.98067400003356,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.562758,
+      "probbit_ms": 17.562758,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -1216,7 +1216,7 @@
       "wall_ms": 19.080287999997836,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.712016,
+      "probbit_ms": 17.712016,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -1232,7 +1232,7 @@
       "wall_ms": 18.986130000030244,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 17.631546,
+      "probbit_ms": 17.631546,
       "verdict": "exact",
       "tier": "enumerate",
       "released": 12,
@@ -1260,7 +1260,7 @@
       18.986130000030244
      ]
     },
-    "pbit_ms": {
+    "probbit_ms": {
      "median": 17.562758,
      "q1": 17.507047999999998,
      "q3": 17.671781,
@@ -1300,13 +1300,13 @@
     "site_updates_per_s": null
    },
    "decide_300": {
-    "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+    "cmd": "probbit demo --tasks 300 | probbit decide --budget-ms 300",
     "runs": [
      {
       "wall_ms": 478.4774459999994,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 470.644527,
+      "probbit_ms": 470.644527,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -1322,7 +1322,7 @@
       "wall_ms": 477.71077400000195,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 469.844102,
+      "probbit_ms": 469.844102,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -1338,7 +1338,7 @@
       "wall_ms": 478.6707449999881,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 470.315261,
+      "probbit_ms": 470.315261,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -1354,7 +1354,7 @@
       "wall_ms": 487.9514849999964,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 479.748635,
+      "probbit_ms": 479.748635,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -1370,7 +1370,7 @@
       "wall_ms": 476.8139489999612,
       "demo_exit": 0,
       "decide_exit": 0,
-      "pbit_ms": 468.59489,
+      "probbit_ms": 468.59489,
       "verdict": "diagnostics_passed",
       "tier": null,
       "released": 300,
@@ -1398,7 +1398,7 @@
       476.8139489999612
      ]
     },
-    "pbit_ms": {
+    "probbit_ms": {
      "median": 470.315261,
      "q1": 469.21949600000005,
      "q3": 475.196581,
@@ -1452,7 +1452,7 @@
     }
    },
    "peak_rss_300": {
-    "cmd": "pbit decide --budget-ms 300 < demo300.json",
+    "cmd": "probbit decide --budget-ms 300 < demo300.json",
     "method": "/usr/bin/time -v (Maximum resident set size, KiB x 1024)",
     "bytes": {
      "median": 18399232,
@@ -1484,13 +1484,13 @@
     ]
    },
    "kernels": {
-    "skipped": "no kernels example at target/x86_64-unknown-linux-musl/release/examples/kernels (build it with -p pbit-core --example kernels)"
+    "skipped": "no kernels example at target/x86_64-unknown-linux-musl/release/examples/kernels (build it with -p probbit-core --example kernels)"
    },
    "portable_vs_native": {
     "skipped": "no --native-dir"
    },
    "decide_threads": {
-    "cmd": "PBIT=target/x86_64-unknown-linux-musl/release/pbit python3 bench/decide_threads.py",
+    "cmd": "PROBBIT=target/x86_64-unknown-linux-musl/release/probbit python3 bench/decide_threads.py",
     "exit": 0,
     "rows": {
      "threads_1": {
@@ -1599,7 +1599,7 @@
       18.986130000030244
      ]
     },
-    "decide_12_pbit_ms": {
+    "decide_12_probbit_ms": {
      "median": 17.562758,
      "q1": 17.507047999999998,
      "q3": 17.671781,
@@ -1635,7 +1635,7 @@
       476.8139489999612
      ]
     },
-    "decide_300_pbit_ms": {
+    "decide_300_probbit_ms": {
      "median": 470.315261,
      "q1": 469.21949600000005,
      "q3": 475.196581,

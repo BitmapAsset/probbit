@@ -1,5 +1,5 @@
 name: Feature request
-description: A constraint type, instruction, control, front-end or integration pbit should have
+description: A constraint type, instruction, control, front-end or integration probbit should have
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -12,7 +12,7 @@ body:
   - type: textarea
     id: today
     attributes:
-      label: What pbit does today on it
+      label: What probbit does today on it
       description: Where it falls short, with a command if you have one. `USE-CASES.md` lists what is and is not expressed in the current IR (cost budgets and overflow are known gaps).
   - type: textarea
     id: proposal
@@ -24,8 +24,8 @@ body:
     attributes:
       label: Area
       options:
-        - pbit-ir (instruction set, exact tiers, sampler, gate)
-        - pbit-decide (router front-end, JSON contract)
-        - pbit CLI (flags, controls, telemetry)
+        - probbit-ir (instruction set, exact tiers, sampler, gate)
+        - probbit-decide (router front-end, JSON contract)
+        - probbit CLI (flags, controls, telemetry)
         - integrations (bindings, MCP, packaging)
         - docs and benchmarks

@@ -1,5 +1,5 @@
 {
- "pbit_ir": 1,
+ "probbit_ir": 1,
  "comment": "Ising denoising 8x12: unary +-1.1 toward the observed pixel, Potts 0.7 between 4-neighbours",
  "values": [
   "0",

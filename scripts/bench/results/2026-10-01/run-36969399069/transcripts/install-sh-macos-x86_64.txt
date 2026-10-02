@@ -1,117 +1,117 @@
-shell under test: sh (/bin/sh); archive: pbit-v0.2.0-x86_64-apple-darwin.tar.gz
-pbit-v0.2.0-x86_64-apple-darwin.tar.gz.sha256
-== 1. piped to sh, PBIT_INSTALL_DIR set, version given without the v
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49183/good/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
+shell under test: sh (/bin/sh); archive: probbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit-v0.2.0-x86_64-apple-darwin.tar.gz.sha256
+== 1. piped to sh, PROBBIT_INSTALL_DIR set, version given without the v
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49183/good/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
   sha256 ok  3dca157a4263b49550f6c5ad2645ab3ec3b936c6ad77f6ef5632f4ae25517c20
-  installed  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/pbit (pbit 0.2.0)
+  installed  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/probbit (probbit 0.2.0)
 
 /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin is not on your PATH. Add it (e.g. in ~/.profile):
   export PATH="/var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin:$PATH"
 
 Next:
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/pbit version
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/pbit demo --tasks 12 | /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/pbit decide --pretty
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/pbit stats --pretty
-$ command -v pbit: /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/probbit version
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/probbit demo --tasks 12 | /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/probbit decide --pretty
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/probbit stats --pretty
+$ command -v probbit: /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 == 2. default directory, scratch HOME
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49183/good/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49183/good/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
   sha256 ok  3dca157a4263b49550f6c5ad2645ab3ec3b936c6ad77f6ef5632f4ae25517c20
-  installed  /usr/local/bin/pbit (pbit 0.2.0)
+  installed  /usr/local/bin/probbit (probbit 0.2.0)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: installed to /usr/local/bin/probbit (probbit 0.2.0)
 == 3. tampered .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49183/bad/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
-pbit install: error: checksum mismatch for pbit-v0.2.0-x86_64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 3dca157a4263b49550f6c5ad2645ab3ec3b936c6ad77f6ef5632f4ae25517c20 (nothing was installed)
-ok: rejected, /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/badbin/pbit absent
-== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
-pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49183/bad/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit install: error: checksum mismatch for probbit-v0.2.0-x86_64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 3dca157a4263b49550f6c5ad2645ab3ec3b936c6ad77f6ef5632f4ae25517c20 (nothing was installed)
+ok: rejected, /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.4rNvxZMgTF/badbin/probbit absent
+== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail
+probbit install: error: set PROBBIT_VERSION (e.g. v0.2.0) together with PROBBIT_DOWNLOAD_BASE
 ok: rejected
 install.sh: all checks passed (sh, x86_64-apple-darwin)
 scripts/bench/test_install_sh.sh: line 12:  5636 Terminated: 15          "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1
-shell under test: bash (/bin/bash); archive: pbit-v0.2.0-x86_64-apple-darwin.tar.gz
-pbit-v0.2.0-x86_64-apple-darwin.tar.gz.sha256
-== 1. piped to bash, PBIT_INSTALL_DIR set, version given without the v
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49193/good/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
+shell under test: bash (/bin/bash); archive: probbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit-v0.2.0-x86_64-apple-darwin.tar.gz.sha256
+== 1. piped to bash, PROBBIT_INSTALL_DIR set, version given without the v
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49193/good/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
   sha256 ok  943efddc395688b40c853fbc03dbcb10b56adc461263f6b482b0423f95af78dd
-  installed  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/pbit (pbit 0.2.0)
+  installed  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/probbit (probbit 0.2.0)
 
 /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin is not on your PATH. Add it (e.g. in ~/.profile):
   export PATH="/var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin:$PATH"
 
 Next:
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/pbit version
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/pbit demo --tasks 12 | /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/pbit decide --pretty
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/pbit stats --pretty
-$ command -v pbit: /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/probbit version
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/probbit demo --tasks 12 | /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/probbit decide --pretty
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/probbit stats --pretty
+$ command -v probbit: /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 == 2. default directory, scratch HOME
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49193/good/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49193/good/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
   sha256 ok  943efddc395688b40c853fbc03dbcb10b56adc461263f6b482b0423f95af78dd
-  installed  /usr/local/bin/pbit (pbit 0.2.0)
+  installed  /usr/local/bin/probbit (probbit 0.2.0)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: installed to /usr/local/bin/probbit (probbit 0.2.0)
 == 3. tampered .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49193/bad/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
-pbit install: error: checksum mismatch for pbit-v0.2.0-x86_64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 943efddc395688b40c853fbc03dbcb10b56adc461263f6b482b0423f95af78dd (nothing was installed)
-ok: rejected, /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/badbin/pbit absent
-== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
-pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49193/bad/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit install: error: checksum mismatch for probbit-v0.2.0-x86_64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 943efddc395688b40c853fbc03dbcb10b56adc461263f6b482b0423f95af78dd (nothing was installed)
+ok: rejected, /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.dIll06f370/badbin/probbit absent
+== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail
+probbit install: error: set PROBBIT_VERSION (e.g. v0.2.0) together with PROBBIT_DOWNLOAD_BASE
 ok: rejected
 install.sh: all checks passed (bash, x86_64-apple-darwin)
 scripts/bench/test_install_sh.sh: line 12:  6374 Terminated: 15          "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1
-shell under test: dash (/bin/dash); archive: pbit-v0.2.0-x86_64-apple-darwin.tar.gz
-pbit-v0.2.0-x86_64-apple-darwin.tar.gz.sha256
-== 1. piped to dash, PBIT_INSTALL_DIR set, version given without the v
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49202/good/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
+shell under test: dash (/bin/dash); archive: probbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit-v0.2.0-x86_64-apple-darwin.tar.gz.sha256
+== 1. piped to dash, PROBBIT_INSTALL_DIR set, version given without the v
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49202/good/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
   sha256 ok  48a030141c020e7c35ff90212ab1bb1f8749476221b210358b5057ce3207690d
-  installed  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/pbit (pbit 0.2.0)
+  installed  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/probbit (probbit 0.2.0)
 
 /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin is not on your PATH. Add it (e.g. in ~/.profile):
   export PATH="/var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin:$PATH"
 
 Next:
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/pbit version
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/pbit demo --tasks 12 | /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/pbit decide --pretty
-  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/pbit stats --pretty
-$ command -v pbit: /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/probbit version
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/probbit demo --tasks 12 | /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/probbit decide --pretty
+  /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/probbit stats --pretty
+$ command -v probbit: /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 == 2. default directory, scratch HOME
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49202/good/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49202/good/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
   sha256 ok  48a030141c020e7c35ff90212ab1bb1f8749476221b210358b5057ce3207690d
-  installed  /usr/local/bin/pbit (pbit 0.2.0)
+  installed  /usr/local/bin/probbit (probbit 0.2.0)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: installed to /usr/local/bin/probbit (probbit 0.2.0)
 == 3. tampered .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-apple-darwin
-  fetching http://127.0.0.1:49202/bad/v0.2.0/pbit-v0.2.0-x86_64-apple-darwin.tar.gz
-pbit install: error: checksum mismatch for pbit-v0.2.0-x86_64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 48a030141c020e7c35ff90212ab1bb1f8749476221b210358b5057ce3207690d (nothing was installed)
-ok: rejected, /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/badbin/pbit absent
-== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
-pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+probbit install: v0.2.0 for x86_64-apple-darwin
+  fetching http://127.0.0.1:49202/bad/v0.2.0/probbit-v0.2.0-x86_64-apple-darwin.tar.gz
+probbit install: error: checksum mismatch for probbit-v0.2.0-x86_64-apple-darwin.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 48a030141c020e7c35ff90212ab1bb1f8749476221b210358b5057ce3207690d (nothing was installed)
+ok: rejected, /var/folders/20/jp1_0n3n7kndh6rnbqb5344m0000gn/T/tmp.sf6Rcnq3w0/badbin/probbit absent
+== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail
+probbit install: error: set PROBBIT_VERSION (e.g. v0.2.0) together with PROBBIT_DOWNLOAD_BASE
 ok: rejected
 install.sh: all checks passed (dash, x86_64-apple-darwin)
 scripts/bench/test_install_sh.sh: line 12:  6888 Terminated: 15          "$PY" -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK/srv" > "$WORK/http.log" 2>&1

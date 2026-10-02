@@ -1,5 +1,5 @@
 {
- "schema": "pbit-test-matrix/1",
+ "schema": "probbit-test-matrix/1",
  "label": "linux-x86_64",
  "date_utc": "2026-10-02T05:52:37Z",
  "cmd": "cargo test --release --locked --workspace --no-fail-fast",

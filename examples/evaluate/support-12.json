@@ -15,7 +15,7 @@
     "reply_template": {"type": "choice", "instructions": "Which reply template?", "criteria": {"apology": null, "howto": null, "outage": "Known incident notice", "upsell": "Offer a higher plan"}},
     "sla": {"type": "choice", "instructions": "Response time target?", "criteria": {"4h": null, "24h": null, "72h": null}}
   },
-  "pbit": {
+  "probbit": {
     "judge": {
       "model": "jev-latest",
       "usage": {"input_tokens": 412, "output_tokens": 24},

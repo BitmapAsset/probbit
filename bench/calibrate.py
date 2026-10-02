@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""R19 P1.4 calibration runner (stdlib only). Runs the frozen stress corpus (pbit-cli/tests/stress/) through the release
+"""R19 P1.4 calibration runner (stdlib only). Runs the frozen stress corpus (probbit-cli/tests/stress/) through the release
 binary at defaults AND with the sampler forced (`--mode sample` / `--op sample`), seeds 1..S, and scores every answer
-against an oracle that does not use pbit's inference: the occupancy count DP via elementary symmetric polynomials (router
+against an oracle that does not use probbit's inference: the occupancy count DP via elementary symmetric polynomials (router
 files), brute-force enumeration with caps (IR programs with k^n <= 2^20), a log-space transfer matrix (paths).
 
 Per family and mode it reports: whole answers (`exact` or `diagnostics_passed`), FALSE whole answers (any variable off by
 more than 0.05 TV), released items, WRONG released items (> 0.05 TV), partial and refused counts (refusal rate), runtime
 median (the answer's `ms`). The header records the commit, the gate version, the gate thresholds read from
-pbit-ir/src/lib.rs (frozen: see CONTRIBUTING, "Calibration"), the machine, the load before / after and every command.
+probbit-ir/src/lib.rs (frozen: see CONTRIBUTING, "Calibration"), the machine, the load before / after and every command.
 
-    cargo build --release -p pbit-cli && python3 bench/calibrate.py [--seeds 20] [--jobs 2] [--out results.jsonl]
+    cargo build --release -p probbit-cli && python3 bench/calibrate.py [--seeds 20] [--jobs 2] [--out results.jsonl]
 """
 import argparse, itertools, json, math, os, platform, re, statistics, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PBIT = os.environ.get("PBIT_BIN") or os.path.join(ROOT, "target", "release", "pbit")  # PBIT_BIN: compare another binary
-STRESS = os.path.join(ROOT, "pbit-cli", "tests", "stress")
+PROBBIT = os.environ.get("PROBBIT_BIN") or os.path.join(ROOT, "target", "release", "probbit")  # PROBBIT_BIN: compare another binary
+STRESS = os.path.join(ROOT, "probbit-cli", "tests", "stress")
 TOL = 0.05
 
 def lse(xs):
@@ -66,7 +66,7 @@ def ir_parts(doc):
     return ids, vals, n, k, h, allowed, pairs, caps
 
 def v2_ok(doc, ids, vals):
-    """R19.5 IR constructs checked by their DIRECT meaning (not pbit's cap lowering): all_different, implies, tables, precedes."""
+    """R19.5 IR constructs checked by their DIRECT meaning (not probbit's cap lowering): all_different, implies, tables, precedes."""
     xi = {x: i for i, x in enumerate(ids)}; vi = {v: q for q, v in enumerate(vals)}; tests = []
     for c in doc.get("all_different", []): o = [xi[x] for x in c["vars"]]; tests.append(lambda x, o=o: len({x[i] for i in o}) == len(o))
     for c in doc.get("implies", []):
@@ -117,7 +117,7 @@ def holdout_programs(seed, per_family):
     R = random.Random(seed); out = []
     def doc(vals, n, h, pairs, caps, comment):
         vs = [{"id": f"x{i}", "h": {vals[q]: round(h[i][q], 4) for q in range(len(vals))}} for i in range(n)]
-        return {"pbit_ir": 1, "comment": comment, "values": vals, "vars": vs, "pairs": pairs, "caps": caps}
+        return {"probbit_ir": 1, "comment": comment, "values": vals, "vars": vs, "pairs": pairs, "caps": caps}
     for t in range(per_family):
         # 1. two 6-spin ferro clusters (Potts 1.5-3), a small field makes one cluster's mode rare; one weak bridge
         n = 12; h = [[0.0, R.uniform(0.05, 0.4) * (1 if i < 6 else -1)] for i in range(n)]
@@ -184,11 +184,11 @@ def holdout_programs(seed, per_family):
         vs = [{"id": f"x{i}", "h": {vals[q]: round(h[i][q], 4) for q in al[i]}, "allowed": [vals[q] for q in al[i]]} for i in range(n)]
         pairs = [{"i": f"x{i}", "j": f"x{j}", "table": [[round(R3.uniform(-0.4, 0.4), 3) for _ in range(3)] for _ in range(3)]}
                  for i in range(n) for j in range(i + 1, n) if R3.random() < 0.15]
-        out.append(("saturated-k3", {"pbit_ir": 1, "comment": "holdout saturated quotas", "values": vals, "vars": vs, "pairs": pairs,
+        out.append(("saturated-k3", {"probbit_ir": 1, "comment": "holdout saturated quotas", "values": vals, "vars": vs, "pairs": pairs,
                                      "caps": [{"value": v, "limit": 4} for v in vals]}))
     # R19.5 IR v2 constructs (own stream): 7 variables x 4 values, random unaries + a few Potts pairs, plus an all_different over
     # 3 variables, an implication, a forbid table on 3 variables, a precedence (gap 0..2) and an at-least cap; regenerated
-    # until feasible (the oracle checks every construct by its direct meaning, not by pbit's cap lowering)
+    # until feasible (the oracle checks every construct by its direct meaning, not by probbit's cap lowering)
     R4 = random.Random(seed * 1000003 + 17)
     for t in range(per_family):
         vals = ["s0", "s1", "s2", "s3"]; n = 7
@@ -196,7 +196,7 @@ def holdout_programs(seed, per_family):
             h = [[R4.uniform(-0.6, 0.6) for _ in range(4)] for _ in range(n)]; ids = [f"x{i}" for i in range(n)]
             pairs = [{"i": f"x{i}", "j": f"x{j}", "potts": round(R4.uniform(-0.8, 0.8), 3)} for i in range(n) for j in range(i + 1, n) if R4.random() < 0.2]
             ad = R4.sample(ids, 3); a, b = R4.sample(ids, 2); tv = R4.sample(ids, 3); pa, pb = R4.sample(ids, 2)
-            d = {"pbit_ir": 1, "comment": "holdout IR v2 constructs", "values": vals,
+            d = {"probbit_ir": 1, "comment": "holdout IR v2 constructs", "values": vals,
                  "vars": [{"id": ids[i], "h": {vals[q]: round(h[i][q], 4) for q in range(4)}} for i in range(n)], "pairs": pairs,
                  "caps": [{"value": R4.choice(vals), "min": R4.randint(1, 2)}],
                  "all_different": [{"vars": ad}],
@@ -220,12 +220,12 @@ FAMILIES = [
 ]
 
 def thresholds():
-    src = open(os.path.join(ROOT, "pbit-ir", "src", "lib.rs")).read()
+    src = open(os.path.join(ROOT, "probbit-ir", "src", "lib.rs")).read()
     keys = ["GATE_VERSION", "GATE_BS_POW", "PARTIAL_RHAT", "BATCH_RATIO_MAX", "ITEM_RHAT_MAX", "GATE"]
     return {k: re.search(rf"pub const {k}: [^=]+= ([^;]+);", src).group(1).strip() for k in keys}
 
 def one(args, inp, truth):
-    p = subprocess.run([PBIT] + args, input=inp, capture_output=True, text=True)
+    p = subprocess.run([PROBBIT] + args, input=inp, capture_output=True, text=True)
     try: d = json.loads(p.stdout)
     except ValueError: return {"exit": p.returncode, "verdict": "unparsable", "ms": None}
     v = d.get("verdict"); est = d.get("odds") or d.get("marginals") or {}
@@ -262,8 +262,8 @@ def main():
             base = [fe] + extra + (a.extra.split() if a.extra and mode == "sampler" else [])
             with ThreadPoolExecutor(a.jobs) as ex:
                 res = list(ex.map(lambda s: one(base + ["--seed", str(s)], inp, truth), range(1, a.seeds + 1)))
-            src = f"<holdout program {label} from --holdout-seed {a.holdout_seed} (in the --out file)>" if a.holdout else f"pbit-cli/tests/stress/{f}"
-            for s, r in zip(range(1, a.seeds + 1), res): recs.append({"family": label, "mode": mode, "seed": s, "command": f"pbit {' '.join(base)} --seed {s} < {src}", **r})
+            src = f"<holdout program {label} from --holdout-seed {a.holdout_seed} (in the --out file)>" if a.holdout else f"probbit-cli/tests/stress/{f}"
+            for s, r in zip(range(1, a.seeds + 1), res): recs.append({"family": label, "mode": mode, "seed": s, "command": f"probbit {' '.join(base)} --seed {s} < {src}", **r})
             whole = sum(1 for r in res if r["verdict"] in ("exact", "diagnostics_passed"))
             ms = [r["ms"] for r in res if r["ms"] is not None]
             rows.append((label, mode, " ".join(base), whole, sum(r["false_whole"] for r in res), sum(r["released"] for r in res), sum(r["wrong"] for r in res),
@@ -274,7 +274,7 @@ def main():
     print("| family | mode | command | whole | FALSE whole | released | WRONG | partial | refused (rate) | median ms | tiers | gate |")
     print("|---|---|---|---|---|---|---|---|---|---|---|---|")
     for (nm, md, cmd, wh, fw, rl, wr, pa, rf, nr, me, ti, gv) in rows:
-        print(f"| {nm} | {md} | `pbit {cmd}` | {wh} | {fw} | {rl} | {wr} | {pa} | {rf} ({rf / nr:.0%}) | {me:.3f} | {','.join(ti)} | {','.join(gv)} |")
+        print(f"| {nm} | {md} | `probbit {cmd}` | {wh} | {fw} | {rl} | {wr} | {pa} | {rf} ({rf / nr:.0%}) | {me:.3f} | {','.join(ti)} | {','.join(gv)} |")
     if a.out:
         with open(a.out, "w") as fh:
             fh.write(json.dumps(head) + "\n")

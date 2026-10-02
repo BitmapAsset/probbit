@@ -1,5 +1,5 @@
 {
- "schema": "pbit-bench-matrix/1",
+ "schema": "probbit-bench-matrix/1",
  "label": "macos-arm64",
  "date_utc": "2026-10-02T05:35:28Z",
  "git_sha": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
@@ -102,9 +102,9 @@
  },
  "errors": [],
  "binary": {
-  "path": "target/release/pbit",
+  "path": "target/release/probbit",
   "size_bytes": 1146960,
-  "version": "pbit 0.2.0",
+  "version": "probbit 0.2.0",
   "linkage": {
    "file": "Mach-O 64-bit executable arm64",
    "otool_L": [
@@ -114,7 +114,7 @@
   }
  },
  "stats_first": {
-  "engine": "pbit 0.2.0",
+  "engine": "probbit 0.2.0",
   "machine": {
    "os": "macos",
    "arch": "aarch64",
@@ -202,13 +202,13 @@
   }
  },
  "decide_12": {
-  "cmd": "pbit demo --tasks 12 | pbit decide ",
+  "cmd": "probbit demo --tasks 12 | probbit decide ",
   "runs": [
    {
     "wall_ms": 15.10804199998006,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 11.344709,
+    "probbit_ms": 11.344709,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -224,7 +224,7 @@
     "wall_ms": 15.050082999977121,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 11.4415,
+    "probbit_ms": 11.4415,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -240,7 +240,7 @@
     "wall_ms": 19.817458999995097,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 11.442583,
+    "probbit_ms": 11.442583,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -256,7 +256,7 @@
     "wall_ms": 15.493166999988262,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 11.642625,
+    "probbit_ms": 11.642625,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -272,7 +272,7 @@
     "wall_ms": 16.73816699999975,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 12.139,
+    "probbit_ms": 12.139,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -300,7 +300,7 @@
     16.73816699999975
    ]
   },
-  "pbit_ms": {
+  "probbit_ms": {
    "median": 11.442583,
    "q1": 11.3931045,
    "q3": 11.8908125,
@@ -340,13 +340,13 @@
   "site_updates_per_s": null
  },
  "decide_300": {
-  "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+  "cmd": "probbit demo --tasks 300 | probbit decide --budget-ms 300",
   "runs": [
    {
     "wall_ms": 432.3906250000107,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 425.390833,
+    "probbit_ms": 425.390833,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -362,7 +362,7 @@
     "wall_ms": 443.55099999998515,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 432.115291,
+    "probbit_ms": 432.115291,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -378,7 +378,7 @@
     "wall_ms": 436.02708299999904,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 428.499583,
+    "probbit_ms": 428.499583,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -394,7 +394,7 @@
     "wall_ms": 442.2595000000058,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 430.249042,
+    "probbit_ms": 430.249042,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -410,7 +410,7 @@
     "wall_ms": 448.6665839999944,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 435.776417,
+    "probbit_ms": 435.776417,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -438,7 +438,7 @@
     448.6665839999944
    ]
   },
-  "pbit_ms": {
+  "probbit_ms": {
    "median": 430.249042,
    "q1": 426.945208,
    "q3": 433.945854,
@@ -492,7 +492,7 @@
   }
  },
  "peak_rss_300": {
-  "cmd": "pbit decide --budget-ms 300 < demo300.json",
+  "cmd": "probbit decide --budget-ms 300 < demo300.json",
   "method": "/usr/bin/time -l (maximum resident set size, bytes)",
   "bytes": {
    "median": 32014336,
@@ -736,7 +736,7 @@
   "skipped": "no --native-dir"
  },
  "decide_threads": {
-  "cmd": "PBIT=target/release/pbit python3 bench/decide_threads.py",
+  "cmd": "PROBBIT=target/release/probbit python3 bench/decide_threads.py",
   "exit": 0,
   "rows": {
    "threads_1": {
@@ -807,21 +807,21 @@
   "cross_x86_64_apple_darwin": [
    "$ rustup target add x86_64-apple-darwin",
    "info: downloading component rust-std",
-   "$ cargo build --release --locked -p pbit-cli --target x86_64-apple-darwin",
+   "$ cargo build --release --locked -p probbit-cli --target x86_64-apple-darwin",
    "    Finished `release` profile [optimized] target(s) in 17.81s",
-   "$ file target/x86_64-apple-darwin/release/pbit",
-   "target/x86_64-apple-darwin/release/pbit: Mach-O 64-bit executable x86_64",
-   "$ lipo -archs target/x86_64-apple-darwin/release/pbit",
+   "$ file target/x86_64-apple-darwin/release/probbit",
+   "target/x86_64-apple-darwin/release/probbit: Mach-O 64-bit executable x86_64",
+   "$ lipo -archs target/x86_64-apple-darwin/release/probbit",
    "x86_64",
-   "$ otool -L target/x86_64-apple-darwin/release/pbit",
-   "target/x86_64-apple-darwin/release/pbit:",
+   "$ otool -L target/x86_64-apple-darwin/release/probbit",
+   "target/x86_64-apple-darwin/release/probbit:",
    "\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)",
    "size 1270368 bytes",
    "rosetta: present",
-   "$ arch -x86_64 target/x86_64-apple-darwin/release/pbit version",
-   "pbit 0.2.0",
-   "$ arch -x86_64 pbit demo --tasks 12 | arch -x86_64 pbit decide: exit 0, verdict exact",
-   "$ arch -x86_64 pbit stats (self-test under Rosetta)",
+   "$ arch -x86_64 target/x86_64-apple-darwin/release/probbit version",
+   "probbit 0.2.0",
+   "$ arch -x86_64 probbit demo --tasks 12 | arch -x86_64 probbit decide: exit 0, verdict exact",
+   "$ arch -x86_64 probbit stats (self-test under Rosetta)",
    "1 thread 10951089 | threads 3 19953406"
   ]
  },
@@ -937,7 +937,7 @@
     16.73816699999975
    ]
   },
-  "decide_12_pbit_ms": {
+  "decide_12_probbit_ms": {
    "median": 11.442583,
    "q1": 11.3931045,
    "q3": 11.8908125,
@@ -973,7 +973,7 @@
     448.6665839999944
    ]
   },
-  "decide_300_pbit_ms": {
+  "decide_300_probbit_ms": {
    "median": 430.249042,
    "q1": 426.945208,
    "q3": 433.945854,

@@ -1,5 +1,5 @@
 {
- "pbit_ir": 1,
+ "probbit_ir": 1,
  "comment": "tool-call plan over 6 steps",
  "values": [
   "search",

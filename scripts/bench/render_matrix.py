@@ -78,7 +78,7 @@ rows = []
 for lab, b, t, src in data:
     c = b["cells"]
     rows.append([lab, s(c.get("stats_1t")), s(c.get("stats_default")), ", ".join(map(str, c.get("stats_default_threads", [])))])
-print(table("`pbit stats` self-test: 400-spin ring, IR sampler, site updates/s (N = 5)", ["1 thread", "default threads", "threads (= min(cores, 4))"], rows))
+print(table("`probbit stats` self-test: 400-spin ring, IR sampler, site updates/s (N = 5)", ["1 thread", "default threads", "threads (= min(cores, 4))"], rows))
 
 rows = []
 for lab, b, t, src in data:
@@ -89,25 +89,25 @@ for lab, b, t, src in data:
         nat = "n/a: " + str(r)
     rows.append([lab, s(c.get("kernel_multispin_fast_1t")), s(c.get("kernel_multispin_fast_4t")), s(c.get("kernel_multispin_fast_10t")),
                  s(c.get("kernel_heatbath_fast_1t")), nat])
-print(table("Lattice kernels (`pbit-core/examples/kernels`, portable build), updates/s (N = 5)",
+print(table("Lattice kernels (`probbit-core/examples/kernels`, portable build), updates/s (N = 5)",
             ["multispin fast, 1 thread", "multispin fast, 4 threads", "multispin fast, 10 threads", "heat-bath f32 fast, 1 thread",
              "native / portable (multispin 1t / 4t / heat-bath)"], rows))
 
 rows = []
 for lab, b, t, src in data:
     c = b["cells"]
-    rows.append([lab, s(c.get("decide_12_wall_ms"), ms), s(c.get("decide_12_pbit_ms"), ms), ", ".join(c.get("decide_12_verdicts", [])),
+    rows.append([lab, s(c.get("decide_12_wall_ms"), ms), s(c.get("decide_12_probbit_ms"), ms), ", ".join(c.get("decide_12_verdicts", [])),
                  ", ".join(map(str, c.get("decide_12_exit_codes", [])))])
-print(table("`pbit demo --tasks 12 | pbit decide`, ms (N = 5)", ["wall, both processes", "pbit's own `ms`", "verdict", "exit"], rows))
+print(table("`probbit demo --tasks 12 | probbit decide`, ms (N = 5)", ["wall, both processes", "probbit's own `ms`", "verdict", "exit"], rows))
 
 rows = []
 for lab, b, t, src in data:
     c = b["cells"]; rel = c.get("decide_300_released") or {}
-    rows.append([lab, s(c.get("decide_300_wall_ms"), ms), s(c.get("decide_300_pbit_ms"), ms),
+    rows.append([lab, s(c.get("decide_300_wall_ms"), ms), s(c.get("decide_300_probbit_ms"), ms),
                  "%d-%d of 300" % (rel.get("min", 0), rel.get("max", 0)) if rel else "n/a", str(c.get("decide_300_violations_max")),
                  ", ".join(c.get("decide_300_verdicts", [])), s(c.get("decide_300_site_updates_per_s"))])
-print(table("`pbit demo --tasks 300 | pbit decide --budget-ms 300`, ms (N = 5)",
-            ["wall, both processes", "pbit's own `ms`", "released (min-max)", "violations (max)", "verdict", "sampler site updates/s"], rows))
+print(table("`probbit demo --tasks 300 | probbit decide --budget-ms 300`, ms (N = 5)",
+            ["wall, both processes", "probbit's own `ms`", "released (min-max)", "violations (max)", "verdict", "sampler site updates/s"], rows))
 
 rows = []
 for lab, b, t, src in data:
@@ -117,8 +117,8 @@ for lab, b, t, src in data:
     psv = ", ".join(mib(r["peak_working_set_bytes"]) for r in ps["runs"]) if isinstance(ps, dict) else ""
     rows.append([lab, s(v, mib) if v else "n/a", c.get("decide_300_peak_rss_method", "n/a"),
                  ", ".join("%.1f" % x for x in selfr) or "n/a (Windows: `sys::usage()` is Unix-only)", psv or "-"])
-print(table("Peak memory of the 300-task `pbit decide --budget-ms 300`, MiB (N = 3)",
-            ["peak RSS", "how", "pbit's own `peak_rss_mb`", "Get-Process polling (Windows, lower bound)"], rows))
+print(table("Peak memory of the 300-task `probbit decide --budget-ms 300`, MiB (N = 3)",
+            ["peak RSS", "how", "probbit's own `peak_rss_mb`", "Get-Process polling (Windows, lower bound)"], rows))
 
 rows = []
 for lab, b, t, src in data:
@@ -146,6 +146,6 @@ for lab, f in [("Linux x86_64 (`ubuntu-latest`)", "bench-linux-x86_64.json"), ("
     rows.append([lab, "%s / %s" % cpus if cpus[0] != cpus[1] else "both " + str(cpus[0]), pair("stats_1t"), pair("kernel_multispin_fast_1t"),
                  pair("decide_12_wall_ms", ms), pair("decide_300_wall_ms", ms), pair("decide_300_peak_rss_bytes", mib)])
 out = ["#### Run to run: run 1 / run 2 medians, same source, two VMs per runner label", "",
-       "| platform | CPU (run 1 / run 2) | `pbit stats` 1 thread | multispin fast, 1 thread | 12-task wall ms | 300-task wall ms | peak RSS MiB |",
+       "| platform | CPU (run 1 / run 2) | `probbit stats` 1 thread | multispin fast, 1 thread | 12-task wall ms | 300-task wall ms | peak RSS MiB |",
        "|---|---|---|---|---|---|---|"] + ["| %s |" % " | ".join(r) for r in rows]
 print("\n".join(out))

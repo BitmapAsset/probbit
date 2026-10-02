@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """R19.7 (P2.2 family 3): tree-structured probabilistic inference. Random trees (parent of node i uniform in 0..i-1), k values,
 unaries ~ U(-1, 1), one k x k table per edge ~ U(-1, 1). Independent oracle: log-space two-pass sum-product (marginals, log Z).
-pbit: `pbit run` at defaults (the inference compiler's forest tier, exact) and `pbit run --op sample --seed S` (gated sampler).
+probbit: `probbit run` at defaults (the inference compiler's forest tier, exact) and `probbit run --op sample --seed S` (gated sampler).
 Stdlib only. Usage: python3 bench/tree_infer.py [--sizes 200,1000] [--k 3] [--instances 2] [--seeds 4]"""
 import argparse, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 def lse(xs): m = max(xs); return m + math.log(sum(math.exp(x - m) for x in xs))
 def instance(n, k, seed):
     r = random.Random(seed); par = [None] + [r.randrange(i) for i in range(1, n)]
@@ -12,7 +12,7 @@ def instance(n, k, seed):
     return par, h, t
 def program(par, h, t, k):
     n = len(par); vals = [f"v{a}" for a in range(k)]
-    return {"pbit_ir": 1, "comment": "random tree, table couplings parent -> child", "values": vals,
+    return {"probbit_ir": 1, "comment": "random tree, table couplings parent -> child", "values": vals,
             "vars": [{"id": f"x{i}", "h": {vals[a]: h[i][a] for a in range(k)}} for i in range(n)],
             "pairs": [{"i": f"x{par[i]}", "j": f"x{i}", "table": t[i]} for i in range(1, n)]}
 def sum_product(par, h, t, k):
@@ -29,12 +29,12 @@ def sum_product(par, h, t, k):
         for c in ch[i]: down[c] = [lse([t[c][a][b] + full[a] - up[c][a] for a in range(k)]) for b in range(k)]
     return logz, marg
 def run(prog, *args):
-    t0 = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t0 = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t0) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--sizes', default='200,1000'); ap.add_argument('--k', type=int, default=3)
     ap.add_argument('--instances', type=int, default=2); ap.add_argument('--seeds', type=int, default=4); a = ap.parse_args(); k = a.k
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "sizes": a.sizes, "k": k, "instances": a.instances, "seeds": a.seeds}))
     print("| n | inst | oracle log Z | default: tier, \\|log Z - oracle\\|, max \\|odds - oracle\\|, ms | sampler verdicts | released | max \\|odds - oracle\\| released | median ms |")
     print("|---|---|---|---|---|---|---|---|")

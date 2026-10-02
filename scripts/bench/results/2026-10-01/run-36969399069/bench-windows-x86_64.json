@@ -1,5 +1,5 @@
 {
- "schema": "pbit-bench-matrix/1",
+ "schema": "probbit-bench-matrix/1",
  "label": "windows-x86_64",
  "date_utc": "2026-10-02T05:35:01Z",
  "git_sha": "ab04b5ce1ef9c8367ddbbda5b8f4137b5e22dcd5",
@@ -76,9 +76,9 @@
  },
  "errors": [],
  "binary": {
-  "path": "target/release/pbit",
+  "path": "target/release/probbit",
   "size_bytes": 966656,
-  "version": "pbit 0.2.0",
+  "version": "probbit 0.2.0",
   "linkage": {
    "file": "PE32+ executable for MS Windows 6.00 (console), x86-64, 5 sections",
    "dumpbin_found_via": "vswhere (not on PATH)",
@@ -99,7 +99,7 @@
   }
  },
  "stats_first": {
-  "engine": "pbit 0.2.0",
+  "engine": "probbit 0.2.0",
   "machine": {
    "os": "windows",
    "arch": "x86_64",
@@ -184,13 +184,13 @@
   }
  },
  "decide_12": {
-  "cmd": "pbit demo --tasks 12 | pbit decide ",
+  "cmd": "probbit demo --tasks 12 | probbit decide ",
   "runs": [
    {
     "wall_ms": 21.600100000000566,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 12.8469,
+    "probbit_ms": 12.8469,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -206,7 +206,7 @@
     "wall_ms": 20.618300000023737,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 12.4243,
+    "probbit_ms": 12.4243,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -222,7 +222,7 @@
     "wall_ms": 20.410799999922347,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 12.4998,
+    "probbit_ms": 12.4998,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -238,7 +238,7 @@
     "wall_ms": 20.442300000013347,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 12.419,
+    "probbit_ms": 12.419,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -254,7 +254,7 @@
     "wall_ms": 20.66669999999249,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 12.6842,
+    "probbit_ms": 12.6842,
     "verdict": "exact",
     "tier": "enumerate",
     "released": 12,
@@ -282,7 +282,7 @@
     20.66669999999249
    ]
   },
-  "pbit_ms": {
+  "probbit_ms": {
    "median": 12.4998,
    "q1": 12.42165,
    "q3": 12.765550000000001,
@@ -322,13 +322,13 @@
   "site_updates_per_s": null
  },
  "decide_300": {
-  "cmd": "pbit demo --tasks 300 | pbit decide --budget-ms 300",
+  "cmd": "probbit demo --tasks 300 | probbit decide --budget-ms 300",
   "runs": [
    {
     "wall_ms": 477.7017999999771,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 464.9719,
+    "probbit_ms": 464.9719,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -344,7 +344,7 @@
     "wall_ms": 469.82330000003003,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 456.0813,
+    "probbit_ms": 456.0813,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -360,7 +360,7 @@
     "wall_ms": 455.75429999996686,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 442.7194,
+    "probbit_ms": 442.7194,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -376,7 +376,7 @@
     "wall_ms": 457.8821000000062,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 444.7189,
+    "probbit_ms": 444.7189,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -392,7 +392,7 @@
     "wall_ms": 456.29230000008647,
     "demo_exit": 0,
     "decide_exit": 0,
-    "pbit_ms": 443.1207,
+    "probbit_ms": 443.1207,
     "verdict": "diagnostics_passed",
     "tier": null,
     "released": 300,
@@ -420,7 +420,7 @@
     456.29230000008647
    ]
   },
-  "pbit_ms": {
+  "probbit_ms": {
    "median": 444.7189,
    "q1": 442.92005,
    "q3": 460.52660000000003,
@@ -474,7 +474,7 @@
   }
  },
  "peak_rss_300": {
-  "cmd": "pbit decide --budget-ms 300 < demo300.json",
+  "cmd": "probbit decide --budget-ms 300 < demo300.json",
   "method": "K32GetProcessMemoryInfo PeakWorkingSetSize (process handle, after exit)",
   "bytes": {
    "median": 21155840,
@@ -715,13 +715,13 @@
   }
  },
  "windows_shim": [
-  "target/release/pbit",
+  "target/release/probbit",
   "target/release/examples/kernels",
-  "target/native/release/pbit",
+  "target/native/release/probbit",
   "target/native/release/examples/kernels"
  ],
  "portable_vs_native": {
-  "cmd": "PBIT_DIR=target/release PBIT_NATIVE_DIR=target/native/release python3 bench/portable_vs_native.py",
+  "cmd": "PROBBIT_DIR=target/release PROBBIT_NATIVE_DIR=target/native/release python3 bench/portable_vs_native.py",
   "exit": 0,
   "rows": {
    "T1 SoA f32 heat-bath LUT, splitmix": {
@@ -893,7 +893,7 @@
     ],
     "ratio": 0.931
    },
-   "pbit stats IR ring, 1 thread": {
+   "probbit stats IR ring, 1 thread": {
     "portable": 12400000.0,
     "portable_iqr": [
      11760000.0,
@@ -906,7 +906,7 @@
     ],
     "ratio": 1.081
    },
-   "pbit stats IR ring, 4 threads": {
+   "probbit stats IR ring, 4 threads": {
     "portable": 15320000.0,
     "portable_iqr": [
      13810000.0,
@@ -919,7 +919,7 @@
     ],
     "ratio": 1.033
    },
-   "pbit decide 300 tasks, 4 thr (sampler)": {
+   "probbit decide 300 tasks, 4 thr (sampler)": {
     "portable": 11410000.0,
     "portable_iqr": [
      8898000.0,
@@ -948,16 +948,16 @@
    "fast T1 f32 LUT, Philox: portable 1.794e+08 [1.377e+08-1.902e+08] | native 1.977e+08 [1.572e+08-2.037e+08] | ratio 1.102",
    "fast T0 multispin, splitmix: portable 1.494e+10 [1.171e+10-1.604e+10] | native 1.279e+10 [1.048e+10-1.533e+10] | ratio 0.856",
    "fast T0 multispin, Philox: portable 1.026e+10 [8.446e+09-1.056e+10] | native 9.554e+09 [7.924e+09-1.048e+10] | ratio 0.931",
-   "pbit stats IR ring, 1 thread: portable 1.24e+07 [1.176e+07-1.34e+07] | native 1.34e+07 [1.169e+07-1.37e+07] | ratio 1.081",
-   "pbit stats IR ring, 4 threads: portable 1.532e+07 [1.381e+07-1.679e+07] | native 1.583e+07 [1.412e+07-1.829e+07] | ratio 1.033",
-   "pbit decide 300 tasks, 4 thr (sampler): portable 1.141e+07 [8.898e+06-1.145e+07] | native 1.161e+07 [1.121e+07-1.174e+07] | ratio 1.017",
+   "probbit stats IR ring, 1 thread: portable 1.24e+07 [1.176e+07-1.34e+07] | native 1.34e+07 [1.169e+07-1.37e+07] | ratio 1.081",
+   "probbit stats IR ring, 4 threads: portable 1.532e+07 [1.381e+07-1.679e+07] | native 1.583e+07 [1.412e+07-1.829e+07] | ratio 1.033",
+   "probbit decide 300 tasks, 4 thr (sampler): portable 1.141e+07 [8.898e+06-1.145e+07] | native 1.161e+07 [1.121e+07-1.174e+07] | ratio 1.017",
    "kernels checksum identical across builds: True | decide answer (odds+plan+gate) identical across builds: True"
   ],
   "stderr_tail": null,
   "note": "the script's first line is hard-coded to the M4; the machine is the one in `machine`"
  },
  "decide_threads": {
-  "cmd": "PBIT=target/release/pbit python3 bench/decide_threads.py",
+  "cmd": "PROBBIT=target/release/probbit python3 bench/decide_threads.py",
   "exit": 1,
   "rows": {},
   "stdout": [
@@ -982,7 +982,7 @@
   },
   "peak_rss_powershell": {
    "method": "Get-Process PeakWorkingSet64, polled every ~5 ms until exit (lower bound)",
-   "cmd": "pbit decide --budget-ms 300 < demo300.json",
+   "cmd": "probbit decide --budget-ms 300 < demo300.json",
    "powershell": "7.6.6",
    "runs": [
     {
@@ -1115,7 +1115,7 @@
     20.66669999999249
    ]
   },
-  "decide_12_pbit_ms": {
+  "decide_12_probbit_ms": {
    "median": 12.4998,
    "q1": 12.42165,
    "q3": 12.765550000000001,
@@ -1151,7 +1151,7 @@
     456.29230000008647
    ]
   },
-  "decide_300_pbit_ms": {
+  "decide_300_probbit_ms": {
    "median": 444.7189,
    "q1": 442.92005,
    "q3": 460.52660000000003,
@@ -1231,9 +1231,9 @@
    "fast T1 f32 LUT, Philox": 1.102,
    "fast T0 multispin, splitmix": 0.856,
    "fast T0 multispin, Philox": 0.931,
-   "pbit stats IR ring, 1 thread": 1.081,
-   "pbit stats IR ring, 4 threads": 1.033,
-   "pbit decide 300 tasks, 4 thr (sampler)": 1.017
+   "probbit stats IR ring, 1 thread": 1.081,
+   "probbit stats IR ring, 4 threads": 1.033,
+   "probbit decide 300 tasks, 4 thr (sampler)": 1.017
   },
   "threads_rows": "n/a: exit 1, TypeError: '<' not supported between instances of 'NoneType' and 'NoneType'"
  },

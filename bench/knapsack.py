@@ -3,17 +3,17 @@
 Stdlib only. Per instance (n items, weights 1..20, unaries h_in ~ U(0, 1.5), budget = 40% of the total weight):
   oracle   = log-space forward/backward DP over the used capacity: log Z, P(item in) for every item, and the optimum (max-product)
   baseline = greedy by h_in / weight (classical heuristic for the best plan)
-  pbit     = `pbit run` at defaults (tier, plan log w) and `pbit run --op sample --seed S` (verdict, released items' max |odds - DP|)
+  probbit     = `probbit run` at defaults (tier, plan log w) and `probbit run --op sample --seed S` (verdict, released items' max |odds - DP|)
 Usage: python3 bench/knapsack.py [--sizes 20,40,80] [--seeds 4] [--instances 3] [--write-example examples/knapsack-20.json]"""
 import argparse, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 NEG = float('-inf')
 def lse(a, b): m = max(a, b); return m if m == NEG else m + math.log(math.exp(a - m) + math.exp(b - m))
 def instance(n, seed):
     r = random.Random(seed); w = [r.randint(1, 20) for _ in range(n)]; h = [round(r.uniform(0, 1.5), 4) for _ in range(n)]
     return w, h, sum(w) * 2 // 5
 def program(w, h, L):
-    return {"pbit_ir": 1, "comment": "knapsack: item i in (+h_i) or out; total weight of the items in <= limit",
+    return {"probbit_ir": 1, "comment": "knapsack: item i in (+h_i) or out; total weight of the items in <= limit",
             "values": ["out", "in"], "vars": [{"id": f"i{q}", "h": {"in": h[q]}} for q in range(len(w))],
             "linear": [{"terms": [[f"i{q}", "in", w[q]] for q in range(len(w))], "limit": L}]}
 def dp(w, h, L):
@@ -44,12 +44,12 @@ def greedy(w, h, L):
         if h[q] > 0 and load + w[q] <= L: load += w[q]; val += h[q]
     return val
 def run(prog, *args):
-    t = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--sizes', default='20,40,80'); ap.add_argument('--seeds', type=int, default=4)
     ap.add_argument('--instances', type=int, default=3); ap.add_argument('--write-example', default=None); a = ap.parse_args()
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "sizes": a.sizes, "seeds": a.seeds, "instances": a.instances}))
     if a.write_example:
         w, h, L = instance(20, 1); json.dump(program(w, h, L), open(a.write_example, 'w'), indent=1); print("wrote", a.write_example)

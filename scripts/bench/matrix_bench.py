@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""One row of BENCHMARK-MATRIX.md: machine facts, build facts and pbit timings for one OS/arch, written as one JSON file.
+"""One row of BENCHMARK-MATRIX.md: machine facts, build facts and probbit timings for one OS/arch, written as one JSON file.
 
-    python3 scripts/bench/matrix_bench.py --bin target/release/pbit --label linux-x86_64 --out bench-linux-x86_64.json \
+    python3 scripts/bench/matrix_bench.py --bin target/release/probbit --label linux-x86_64 --out bench-linux-x86_64.json \
         [--native-dir target-native/release] [--runs 5] [--attach KEY=FILE ...]
 
 Stdlib only, Python >= 3.8, Linux / macOS / Windows. Run from the repo root after
-`cargo build --release --locked --workspace` and `cargo build --release --locked -p pbit-core --example kernels`.
+`cargo build --release --locked --workspace` and `cargo build --release --locked -p probbit-core --example kernels`.
 `--native-dir` names a `-C target-cpu=native` build of the same two targets; with it, bench/portable_vs_native.py runs too.
 
 Every timing is N runs (default 5): median [IQR] (statistics.quantiles, n=4, as in bench/*.py) plus every raw value.
-Wall clock is taken outside pbit (time.perf_counter around the processes); `pbit_ms` is what pbit reports itself.
+Wall clock is taken outside probbit (time.perf_counter around the processes); `probbit_ms` is what probbit reports itself.
 Peak RSS of the 300-task decide: /usr/bin/time -l (macOS, "maximum resident set size", bytes), /usr/bin/time -v (Linux,
 "Maximum resident set size", KiB), PeakWorkingSetSize from K32GetProcessMemoryInfo on the process handle (Windows; the
 handle is still open after the wait). Absolute paths of this machine are scrubbed from the output.
@@ -24,7 +24,7 @@ DT = re.compile(r"^--threads (\d+): wall ms ([0-9.]+) \[([0-9.]+)-([0-9.]+)\], C
                 r" answer identical: yes; verdict (\S+)$")
 DD = re.compile(r"^default path \(--budget-ms 300, 4 chains, threads (\d+)\): wall ms ([0-9.]+) \[([0-9.]+)-([0-9.]+)\],"
                 r" sweeps (\d+), verdict (\S+)$")
-# BENCHMARKS.md §1 rows, from pbit-core/examples/kernels.rs
+# BENCHMARKS.md §1 rows, from probbit-core/examples/kernels.rs
 KERNEL_CELLS = {"kernel_multispin_fast_4t": "fast multispin splitmix x 4 thr", "kernel_multispin_fast_10t": "fast multispin splitmix x10 thr",
                 "kernel_multispin_fast_1t": "fast T0 multispin, splitmix", "kernel_heatbath_fast_1t": "fast T1 f32 LUT, splitmix"}
 
@@ -190,7 +190,7 @@ def win_peak(handle):
 
 
 def peak_rss(bin_, doc, args):
-    """One run of `pbit decide args < doc` under the OS tool: (bytes, method, pbit's own peak_rss_mb, verdict, extra)."""
+    """One run of `probbit decide args < doc` under the OS tool: (bytes, method, probbit's own peak_rss_mb, verdict, extra)."""
     s = platform.system(); extra = {}
     with open(doc, "rb") as f:
         if s == "Windows":
@@ -243,14 +243,14 @@ def main():
     a = ap.parse_args()
     bin_ = exe(a.bin); pdir = os.path.dirname(bin_) or "."
     N = a.runs; t_start = time.time()
-    R = {"schema": "pbit-bench-matrix/1", "label": a.label, "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    R = {"schema": "probbit-bench-matrix/1", "label": a.label, "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
          "git_sha": sh(["git", "rev-parse", "HEAD"])[1].strip() or None, "runner": runner(), "notes": a.note,
          "machine": machine(), "toolchain": toolchain(), "load": {"start": load()}, "errors": []}
     print("machine:", R["machine"].get("cpu_model"), "| logical cores", R["machine"]["logical_cores"], "| load", R["load"]["start"]["loadavg"], flush=True)
 
     R["binary"] = {"path": a.bin, "size_bytes": os.path.getsize(bin_), "version": sh([bin_, "version"])[1].strip(), "linkage": linkage(bin_)}
 
-    # pbit stats: the IR self-test (400-spin ring, fixed work), 1 thread and default threads
+    # probbit stats: the IR self-test (400-spin ring, fixed work), 1 thread and default threads
     st = []
     for _ in range(N):
         rc, j, err = run_json([bin_, "stats"])
@@ -265,25 +265,25 @@ def main():
                       "speedup": summary([j["self_test"]["speedup"] for j in st])}
     R["load"]["after_stats"] = load()
 
-    # pbit demo --tasks 12 | pbit decide, and pbit demo --tasks 300 | pbit decide --budget-ms 300
+    # probbit demo --tasks 12 | probbit decide, and probbit demo --tasks 300 | probbit decide --budget-ms 300
     for key, demo, dec in [("decide_12", ["--tasks", "12"], []), ("decide_300", ["--tasks", "300"], ["--budget-ms", "300"])]:
         runs = []
         for _ in range(N):
             wall, rc1, rc2, d, err = pipeline(bin_, demo, dec)
             d = d or {}; tel = d.get("telemetry") or {}
-            runs.append({"wall_ms": wall, "demo_exit": rc1, "decide_exit": rc2, "pbit_ms": d.get("ms"), "verdict": d.get("verdict"),
+            runs.append({"wall_ms": wall, "demo_exit": rc1, "decide_exit": rc2, "probbit_ms": d.get("ms"), "verdict": d.get("verdict"),
                          "tier": d.get("tier"), "released": len(d.get("released") or []), "escalated": len(d.get("escalated") or []),
                          "violations": d.get("violations"), "sweeps": tel.get("sweeps"), "site_updates_per_s": tel.get("site_updates_per_s"),
                          "threads": tel.get("threads"), "peak_rss_mb_self": tel.get("peak_rss_mb"), "stderr": err or None})
-        R[key] = {"cmd": "pbit demo %s | pbit decide %s" % (" ".join(demo), " ".join(dec)), "runs": runs,
-                  "wall_ms": summary([r["wall_ms"] for r in runs]), "pbit_ms": summary([r["pbit_ms"] for r in runs]),
+        R[key] = {"cmd": "probbit demo %s | probbit decide %s" % (" ".join(demo), " ".join(dec)), "runs": runs,
+                  "wall_ms": summary([r["wall_ms"] for r in runs]), "probbit_ms": summary([r["probbit_ms"] for r in runs]),
                   "released": summary([r["released"] for r in runs]), "violations_max": max([r["violations"] or 0 for r in runs]),
                   "verdicts": sorted(set(str(r["verdict"]) for r in runs)), "exit_codes": sorted(set(r["decide_exit"] for r in runs)),
                   "site_updates_per_s": summary([r["site_updates_per_s"] for r in runs])}
     R["load"]["after_decide"] = load()
 
     # peak RSS of the 300-task decide (3 runs; the document is generated once)
-    tmp = tempfile.mkdtemp(prefix="pbit-bench-")
+    tmp = tempfile.mkdtemp(prefix="probbit-bench-")
     doc = os.path.join(tmp, "demo300.json")
     with open(doc, "w") as f:
         f.write(sh([bin_, "demo", "--tasks", "300"])[1])
@@ -294,11 +294,11 @@ def main():
         except Exception as e:
             R["errors"].append("peak_rss: %s: %s" % (type(e).__name__, e))
     if rss:
-        R["peak_rss_300"] = {"cmd": "pbit decide --budget-ms 300 < demo300.json", "method": rss[0][1],
+        R["peak_rss_300"] = {"cmd": "probbit decide --budget-ms 300 < demo300.json", "method": rss[0][1],
                              "bytes": summary([r[0] for r in rss]), "self_reported_peak_rss_mb": [r[2] for r in rss],
                              "verdicts": [r[3] for r in rss], "extra": [r[4] for r in rss]}
 
-    # lattice kernels (pbit-core/examples/kernels.rs), portable build, N runs
+    # lattice kernels (probbit-core/examples/kernels.rs), portable build, N runs
     kbin = exe(os.path.join(pdir, "examples", "kernels"))
     if os.path.exists(kbin):
         ks = []
@@ -312,20 +312,20 @@ def main():
             R["kernels"] = {"cmd": os.path.relpath(kbin).replace(os.sep, "/"), "checksums": sorted(set(k.get("chk") for k in ks)),
                             "lines": {name: summary([k.get(name) for k in ks]) for name in ks[0] if name != "chk"}}
     else:
-        R["kernels"] = {"skipped": "no kernels example at %s (build it with -p pbit-core --example kernels)" % os.path.relpath(kbin)}
+        R["kernels"] = {"skipped": "no kernels example at %s (build it with -p probbit-core --example kernels)" % os.path.relpath(kbin)}
     R["load"]["after_kernels"] = load()
 
     # bench/portable_vs_native.py (unchanged; its header line names the M4 whatever the machine)
     if a.native_dir:
         if platform.system() == "Windows":
-            # the script runs <dir>/pbit and <dir>/examples/kernels; CreateProcess appends no .exe to a name with a path
+            # the script runs <dir>/probbit and <dir>/examples/kernels; CreateProcess appends no .exe to a name with a path
             R["windows_shim"] = []
             for d in (pdir, a.native_dir):
-                for name in ("pbit", os.path.join("examples", "kernels")):
+                for name in ("probbit", os.path.join("examples", "kernels")):
                     src, dst = os.path.join(d, name + ".exe"), os.path.join(d, name)
                     if os.path.exists(src) and not os.path.exists(dst):
                         shutil.copyfile(src, dst); R["windows_shim"].append(os.path.relpath(dst).replace(os.sep, "/"))
-        env = dict(os.environ, PBIT_DIR=pdir, PBIT_NATIVE_DIR=a.native_dir)
+        env = dict(os.environ, PROBBIT_DIR=pdir, PROBBIT_NATIVE_DIR=a.native_dir)
         rc, out, err = sh([sys.executable, "bench/portable_vs_native.py"], env=env, timeout=1800)
         rows = {}
         for line in out.splitlines():
@@ -334,7 +334,7 @@ def main():
                 g = m.groups()
                 rows[g[0]] = {"portable": float(g[1]), "portable_iqr": [float(g[2]), float(g[3])], "native": float(g[4]),
                               "native_iqr": [float(g[5]), float(g[6])], "ratio": float(g[7])}
-        R["portable_vs_native"] = {"cmd": "PBIT_DIR=%s PBIT_NATIVE_DIR=%s python3 bench/portable_vs_native.py" % (
+        R["portable_vs_native"] = {"cmd": "PROBBIT_DIR=%s PROBBIT_NATIVE_DIR=%s python3 bench/portable_vs_native.py" % (
             os.path.relpath(pdir).replace(os.sep, "/"), os.path.relpath(a.native_dir).replace(os.sep, "/")), "exit": rc,
             "rows": rows, "stdout": out.splitlines(), "stderr_tail": err[-1500:] or None,
             "note": "the script's first line is hard-coded to the M4; the machine is the one in `machine`"}
@@ -343,7 +343,7 @@ def main():
     R["load"]["after_pvn"] = load()
 
     # bench/decide_threads.py (unchanged; same hard-coded header)
-    rc, out, err = sh([sys.executable, "bench/decide_threads.py"], env=dict(os.environ, PBIT=bin_), timeout=1800)
+    rc, out, err = sh([sys.executable, "bench/decide_threads.py"], env=dict(os.environ, PROBBIT=bin_), timeout=1800)
     th = {}
     for line in out.splitlines():
         m = DT.match(line)
@@ -354,7 +354,7 @@ def main():
         if m:
             g = m.groups(); th["default"] = {"threads": int(g[0]), "wall_ms": float(g[1]), "wall_iqr": [float(g[2]), float(g[3])],
                                              "sweeps": int(g[4]), "verdict": g[5]}
-    R["decide_threads"] = {"cmd": "PBIT=%s python3 bench/decide_threads.py" % a.bin, "exit": rc, "rows": th, "stdout": out.splitlines(),
+    R["decide_threads"] = {"cmd": "PROBBIT=%s python3 bench/decide_threads.py" % a.bin, "exit": rc, "rows": th, "stdout": out.splitlines(),
                            "stderr_tail": err[-1500:] or None}
     R["load"]["end"] = load()
 
@@ -379,7 +379,7 @@ def main():
     for name, line in KERNEL_CELLS.items():
         C[name] = (R.get("kernels", {}).get("lines") or {}).get(line)
     for key in ("decide_12", "decide_300"):
-        C[key + "_wall_ms"] = R[key]["wall_ms"]; C[key + "_pbit_ms"] = R[key]["pbit_ms"]; C[key + "_verdicts"] = R[key]["verdicts"]
+        C[key + "_wall_ms"] = R[key]["wall_ms"]; C[key + "_probbit_ms"] = R[key]["probbit_ms"]; C[key + "_verdicts"] = R[key]["verdicts"]
         C[key + "_exit_codes"] = R[key]["exit_codes"]
     C["decide_300_released"] = R["decide_300"]["released"]; C["decide_300_violations_max"] = R["decide_300"]["violations_max"]
     C["decide_300_site_updates_per_s"] = R["decide_300"]["site_updates_per_s"]

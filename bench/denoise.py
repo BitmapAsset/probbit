@@ -3,10 +3,10 @@
 Clean image = a filled ellipse; each pixel flipped with probability `flip`; program = one {0, 1} variable per pixel, unary
 +-eta (log-odds of the observed pixel), Potts +J between 4-neighbours. Oracle = row transfer matrix (2^W states per row):
 exact log Z, per-pixel P(1) and the MAP image (Viterbi). Baseline = ICM (iterated conditional modes from the noisy image).
-pbit = `pbit run` at defaults (tier, plan) and `pbit run --op sample --seed S` (verdict, released pixels' max |odds - exact|).
+probbit = `probbit run` at defaults (tier, plan) and `probbit run --op sample --seed S` (verdict, released pixels' max |odds - exact|).
 Usage: python3 bench/denoise.py [--w 8] [--h 12] [--images 3] [--seeds 4] [--write-example examples/denoise-8x12.json]"""
 import argparse, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 def lse(xs): m = max(xs); return m + math.log(sum(math.exp(x - m) for x in xs))
 def image(w, h, seed, flip):
     r = random.Random(seed); cx, cy, rx, ry = (w - 1) / 2, (h - 1) / 2, w * r.uniform(0.25, 0.4), h * r.uniform(0.25, 0.4)
@@ -17,7 +17,7 @@ def program(noisy, eta, J):
     h, w = len(noisy), len(noisy[0]); vid = lambda y, x: f"p{y}_{x}"
     pairs = [{"i": vid(y, x), "j": vid(y, x + 1), "potts": J} for y in range(h) for x in range(w - 1)] + \
             [{"i": vid(y, x), "j": vid(y + 1, x), "potts": J} for y in range(h - 1) for x in range(w)]
-    return {"pbit_ir": 1, "comment": f"Ising denoising {w}x{h}: unary +-{eta} toward the observed pixel, Potts {J} between 4-neighbours",
+    return {"probbit_ir": 1, "comment": f"Ising denoising {w}x{h}: unary +-{eta} toward the observed pixel, Potts {J} between 4-neighbours",
             "values": ["0", "1"], "vars": [{"id": vid(y, x), "h": {"1": eta if noisy[y][x] else -eta}} for y in range(h) for x in range(w)], "pairs": pairs}
 def exact(noisy, eta, J):
     h, w = len(noisy), len(noisy[0]); S = 1 << w; bit = lambda s, x: (s >> x) & 1
@@ -51,13 +51,13 @@ def icm(noisy, eta, J):
     return x
 def errs(a, b): return sum(p != q for ra, rb in zip(a, b) for p, q in zip(ra, rb))
 def run(prog, *args):
-    t = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--w', type=int, default=8); ap.add_argument('--h', type=int, default=12)
     ap.add_argument('--images', type=int, default=3); ap.add_argument('--seeds', type=int, default=4); ap.add_argument('--flip', type=float, default=0.1)
     ap.add_argument('--eta', type=float, default=1.1); ap.add_argument('--J', type=float, default=0.7); ap.add_argument('--write-example', default=None); a = ap.parse_args()
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "w": a.w, "h": a.h, "flip": a.flip, "eta": a.eta, "J": a.J, "seeds": a.seeds}))
     print("| image | noisy err | ICM err | exact MAP err | exact MPM err | default: tier, plan err, plan = MAP?, ms | sampler verdicts | released | max \\|odds - exact\\| | sampler MPM err | median ms |")
     print("|---|---|---|---|---|---|---|---|---|---|---|")

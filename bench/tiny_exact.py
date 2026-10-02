@@ -1,7 +1,7 @@
 # "where it loses" on tiny inputs: the 12-task demo answered by the exact tier (auto) vs the forced sampler (--mode sample,
 # default 200 ms budget + 50 ms polish). N = 7 each, wall ms median [IQR]; the exact answer is the reference for the sampler's odds.
 import os, json, subprocess, statistics
-BIN=os.environ.get('PBIT', 'target/release/pbit')
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
 demo=subprocess.run([BIN,"demo","--tasks","12"],capture_output=True,text=True).stdout
 def tv(a,b): ks=set(a)|set(b); return 0.5*sum(abs(a.get(k,0)-b.get(k,0)) for k in ks)
 ex=[]; sm=[]; worst=0.0; ref=None; vs=[]

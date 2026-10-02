@@ -1,5 +1,5 @@
 {
- "pbit_ir": 1,
+ "probbit_ir": 1,
  "comment": "knapsack: item i in (+h_i) or out; total weight of the items in <= limit",
  "values": [
   "out",

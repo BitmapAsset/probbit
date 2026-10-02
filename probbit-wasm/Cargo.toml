@@ -1,0 +1,17 @@
+[package]
+name = "probbit-wasm"
+description = "probbit in a browser: decide, run and evaluate as JSON-in / JSON-out functions on wasm32-unknown-unknown, without threads"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+probbit-core = { path = "../probbit-core" }
+probbit-ir = { path = "../probbit-ir" }
+probbit-decide = { path = "../probbit-decide" }

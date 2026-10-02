@@ -2,7 +2,7 @@
 
     from mock_judge import MockJudge
     with MockJudge({"urgent": 0.41, "team": {"billing": 0.48, "technical": 0.44}}, model="jev-latest", key="k") as judge:
-        answer = pbit.evaluate(request, judge=judge.url, auth_env="JUDGE_KEY")   # JUDGE_KEY=k in the environment
+        answer = probbit.evaluate(request, judge=judge.url, auth_env="JUDGE_KEY")   # JUDGE_KEY=k in the environment
 
 It answers any POST with the System One response shape of TypeSafe's OpenAPI 0.2.0 (https://api.typesafe.ai/openapi.json)
 and the Workers AI clef output schema (https://developers.cloudflare.com/workers-ai/models/clef/schema-output.json):

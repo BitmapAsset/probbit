@@ -1,5 +1,5 @@
 name: bench
-# Portability and benchmark matrix: pbit built, tested and measured on each standard GitHub runner OS; static and cross
+# Portability and benchmark matrix: probbit built, tested and measured on each standard GitHub runner OS; static and cross
 # builds; the installers (install.sh, install.ps1), the npm wrapper and the docs/agents.md recipes, each against a local
 # server (no release needed). Runs on pushes to its own branch and by hand only, never on pull requests or main: macOS
 # minutes bill at 10x on a private repo. Standard runners only. Results: BENCHMARK-MATRIX.md, PORTABILITY.md.
@@ -19,7 +19,7 @@ permissions:
   contents: read
 env:
   CARGO_TERM_COLOR: never
-  TAG: v0.4.0
+  TAG: v0.5.0
 
 jobs:
   bench:
@@ -52,7 +52,7 @@ jobs:
           start=$(date +%s)
           cargo build --release --locked --workspace
           echo "build_s=$(( $(date +%s) - start ))" >> "$GITHUB_OUTPUT"
-          cargo build --release --locked -p pbit-core --example kernels
+          cargo build --release --locked -p probbit-core --example kernels
           ls -l target/release/
       - name: build (-C target-cpu=native, for bench/portable_vs_native.py)
         id: native
@@ -61,29 +61,29 @@ jobs:
         env:
           RUSTFLAGS: -C target-cpu=native
         run: |
-          cargo build --release --locked -p pbit-cli --target-dir target/native
-          cargo build --release --locked -p pbit-core --example kernels --target-dir target/native
+          cargo build --release --locked -p probbit-cli --target-dir target/native
+          cargo build --release --locked -p probbit-core --example kernels --target-dir target/native
 
-      - name: callers (shell pipe, python/pbit.py tests, examples/node/decide.mjs)
+      - name: callers (shell pipe, python/probbit.py tests, examples/node/decide.mjs)
         id: callers
         continue-on-error: true
         run: |
-          B="$PWD/target/release/pbit"
+          B="$PWD/target/release/probbit"
           if [ "$RUNNER_OS" = Windows ]; then B="$(cygpath -w "$B.exe")"; fi
-          export PBIT_BIN="$B"
-          mkdir -p onpath && cp target/release/pbit* onpath/ 2> /dev/null || true
+          export PROBBIT_BIN="$B"
+          mkdir -p onpath && cp target/release/probbit* onpath/ 2> /dev/null || true
           export PATH="$PWD/onpath:$PATH"
           {
-            echo "\$ pbit demo --tasks 12 | pbit decide --pretty   ($(command -v pbit))"
-            pbit demo --tasks 12 | pbit decide --pretty > d12.json
+            echo "\$ probbit demo --tasks 12 | probbit decide --pretty   ($(command -v probbit))"
+            probbit demo --tasks 12 | probbit decide --pretty > d12.json
             echo "exit $?"; sed -n 1,8p d12.json
-            pbit demo --tasks 24 > router.json
-            echo "\$ pbit decide --budget-ms 200 < router.json > decision.json; case \$? in ..."
-            pbit decide --budget-ms 200 < router.json > decision.json && rc=0 || rc=$?
+            probbit demo --tasks 24 > router.json
+            echo "\$ probbit decide --budget-ms 200 < router.json > decision.json; case \$? in ..."
+            probbit decide --budget-ms 200 < router.json > decision.json && rc=0 || rc=$?
             case $rc in 0) echo answer ;; 1) echo infeasible ;; 2) echo "bad input" ;; 3) echo "refused: escalate" ;; *) echo "exit $rc"; exit 1 ;; esac
             $PY -c 'import json,sys; print(json.load(sys.stdin)["verdict"])' < decision.json
-            echo "\$ $PY python/test_pbit.py"
-            $PY python/test_pbit.py
+            echo "\$ $PY python/test_probbit.py"
+            $PY python/test_probbit.py
             echo "\$ $PY python/examples/route_agents.py"
             $PY python/examples/route_agents.py
             echo "\$ node examples/node/decide.mjs   (node $(node --version))"
@@ -97,19 +97,19 @@ jobs:
         run: |
           for s in sh bash dash; do
             command -v "$s" > /dev/null || continue
-            SH=$s sh scripts/bench/test_install_sh.sh target/release/pbit "$TARGET" "$TAG"
+            SH=$s sh scripts/bench/test_install_sh.sh target/release/probbit "$TARGET" "$TAG"
           done 2>&1 | tee "out/install-sh-$LABEL.txt"
 
       - name: npm wrapper (npm pack, npm install -g from 127.0.0.1, npm uninstall -g)
         id: npm
         if: runner.os == 'Linux'
         continue-on-error: true
-        run: sh scripts/bench/test_npm.sh target/release/pbit "$TARGET" "$TAG" 2>&1 | tee "out/npm-$LABEL.txt"
+        run: sh scripts/bench/test_npm.sh target/release/probbit "$TARGET" "$TAG" 2>&1 | tee "out/npm-$LABEL.txt"
       - name: npm wrapper on Windows (informational)
         id: npm_windows
         if: runner.os == 'Windows'
         continue-on-error: true
-        run: sh scripts/bench/test_npm.sh target/release/pbit.exe "$TARGET" "$TAG" 2>&1 | tee "out/npm-$LABEL.txt"
+        run: sh scripts/bench/test_npm.sh target/release/probbit.exe "$TARGET" "$TAG" 2>&1 | tee "out/npm-$LABEL.txt"
 
       # PowerShell scripts are started from bash (pwsh/powershell -File, exit code 1 on a throw): redirecting a native
       # command's stderr inside a pwsh step can itself raise under the runner's ErrorActionPreference = stop.
@@ -118,10 +118,10 @@ jobs:
         if: runner.os == 'Windows'
         continue-on-error: true
         run: |
-          sh scripts/bench/package_like_release.sh target/release/pbit.exe "$TARGET" "$TAG" "srv/good/$TAG"
+          sh scripts/bench/package_like_release.sh target/release/probbit.exe "$TARGET" "$TAG" "srv/good/$TAG"
           cp -R srv/good srv/bad
-          printf '%064d  %s\n' 0 "pbit-$TAG-$TARGET.zip" > "srv/bad/$TAG/pbit-$TAG-$TARGET.zip.sha256"
-          ls -l "srv/good/$TAG"; cat "srv/good/$TAG/pbit-$TAG-$TARGET.zip.sha256"
+          printf '%064d  %s\n' 0 "probbit-$TAG-$TARGET.zip" > "srv/bad/$TAG/probbit-$TAG-$TARGET.zip.sha256"
+          ls -l "srv/good/$TAG"; cat "srv/good/$TAG/probbit-$TAG-$TARGET.zip.sha256"
       - name: install.ps1 under PowerShell 7
         id: install_ps1_pwsh
         if: runner.os == 'Windows'
@@ -144,7 +144,7 @@ jobs:
         id: rss_ps
         if: runner.os == 'Windows'
         continue-on-error: true
-        run: pwsh -NoProfile -File scripts/bench/peak_rss_windows.ps1 -Exe target/release/pbit.exe -Out out/peak-rss-powershell.json
+        run: pwsh -NoProfile -File scripts/bench/peak_rss_windows.ps1 -Exe target/release/probbit.exe -Out out/peak-rss-powershell.json
 
       - name: cross build x86_64-apple-darwin on the arm64 runner (Rosetta smoke if present)
         id: cross_darwin
@@ -153,9 +153,9 @@ jobs:
         run: |
           {
             echo "\$ rustup target add x86_64-apple-darwin"; rustup target add x86_64-apple-darwin
-            echo "\$ cargo build --release --locked -p pbit-cli --target x86_64-apple-darwin"
-            cargo build --release --locked -p pbit-cli --target x86_64-apple-darwin 2>&1 | tail -1
-            B=target/x86_64-apple-darwin/release/pbit
+            echo "\$ cargo build --release --locked -p probbit-cli --target x86_64-apple-darwin"
+            cargo build --release --locked -p probbit-cli --target x86_64-apple-darwin 2>&1 | tail -1
+            B=target/x86_64-apple-darwin/release/probbit
             echo "\$ file $B"; file "$B"
             echo "\$ lipo -archs $B"; lipo -archs "$B"
             echo "\$ otool -L $B"; otool -L "$B"
@@ -164,8 +164,8 @@ jobs:
               echo "rosetta: present"
               echo "\$ arch -x86_64 $B version"; /usr/bin/arch -x86_64 "$B" version
               /usr/bin/arch -x86_64 "$B" demo --tasks 12 | /usr/bin/arch -x86_64 "$B" decide > d12-x86.json
-              echo "\$ arch -x86_64 pbit demo --tasks 12 | arch -x86_64 pbit decide: exit $?, verdict $(python3 -c 'import json; print(json.load(open("d12-x86.json"))["verdict"])')"
-              echo "\$ arch -x86_64 pbit stats (self-test under Rosetta)"
+              echo "\$ arch -x86_64 probbit demo --tasks 12 | arch -x86_64 probbit decide: exit $?, verdict $(python3 -c 'import json; print(json.load(open("d12-x86.json"))["verdict"])')"
+              echo "\$ arch -x86_64 probbit stats (self-test under Rosetta)"
               /usr/bin/arch -x86_64 "$B" stats | python3 -c 'import json,sys; s=json.load(sys.stdin)["self_test"]; print("1 thread", s["site_updates_per_s_1_thread"], "| threads", s["threads"], s["site_updates_per_s"])'
             else
               echo "rosetta: absent, build only"
@@ -192,7 +192,7 @@ jobs:
           if [ "${{ steps.native.outcome }}" = success ]; then set -- "$@" --native-dir target/native/release; fi
           if [ -f out/peak-rss-powershell.json ]; then set -- "$@" --attach peak_rss_powershell=out/peak-rss-powershell.json; fi
           if [ -f out/cross-x86_64-apple-darwin.txt ]; then set -- "$@" --attach cross_x86_64_apple_darwin=out/cross-x86_64-apple-darwin.txt; fi
-          $PY scripts/bench/matrix_bench.py --bin target/release/pbit --label "$LABEL" --out "out/bench-$LABEL.json" "$@"
+          $PY scripts/bench/matrix_bench.py --bin target/release/probbit --label "$LABEL" --out "out/bench-$LABEL.json" "$@"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -265,18 +265,18 @@ jobs:
           mkdir -p out
           {
             echo "\$ rustup target add x86_64-unknown-linux-musl"; rustup target add x86_64-unknown-linux-musl
-            echo "\$ cargo build --release --locked -p pbit-cli --target x86_64-unknown-linux-musl"
-            cargo build --release --locked -p pbit-cli --target x86_64-unknown-linux-musl 2>&1 | tail -1
-            B=target/x86_64-unknown-linux-musl/release/pbit
+            echo "\$ cargo build --release --locked -p probbit-cli --target x86_64-unknown-linux-musl"
+            cargo build --release --locked -p probbit-cli --target x86_64-unknown-linux-musl 2>&1 | tail -1
+            B=target/x86_64-unknown-linux-musl/release/probbit
             echo "\$ file $B"; file "$B"
             echo "\$ ldd $B"; ldd "$B" 2>&1 || true
             echo "size $(stat -c %s "$B") bytes"
             echo "\$ $B version"; "$B" version
             "$B" demo --tasks 12 | "$B" decide > d12.json
-            echo "\$ pbit demo --tasks 12 | pbit decide: exit $?, verdict $(python3 -c 'import json; print(json.load(open("d12.json"))["verdict"])')"
+            echo "\$ probbit demo --tasks 12 | probbit decide: exit $?, verdict $(python3 -c 'import json; print(json.load(open("d12.json"))["verdict"])')"
           } 2>&1 | tee out/musl-x86_64.txt
       - name: glibc build in the same VM (for the musl vs glibc comparison)
-        run: cargo build --release --locked -p pbit-cli 2>&1 | tail -1
+        run: cargo build --release --locked -p probbit-cli 2>&1 | tail -1
       - name: aarch64-unknown-linux-musl (cross-linked; qemu smoke if installable within 120 s)
         id: musl_arm
         continue-on-error: true
@@ -286,9 +286,9 @@ jobs:
             t0=$(date +%s); sudo apt-get update -qq && sudo apt-get install -y -qq gcc-aarch64-linux-gnu > /dev/null
             echo "linker installed in $(( $(date +%s) - t0 )) s"
             echo "\$ rustup target add aarch64-unknown-linux-musl"; rustup target add aarch64-unknown-linux-musl
-            echo "\$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p pbit-cli --target aarch64-unknown-linux-musl"
-            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p pbit-cli --target aarch64-unknown-linux-musl 2>&1 | tail -1
-            B=target/aarch64-unknown-linux-musl/release/pbit
+            echo "\$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p probbit-cli --target aarch64-unknown-linux-musl"
+            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p probbit-cli --target aarch64-unknown-linux-musl 2>&1 | tail -1
+            B=target/aarch64-unknown-linux-musl/release/probbit
             echo "\$ file $B"; file "$B"
             echo "size $(stat -c %s "$B") bytes"
             t0=$(date +%s)
@@ -297,7 +297,7 @@ jobs:
               Q=$(command -v qemu-aarch64-static || command -v qemu-aarch64)
               echo "\$ $(basename "$Q") $B version"; "$Q" "$B" version
               "$Q" "$B" demo --tasks 12 | "$Q" "$B" decide > d12-arm.json
-              echo "\$ qemu pbit demo --tasks 12 | qemu pbit decide: exit $?, verdict $(python3 -c 'import json; print(json.load(open("d12-arm.json"))["verdict"])')"
+              echo "\$ qemu probbit demo --tasks 12 | qemu probbit decide: exit $?, verdict $(python3 -c 'import json; print(json.load(open("d12-arm.json"))["verdict"])')"
             else
               echo "qemu-user-static: not installed within 120 s, build only"
             fi
@@ -308,11 +308,11 @@ jobs:
         run: |
           {
             echo "\$ rustup target add wasm32-wasip1"; rustup target add wasm32-wasip1
-            echo "\$ cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide"
-            set +e; cargo check --target wasm32-wasip1 -p pbit-ir -p pbit-decide > wasm.log 2>&1; rc=$?; set -e
+            echo "\$ cargo check --target wasm32-wasip1 -p probbit-ir -p probbit-decide"
+            set +e; cargo check --target wasm32-wasip1 -p probbit-ir -p probbit-decide > wasm.log 2>&1; rc=$?; set -e
             echo "exit $rc"; echo "first error: $(grep -m1 -E '^error' wasm.log || echo none)"; tail -3 wasm.log
           } 2>&1 | tee out/wasm32-wasip1.txt
-      - name: minimum Rust version probes (debug builds of pbit-cli)
+      - name: minimum Rust version probes (debug builds of probbit-cli)
         id: msrv
         continue-on-error: true
         run: |
@@ -321,7 +321,7 @@ jobs:
               rustup toolchain install "$v" --profile minimal --no-self-update > /dev/null 2>&1 || { echo "rust $v: toolchain install failed"; continue; }
               flags=--locked; how="--locked (Cargo.lock as committed, lockfile v4)"
               if [ "$v" = 1.72 ] || [ "$v" = 1.73 ]; then mv Cargo.lock Cargo.lock.v4; flags=""; how="Cargo.lock moved aside (cargo < 1.78 cannot read lockfile v4)"; fi
-              set +e; cargo "+$v" build $flags -p pbit-cli --target-dir "target/msrv-$v" > "msrv-$v.log" 2>&1; rc=$?; set -e
+              set +e; cargo "+$v" build $flags -p probbit-cli --target-dir "target/msrv-$v" > "msrv-$v.log" 2>&1; rc=$?; set -e
               if [ -f Cargo.lock.v4 ]; then rm -f Cargo.lock; mv Cargo.lock.v4 Cargo.lock; fi
               if [ "$rc" = 0 ]; then echo "rust $v: build ok, $how"; else echo "rust $v: build FAILED, $how: $(grep -m1 -E '^error' "msrv-$v.log")"; fi
             done
@@ -331,8 +331,8 @@ jobs:
         id: measure
         continue-on-error: true
         run: |
-          python3 scripts/bench/matrix_bench.py --bin target/x86_64-unknown-linux-musl/release/pbit --label linux-x86_64-musl --out out/bench-linux-x86_64-musl.json --note "static musl build, same VM as bench-linux-x86_64-gnu-samevm"
-          python3 scripts/bench/matrix_bench.py --bin target/release/pbit --label linux-x86_64-gnu-samevm --out out/bench-linux-x86_64-gnu-samevm.json --note "glibc build, same VM as the musl row"
+          python3 scripts/bench/matrix_bench.py --bin target/x86_64-unknown-linux-musl/release/probbit --label linux-x86_64-musl --out out/bench-linux-x86_64-musl.json --note "static musl build, same VM as bench-linux-x86_64-gnu-samevm"
+          python3 scripts/bench/matrix_bench.py --bin target/release/probbit --label linux-x86_64-gnu-samevm --out out/bench-linux-x86_64-gnu-samevm.json --note "glibc build, same VM as the musl row"
       - name: one JSON for the job
         if: always()
         env:
@@ -342,7 +342,7 @@ jobs:
           import glob, json, os, sys, time
           sys.path.insert(0, "scripts/bench")
           from matrix_bench import machine, runner, toolchain
-          out = {"schema": "pbit-cross/1", "label": "cross-linux-x86_64", "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+          out = {"schema": "probbit-cross/1", "label": "cross-linux-x86_64", "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                  "outcomes": json.loads(os.environ["OUTCOMES"]), "runner": runner(), "machine": machine(), "toolchain": toolchain(),
                  "transcripts": {os.path.basename(p): open(p).read().splitlines() for p in sorted(glob.glob("out/*.txt"))},
                  "bench": {os.path.basename(p)[6:-5]: json.load(open(p)) for p in sorted(glob.glob("out/bench-*.json"))}}

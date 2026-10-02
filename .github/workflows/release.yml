@@ -50,12 +50,12 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p pbit-cli --target ${{ matrix.target }}
+        run: cargo build --release --locked -p probbit-cli --target ${{ matrix.target }}
       - name: smoke test
         if: ${{ !matrix.cross }}
         shell: bash
         run: |
-          BIN="target/${{ matrix.target }}/release/pbit"
+          BIN="target/${{ matrix.target }}/release/probbit"
           [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
           RUN=""; [ "${{ matrix.rosetta }}" = "true" ] && RUN="arch -x86_64"
           $RUN "$BIN" version
@@ -64,12 +64,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          NAME="pbit-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          NAME="probbit-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$NAME"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp "target/${{ matrix.target }}/release/pbit.exe" "dist/$NAME/"
+            cp "target/${{ matrix.target }}/release/probbit.exe" "dist/$NAME/"
           else
-            cp "target/${{ matrix.target }}/release/pbit" "dist/$NAME/"
+            cp "target/${{ matrix.target }}/release/probbit" "dist/$NAME/"
           fi
           cp README.md LICENSE CHANGELOG.md "dist/$NAME/"
           cp -R examples python docs "dist/$NAME/"   # JSON examples, the Python wrapper, the IR spec and docs/agents.md
@@ -106,6 +106,6 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "pbit $GITHUB_REF_NAME" \
+            gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "probbit $GITHUB_REF_NAME" \
               --notes "Portable builds (no CPU pin) for Linux x86_64 (glibc >= 2.34, or static musl), Linux arm64 (static musl), macOS (Apple silicon and Intel) and Windows x86_64 (static C runtime). Verify an archive with the .sha256 file beside it. What changed: see CHANGELOG.md."
           fi

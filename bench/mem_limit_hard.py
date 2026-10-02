@@ -1,7 +1,7 @@
 # What the memory cap costs where the gate is marginal: 300-task --hard demo, decide --budget-ms 1000, 5 seeds,
 # unbounded vs --mem-limit-mb 8 / 2 (thinning x ~7 / ~27): released tasks, verdicts, peak RSS. Run alone.
 import os, json, subprocess, statistics
-BIN=os.environ.get('PBIT', 'target/release/pbit')
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
 demo=subprocess.run([BIN,"demo","--tasks","300","--hard"],capture_output=True,text=True).stdout
 print("machine: Apple M4 (4P+6E), 16 GB; 300-task --hard demo, decide --budget-ms 1000 (polish default), seeds 1-5")
 for lab,extra in [("unbounded",[]),("--mem-limit-mb 8",["--mem-limit-mb","8"]),("--mem-limit-mb 2",["--mem-limit-mb","2"])]:

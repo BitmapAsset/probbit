@@ -6,7 +6,7 @@ ceil(n / 3) + 1 tasks on C. Oracle: brute force over 3^n by the rules' direct me
 ILP baseline); baseline: greedy (tasks by best score, best feasible worker). Stdlib only.
 Usage: python3 bench/assign_side.py [--sizes 8,12] [--instances 2] [--seeds 4]"""
 import argparse, itertools, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 W = ["A", "B", "C"]
 def instance(n, seed):
     r = random.Random(seed); sc = [[round(r.uniform(-1, 1), 4) for _ in W] for _ in range(n)]; ef = [r.randint(1, 4) for _ in range(n)]
@@ -15,7 +15,7 @@ def instance(n, seed):
     return sc, ef, sorted(conf), -(-sum(ef) // 3) + 1, -(-n // 3) + 1
 def program(sc, ef, conf, lim, capc):
     n = len(sc); t = lambda i: f"t{i}"
-    return {"pbit_ir": 1, "comment": "assignment with side constraints", "values": W,
+    return {"probbit_ir": 1, "comment": "assignment with side constraints", "values": W,
         "vars": [{"id": t(i), "h": {w: sc[i][q] for q, w in enumerate(W)}} for i in range(n)],
         "linear": [{"terms": [[t(i), w, ef[i]] for i in range(n)], "limit": lim} for w in W],
         "all_different": [{"vars": [t(a), t(b)]} for a, b in conf],
@@ -45,11 +45,11 @@ def greedy(sc, ef, conf, lim, capc):
         if x[i] is None: return None
     return sum(sc[i][x[i]] for i in range(n))
 def run(prog, *args):
-    t0 = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t0 = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t0) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--sizes', default='8,12'); ap.add_argument('--instances', type=int, default=2); ap.add_argument('--seeds', type=int, default=4); a = ap.parse_args()
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "sizes": a.sizes, "instances": a.instances, "seeds": a.seeds}))
     print("| n | inst | feasible | optimum | greedy (gap) | default: verdict, tier, n_feasible, max \\|odds - brute\\|, plan = optimum?, ms | sampler verdicts | released | max \\|odds - brute\\| released | median ms |")
     print("|---|---|---|---|---|---|---|---|---|---|")

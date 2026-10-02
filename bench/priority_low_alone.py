@@ -1,8 +1,8 @@
-# The cost of --priority low (nice 10 + PRIO_DARWIN_BG on macOS) to pbit itself on an otherwise idle machine:
+# The cost of --priority low (nice 10 + PRIO_DARWIN_BG on macOS) to probbit itself on an otherwise idle machine:
 # 400-spin ring, 4 chains x 4000 sweeps on 4 threads, fixed work, 5 alternating runs, wall ms median [IQR]; answer identical.
 import os, json, subprocess, statistics
-BIN=os.environ.get('PBIT', 'target/release/pbit')
-n=400; ring=json.dumps({"pbit_ir":1,"values":["-","+"],"vars":[{"id":f"s{i}","h":{"+":0.1*((i%7)-3)}} for i in range(n)],"pairs":[{"i":f"s{i}","j":f"s{(i+1)%n}","table":[[0.4,-0.4],[-0.4,0.4]]} for i in range(n)]})
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
+n=400; ring=json.dumps({"probbit_ir":1,"values":["-","+"],"vars":[{"id":f"s{i}","h":{"+":0.1*((i%7)-3)}} for i in range(n)],"pairs":[{"i":f"s{i}","j":f"s{(i+1)%n}","table":[[0.4,-0.4],[-0.4,0.4]]} for i in range(n)]})
 r={}; ref=None
 for _ in range(5):
     for p in ["normal","low"]:

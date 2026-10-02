@@ -1,8 +1,8 @@
-# BENCHMARKS §6: does the exact tier's gap budget make `pbit run --op decide` give up on CSPs that
+# BENCHMARKS §6: does the exact tier's gap budget make `probbit run --op decide` give up on CSPs that
 # `--op exact` answers? Random 3-colourings G(n, m) near the threshold, one edge clamped. `python3 bench/csp_gap_probe.py`
-# (NS=100,150,200 DS=4.3,4.6 SEEDS=3 ALARM=6 BUDGET=200 (ms, --budget-ms of both ops); PBIT=path overrides the binary; stdlib only).
+# (NS=100,150,200 DS=4.3,4.6 SEEDS=3 ALARM=6 BUDGET=200 (ms, --budget-ms of both ops); PROBBIT=path overrides the binary; stdlib only).
 import json, random, subprocess, sys, time, os
-BIN = os.environ.get('PBIT', 'target/release/pbit')
+BIN = os.environ.get('PROBBIT', 'target/release/probbit')
 def prog(n, d, seed):
     r = random.Random(seed); m = int(round(n * d / 2)); E = set()
     while len(E) < m:
@@ -11,7 +11,7 @@ def prog(n, d, seed):
     vars_ = [{"id": f"v{i}", "h": {c: round(r.uniform(0, 0.3), 3) for c in cols}} for i in range(n)]
     a, b = E[0]; vars_[a]["clamp"] = "r"; vars_[b]["clamp"] = "g"
     caps = [{"limit": 1, "members": [[f"v{a}", c], [f"v{b}", c]]} for (a, b) in E for c in cols]
-    return {"pbit_ir": 1, "values": cols, "vars": vars_, "caps": caps}
+    return {"probbit_ir": 1, "values": cols, "vars": vars_, "caps": caps}
 def run(p, op, alarm):
     t = time.time()
     cp = subprocess.run(['perl', '-e', f'alarm {alarm}; exec @ARGV', BIN, 'run', '--op', op, '--budget-ms', os.environ.get('BUDGET', '200'), '--polish-ms', '0'],

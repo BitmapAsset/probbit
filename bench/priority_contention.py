@@ -1,9 +1,9 @@
-# Does --priority low yield under contention? Foreground = pbit run, 400-spin ring, 10 chains x 20000 sweeps on 10 threads,
-# fixed work, normal priority. Background hog = pbit run, same ring, 10 chains / 10 threads, --budget-ms 4000, at normal vs low priority.
-# (Deliberately concurrent: this measures sharing, not pbit alone.) 5 reps per condition, foreground wall ms median [IQR].
+# Does --priority low yield under contention? Foreground = probbit run, 400-spin ring, 10 chains x 20000 sweeps on 10 threads,
+# fixed work, normal priority. Background hog = probbit run, same ring, 10 chains / 10 threads, --budget-ms 4000, at normal vs low priority.
+# (Deliberately concurrent: this measures sharing, not probbit alone.) 5 reps per condition, foreground wall ms median [IQR].
 import os, json, subprocess, statistics, time
-BIN=os.environ.get('PBIT', 'target/release/pbit')
-n=400; ring=json.dumps({"pbit_ir":1,"values":["-","+"],"vars":[{"id":f"s{i}","h":{"+":0.1*((i%7)-3)}} for i in range(n)],"pairs":[{"i":f"s{i}","j":f"s{(i+1)%n}","table":[[0.4,-0.4],[-0.4,0.4]]} for i in range(n)]})
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
+n=400; ring=json.dumps({"probbit_ir":1,"values":["-","+"],"vars":[{"id":f"s{i}","h":{"+":0.1*((i%7)-3)}} for i in range(n)],"pairs":[{"i":f"s{i}","j":f"s{(i+1)%n}","table":[[0.4,-0.4],[-0.4,0.4]]} for i in range(n)]})
 fg=[BIN,"run","--op","sample","--sweeps","20000","--chains","10","--threads","10","--polish-ms","0"]
 def fore():
     d=json.loads(subprocess.run(fg,input=ring,capture_output=True,text=True).stdout); return d['ms'], d['telemetry']['process_cpu_ms']

@@ -1,7 +1,7 @@
 # Does the plan polish honour --threads? A/B of two binaries (OLD = before the polish honoured --threads, NEW = after) on the 300-task demo,
-# `pbit decide --sweeps 400 --polish-ms 50 --threads T`, N = 5 alternating; wall ms, process CPU ms (getrusage), plan log w; medians.
+# `probbit decide --sweeps 400 --polish-ms 50 --threads T`, N = 5 alternating; wall ms, process CPU ms (getrusage), plan log w; medians.
 import os, json, subprocess, statistics
-OLD=os.environ['OLD']; NEW=os.environ.get('NEW', 'target/release/pbit'); N=int(os.environ.get('N', '5'))
+OLD=os.environ['OLD']; NEW=os.environ.get('NEW', 'target/release/probbit'); N=int(os.environ.get('N', '5'))
 demo=subprocess.run([NEW,"demo","--tasks","300"],capture_output=True,text=True).stdout
 print(f"machine: Apple M4, 16 GB; N = {N} alternating; columns: threads | binary | wall ms | process CPU ms | CPU/wall | plan log w (min-max)")
 for t in ("1","4"):

@@ -17,19 +17,19 @@ jobs:
         run: cargo build --release --workspace
       - name: test
         run: cargo test --release --workspace
-      - name: demo pipeline (pbit demo | pbit decide)
+      - name: demo pipeline (probbit demo | probbit decide)
         shell: bash
         run: |
-          cargo run --release -p pbit-cli -- demo --tasks 12 | cargo run --release -p pbit-cli -- decide --pretty
-          cargo run --release -p pbit-cli -- demo --tasks 300 | cargo run --release -p pbit-cli -- decide --budget-ms 300
-      - name: processor spec sheet (pbit stats)
-        run: cargo run --release -p pbit-cli -- stats --pretty
+          cargo run --release -p probbit-cli -- demo --tasks 12 | cargo run --release -p probbit-cli -- decide --pretty
+          cargo run --release -p probbit-cli -- demo --tasks 300 | cargo run --release -p probbit-cli -- decide --budget-ms 300
+      - name: processor spec sheet (probbit stats)
+        run: cargo run --release -p probbit-cli -- stats --pretty
       - name: agent_router example
         run: cargo run --release --example agent_router
   wasm:
-    # pbit-wasm, the browser build (wasm32-unknown-unknown, no threads): built as playground/build.sh builds it, then loaded by
+    # probbit-wasm, the browser build (wasm32-unknown-unknown, no threads): built as playground/build.sh builds it, then loaded by
     # Node with the playground's own loader and run on the 300-task demo (--sweeps 3200) and the evaluate example; check.mjs
-    # exits 1 unless both answer with 0 violations. The no-thread = 4-thread equality runs natively in `test` (pbit-wasm tests).
+    # exits 1 unless both answer with 0 violations. The no-thread = 4-thread equality runs natively in `test` (probbit-wasm tests).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -39,7 +39,7 @@ jobs:
       - name: build
         run: sh playground/build.sh
       - name: run under Node
-        run: node --version && node playground/check.mjs playground/pbit.wasm
+        run: node --version && node playground/check.mjs playground/probbit.wasm
   release-targets:
     # The release archives' targets that `test` does not build (release.yml runs only on tags): built here, so a tag is
     # never the first build of a target. Static musl (x86_64 runs here, aarch64 is cross-linked), macOS x86_64 under
@@ -65,12 +65,12 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release --locked -p pbit-cli --target ${{ matrix.target }}
+        run: cargo build --release --locked -p probbit-cli --target ${{ matrix.target }}
       - name: smoke test and what it links
         if: ${{ matrix.run }}
         shell: bash
         run: |
-          BIN="target/${{ matrix.target }}/release/pbit"
+          BIN="target/${{ matrix.target }}/release/probbit"
           [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
           RUN=""; [ "${{ matrix.rosetta }}" = "true" ] && RUN="arch -x86_64"
           $RUN "$BIN" version

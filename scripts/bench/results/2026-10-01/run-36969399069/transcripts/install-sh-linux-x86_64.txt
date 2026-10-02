@@ -1,114 +1,114 @@
-shell under test: sh (/usr/bin/sh); archive: pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-== 1. piped to sh, PBIT_INSTALL_DIR set, version given without the v
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:47945/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+shell under test: sh (/usr/bin/sh); archive: probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+== 1. piped to sh, PROBBIT_INSTALL_DIR set, version given without the v
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:47945/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
   sha256 ok  37c918a62f2d0f930df5487beec13a4076ab647f5ed0f5a3e818ec32129b57dc
-  installed  /tmp/tmp.Xso7PrR0aM/bin/pbit (pbit 0.2.0)
+  installed  /tmp/tmp.Xso7PrR0aM/bin/probbit (probbit 0.2.0)
 
 /tmp/tmp.Xso7PrR0aM/bin is not on your PATH. Add it (e.g. in ~/.profile):
   export PATH="/tmp/tmp.Xso7PrR0aM/bin:$PATH"
 
 Next:
-  /tmp/tmp.Xso7PrR0aM/bin/pbit version
-  /tmp/tmp.Xso7PrR0aM/bin/pbit demo --tasks 12 | /tmp/tmp.Xso7PrR0aM/bin/pbit decide --pretty
-  /tmp/tmp.Xso7PrR0aM/bin/pbit stats --pretty
-$ command -v pbit: /tmp/tmp.Xso7PrR0aM/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+  /tmp/tmp.Xso7PrR0aM/bin/probbit version
+  /tmp/tmp.Xso7PrR0aM/bin/probbit demo --tasks 12 | /tmp/tmp.Xso7PrR0aM/bin/probbit decide --pretty
+  /tmp/tmp.Xso7PrR0aM/bin/probbit stats --pretty
+$ command -v probbit: /tmp/tmp.Xso7PrR0aM/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 == 2. default directory, scratch HOME
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:47945/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:47945/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
   sha256 ok  37c918a62f2d0f930df5487beec13a4076ab647f5ed0f5a3e818ec32129b57dc
-  installed  /usr/local/bin/pbit (pbit 0.2.0)
+  installed  /usr/local/bin/probbit (probbit 0.2.0)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: installed to /usr/local/bin/probbit (probbit 0.2.0)
 == 3. tampered .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:47945/bad/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit install: error: checksum mismatch for pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 37c918a62f2d0f930df5487beec13a4076ab647f5ed0f5a3e818ec32129b57dc (nothing was installed)
-ok: rejected, /tmp/tmp.Xso7PrR0aM/badbin/pbit absent
-== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
-pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:47945/bad/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit install: error: checksum mismatch for probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got 37c918a62f2d0f930df5487beec13a4076ab647f5ed0f5a3e818ec32129b57dc (nothing was installed)
+ok: rejected, /tmp/tmp.Xso7PrR0aM/badbin/probbit absent
+== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail
+probbit install: error: set PROBBIT_VERSION (e.g. v0.2.0) together with PROBBIT_DOWNLOAD_BASE
 ok: rejected
 install.sh: all checks passed (sh, x86_64-unknown-linux-gnu)
-shell under test: bash (/usr/bin/bash); archive: pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-== 1. piped to bash, PBIT_INSTALL_DIR set, version given without the v
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:47791/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+shell under test: bash (/usr/bin/bash); archive: probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+== 1. piped to bash, PROBBIT_INSTALL_DIR set, version given without the v
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:47791/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
   sha256 ok  e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20
-  installed  /tmp/tmp.o3x4RvtLf6/bin/pbit (pbit 0.2.0)
+  installed  /tmp/tmp.o3x4RvtLf6/bin/probbit (probbit 0.2.0)
 
 /tmp/tmp.o3x4RvtLf6/bin is not on your PATH. Add it (e.g. in ~/.profile):
   export PATH="/tmp/tmp.o3x4RvtLf6/bin:$PATH"
 
 Next:
-  /tmp/tmp.o3x4RvtLf6/bin/pbit version
-  /tmp/tmp.o3x4RvtLf6/bin/pbit demo --tasks 12 | /tmp/tmp.o3x4RvtLf6/bin/pbit decide --pretty
-  /tmp/tmp.o3x4RvtLf6/bin/pbit stats --pretty
-$ command -v pbit: /tmp/tmp.o3x4RvtLf6/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+  /tmp/tmp.o3x4RvtLf6/bin/probbit version
+  /tmp/tmp.o3x4RvtLf6/bin/probbit demo --tasks 12 | /tmp/tmp.o3x4RvtLf6/bin/probbit decide --pretty
+  /tmp/tmp.o3x4RvtLf6/bin/probbit stats --pretty
+$ command -v probbit: /tmp/tmp.o3x4RvtLf6/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 == 2. default directory, scratch HOME
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:47791/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:47791/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
   sha256 ok  e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20
-  installed  /usr/local/bin/pbit (pbit 0.2.0)
+  installed  /usr/local/bin/probbit (probbit 0.2.0)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: installed to /usr/local/bin/probbit (probbit 0.2.0)
 == 3. tampered .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:47791/bad/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit install: error: checksum mismatch for pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20 (nothing was installed)
-ok: rejected, /tmp/tmp.o3x4RvtLf6/badbin/pbit absent
-== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
-pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:47791/bad/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit install: error: checksum mismatch for probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20 (nothing was installed)
+ok: rejected, /tmp/tmp.o3x4RvtLf6/badbin/probbit absent
+== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail
+probbit install: error: set PROBBIT_VERSION (e.g. v0.2.0) together with PROBBIT_DOWNLOAD_BASE
 ok: rejected
 install.sh: all checks passed (bash, x86_64-unknown-linux-gnu)
-shell under test: dash (/usr/bin/dash); archive: pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-== 1. piped to dash, PBIT_INSTALL_DIR set, version given without the v
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:43227/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+shell under test: dash (/usr/bin/dash); archive: probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+== 1. piped to dash, PROBBIT_INSTALL_DIR set, version given without the v
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:43227/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
   sha256 ok  e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20
-  installed  /tmp/tmp.qoTkSAx0zg/bin/pbit (pbit 0.2.0)
+  installed  /tmp/tmp.qoTkSAx0zg/bin/probbit (probbit 0.2.0)
 
 /tmp/tmp.qoTkSAx0zg/bin is not on your PATH. Add it (e.g. in ~/.profile):
   export PATH="/tmp/tmp.qoTkSAx0zg/bin:$PATH"
 
 Next:
-  /tmp/tmp.qoTkSAx0zg/bin/pbit version
-  /tmp/tmp.qoTkSAx0zg/bin/pbit demo --tasks 12 | /tmp/tmp.qoTkSAx0zg/bin/pbit decide --pretty
-  /tmp/tmp.qoTkSAx0zg/bin/pbit stats --pretty
-$ command -v pbit: /tmp/tmp.qoTkSAx0zg/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+  /tmp/tmp.qoTkSAx0zg/bin/probbit version
+  /tmp/tmp.qoTkSAx0zg/bin/probbit demo --tasks 12 | /tmp/tmp.qoTkSAx0zg/bin/probbit decide --pretty
+  /tmp/tmp.qoTkSAx0zg/bin/probbit stats --pretty
+$ command -v probbit: /tmp/tmp.qoTkSAx0zg/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 == 2. default directory, scratch HOME
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:43227/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:43227/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
   sha256 ok  e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20
-  installed  /usr/local/bin/pbit (pbit 0.2.0)
+  installed  /usr/local/bin/probbit (probbit 0.2.0)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: installed to /usr/local/bin/pbit (pbit 0.2.0)
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: installed to /usr/local/bin/probbit (probbit 0.2.0)
 == 3. tampered .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-unknown-linux-gnu
-  fetching http://127.0.0.1:43227/bad/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit install: error: checksum mismatch for pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20 (nothing was installed)
-ok: rejected, /tmp/tmp.qoTkSAx0zg/badbin/pbit absent
-== 4. PBIT_DOWNLOAD_BASE without PBIT_VERSION must fail
-pbit install: error: set PBIT_VERSION (e.g. v0.2.0) together with PBIT_DOWNLOAD_BASE
+probbit install: v0.2.0 for x86_64-unknown-linux-gnu
+  fetching http://127.0.0.1:43227/bad/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit install: error: checksum mismatch for probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got e8af8a4b598c3b72de2d5cf6f75e610a768bb59c74a97333413e395626ecae20 (nothing was installed)
+ok: rejected, /tmp/tmp.qoTkSAx0zg/badbin/probbit absent
+== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail
+probbit install: error: set PROBBIT_VERSION (e.g. v0.2.0) together with PROBBIT_DOWNLOAD_BASE
 ok: rejected
 install.sh: all checks passed (dash, x86_64-unknown-linux-gnu)

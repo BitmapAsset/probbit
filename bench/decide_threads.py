@@ -1,7 +1,7 @@
-# `pbit decide` (router sampler path) latency + CPU vs --threads at fixed work (300-task demo, 4 chains x 400 sweeps,
+# `probbit decide` (router sampler path) latency + CPU vs --threads at fixed work (300-task demo, 4 chains x 400 sweeps,
 # polish 0); asserts identical odds + plan + gate across thread counts (the determinism contract), then default-path budget check.
 import os, json, subprocess, statistics
-BIN=os.environ.get('PBIT', 'target/release/pbit')
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
 demo=subprocess.run([BIN,"demo","--tasks","300"],capture_output=True,text=True).stdout
 print("machine: Apple M4 (4P+6E), 16 GB; 300-task demo, decide --sweeps 400 --chains 4 --polish-ms 0 (fixed work), 5 runs each, medians [IQR]")
 ref=None

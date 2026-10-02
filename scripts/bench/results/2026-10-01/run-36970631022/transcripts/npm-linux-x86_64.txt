@@ -1,70 +1,70 @@
 node v22.23.3, npm 10.9.9, target x86_64-unknown-linux-gnu
 npm notice
-npm notice 📦  pbit@0.2.0
+npm notice 📦  probbit@0.2.0
 npm notice Tarball Contents
 npm notice 11.4kB LICENSE
 npm notice 1.6kB README.md
-npm notice 1.7kB bin/pbit.js
+npm notice 1.7kB bin/probbit.js
 npm notice 5.0kB install.js
 npm notice 736B package.json
 npm notice Tarball Details
-npm notice name: pbit
+npm notice name: probbit
 npm notice version: 0.2.0
-npm notice filename: pbit-0.2.0.tgz
+npm notice filename: probbit-0.2.0.tgz
 npm notice package size: 7.8 kB
 npm notice unpacked size: 20.4 kB
 npm notice shasum: 320a800c1bea6a3746f73441bf36f3c59c0c3499
 npm notice integrity: sha512-iuUFO3Oex1JpW[...]HF+pBF0+I8ChA==
 npm notice total files: 5
 npm notice
-== npm pack -> pbit-0.2.0.tgz:
+== npm pack -> probbit-0.2.0.tgz:
    package/LICENSE
    package/install.js
-   package/bin/pbit.js
+   package/bin/probbit.js
    package/package.json
    package/README.md
-== 1. npm install -g pbit-0.2.0.tgz (PBIT_DOWNLOAD_BASE=http://127.0.0.1:35951/good)
+== 1. npm install -g probbit-0.2.0.tgz (PROBBIT_DOWNLOAD_BASE=http://127.0.0.1:35951/good)
 
-> pbit@0.2.0 postinstall
+> probbit@0.2.0 postinstall
 > node install.js
 
-pbit: fetching http://127.0.0.1:35951/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit: installed v0.2.0 (x86_64-unknown-linux-gnu), sha256 b1064e26615a3f68433e0578f4e117faf2ebf5bf767008faa7953a8e3bcbf8cc
+probbit: fetching http://127.0.0.1:35951/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit: installed v0.2.0 (x86_64-unknown-linux-gnu), sha256 b1064e26615a3f68433e0578f4e117faf2ebf5bf767008faa7953a8e3bcbf8cc
 
 added 1 package in 340ms
-$ which pbit: /tmp/tmp.S8EG08YHen/prefix1/bin/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+$ which probbit: /tmp/tmp.S8EG08YHen/prefix1/bin/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 exit codes through the wrapper: infeasible 1 (want 1), bad input 2 (want 2), declined 3 (want 3)
 
 removed 1 package in 139ms
-ok: uninstalled, /tmp/tmp.S8EG08YHen/prefix1/bin/pbit absent
+ok: uninstalled, /tmp/tmp.S8EG08YHen/prefix1/bin/probbit absent
 == 2. npm install -g --ignore-scripts: the binary is fetched on first run
 
 added 1 package in 152ms
-pbit: the binary is not installed yet, fetching it now
-pbit: fetching http://127.0.0.1:35951/good/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit: installed v0.2.0 (x86_64-unknown-linux-gnu), sha256 b1064e26615a3f68433e0578f4e117faf2ebf5bf767008faa7953a8e3bcbf8cc
-pbit 0.2.0
+probbit: the binary is not installed yet, fetching it now
+probbit: fetching http://127.0.0.1:35951/good/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit: installed v0.2.0 (x86_64-unknown-linux-gnu), sha256 b1064e26615a3f68433e0578f4e117faf2ebf5bf767008faa7953a8e3bcbf8cc
+probbit 0.2.0
 ok: first run fetched it; second run used it
-== 3. PBIT_BINARY=<local build> (no download)
+== 3. PROBBIT_BINARY=<local build> (no download)
 
-> pbit@0.2.0 postinstall
+> probbit@0.2.0 postinstall
 > node install.js
 
-pbit: using /home/runner/work/pbit/pbit/target/release/pbit (PBIT_BINARY)
+probbit: using /home/runner/work/probbit/probbit/target/release/probbit (PROBBIT_BINARY)
 
 added 1 package in 181ms
-pbit 0.2.0
+probbit 0.2.0
 == 4. tampered .sha256: npm install must fail
 
-> pbit@0.2.0 postinstall
+> probbit@0.2.0 postinstall
 > node install.js
 
-pbit: fetching http://127.0.0.1:35951/bad/v0.2.0/pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-pbit: checksum mismatch for pbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got b1064e26615a3f68433e0578f4e117faf2ebf5bf767008faa7953a8e3bcbf8cc; nothing was installed
+probbit: fetching http://127.0.0.1:35951/bad/v0.2.0/probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
+probbit: checksum mismatch for probbit-v0.2.0-x86_64-unknown-linux-gnu.tar.gz: expected 0000000000000000000000000000000000000000000000000000000000000000, got b1064e26615a3f68433e0578f4e117faf2ebf5bf767008faa7953a8e3bcbf8cc; nothing was installed
 npm error code 1
-npm error path /tmp/tmp.S8EG08YHen/prefix4/lib/node_modules/pbit
+npm error path /tmp/tmp.S8EG08YHen/prefix4/lib/node_modules/probbit
 npm error command failed
 npm error command sh -c node install.js
 npm error A complete log of this run can be found in: /home/runner/.npm/_logs/2026-10-02T05_49_49_925Z-debug-0.log

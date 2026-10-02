@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """R19.7 (P2.2 family 4): subset selection under a budget with pair correlations (portfolio shape). n assets in a sector chain:
 x_i in {out, in}, h_in ~ U(-0.2, 1.0) (return minus risk), cost 1..10, budget 35% of the total cost (one IR `linear` rule), and a
-Potts term J_i ~ U(-0.6, 0.6) between neighbours i, i+1 (+J when both take the same choice). No exact tier of pbit applies
+Potts term J_i ~ U(-0.6, 0.6) between neighbours i, i+1 (+J when both take the same choice). No exact tier of probbit applies
 (a weighted rule plus a chain of pairs): defaults sample. Independent oracle: exact DP over (position, choice, used budget):
 log Z, P(in) per asset, the optimum. Baseline: greedy by h_in / cost ignoring the pairs (scored with them). Stdlib only.
 Usage: python3 bench/portfolio.py [--sizes 30,60] [--instances 2] [--seeds 4]"""
 import argparse, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 NEG = float('-inf')
 def lse2(a, b): m = max(a, b); return m if m == NEG else m + math.log(math.exp(a - m) + math.exp(b - m))
 def instance(n, seed):
     r = random.Random(seed); h = [round(r.uniform(-0.2, 1.0), 4) for _ in range(n)]; w = [r.randint(1, 10) for _ in range(n)]
     J = [round(r.uniform(-0.6, 0.6), 4) for _ in range(n - 1)]; return h, w, J, sum(w) * 7 // 20
 def program(h, w, J, L):
-    n = len(h); return {"pbit_ir": 1, "comment": "budgeted selection with neighbour correlations", "values": ["out", "in"],
+    n = len(h); return {"probbit_ir": 1, "comment": "budgeted selection with neighbour correlations", "values": ["out", "in"],
         "vars": [{"id": f"a{i}", "h": {"in": h[i]}} for i in range(n)], "pairs": [{"i": f"a{i}", "j": f"a{i+1}", "potts": J[i]} for i in range(n - 1)],
         "linear": [{"terms": [[f"a{i}", "in", w[i]] for i in range(n)], "limit": L}]}
 def logw(x, h, J): return sum(h[i] for i in range(len(x)) if x[i]) + sum(J[i] for i in range(len(x) - 1) if x[i] == x[i + 1])
@@ -47,11 +47,11 @@ def greedy(h, w, J, L):
         if h[i] > 0 and load + w[i] <= L: x[i] = 1; load += w[i]
     return logw(x, h, J)
 def run(prog, *args):
-    t0 = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t0 = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t0) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--sizes', default='30,60'); ap.add_argument('--instances', type=int, default=2); ap.add_argument('--seeds', type=int, default=4); a = ap.parse_args()
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "sizes": a.sizes, "instances": a.instances, "seeds": a.seeds}))
     print("| n | inst | DP log Z | DP optimum | greedy (gap) | default: tier, plan log w (gap), ms | sampler verdicts | released | max \\|odds - DP\\| | median ms |")
     print("|---|---|---|---|---|---|---|---|---|---|")

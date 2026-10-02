@@ -3,38 +3,38 @@
 version = 4
 
 [[package]]
-name = "pbit-cli"
-version = "0.4.0"
+name = "probbit-cli"
+version = "0.5.0"
 dependencies = [
- "pbit-core",
- "pbit-decide",
- "pbit-ir",
+ "probbit-core",
+ "probbit-decide",
+ "probbit-ir",
 ]
 
 [[package]]
-name = "pbit-core"
-version = "0.4.0"
+name = "probbit-core"
+version = "0.5.0"
 
 [[package]]
-name = "pbit-decide"
-version = "0.4.0"
+name = "probbit-decide"
+version = "0.5.0"
 dependencies = [
- "pbit-core",
- "pbit-ir",
+ "probbit-core",
+ "probbit-ir",
 ]
 
 [[package]]
-name = "pbit-ir"
-version = "0.4.0"
+name = "probbit-ir"
+version = "0.5.0"
 dependencies = [
- "pbit-core",
+ "probbit-core",
 ]
 
 [[package]]
-name = "pbit-wasm"
-version = "0.4.0"
+name = "probbit-wasm"
+version = "0.5.0"
 dependencies = [
- "pbit-core",
- "pbit-decide",
- "pbit-ir",
+ "probbit-core",
+ "probbit-decide",
+ "probbit-ir",
 ]

@@ -6,7 +6,7 @@ just before it (`implies`), and a token budget (one `linear` rule: search 3, rea
 Oracle: brute force over 6^T by the rules' direct meaning. Baseline: greedy step by step (best feasible next action).
 Stdlib only. Usage: python3 bench/agent_planner.py [--steps 6,7] [--instances 2] [--seeds 4] [--write-example examples/agent-plan-6.json]"""
 import argparse, itertools, json, math, os, random, subprocess, time
-PBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'pbit')
+PROBBIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'target', 'release', 'probbit')
 A = ["search", "read", "code", "test", "ask", "stop"]; COST = {"search": 3, "read": 2, "code": 5, "test": 4, "ask": 1, "stop": 0}
 PREF = {("search", "read"): 0.8, ("read", "code"): 0.6, ("code", "test"): 0.9, ("test", "stop"): 0.7, ("test", "code"): 0.3, ("ask", "code"): 0.4}
 def instance(T, seed):
@@ -16,7 +16,7 @@ def instance(T, seed):
     return h, tab, 3 * T
 def program(T, h, tab, budget):
     s = lambda t: f"s{t}"
-    return {"pbit_ir": 1, "comment": f"tool-call plan over {T} steps", "values": A,
+    return {"probbit_ir": 1, "comment": f"tool-call plan over {T} steps", "values": A,
         "vars": [{"id": s(t), "h": h[t], **({"forbid": ["test"]} if t == 0 else {})} for t in range(T)],
         "pairs": [{"i": s(t), "j": s(t + 1), "table": tab} for t in range(T - 1)],
         "caps": [{"value": "search", "limit": 2}, {"value": "ask", "limit": 1}],
@@ -46,12 +46,12 @@ def greedy(T, h, tab, budget):
         x.append(max(cands, key=lambda a: h[t][a] + (tab[A.index(x[-1])][A.index(a)] if x else 0.0)))
     return lw(x, h, tab)
 def run(prog, *args):
-    t0 = time.time(); p = subprocess.run([PBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
+    t0 = time.time(); p = subprocess.run([PROBBIT, 'run', *args], input=json.dumps(prog), capture_output=True, text=True)
     return p.returncode, json.loads(p.stdout), (time.time() - t0) * 1e3
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--steps', default='6,7'); ap.add_argument('--instances', type=int, default=2)
     ap.add_argument('--seeds', type=int, default=4); ap.add_argument('--write-example', default=None); a = ap.parse_args()
-    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PBIT)).stdout.strip()
+    commit = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=os.path.dirname(PROBBIT)).stdout.strip()
     print(json.dumps({"commit": commit, "load_before": os.getloadavg(), "steps": a.steps, "instances": a.instances, "seeds": a.seeds}))
     print("| T | inst | feasible plans | optimum log w | greedy (gap) | default: verdict, tier, n_feasible, max \\|odds - brute\\|, plan = optimum?, ms | sampler verdicts | released | max \\|odds - brute\\| released | median ms |")
     print("|---|---|---|---|---|---|---|---|---|---|")

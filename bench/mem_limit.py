@@ -2,7 +2,7 @@
 # tiers; unthinned vs a tight cap (heavy thinning): false releases = released task with TV(sampler odds, exact odds) > tv_tol.
 # (B) memory: 300-task demo, --budget-ms 3000, peak RSS without / with --mem-limit-mb 16 (3 runs each).
 import os, json, subprocess, statistics
-BIN=os.environ.get('PBIT', 'target/release/pbit')
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
 def run(args, inp): p=subprocess.run([BIN]+args,input=inp,capture_output=True,text=True); return json.loads(p.stdout)
 def tv(a,b): ks=set(a)|set(b); return 0.5*sum(abs(a.get(k,0)-b.get(k,0)) for k in ks)
 print("machine: Apple M4 (4P+6E), 16 GB")

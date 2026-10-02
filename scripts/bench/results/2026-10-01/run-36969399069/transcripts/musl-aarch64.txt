@@ -12,12 +12,12 @@ No VM guests are running outdated hypervisor (qemu) binaries on this host.
 linker installed in 13 s
 $ rustup target add aarch64-unknown-linux-musl
 info: downloading component rust-std
-$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p pbit-cli --target aarch64-unknown-linux-musl
+$ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc cargo build --release --locked -p probbit-cli --target aarch64-unknown-linux-musl
     Finished `release` profile [optimized] target(s) in 19.31s
-$ file target/aarch64-unknown-linux-musl/release/pbit
-target/aarch64-unknown-linux-musl/release/pbit: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=6b9608f1981e300fe1d149bd279ce6fa0ba3e383, not stripped
+$ file target/aarch64-unknown-linux-musl/release/probbit
+target/aarch64-unknown-linux-musl/release/probbit: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=6b9608f1981e300fe1d149bd279ce6fa0ba3e383, not stripped
 size 1477600 bytes
 qemu-user-static installed in 4 s
-$ qemu-aarch64-static target/aarch64-unknown-linux-musl/release/pbit version
-pbit 0.2.0
-$ qemu pbit demo --tasks 12 | qemu pbit decide: exit 0, verdict exact
+$ qemu-aarch64-static target/aarch64-unknown-linux-musl/release/probbit version
+probbit 0.2.0
+$ qemu probbit demo --tasks 12 | qemu probbit decide: exit 0, verdict exact

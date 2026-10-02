@@ -1,37 +1,37 @@
 PowerShell 7.6.6 (Core)
 == 1. & .\install.ps1 -DownloadBase http://127.0.0.1:50051/good -Version v0.2.0 -InstallDir <tmp>\bin1 -AddToPath
-pbit install: v0.2.0 for x86_64-pc-windows-msvc
-  fetching http://127.0.0.1:50051/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
+probbit install: v0.2.0 for x86_64-pc-windows-msvc
+  fetching http://127.0.0.1:50051/good/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
   sha256 ok  2d92b06698b3c78f38a8d6e018313e67c2c8091c0dd8914de19b002bfe07ac0a
-  installed  C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1\pbit.exe (pbit 0.2.0)
-  added      C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1 to your user PATH (new terminals see it)
+  installed  C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1\probbit.exe (probbit 0.2.0)
+  added      C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1 to your user PATH (new terminals see it)
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-$ (Get-Command pbit).Source: C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1\pbit.exe
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide | ConvertFrom-Json: exit 0, verdict exact, released 12 of 12
-ok: user PATH now starts with C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1
-== 2. irm | iex form: PBIT_* environment variables, script text through Invoke-Expression
-pbit install: v0.2.0 for x86_64-pc-windows-msvc
-  fetching http://127.0.0.1:50051/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+$ (Get-Command probbit).Source: C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1\probbit.exe
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide | ConvertFrom-Json: exit 0, verdict exact, released 12 of 12
+ok: user PATH now starts with C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin1
+== 2. irm | iex form: PROBBIT_* environment variables, script text through Invoke-Expression
+probbit install: v0.2.0 for x86_64-pc-windows-msvc
+  fetching http://127.0.0.1:50051/good/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
   sha256 ok  2d92b06698b3c78f38a8d6e018313e67c2c8091c0dd8914de19b002bfe07ac0a
-  installed  C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2\pbit.exe (pbit 0.2.0)
+  installed  C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2\probbit.exe (probbit 0.2.0)
 
-C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2 is on this session's PATH only. To keep it, run (or re-run this installer with -AddToPath):
-  [Environment]::SetEnvironmentVariable('Path', 'C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2;' + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
+C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2 is on this session's PATH only. To keep it, run (or re-run this installer with -AddToPath):
+  [Environment]::SetEnvironmentVariable('Path', 'C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2;' + [Environment]::GetEnvironmentVariable('Path', 'User'), 'User')
 
 Next:
-  pbit version
-  pbit demo --tasks 12 | pbit decide --pretty
-  pbit stats --pretty
-ok: pbit 0.2.0 in C:\Users\runneradmin\AppData\Local\Temp\pbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2
+  probbit version
+  probbit demo --tasks 12 | probbit decide --pretty
+  probbit stats --pretty
+ok: probbit 0.2.0 in C:\Users\runneradmin\AppData\Local\Temp\probbit-ps-test-44171e0b07df4a84a1b827d360f11481\bin2
 == 3. a wrong .sha256 must fail and install nothing
-pbit install: v0.2.0 for x86_64-pc-windows-msvc
-  fetching http://127.0.0.1:50051/bad/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
-rejected: pbit install: checksum mismatch for pbit-v0.2.0-x86_64-pc-windows-msvc.zip: expected 0000000000000000000000000000000000000000000000000000000000000000, got 2d92b06698b3c78f38a8d6e018313e67c2c8091c0dd8914de19b002bfe07ac0a (nothing was installed)
+probbit install: v0.2.0 for x86_64-pc-windows-msvc
+  fetching http://127.0.0.1:50051/bad/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
+rejected: probbit install: checksum mismatch for probbit-v0.2.0-x86_64-pc-windows-msvc.zip: expected 0000000000000000000000000000000000000000000000000000000000000000, got 2d92b06698b3c78f38a8d6e018313e67c2c8091c0dd8914de19b002bfe07ac0a (nothing was installed)
 == 4. -DownloadBase without -Version must fail
-rejected: pbit install: set -Version (or PBIT_VERSION), e.g. v0.2.0, together with -DownloadBase
+rejected: probbit install: set -Version (or PROBBIT_VERSION), e.g. v0.2.0, together with -DownloadBase
 install.ps1: all checks passed (PowerShell 7.6.6)

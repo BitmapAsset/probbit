@@ -1,0 +1,15 @@
+[package]
+name = "probbit-decide"
+description = "Joint constrained decision engine: feasible plans, plan odds, marginals, what-if, calibrated refusal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../README.md"
+keywords = ["p-bit", "assignment", "routing", "constraints", "probabilistic"]
+categories = ["algorithms", "science"]
+
+[dependencies]
+probbit-core = { path = "../probbit-core", version = "0.5.0" }
+probbit-ir = { path = "../probbit-ir", version = "0.5.0" }

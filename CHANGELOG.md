@@ -3,6 +3,27 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.5.0 - unreleased
+
+### Changed
+- **Renamed: pbit → probbit everywhere** (crates, binary, env vars, MCP tools, Python module, npm package). 'p-bit' remains the
+  term for the probabilistic bit. No behaviour changes.
+  - Crates `probbit-core`, `probbit-ir`, `probbit-decide`, `probbit-cli` (binary `probbit`), `probbit-wasm`; Rust paths
+    `probbit_core::` etc.
+  - Environment variables `PROBBIT_THEME`, `PROBBIT_CONFIG`, `PROBBIT_CHAINS`, `PROBBIT_THREADS`, `PROBBIT_CPU_LIMIT`,
+    `PROBBIT_MEM_LIMIT_MB`, `PROBBIT_PRIORITY`; installer variables `PROBBIT_VERSION`, `PROBBIT_INSTALL_DIR`,
+    `PROBBIT_DOWNLOAD_BASE`, ...; config file `probbit.json`; cache directory `$XDG_CACHE_HOME/probbit`.
+  - MCP server `probbit`, tools `probbit_decide`, `probbit_run`, `probbit_stats`, `probbit_demo`, `probbit_evaluate`.
+  - The IR's version key `probbit_ir` and the evaluate request's namespaced `probbit` block; the `engine` field reads
+    `probbit 0.5.0`. The documents are otherwise byte for byte the 0.4.0 documents (proven on the 7 golden inputs and every
+    example; the golden test is now `stdout_matches_the_0_5_0_goldens`).
+  - Python module `probbit.py` (`ProbbitError`, ...), npm package and bin `probbit`, release assets `probbit-<tag>-<target>`,
+    the playground's `probbit.wasm` / `probbit-wasm.js` (C ABI `probbit_*`, clock import `probbit.now_ms`).
+  - The terminal hero screen spells probbit (its command column is 6 characters wider to fit the longer name).
+  - Repository `github.com/BitmapAsset/probbit` (the old URLs redirect); the IR schema `$id` now names it (it named a wrong owner).
+- Migration: rename the binary, env vars, MCP tool names, `"pbit_ir": 1` → `"probbit_ir": 1` and the evaluate `pbit` block →
+  `probbit` in your documents and scripts; nothing else changes.
+
 ## 0.4.0 - unreleased
 
 ### Added

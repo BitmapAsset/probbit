@@ -1,7 +1,7 @@
-# --cpu-limit on the router path (pbit decide): 300-task demo, --sweeps 1000 --chains 4 --threads 4 --polish-ms 0, N = 3 per level.
+# --cpu-limit on the router path (probbit decide): 300-task demo, --sweeps 1000 --chains 4 --threads 4 --polish-ms 0, N = 3 per level.
 # utilisation = process CPU ms / (sample_ms x threads) (sampler phase only; the exact tiers' decline is outside the duty cycle).
 import os, json, subprocess, statistics
-BIN=os.environ.get('PBIT', 'target/release/pbit')
+BIN=os.environ.get('PROBBIT', 'target/release/probbit')
 demo=subprocess.run([BIN,"demo","--tasks","300"],capture_output=True,text=True).stdout; ref=None
 for pct in [100,50,25]:
     u=[]; w=[]; c=[]

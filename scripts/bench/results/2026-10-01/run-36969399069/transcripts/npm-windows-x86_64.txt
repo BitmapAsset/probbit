@@ -1,70 +1,70 @@
 node v22.23.3, npm 10.9.9, target x86_64-pc-windows-msvc
 npm notice
-npm notice package: pbit@0.2.0
+npm notice package: probbit@0.2.0
 npm notice Tarball Contents
 npm notice 11.6kB LICENSE
 npm notice 1.6kB README.md
-npm notice 1.8kB bin/pbit.js
+npm notice 1.8kB bin/probbit.js
 npm notice 5.1kB install.js
 npm notice 760B package.json
 npm notice Tarball Details
-npm notice name: pbit
+npm notice name: probbit
 npm notice version: 0.2.0
-npm notice filename: pbit-0.2.0.tgz
+npm notice filename: probbit-0.2.0.tgz
 npm notice package size: 7.8 kB
 npm notice unpacked size: 20.8 kB
 npm notice shasum: e627337a1e165cdfb101bedbc6a178a24c3695d6
 npm notice integrity: sha512-H/JH23iMhSCfA[...]r7vAu3FiTe5YQ==
 npm notice total files: 5
 npm notice
-== npm pack -> pbit-0.2.0.tgz:
+== npm pack -> probbit-0.2.0.tgz:
    package/LICENSE
    package/install.js
-   package/bin/pbit.js
+   package/bin/probbit.js
    package/package.json
    package/README.md
-== 1. npm install -g pbit-0.2.0.tgz (PBIT_DOWNLOAD_BASE=http://127.0.0.1:50031/good)
+== 1. npm install -g probbit-0.2.0.tgz (PROBBIT_DOWNLOAD_BASE=http://127.0.0.1:50031/good)
 
-> pbit@0.2.0 postinstall
+> probbit@0.2.0 postinstall
 > node install.js
 
-pbit: fetching http://127.0.0.1:50031/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
-pbit: installed v0.2.0 (x86_64-pc-windows-msvc), sha256 0bdba294ede614491cece19d55406c58549b3d73eadb284da3cab9533821979e
+probbit: fetching http://127.0.0.1:50031/good/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
+probbit: installed v0.2.0 (x86_64-pc-windows-msvc), sha256 0bdba294ede614491cece19d55406c58549b3d73eadb284da3cab9533821979e
 
 added 1 package in 2s
-$ which pbit: /tmp/tmp.rL0yBj3eyt/prefix1/pbit
-$ pbit version: pbit 0.2.0
-$ pbit demo --tasks 12 | pbit decide: exit 0, verdict exact | released 12 of 12
+$ which probbit: /tmp/tmp.rL0yBj3eyt/prefix1/probbit
+$ probbit version: probbit 0.2.0
+$ probbit demo --tasks 12 | probbit decide: exit 0, verdict exact | released 12 of 12
 exit codes through the wrapper: infeasible 1 (want 1), bad input 2 (want 2), declined 3 (want 3)
 
 removed 1 package in 353ms
-ok: uninstalled, /tmp/tmp.rL0yBj3eyt/prefix1/pbit absent
+ok: uninstalled, /tmp/tmp.rL0yBj3eyt/prefix1/probbit absent
 == 2. npm install -g --ignore-scripts: the binary is fetched on first run
 
 added 1 package in 585ms
-pbit: the binary is not installed yet, fetching it now
-pbit: fetching http://127.0.0.1:50031/good/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
-pbit: installed v0.2.0 (x86_64-pc-windows-msvc), sha256 0bdba294ede614491cece19d55406c58549b3d73eadb284da3cab9533821979e
-pbit 0.2.0
+probbit: the binary is not installed yet, fetching it now
+probbit: fetching http://127.0.0.1:50031/good/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
+probbit: installed v0.2.0 (x86_64-pc-windows-msvc), sha256 0bdba294ede614491cece19d55406c58549b3d73eadb284da3cab9533821979e
+probbit 0.2.0
 ok: first run fetched it; second run used it
-== 3. PBIT_BINARY=<local build> (no download)
+== 3. PROBBIT_BINARY=<local build> (no download)
 
-> pbit@0.2.0 postinstall
+> probbit@0.2.0 postinstall
 > node install.js
 
-pbit: using D:\a\pbit\pbit\target\release\pbit.exe (PBIT_BINARY)
+probbit: using D:\a\probbit\probbit\target\release\probbit.exe (PROBBIT_BINARY)
 
 added 1 package in 651ms
-pbit 0.2.0
+probbit 0.2.0
 == 4. tampered .sha256: npm install must fail
 
-> pbit@0.2.0 postinstall
+> probbit@0.2.0 postinstall
 > node install.js
 
-pbit: fetching http://127.0.0.1:50031/bad/v0.2.0/pbit-v0.2.0-x86_64-pc-windows-msvc.zip
-pbit: checksum mismatch for pbit-v0.2.0-x86_64-pc-windows-msvc.zip: expected 0000000000000000000000000000000000000000000000000000000000000000, got 0bdba294ede614491cece19d55406c58549b3d73eadb284da3cab9533821979e; nothing was installed
+probbit: fetching http://127.0.0.1:50031/bad/v0.2.0/probbit-v0.2.0-x86_64-pc-windows-msvc.zip
+probbit: checksum mismatch for probbit-v0.2.0-x86_64-pc-windows-msvc.zip: expected 0000000000000000000000000000000000000000000000000000000000000000, got 0bdba294ede614491cece19d55406c58549b3d73eadb284da3cab9533821979e; nothing was installed
 npm error code 1
-npm error path C:\Users\RUNNER~1\AppData\Local\Temp\tmp.rL0yBj3eyt\prefix4\node_modules\pbit
+npm error path C:\Users\RUNNER~1\AppData\Local\Temp\tmp.rL0yBj3eyt\prefix4\node_modules\probbit
 npm error command failed
 npm error command C:\Windows\system32\cmd.exe /d /s /c node install.js
 npm error A complete log of this run can be found in: C:\Users\runneradmin\AppData\Local\npm-cache\_logs\2026-10-02T05_34_43_751Z-debug-0.log

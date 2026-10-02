@@ -6,7 +6,7 @@ body:
     id: what
     attributes:
       label: What happened
-      description: The exact command and what it returned. If the problem JSON fits, paste it; otherwise the `pbit demo` flags and seed that produce it.
+      description: The exact command and what it returned. If the problem JSON fits, paste it; otherwise the `probbit demo` flags and seed that produce it.
       render: shell
     validations:
       required: true
@@ -20,7 +20,7 @@ body:
     id: env
     attributes:
       label: Environment
-      description: Output of `pbit version` and `pbit stats --pretty` (machine, build features, effective controls), plus the OS.
+      description: Output of `probbit version` and `probbit stats --pretty` (machine, build features, effective controls), plus the OS.
       render: json
     validations:
       required: true
@@ -36,4 +36,4 @@ body:
       label: Checks
       options:
         - label: I ran it with the default build (no `target-cpu=native`) or said so above.
-        - label: If timing is involved, I noted the machine load (`pbit stats` reports it) and whether other work was running.
+        - label: If timing is involved, I noted the machine load (`probbit stats` reports it) and whether other work was running.
