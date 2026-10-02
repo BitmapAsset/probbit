@@ -9,25 +9,30 @@
 //!   pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--pretty]  # a general pbit-ir JSON program
 //!   --progress [MS] (decide, run): one JSONL telemetry line on stderr every MS ms (default 100) while the decision runs
 //!   pbit stats [--sweeps N]                  # the processor's spec sheet: machine, build, effective controls + source, measured updates/s
+//!   pbit mcp                                 # a Model Context Protocol server on stdio (tools pbit_decide, pbit_run, pbit_stats, pbit_demo)
 //!   pbit version
 //!   pbit <command> --help | -h               # usage, every flag with its default, exit codes
-//!   pbit --help | -h                          # the usage above (stdout, exit 0)
+//!   pbit --help | -h                          # the usage above (stdout, exit 0); at a terminal the hero screen
+//!   --top, --summary (decide, run), --live (demo), --plain: see `pbit <command> --help`; visuals go to stderr (theme.rs)
 mod json;
+mod mcp;
 mod run;
 mod sys;
+mod theme;
+mod tui;
 use json::{num, obj, str as jstr, Json};
 use pbit_decide::*;
 use std::io::{Read, Write};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-struct Named { p: Problem, tasks: Vec<String>, workers: Vec<String> }
+pub(crate) struct Named { pub(crate) p: Problem, pub(crate) tasks: Vec<String>, pub(crate) workers: Vec<String> }
 
 /// Every stderr line goes through here. `eprintln!` panicked when stderr was a pipe whose reader had gone (`pbit decide --bogus
 /// 2>&1 >/dev/null | true`, or `--progress` into `head -c 1`: exit 134 with panic = abort, the decision lost to a log line). A
 /// failed write to stderr is ignored: the command keeps its stdout and its exit code.
 fn err_line(s: &str) { let _ = writeln!(std::io::stderr(), "{s}"); }
-fn fail(msg: &str) -> ! { err_line(&format!("pbit: {msg}")); std::process::exit(2) }
+fn fail(msg: &str) -> ! { tui::top_stop(); err_line(&format!("pbit: {msg}")); std::process::exit(2) }
 /// `--budget-ms inf` / `1e300` aborted (exit 134: the deadline Duration overflowed) and `NaN` never stopped sampling
 fn budget_ms(args: &[String]) -> f64 {
     let b: f64 = arg(args, "--budget-ms", 200.0);
@@ -68,7 +73,7 @@ fn emit(s: &str) { emit_raw(&format!("{s}\n")) }
 
 /// JSON problem -> Problem. See README "Problem format"; the strict contract (types, unknown fields, duplicates, empty domains,
 /// structured errors) is docs/pbit-ir-json.md "Input contract".
-fn from_json(j: &Json) -> Result<Named, json::InErr> {
+pub(crate) fn from_json(j: &Json) -> Result<Named, json::InErr> {
     use json::{arr, at, fields, ix, limit, opt, req, schema, text, value, weight};
     fields(j, "", &["workers", "tasks", "affinity", "comment"])?;
     if let Some(c) = opt(j, "comment") { text(c, "comment")?; }
@@ -132,7 +137,60 @@ fn bad_input(what: &str, e: json::InErr) -> ! {
 /// gate diagnostic that could not be estimated (R-hat / bound infinite: too few samples, chains stuck at different values) is
 /// allowed only on a refusal (exit 3): it prints as null and is named in `gate.non_finite`. Any other non-finite number = no
 /// answer: ONE structured `numeric` error on stdout, exit 3 (it used to print `null`, or a literal `inf`, with exit 0).
-fn finish(mut doc: Json, code: i32, pretty: bool) -> i32 {
+/// How a decision is printed (decide, run): `--pretty`; `--summary` = the compact document (`summary_doc`); with both and a
+/// terminal on stderr (and no NO_COLOR / --plain / PBIT_THEME=plain), the summary box there too.
+pub(crate) struct View { pretty: bool, summary: bool, cmd: &'static str, boxed: Option<theme::Theme> }
+impl View {
+    fn new(args: &[String], cmd: &'static str) -> View {
+        let (pretty, summary) = (args.iter().any(|a| a == "--pretty"), args.iter().any(|a| a == "--summary"));
+        View { pretty, summary, cmd, boxed: if pretty && summary { theme::stderr(args) } else { None } }
+    }
+}
+/// `--summary`: the answer without its per-item tables (`plan`, `odds` / `marginals`, `released` / `escalated` lists,
+/// `release_reason`, `top_plans`), every other field as is, plus `"summary": 1`, `counts` (items, released, escalated) and the
+/// items an agent should look at first: `worst_released` (up to 5: on a sampled answer the largest error bars, on an exact one
+/// the smallest gap between the top two odds) and `worst_escalated` (up to 5, largest error bars), each with its id, plan value
+/// and that value's probability `p`, top two odds, release reason and error bar (`bar` = z x max(MCSE short, MCSE long), the number the gate compares with
+/// `tv_tol`; null where it is not estimable). Same verdict and exit code as the full document.
+fn summary_doc(doc: &Json, bars: &[f64], cmd: &str) -> Json {
+    let Json::Obj(v) = doc else { return doc.clone() };
+    let ids = |k: &str| doc.get(k).and_then(Json::as_arr).map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect::<Vec<_>>());
+    let (released, escalated) = (ids("released"), ids("escalated"));
+    let odds = doc.get(if cmd == "decide" { "odds" } else { "marginals" }); let plan = doc.get("plan"); let reasons = doc.get("release_reason");
+    let pos: std::collections::HashMap<&str, usize> = plan.or(odds).and_then(Json::as_obj).map_or_else(Default::default, |o| o.iter().enumerate().map(|(i, (k, _))| (k.as_str(), i)).collect());
+    let bar = |id: &str| pos.get(id).and_then(|&i| bars.get(i)).copied();
+    let margin = |id: &str| odds.and_then(|o| o.get(id)).and_then(Json::as_obj).map_or(1.0, |o| { let p: Vec<f64> = o.iter().filter_map(|(_, x)| x.as_f64()).collect();
+        p.first().copied().unwrap_or(1.0) - p.get(1).copied().unwrap_or(0.0) });
+    let key = |id: &str| if bars.is_empty() { margin(id) } else { bar(id).map_or(f64::INFINITY, |b| if b.is_nan() { f64::NEG_INFINITY } else { -b }) };
+    let item = |id: &str| { let mut f = vec![("id", jstr(id))];
+        if let Some(x) = plan.and_then(|p| p.get(id)) { f.push(("value", x.clone()));
+            // the plan's own value and its probability: the joint plan need not hold each item's most likely value
+            if let Some(q) = x.as_str().and_then(|w| odds.and_then(|o| o.get(id)).and_then(|o| o.get(w))) { f.push(("p", q.clone())); } }
+        f.push(("odds", Json::Obj(odds.and_then(|o| o.get(id)).and_then(Json::as_obj).map_or(vec![], |o| o.iter().take(2).cloned().collect()))));
+        if let Some(r) = reasons.and_then(|r| r.get(id)) { f.push(("reason", r.clone())); }
+        if !bars.is_empty() { f.push(("bar", bar(id).filter(|b| b.is_finite()).map_or(Json::Null, num))); }
+        obj(f) };
+    let worst = |l: &[String]| { let mut l: Vec<&String> = l.iter().collect(); l.sort_by(|a, b| key(a).total_cmp(&key(b))); Json::Arr(l.into_iter().take(5).map(|id| item(id)).collect()) };
+    let n = if cmd == "decide" { doc.get("tasks").cloned() } else { doc.get("program").and_then(|p| p.get("vars")).cloned() };
+    let mut counts = vec![(if cmd == "decide" { "tasks" } else { "vars" }, n.unwrap_or(Json::Null))];
+    if let (Some(r), Some(e)) = (&released, &escalated) { counts.push(("released", num(r.len() as f64))); counts.push(("escalated", num(e.len() as f64))); }
+    // counts go right after the verdict (and its tier / reason)
+    let mut out: Vec<(String, Json)> = vec![]; let mut after_verdict = false;
+    for (k, x) in v {
+        if after_verdict && k != "tier" && k != "reason" { out.push(("counts".into(), obj(std::mem::take(&mut counts)))); after_verdict = false; }
+        match k.as_str() {
+            "plan" | "odds" | "marginals" | "release_reason" | "top_plans" | "escalated" => {}
+            "released" => {
+                if let Some(r) = &released { out.push(("worst_released".into(), worst(r))); }
+                if let Some(e) = &escalated { out.push(("worst_escalated".into(), worst(e))); } }
+            _ => { out.push((k.clone(), x.clone()));
+                if k == "engine" { out.push(("summary".into(), num(1.0))); }
+                if k == "verdict" { after_verdict = true; } } } }
+    if after_verdict { out.push(("counts".into(), obj(counts))); }
+    Json::Obj(out)
+}
+fn finish(mut doc: Json, code: i32, view: &View, bars: &[f64]) -> i32 {
+    tui::top_stop();
     let mut bad = vec![]; json::non_finite(&doc, "", &mut bad);
     if !bad.is_empty() {
         if code == 3 && bad.iter().all(|p| p.starts_with("gate.")) {
@@ -143,7 +201,10 @@ fn finish(mut doc: Json, code: i32, pretty: bool) -> i32 {
             err_line(&format!("pbit: numeric failure: {}", e.msg)); emit(&json::write(&e.to_json(), false)); return 3;
         }
     }
-    emit(&json::write(&doc, pretty)); code
+    if view.summary { doc = summary_doc(&doc, bars, view.cmd); }
+    emit(&json::write(&doc, view.pretty));
+    if let Some(th) = view.boxed { let _ = std::io::stderr().write_all(tui::summary_box(th, view.cmd, &doc).as_bytes()); }
+    code
 }
 /// stdin -> a parsed document, or `bad_input`
 fn read_doc(args: &[String]) -> Json { json::parse(&read_stdin(args)).unwrap_or_else(|e| bad_input(if e.code == "schema" { "" } else { "bad input: " }, e)) }
@@ -168,16 +229,16 @@ const CONTROLS: [&str; 5] = ["--chains", "--threads", "--cpu-limit", "--mem-limi
 /// Per command: (flags taking a value, switches); `check_flags` enforces exactly these and `help` lists exactly these (R19.8).
 fn flags_of(cmd: &str) -> (Vec<&'static str>, Vec<&'static str>) {
     match cmd {
-        "decide" => ([&SEARCH[..], &CONTROLS[..], &["--mode", "--max-input-mb"]].concat(), vec!["--pretty", "--progress"]),
-        "run" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms", "--max-input-mb"]].concat(), vec!["--pretty", "--progress"]),
-        "stats" => ([&CONTROLS[..], &["--sweeps"]].concat(), vec!["--pretty"]),
-        "demo" => (vec!["--tasks", "--seed"], vec!["--hard"]),
-        "ir" => (vec!["--max-input-mb"], vec![]),
+        "decide" => ([&SEARCH[..], &CONTROLS[..], &["--mode", "--max-input-mb"]].concat(), vec!["--pretty", "--progress", "--summary", "--top", "--plain"]),
+        "run" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms", "--max-input-mb"]].concat(), vec!["--pretty", "--progress", "--summary", "--top", "--plain"]),
+        "stats" => ([&CONTROLS[..], &["--sweeps"]].concat(), vec!["--pretty", "--plain"]),
+        "demo" => (vec!["--tasks", "--seed"], vec!["--hard", "--live", "--plain"]),
+        "ir" => (vec!["--max-input-mb"], vec!["--plain"]),
         _ => (vec![], vec![]),
     }
 }
 /// One line per flag for `help` (R19.8, P3.1); `help` panics on a flag without a line (test `every_command_has_help`).
-const FLAG_HELP: [(&str, &str); 24] = [
+const FLAG_HELP: [(&str, &str); 28] = [
     ("--budget-ms", "N    sampler wall-clock budget, ms (default 200)"), ("--seed", "N    random seed (default 7)"),
     ("--exact-limit", "N    plans the exact enumeration may count before it declines (default 2000000)"),
     ("--exact-ms", "N    wall-clock cap on the exact tiers that run before the sampler (opt-in; absent = no cap)"),
@@ -194,6 +255,10 @@ const FLAG_HELP: [(&str, &str); 24] = [
     ("--pretty", "indented JSON"), ("--progress", "[MS]    one JSONL telemetry line on stderr every MS ms (default 100)"),
     ("--tasks", "N    tasks to generate (default 12)"), ("--hard", "tight quotas + strong affinity"),
     ("--max-input-mb", "N    largest stdin document read, MB (default 256; 0 = no limit)"),
+    ("--summary", "compact answer: verdict, counts, gate, the 5 worst released and escalated items, telemetry (no per-item tables);\n      with --pretty and a terminal on stderr, also a boxed summary there"),
+    ("--top", "live monitor on stderr while it runs (tier, sweeps, updates/s, CPU, peak RSS, gate; 10 Hz), erased at exit;\n      only with a terminal on stderr; stdout unchanged"),
+    ("--live", "the router story on stderr: exact tiers, then a live field of p-bits from the real chains, the gate, the verdict\n      (default when stdout and stderr are both terminals; --tasks defaults to 300; stdout, if not a terminal, gets the JSON problem)"),
+    ("--plain", "no colour, no animation (as NO_COLOR=1 or PBIT_THEME=plain); output otherwise unchanged"),
 ];
 /// `pbit <command> --help` / `-h` (R19.8, P3.1): what it does, every flag it accepts, exit codes. None = not a command.
 fn help(cmd: &str) -> Option<String> {
@@ -203,6 +268,7 @@ fn help(cmd: &str) -> Option<String> {
         "demo" => ("Emit a synthetic agent-routing document (JSON) for `pbit decide`.", "pbit demo [flags] > router.json"),
         "ir" => ("Print a router document as pbit-ir v0 text (the hardware-facing form).", "pbit ir < router.json"),
         "stats" => ("The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.", "pbit stats [flags]"),
+        "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools pbit_decide,\n  pbit_run, pbit_stats, pbit_demo: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "pbit mcp"),
         "version" => ("Print the version.", "pbit version"), _ => return None };
     let (vals, sw) = flags_of(cmd); let mut h = format!("usage: {usage}\n  {what}\n");
     if !vals.is_empty() || !sw.is_empty() { h.push_str("flags:\n"); }
@@ -318,6 +384,9 @@ fn read_stdin(args: &[String]) -> String {
     if let Err(e) = std::io::stdin().lock().take(if mb == 0 { u64::MAX } else { (cap as u64).saturating_add(1) }).read_to_end(&mut b) {
         bad_input("", json::schema("", format!("cannot read stdin: {e}"))) }
     if mb > 0 && b.len() > cap { bad_input("bad input: ", json::limit("", format!("stdin holds more than --max-input-mb {mb} MB"))) }
+    // One leading UTF-8 byte-order mark is skipped (RFC 8259 lets a parser ignore it): Windows PowerShell 5.1 adds one to every
+    // pipe into a native program, so `pbit demo | pbit decide` exited 2 there (`unexpected character` at byte 0)
+    if b.starts_with(&[0xEF, 0xBB, 0xBF]) { b.drain(..3); }
     String::from_utf8(b).unwrap_or_else(|e| bad_input("", json::schema("", format!("bad JSON: invalid UTF-8 at byte {}", e.utf8_error().valid_up_to()))))
 }
 /// --priority low|normal (flag > PBIT_PRIORITY > config > normal), applied before any chain thread starts.
@@ -339,31 +408,32 @@ fn controls(args: &[String]) -> (usize, usize, u32) {
 /// caps by the occupancy-count DP, cap-free trees by sum-/max-product, the rest by enumeration / the frontier DP). Prints the
 /// exact (or infeasible) answer and exits; returns if the tier declines.
 #[allow(clippy::too_many_arguments)]
-fn components_tier(n: &Named, lowered: &pbit_ir::Model, exact_limit: u64, fr_states: usize, hard: Option<std::time::Instant>, t0: std::time::Instant, out: &mut Vec<(&str, Json)>, pretty: bool) -> bool {
+fn components_tier(n: &Named, lowered: &pbit_ir::Model, exact_limit: u64, fr_states: usize, hard: Option<std::time::Instant>, t0: std::time::Instant, out: &mut Vec<(&str, Json)>, view: &View) -> bool {
     let p = &n.p; if fr_states == 0 { return false; }
     let Some(c) = pbit_ir::exact_components_until(lowered, exact_limit, fr_states, hard) else { return false };
     let parts = obj(vec![("count", num(c.components as f64)), ("forest", num(c.forest as f64)), ("occupancy", num(c.occupancy as f64)), ("enumerate", num(c.enumerated as f64)), ("frontier", num(c.frontier as f64))]);
     if c.infeasible { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no plan satisfies every rule (one independent component has no feasible plan)")), ("components", parts), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-        std::process::exit(finish(obj(std::mem::take(out)), 1, pretty)); }
+        std::process::exit(finish(obj(std::mem::take(out)), 1, view, &[])); }
     out.extend([("verdict", jstr("exact")), ("tier", jstr(if c.forest == c.components { "forest" } else if c.occupancy == c.components { "occupancy" } else { "components" })), ("plan", plan(&n, &c.map)), ("plan_logw", num(c.map_logw)), ("violations", num(p.violations(&c.map) as f64)),
         ("odds", odds(&n, &c.marg)), ("released", ids(&n, &vec![true; p.t], true)), ("escalated", Json::Arr(vec![])), ("logz", num(c.logz)),
         ("top_plans", Json::Arr(vec![obj(vec![("p", num((c.map_logw - c.logz).exp())), ("plan", plan(&n, &c.map))])])), ("components", parts), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-    let code = finish(obj(std::mem::take(out)), 0, pretty); if code != 0 { std::process::exit(code); } true
+    let code = finish(obj(std::mem::take(out)), 0, view, &[]); if code != 0 { std::process::exit(code); } true
 }
 fn decide_cmd(args: &[String]) {
     let (v, w) = flags_of("decide"); check_flags(args, &v, &w);
     let budget: f64 = budget_ms(args); let seed: u64 = arg(args, "--seed", 7);
     let exact_limit: u64 = arg(args, "--exact-limit", 2_000_000); let polish_ms: f64 = polish_ms_arg(args);
     // Any other --mode value (`foo`, `EXACT`, or `--pretty` swallowed as the value) used to run the sampler silently (exit 0)
-    let mode: String = arg(args, "--mode", "auto".to_string()); let pretty = args.iter().any(|a| a == "--pretty");
+    let mode: String = arg(args, "--mode", "auto".to_string()); let view = View::new(args, "decide");
     if !["auto", "exact", "sample"].contains(&mode.as_str()) { fail("--mode must be auto, exact or sample") }
     // --polish-sweeps N = fixed-work polish (deterministic); parsed here, so a bad value exits 2 before sampling
     let polish_sweeps: usize = arg(args, "--polish-sweeps", 0);
     let fr_states: usize = arg(args, "--frontier-states", FRONTIER_MAX_STATES); let sweeps: usize = arg(args, "--sweeps", 0);
-    let (chains, threads, cpu_pct) = controls(args); priority(args);
+    let (chains, threads, cpu_pct) = controls(args); priority(args); let top = top_wanted(args);
     let j = read_doc(args);
     let mut n = from_json(&j).unwrap_or_else(|e| bad_input("bad problem: ", e)); n.p.collective = collective_arg(args); n.p.cluster = cluster_arg(args); n.p.cycles = cycles_arg(args); let p = &n.p;
     let _mon = monitor(args, p.t); let t0 = std::time::Instant::now();
+    if let Some(th) = top { tui::tier("exact tiers"); tui::top_start(th, tui::TopSpec { cmd: "decide", vars: p.t, chains, threads: threads.clamp(1, chains), budget_ms: budget, sweeps, deadline_ms: None }); }
     let xms = exact_ms(args); let hard = xms.map(|x| t0 + std::time::Duration::from_secs_f64(x / 1e3));
     let mut out: Vec<(&str, Json)> = vec![("engine", jstr(&format!("pbit {VERSION}"))), ("tasks", num(p.t as f64)), ("workers", num(p.a as f64)), ("affinity", num(p.lam))];
     // R19 P1.3: the lowered program; when its raw space exceeds --exact-limit the components tier goes BEFORE the
@@ -373,47 +443,51 @@ fn decide_cmd(args: &[String]) {
     // would decline, and the whole-program tiers decline at their first clock read)
     let lowered = if mode == "auto" && fr_states > 0 { p.lower_until(hard).map(|m| m.compiled().0) } else { None };
     let comp_first = lowered.as_ref().is_some_and(|l| (0..l.n).map(|i| l.cand_count(i) as f64).product::<f64>() > exact_limit as f64);
-    if let Some(l) = lowered.as_ref().filter(|_| comp_first) { if components_tier(&n, l, exact_limit, fr_states, hard, t0, &mut out, pretty) { return; } }
+    if let Some(l) = lowered.as_ref().filter(|_| comp_first) { if components_tier(&n, l, exact_limit, fr_states, hard, t0, &mut out, &view) { return; } }
     // 1. exact enumeration when the feasible set is small enough (or forced)
     if mode == "exact" || mode == "auto" {
         let lim = if mode == "exact" { u64::MAX / 128 } else { exact_limit };
         if let Some(e) = exact_within(p, 5, lim, hard) {
             if e.n_feasible == 0 { out.push(("verdict", jstr("infeasible"))); out.push(("reason", jstr("no plan satisfies every rule (allowed sets + capacities + clamps)"))); out.push(("ms", num(t0.elapsed().as_secs_f64() * 1e3)));
-                std::process::exit(finish(obj(out), 1, pretty)); }
+                std::process::exit(finish(obj(out), 1, &view, &[])); }
             let best = &e.top[0].1;
             out.extend([("verdict", jstr("exact")), ("tier", jstr("enumerate")), ("plan", plan(&n, best)), ("plan_logw", num(p.logw(best))), ("violations", num(p.violations(best) as f64)),
                 ("odds", odds(&n, &e.marg)), ("released", ids(&n, &vec![true; p.t], true)), ("escalated", Json::Arr(vec![])),
                 ("n_feasible", num(e.n_feasible as f64)), ("logz", num(e.logz)),
                 ("top_plans", Json::Arr(e.top.iter().map(|(pr, x)| obj(vec![("p", num(*pr)), ("plan", plan(&n, x))])).collect())),
                 ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-            let c = finish(obj(out), 0, pretty); if c != 0 { std::process::exit(c); } return;
+            let c = finish(obj(out), 0, &view, &[]); if c != 0 { std::process::exit(c); } return;
         }
-        if mode == "exact" { if hard.is_some_and(|h| std::time::Instant::now() >= h) { fail("--mode exact: the enumeration did not finish within --exact-ms; raise it, or use auto or sample"); }
-            fail("feasible set too large for --mode exact; use auto or sample"); }
+        // An exact mode that cannot answer declines with a JSON document and exit 3, as `pbit run --op exact` does (it was a
+        // stderr line, exit 2 and an empty stdout: a bad-input code for a decision the processor declined)
+        if mode == "exact" { let why = if hard.is_some_and(|h| std::time::Instant::now() >= h) { "enumeration stopped at --exact-ms; raise it, or use --mode auto or sample" }
+                else { "feasible set too large for --mode exact; use --mode auto or sample" };
+            out.extend([("verdict", jstr("declined")), ("reason", jstr(why)), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
+            std::process::exit(finish(obj(out), 3, &view, &[])); }
     }
     // 2. frontier DP: exact odds and an exact MAP plan when worker sharing between groups is thin; declines in ms otherwise
-    if mode == "auto" && fr_states > 0 { if let Some(f) = exact_frontier_until(p, fr_states, hard) {
+    if mode == "auto" && fr_states > 0 { tui::tier("frontier DP"); if let Some(f) = exact_frontier_until(p, fr_states, hard) {
         out.extend([("verdict", jstr("exact")), ("tier", jstr("frontier")), ("plan", plan(&n, &f.map)), ("plan_logw", num(f.map_logw)), ("violations", num(p.violations(&f.map) as f64)),
             ("odds", odds(&n, &f.marg)), ("released", ids(&n, &vec![true; p.t], true)), ("escalated", Json::Arr(vec![])), ("logz", num(f.logz)),
             ("top_plans", Json::Arr(vec![obj(vec![("p", num((f.map_logw - f.logz).exp())), ("plan", plan(&n, &f.map))])])),
             ("frontier_states", num(f.max_states as f64)), ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-        let c = finish(obj(out), 0, pretty); if c != 0 { std::process::exit(c); } return;
+        let c = finish(obj(out), 0, &view, &[]); if c != 0 { std::process::exit(c); } return;
     }
     // 2b. the components tier after the whole-program tiers (see `components_tier`)
-    if let Some(l) = lowered.as_ref().filter(|_| !comp_first) { if components_tier(&n, l, exact_limit, fr_states, hard, t0, &mut out, pretty) { return; } }
+    if let Some(l) = lowered.as_ref().filter(|_| !comp_first) { if components_tier(&n, l, exact_limit, fr_states, hard, t0, &mut out, &view) { return; } }
     }
     // 3. the p-bit sampler with the certification gate, with the processor controls of `pbit run` (--chains, --threads,
     // --cpu-limit, fixed-work --sweeps); with --sweeps and --polish-ms 0 the answer is a pure function of (problem, seed, chains).
     // Only a run whose exact tiers could run can have hit the cap (was also true under --mode sample)
     let ts = std::time::Instant::now(); let reached = mode != "sample" && hard.is_some_and(|h| ts >= h);
-    let (mem_mb, max_rows) = mem_limit(args, chains, p.t);
+    let (mem_mb, max_rows) = mem_limit(args, chains, p.t); tui::tier("sampler");
     let Some(s) = sample_on(p, chains, threads, sweeps, if sweeps > 0 { None } else { Some(budget) }, seed, false, auto_group_pairs(p), cpu_pct, max_rows) else {
         out.push(("verdict", jstr("infeasible"))); out.push(("reason", jstr("no feasible initial assignment (allowed sets + capacities + clamps)"))); out.push(("ms", num(t0.elapsed().as_secs_f64() * 1e3)));
-        std::process::exit(finish(obj(out), 1, pretty)); };
-    let sample_s = ts.elapsed().as_secs_f64(); let tg = std::time::Instant::now();
+        std::process::exit(finish(obj(out), 1, &view, &[])); };
+    let sample_s = ts.elapsed().as_secs_f64(); let tg = std::time::Instant::now(); tui::tier("gate");
     let g = gate_stats(p, &s); let gate_ms = tg.elapsed().as_secs_f64() * 1e3;
     let rel = g.released_tasks(&GATE); let nrel = rel.iter().filter(|&&r| r).count();
-    let whole = g.diagnostics_passed(&GATE);
+    let whole = g.diagnostics_passed(&GATE); tui::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { p.t } else { nrel }, p.t); tui::tier("polish");
     let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
     // The default --polish-ms polish is wall-clock, so its plan can vary; --polish-sweeps (parsed above) is fixed work
     // The polish runs on --threads workers (it used 4 threads whatever --threads said)
@@ -432,13 +506,35 @@ fn decide_cmd(args: &[String]) {
             ("process_cpu_ms", sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", sys::usage().map_or(Json::Null, |u| num(u.1))), ("nice", sys::nice().map_or(Json::Null, |v| num(v as f64))), ("cpu_limit_pct", num(cpu_pct as f64)),
             ("mem_limit_mb", num(mem_mb as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / p.t).sum::<usize>() as f64))], exact_cap(xms, reached), config_echo()].concat())),
         ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
-    let c = finish(obj(out), if verdict == "refused" { 3 } else { 0 }, pretty); if c != 0 { std::process::exit(c); }
+    let c = finish(obj(out), if verdict == "refused" { 3 } else { 0 }, &view, &item_bars(&g)); if c != 0 { std::process::exit(c); }
+}
+/// Per item, the error bar the gate compares with `tv_tol`: z x max(MCSE short, MCSE long) (`Gate::released_tasks`).
+pub(crate) fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&s, &l)| GATE.z * if s.is_nan() || l.is_nan() { f64::NAN } else { s.max(l) }).collect() }
+/// `--top` asked for and drawable (a terminal on stderr, not plain); exit 2 with `--progress`, which writes the same stream.
+fn top_wanted(args: &[String]) -> Option<theme::Theme> {
+    if !args.iter().any(|a| a == "--top") { return None; }
+    if args.iter().any(|a| a == "--progress") { fail("--top and --progress both write to stderr; use one"); }
+    theme::stderr(args)
 }
 
 /// Where a control's value comes from (same precedence as `ctl`): "flag" > "env" > "file" > "default".
 fn source(args: &[String], name: &str, env: &str) -> &'static str {
     if args.iter().any(|a| a == name) { "flag" } else if std::env::var(env).is_ok() { "env" } else if cfg_val(&name[2..].replace('-', "_")).is_some() { "file" } else { "default" }
 }
+/// The SIMD features this binary was built with (the ones the kernels can use), in `pbit stats` order.
+pub(crate) fn target_features() -> Vec<&'static str> {
+    [("sse4.2", cfg!(target_feature = "sse4.2")), ("avx", cfg!(target_feature = "avx")), ("avx2", cfg!(target_feature = "avx2")), ("fma", cfg!(target_feature = "fma")),
+        ("bmi2", cfg!(target_feature = "bmi2")), ("avx512f", cfg!(target_feature = "avx512f")), ("neon", cfg!(target_feature = "neon")), ("dotprod", cfg!(target_feature = "dotprod"))]
+        .iter().filter(|f| f.1).map(|f| f.0).collect()
+}
+/// The self-test program of `pbit stats` and the hero screen: an `n`-spin ring with a weak field (pbit-ir JSON).
+pub(crate) fn ring(n: usize) -> String {
+    format!("{{\"pbit_ir\": 1, \"values\": [\"-\", \"+\"], \"vars\": [{}], \"pairs\": [{}]}}",
+        (0..n).map(|i| format!("{{\"id\": \"s{i}\", \"h\": {{\"+\": {}}}}}", 0.1 * ((i % 7) as f64 - 3.0))).collect::<Vec<_>>().join(","),
+        (0..n).map(|i| format!("{{\"i\": \"s{i}\", \"j\": \"s{}\", \"table\": [[0.4, -0.4], [-0.4, 0.4]]}}", (i + 1) % n)).collect::<Vec<_>>().join(","))
+}
+/// Rows per chain under the default memory cap (`mem_limit` without flag, variable or config)
+pub(crate) fn default_max_rows(chains: usize, n_vars: usize) -> usize { chains.checked_mul(2 * n_vars + 8).map_or(64, |d| (DEFAULT_MEM_LIMIT_MB.saturating_mul(1_048_576) / d).max(64)) }
 /// `pbit stats` — the processor's spec sheet: machine, build target features, effective controls and where each came
 /// from, and a measured self-test (400-spin ring, 4 chains x `--sweeps` fixed work, IR sampler) at 1 thread and at the effective
 /// thread count, after one discarded warm-up pass. Nothing is applied (e.g. --priority low is reported, not set).
@@ -448,13 +544,8 @@ fn stats_cmd(args: &[String]) {
     let prio = args.iter().position(|a| a == "--priority").and_then(|k| args.get(k + 1)).cloned().or_else(|| std::env::var("PBIT_PRIORITY").ok()).or_else(|| cfg_val("priority")).unwrap_or_else(|| "normal".into());
     if !["low", "normal"].contains(&prio.as_str()) { fail("--priority / PBIT_PRIORITY must be low or normal") } // a bad value used to be echoed
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let feats: Vec<Json> = [("sse4.2", cfg!(target_feature = "sse4.2")), ("avx", cfg!(target_feature = "avx")), ("avx2", cfg!(target_feature = "avx2")), ("fma", cfg!(target_feature = "fma")),
-        ("bmi2", cfg!(target_feature = "bmi2")), ("avx512f", cfg!(target_feature = "avx512f")), ("neon", cfg!(target_feature = "neon")), ("dotprod", cfg!(target_feature = "dotprod"))]
-        .iter().filter(|f| f.1).map(|f| jstr(f.0)).collect();
-    let n = 400; let ring = format!("{{\"pbit_ir\": 1, \"values\": [\"-\", \"+\"], \"vars\": [{}], \"pairs\": [{}]}}",
-        (0..n).map(|i| format!("{{\"id\": \"s{i}\", \"h\": {{\"+\": {}}}}}", 0.1 * ((i % 7) as f64 - 3.0))).collect::<Vec<_>>().join(","),
-        (0..n).map(|i| format!("{{\"i\": \"s{i}\", \"j\": \"s{}\", \"table\": [[0.4, -0.4], [-0.4, 0.4]]}}", (i + 1) % n)).collect::<Vec<_>>().join(","));
-    let prog = run::from_json(&json::parse(&ring).unwrap()).unwrap();
+    let feats: Vec<Json> = target_features().into_iter().map(jstr).collect();
+    let n = 400; let prog = run::from_json(&json::parse(&ring(n)).unwrap()).unwrap();
     let rate = |t: usize| { let t0 = std::time::Instant::now(); let s = pbit_ir::sample_on(&prog.m, chains, t, sweeps, None, 1, false, cpu as u32, 0).unwrap();
         (s.sweeps as f64 * n as f64 / t0.elapsed().as_secs_f64()).round() };
     rate(threads); let (r1, rt) = (rate(1), rate(threads)); // first pass discarded: page faults + clock ramp made 1 thread look slow (4.27x on 4 threads)
@@ -472,12 +563,8 @@ fn stats_cmd(args: &[String]) {
     emit(&json::write(&doc, args.iter().any(|a| a == "--pretty")));
 }
 
-/// The agent-routing demo as a JSON problem: agent tasks x workers under PII / prod-DB policy, quotas and same-workflow affinity.
-fn demo_cmd(args: &[String]) {
-    let (v, w) = flags_of("demo"); check_flags(args, &v, &w);
-    const W: [(&str, usize); 6] = [("opus", 2), ("sonnet", 2), ("luna-pro", 3), ("local-gemma", 2), ("codex", 2), ("human", 3)];
-    const CUST: [&str; 8] = ["acme", "globex", "initech", "umbrella", "hooli", "stark", "wayne", "wonka"];
-    const TPL: [(&str, bool, bool, [f64; 6]); 8] = [
+/// The demo's task templates: (text, PII, production DB, judge fit per worker in `DEMO_W` order).
+pub(crate) const DEMO_TPL: [(&str, bool, bool, [f64; 6]); 8] = [
         ("draft reply: refund dispute (PII)", true, false, [2.0, 1.6, 1.0, 0.6, -1.0, 1.2]),
         ("summarize 40-page contract (PII)", true, false, [2.2, 1.8, 0.8, 0.9, -1.0, 0.5]),
         ("refactor auth middleware", false, false, [1.6, 1.2, 0.0, -0.5, 2.0, -1.0]),
@@ -486,7 +573,26 @@ fn demo_cmd(args: &[String]) {
         ("triage support inbox", false, false, [0.3, 0.8, 1.5, 1.0, -1.0, 0.0]),
         ("fix flaky CI test", false, false, [1.0, 0.8, 0.2, -0.5, 1.8, -2.0]),
         ("investor update draft", false, false, [1.8, 1.4, 0.6, 0.2, -1.0, 0.8])];
-    let n: usize = arg(args, "--tasks", 12); let seed: u64 = arg(args, "--seed", 7); let hard = args.iter().any(|a| a == "--hard");
+/// The agent-routing demo as a JSON problem: agent tasks x workers under PII / prod-DB policy, quotas and same-workflow affinity.
+/// Stdout: the document (`demo_doc`). With `--live`, or by default when stdout and stderr are both terminals, the router story
+/// runs on stderr (`tui::live`; --tasks defaults to 300) and stdout gets the same document only if it is not a terminal.
+fn demo_cmd(args: &[String]) {
+    let (v, w) = flags_of("demo"); check_flags(args, &v, &w);
+    let seed: u64 = arg(args, "--seed", 7); let hard = args.iter().any(|a| a == "--hard"); let live = args.iter().any(|a| a == "--live");
+    let th = theme::stderr(args); let auto = !live && th.is_some() && theme::stdout_is_terminal();
+    if !(live || auto) { emit(&json::write(&demo_doc(arg(args, "--tasks", 12), seed, hard), true)); return; }
+    let doc = demo_doc(arg(args, "--tasks", 300), seed, hard);
+    let Some(th) = th else { err_line("pbit: --live draws on a colour terminal (stderr); no terminal, or NO_COLOR / --plain / PBIT_THEME=plain: printed the problem only");
+        emit(&json::write(&doc, true)); return };
+    let mut n = from_json(&doc).unwrap_or_else(|e| bad_input("bad problem: ", e)); n.p.collective = true; n.p.cluster = true; n.p.cycles = true; // decide's defaults
+    tui::live(th, &tui::DemoRun { doc: &doc, p: &n.p, tasks: &n.tasks, workers: &n.workers, seed, hard });
+    if !theme::stdout_is_terminal() { emit(&json::write(&doc, true)); }
+}
+/// The demo document for `n` tasks (seeded): the bytes of `pbit demo` since 0.1.
+pub(crate) fn demo_doc(n: usize, seed: u64, hard: bool) -> Json {
+    const W: [(&str, usize); 6] = [("opus", 2), ("sonnet", 2), ("luna-pro", 3), ("local-gemma", 2), ("codex", 2), ("human", 3)];
+    const CUST: [&str; 8] = ["acme", "globex", "initech", "umbrella", "hooli", "stark", "wayne", "wonka"];
+    const TPL: [(&str, bool, bool, [f64; 6]); 8] = DEMO_TPL;
     let mut r = pbit_core::Philox4x32::new(seed, 4242);
     #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the demo's scores, and every test and benchmark built on them, depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
@@ -499,14 +605,17 @@ fn demo_cmd(args: &[String]) {
         let scores = Json::Obj(W.iter().enumerate().map(|(w, (id, _))| (id.to_string(), num(((fit[w] + 0.7 * g()) * 100.0).round() / 100.0))).collect());
         tasks.push(obj(vec![("id", jstr(&format!("T{:03}", i))), ("text", jstr(&format!("{} {}", CUST[(i / 3) % CUST.len()], tn))), ("group", jstr(&format!("{}-wf{}", CUST[(i / 3) % CUST.len()], i / 3))),
             ("allowed", Json::Arr(allowed)), ("scores", scores)])); }
-    let doc = obj(vec![("comment", jstr("pbit demo: route agent tasks to workers. Rules: PII only on local-gemma or human; prod-DB migrations never on luna-pro/local-gemma; quotas are hard; tasks in one workflow prefer one worker (affinity).")),
-        ("affinity", num(if hard { 2.5 } else if n <= 12 { 0.8 } else { 1.2 })), ("workers", Json::Arr(workers)), ("tasks", Json::Arr(tasks))]);
-    emit(&json::write(&doc, true));
+    obj(vec![("comment", jstr("pbit demo: route agent tasks to workers. Rules: PII only on local-gemma or human; prod-DB migrations never on luna-pro/local-gemma; quotas are hard; tasks in one workflow prefer one worker (affinity).")),
+        ("affinity", num(if hard { 2.5 } else if n <= 12 { 0.8 } else { 1.2 })), ("workers", Json::Arr(workers)), ("tasks", Json::Arr(tasks))])
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() >= 2 && args[1..].iter().any(|a| a == "--help" || a == "-h") { if let Some(h) = help(&args[0]) { emit_raw(&h); return; } }
+    // At a terminal, `pbit` (no command) and `pbit --help` print the hero screen (exit 0); piped, `--help` prints USAGE and a
+    // bare `pbit` still exits 2 with USAGE on stderr, as before
+    let bare = args.iter().all(|a| a == "--plain") || args.iter().all(|a| a == "--help" || a == "-h" || a == "--plain");
+    if bare && theme::stdout_is_terminal() { emit_raw(&tui::hero(theme::stdout(&args))); return; }
     match args.first().map(|s| s.as_str()) {
         Some("decide") => decide_cmd(&args),
         Some("demo") => demo_cmd(&args),
@@ -515,18 +624,21 @@ fn main() {
         Some("run") => { let (v, w) = flags_of("run"); check_flags(&args, &v, &w); let tp = std::time::Instant::now(); let j = read_doc(&args);
             let tc = std::time::Instant::now(); let parse_ms = (tc - tp).as_secs_f64() * 1e3;
             let mut p = run::from_json(&j).unwrap_or_else(|e| bad_input("bad program: ", e)); let compile_ms = tc.elapsed().as_secs_f64() * 1e3; p.m.collective = collective_arg(&args); p.m.cluster = cluster_arg(&args); p.m.cycles = cycles_arg(&args);
-            priority(&args); let (chains, threads, cpu_pct) = controls(&args);
+            priority(&args); let (chains, threads, cpu_pct) = controls(&args); let top = top_wanted(&args);
             let op: String = arg(&args, "--op", "decide".to_string()); if !["decide", "exact", "sample"].contains(&op.as_str()) { fail("--op must be decide, exact or sample"); }
             let mon = monitor(&args, p.m.n); let dl = deadline_ms(&args);
             if dl.is_some() && arg::<usize>(&args, "--sweeps", 0) > 0 { fail("--deadline-ms needs a wall-clock budget: drop --sweeps"); }
+            if let Some(th) = top { tui::tier("exact tiers"); tui::top_start(th, tui::TopSpec { cmd: "run", vars: p.m.n, chains, threads: threads.clamp(1, chains), budget_ms: budget_ms(&args), sweeps: arg(&args, "--sweeps", 0), deadline_ms: dl }); }
+            let mut bars = vec![];
             let (mut doc, code) = run::run(&p, &op, budget_ms(&args), arg(&args, "--seed", 7), arg(&args, "--exact-limit", 2_000_000), polish_ms_arg(&args), arg(&args, "--polish-sweeps", 0), arg(&args, "--sweeps", 0), arg(&args, "--frontier-states", pbit_ir::FRONTIER_MAX_STATES),
-                chains, threads, cpu_pct, mem_limit(&args, chains, p.m.n), exact_ms(&args), dl.map(|d| (tp, d, args.iter().any(|a| a == "--budget-ms")))); drop(mon); run::phases(&mut doc, parse_ms, compile_ms, dl);
-            let c = finish(doc, code, args.iter().any(|a| a == "--pretty")); if c != 0 { std::process::exit(c); } }
+                chains, threads, cpu_pct, mem_limit(&args, chains, p.m.n), exact_ms(&args), dl.map(|d| (tp, d, args.iter().any(|a| a == "--budget-ms"))), &mut bars); drop(mon); run::phases(&mut doc, parse_ms, compile_ms, dl);
+            let c = finish(doc, code, &View::new(&args, "run"), &bars); if c != 0 { std::process::exit(c); } }
         Some("stats") => stats_cmd(&args),
+        Some("mcp") => { check_flags(&args, &[], &[]); mcp::serve() }
         Some("version") | Some("--version") | Some("-V") => { check_flags(&args, &[], &[]); emit(&format!("pbit {VERSION}")) }
         // `pbit --help` / `-h` asked for the usage: stdout, exit 0 (it went to stderr with exit 2, as for a missing command)
         Some("--help") | Some("-h") => emit_raw(USAGE),
         _ => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
     }
 }
-const USAGE: &str = "usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard]\n       pbit ir [--max-input-mb N] < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit version\n       pbit <command> --help | -h\n";
+const USAGE: &str = "usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard] [--live]\n       pbit ir [--max-input-mb N] < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit mcp   (Model Context Protocol server on stdio)\n       pbit version\n       pbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";

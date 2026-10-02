@@ -63,7 +63,7 @@ The npm package (`npm/`) installs the binary and a `pbit` command with exit code
 
 ## PowerShell
 
-Run on Windows (`windows-latest`) with PowerShell 7.6 as written, and with Windows PowerShell 5.1 through `cmd` (below).
+Run on Windows (`windows-latest`) with PowerShell 7.6 as written.
 
 ```powershell
 pbit demo --tasks 12 | pbit decide | ConvertFrom-Json | Select-Object verdict, violations, ms
@@ -71,27 +71,53 @@ Get-Content router.json -Raw | pbit decide --budget-ms 200 | ConvertFrom-Json; $
 ```
 
 Windows PowerShell 5.1 (the `powershell.exe` that ships with Windows) adds a UTF-8 byte-order mark to text it pipes into
-a program, even with `$OutputEncoding` set to `us-ascii` (the image default), and pbit 0.2.0 rejects that input: exit 2,
-`bad JSON: unexpected character 'ï' at byte 0`. Use PowerShell 7 (`pwsh`), or let `cmd` do the piping and the
-redirection; PowerShell then only reads pbit's output:
+a program, even with `$OutputEncoding` at its `us-ascii` default. From 0.3.0 pbit skips one leading byte-order mark, so
+the same pipes work there directly (0.2.x exited 2: `bad JSON: unexpected character 'ï' at byte 0`). Background, for
+0.2.x or for other programs: let `cmd` pipe (`cmd /c "pbit demo --tasks 12 | pbit decide"`), or write UTF-8 without a
+mark with `[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)` and
+`$OutputEncoding = [System.Text.UTF8Encoding]::new($false)`.
 
-```powershell
-cmd /c "pbit demo --tasks 12 | pbit decide" | ConvertFrom-Json | Select-Object verdict, violations, ms
-cmd /c "pbit decide --budget-ms 200 < router.json" | ConvertFrom-Json; $LASTEXITCODE
-```
+## MCP: one line per agent
 
-PowerShell 7 writes a byte-order mark too if a profile sets `$OutputEncoding = [Text.Encoding]::UTF8` (a string piped
-into pbit then exits 2; seen with PowerShell 7.6); `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` fixes that.
+`pbit mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (JSON-RPC 2.0, one message per
+line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its four tools take the
+commands' own documents and return the commands' own JSON, byte for byte:
 
-## For agents
+| tool | arguments | returns |
+|---|---|---|
+| `pbit_decide` | a router document (`workers`, `tasks`, `affinity`, `comment`) plus optional `flags` | `pbit decide` |
+| `pbit_run` | a pbit-ir program ([pbit-ir.schema.json](pbit-ir.schema.json)) plus optional `flags` | `pbit run` |
+| `pbit_stats` | optional `sweeps`, `chains`, `threads` | `pbit stats` |
+| `pbit_demo` | optional `tasks`, `seed`, `hard` | `pbit demo` (a router document) |
 
-Coding agents with a shell tool (Claude Code, Codex, and other harnesses that can run commands) call pbit the same way a
-script does: they run the command, read the JSON, and branch on the exit code. Nothing needs to be registered. A
-paragraph like this one in the project's agent instructions (`CLAUDE.md`, `AGENTS.md`) is enough:
+`flags` are the command's flags without the dashes: `{"budget_ms": 200, "seed": 3, "summary": true}`; `summary: true`
+returns the compact answer (README, "First five minutes"). `infeasible` and `refused` / `declined` are answers; bad input
+and flag errors come back as tool errors (`isError`) with the `{"error"}` object or the flag message.
+
+Protocol: checked against the MCP specification revision 2026-07-28 (the current one on 2026-10-01). Requests that
+carry `io.modelcontextprotocol/protocolVersion` in `_meta` are served statelessly (`server/discover`, `tools/list`,
+`tools/call`, `ping`); a client that opens with `initialize` (revisions 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05)
+is served by the revision negotiated there. Tested by `python3 python/test_mcp.py` (a dependency-free client over pipes).
+
+| agent | one line | checked |
+|---|---|---|
+| Claude Code | `claude mcp add pbit -- pbit mcp` | a real call on 2026-10-02 (Claude Code 2.1.284, which opened with `initialize` 2025-11-25): `pbit_demo` then `pbit_decide` with `summary`, 12 and 29 ms |
+| Codex CLI | `codex mcp add pbit -- pbit mcp` (writes `[mcp_servers.pbit]` with `command = "pbit"`, `args = ["mcp"]` to `~/.codex/config.toml`) | the entry it writes (codex-cli 0.141.0); no model call |
+| Cursor | `.cursor/mcp.json`: `{"mcpServers": {"pbit": {"command": "pbit", "args": ["mcp"]}}}` | not run here |
+| mcporter (and harnesses that read its config) | `config/mcporter.json`: `{"mcpServers": {"pbit": {"command": "pbit", "args": ["mcp"]}}}`, then `mcporter call pbit.pbit_demo tasks=3` | `mcporter list pbit` and that call (mcporter 0.7.3) |
+| LangChain | a tool around [python/pbit.py](../python/pbit.py): `@tool def route(doc: dict) -> dict: return pbit.decide(doc, summary=True)` | the wrapper's own tests; LangChain itself not run here |
+
+Use the full path of the binary (`pbit.exe` on Windows) where `pbit` is not on the agent's `PATH`.
+
+## For agents with a shell tool
+
+Coding agents with a shell tool call pbit the same way a script does: they run the command, read the JSON, and branch on
+the exit code. Nothing needs to be registered. A paragraph like this one in the project's agent instructions
+(`CLAUDE.md`, `AGENTS.md`) is enough:
 
 > To route tasks to workers under hard rules (allowed workers, quotas) with odds, write a router document (README, "Use it
-> from anything") and run `pbit decide --budget-ms 200 < doc.json`. Exit 0: act on `plan` for the ids in `released` and
-> hand the ids in `escalated` to a human. Exit 1: no plan satisfies the rules. Exit 2: fix the document (the `error`
+> from anything") and run `pbit decide --budget-ms 200 --summary < doc.json`. Exit 0: act on the plan for the released
+> items and hand the escalated ones to a human. Exit 1: no plan satisfies the rules. Exit 2: fix the document (the `error`
 > object says where). Exit 3: escalate everything. Never read stderr as data. `pbit <command> --help` lists every flag.
 
 Practical notes for agent use:
@@ -102,7 +128,8 @@ Practical notes for agent use:
   workers) are answered exactly.
 - Fixed work is reproducible: `--sweeps N --polish-ms 0` makes the answer a pure function of the document and `--seed`,
   which is what a test or a replayed agent step wants.
+- `--summary` keeps an agent's context small: verdict, counts, the gate, the 5 worst released and escalated items and the
+  telemetry instead of a plan and odds per item (the 300-task demo at `--sweeps 800`: 2.9 KB instead of 43 KB).
 - `pbit stats` prints the machine, the effective controls and a measured self-test; `--threads`, `--cpu-limit` and
   (on Linux and macOS) `--priority low` keep it from crowding the agent's own process.
-- An MCP server is planned for a later release and is not built yet; until then the shell command above is the
-  integration.
+- `--top`, `demo --live` and the hero screen draw only on a terminal; an agent's pipes never see them.

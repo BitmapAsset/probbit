@@ -244,8 +244,9 @@ fn ids(p: &Prog, mask: &[bool], want: bool) -> Json { Json::Arr(p.vars.iter().en
 /// is then a pure function of (program, seed) — byte-identical across runs and machines with the same float semantics.
 /// `chains` / `threads`: resource controls (fixed sweeps => identical answer for any thread count).
 /// `mem`: the memory cap (--mem-limit-mb, rows per chain) — see main.rs `mem_limit`.
+/// `bars`: filled with the per-variable error bars on a sampled answer (`--summary`), left empty otherwise.
 #[allow(clippy::too_many_arguments)]
-pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_ms: f64, polish_sweeps: usize, sweeps: usize, fr_states: usize, chains: usize, threads: usize, cpu_pct: u32, mem: (usize, usize), exact_ms: Option<f64>, deadline: Option<(std::time::Instant, f64, bool)>) -> (Json, i32) {
+pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_ms: f64, polish_sweeps: usize, sweeps: usize, fr_states: usize, chains: usize, threads: usize, cpu_pct: u32, mem: (usize, usize), exact_ms: Option<f64>, deadline: Option<(std::time::Instant, f64, bool)>, bars: &mut Vec<f64>) -> (Json, i32) {
     let m = &p.m; let t0 = std::time::Instant::now();
     // --exact-ms (opt-in) = a hard wall-clock stop for the exact tiers below, from t0 (see main.rs `exact_ms`)
     let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();
@@ -314,7 +315,7 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
     // budget, and if a chain finds no start the exact search runs again, past its gap budget, to the end of --budget-ms: its
     // first plan is also the proof of infeasibility. An earlier version gave the exact tier half the budget BEFORE sampling, which
     // cost feasible programs sampler time (200-job schedules at 5 s: 174 -> 97 and 157 -> 0 released). `--sweeps N`: no fallback.
-    let fallback = op == "decide" && sweeps == 0 && !m.is_partition();
+    let fallback = op == "decide" && sweeps == 0 && !m.is_partition(); crate::tui::tier("sampler");
     let s = match sample_on_starting(m, chains, threads, sweeps, if sweeps > 0 { None } else { Some(budget) }, seed, false, cpu_pct, mem.1, if fallback { 0.5 } else { 1.0 }) { Some(s) => s, None => {
         // Matching (quota-shaped programs) proves infeasibility; the bounded search for other programs does not
         if m.is_partition() { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no assignment satisfies every rule (capacitated matching)")), ("ms", ms(t0))]); return (obj(out), 1); }
@@ -336,9 +337,9 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
         let hint = if op == "decide" { "no feasible start found within the search budget, and the bounded exact search (run again to the end of --budget-ms) found no plan (not a proof of infeasibility); --op exact searches exhaustively and can prove infeasibility, or raise --budget-ms" }
             else { "no feasible start found within the search budget (not a proof of infeasibility); try --op decide" };
         out.extend([("verdict", jstr("refused")), ("reason", jstr(hint)), ("ms", ms(t0))]); return (obj(out), 3); } };
-    let sample_s = ts.elapsed().as_secs_f64(); let tg = std::time::Instant::now();
+    let sample_s = ts.elapsed().as_secs_f64(); let tg = std::time::Instant::now(); crate::tui::tier("gate");
     let g = gate_stats(m, &s); let gate_ms = tg.elapsed().as_secs_f64() * 1e3; let rel = g.released_tasks(&GATE); let whole = g.diagnostics_passed(&GATE);
-    let nrel = rel.iter().filter(|&&r| r).count(); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
+    let nrel = rel.iter().filter(|&&r| r).count(); crate::tui::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { m.n } else { nrel }, m.n); crate::tui::tier("polish"); *bars = crate::item_bars(&g); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
     let mask: Vec<bool> = if whole { vec![true; m.n] } else { rel };
     // plan polish (as `pbit decide`): anneal the chains' best plan through beta 2 -> 32; never worse than that plan
     // --polish-sweeps N = fixed-work polish (deterministic); --polish-ms is wall-clock, so its plan can vary run to run

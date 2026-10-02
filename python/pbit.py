@@ -6,6 +6,7 @@
     answer = pbit.sample(program, sweeps=2000, seed=3, polish_ms=0)   # fixed work: a pure function of (program, seed)
     answer = pbit.decide(router_doc, budget_ms=200) # router document -> `pbit decide`
     answer = pbit.run(program, deadline_ms=1000)    # whole-call deadline (the process is also killed past a slack)
+    answer = pbit.decide(router_doc, summary=True)  # compact answer: verdict, counts, gate, the worst items (no per-item tables)
 
 Answers: `pbit run` reports per-variable odds under "marginals", `pbit decide` under "odds" (docs/pbit-ir-json.md, README).
 Every call returns the decoded JSON answer for exit 0 (exact / diagnostics_passed / partial), exit 1 (`infeasible`, a proof)
@@ -15,7 +16,8 @@ and exit 3 (`refused` / `declined`: the gate or a cap said no; that is an answer
   PbitNumericError exit 3 with an {"error": {"code": "numeric"}} object: a computed quantity was not finite (no answer)
   PbitTimeout      the call passed `timeout_s` (the process was killed)
   PbitError        anything else (missing binary, a crash, unparseable output)
-Keyword flags map to CLI flags: budget_ms=200 -> --budget-ms 200; collective=False -> --collective off.
+Keyword flags map to CLI flags: budget_ms=200 -> --budget-ms 200; collective=False -> --collective off (collective, cluster,
+cycles take on / off); any other boolean is a switch: summary=True -> --summary, pretty=True -> --pretty, False leaves it out.
 The binary: `binary=` argument, else $PBIT_BIN, else `pbit` on PATH, else ../target/release/pbit next to this file.
 """
 import json, os, shutil, subprocess
@@ -53,14 +55,22 @@ def find_binary(binary=None):
     raise PbitError("pbit binary not found: pass binary=, set PBIT_BIN, or build with `cargo build --release`")
 
 
+_ON_OFF = ("collective", "cluster", "cycles")
+
+
 def _flags(flags):
     out = []
     for k, v in flags.items():
+        name = "--" + k.replace("_", "-")
         if v is None:
             continue
         if isinstance(v, bool):
-            v = "on" if v else "off"
-        out += ["--" + k.replace("_", "-"), str(v)]
+            if k in _ON_OFF:
+                out += [name, "on" if v else "off"]
+            elif v:
+                out.append(name)  # a switch (pretty, summary, progress): it takes no value; False leaves it out
+            continue
+        out += [name, str(v)]
     return out
 
 

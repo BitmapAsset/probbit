@@ -285,6 +285,9 @@ impl<'a> Chain<'a> {
         for &a in cand { if self.w[a] > 0.0 { pick = a; if r < self.w[a] { break; } r -= self.w[a]; } }
         self.load[a0] -= 1; self.load[pick] += 1; self.x[i] = pick;
     }
+    /// The exact two-group joint heat-bath tables (`GroupPairs::new`; None = move off), as `sample_on` sets them when its
+    /// `group_pairs` argument is on: for callers that step chains themselves (the CLI's `demo --live`).
+    pub fn set_group_pairs(&mut self, gp: Option<GroupPairs>) { self.gp = gp; }
     /// O(T * group size) log-weight of the current state
     pub fn logw(&self) -> f64 { let p = self.p; let mut e = 0.0; for i in 0..p.t { e += p.h[i * p.a + self.x[i]]; for &j in &self.mates[i] { if j > i && self.x[j] == self.x[i] { e += p.lam; } } } e }
     fn pair_e(&self, i: usize, a: usize, skip: usize) -> f64 {

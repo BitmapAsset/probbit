@@ -353,11 +353,12 @@ fn precedence_chain_20x30() -> String {
 fn run_deadline_ms_bounds_the_whole_call() {
     // R19.6 (P2.1): --deadline-ms D = whole call (exact tiers D/4, sampler 0.6 and polish 0.1 of the rest, the gate in the
     // reserve); the answer reports deadline {ms, met}. Measured on the chain below (M4, load ~6.5, N = 5 each): D = 500 / 1000 /
-    // 2000 -> median total 488.4 / 950.0 / 1,848.8 ms, met 15/15. Bound here 1.5 x D (load).
+    // 2000 -> median total 488.4 / 950.0 / 1,848.8 ms, met 15/15. Bound here 1.5 x D (load); on a shared CI runner 3 x D
+    // (the macOS Intel runner measured 990 ms for D = 600: the deadline is a target, not a hard bound on a slow CPU)
     let prog = precedence_chain_20x30();
     let (c, out, err) = pbit(&["run", "--deadline-ms", "600", "--seed", "1"], &prog); assert!(c == 0 || c == 3, "{err}");
     let d = json::parse(&out).unwrap(); let tot = d.get("phases").and_then(json::Json::as_arr).unwrap().last().unwrap().get("ms").and_then(json::Json::as_f64).unwrap();
-    assert!(tot < 900.0, "{tot} ms: {out}"); assert_eq!(d.get("deadline").and_then(|x| x.get("ms")).and_then(json::Json::as_f64), Some(600.0));
+    let lim = if std::env::var_os("CI").is_some() { 1800.0 } else { 900.0 }; assert!(tot < lim, "{tot} ms (limit {lim}): {out}"); assert_eq!(d.get("deadline").and_then(|x| x.get("ms")).and_then(json::Json::as_f64), Some(600.0));
     assert_eq!(field(&out, "violations"), "0");
     // an explicit --budget-ms caps the sampler's share
     let (_, out, _) = pbit(&["run", "--deadline-ms", "2000", "--budget-ms", "100", "--seed", "1"], &prog); assert!(field(&out, "budget_ms").parse::<f64>().unwrap() <= 100.0, "{out}");
@@ -764,7 +765,8 @@ fn exact_ms_caps_the_exact_tiers() {
     let (c, o, e) = pbit(&[&["decide", "--exact-ms", "0"][..], &fixed[..]].concat(), &demo); assert!(c == 0 || c == 3, "{e}");
     assert!(o.contains(",\"exact_ms\":0,\"exact_ms_reached\":true"), "{o}");
     let (_, s, _) = pbit(&[&["decide", "--mode", "sample"][..], &fixed[..]].concat(), &demo); assert_eq!(strip(&cap0(&o)), strip(&s));
-    let (c, _, e) = pbit(&["decide", "--mode", "exact", "--exact-ms", "0"], &demo); assert_eq!(c, 2); assert!(e.contains("--exact-ms"), "{e}");
+    // an exact mode stopped by --exact-ms declines as `run --op exact` does: one JSON document, exit 3 (it was exit 2, stdout empty)
+    let (c, o, _) = pbit(&["decide", "--mode", "exact", "--exact-ms", "0"], &demo); assert_eq!(c, 3); assert!(o.contains("\"verdict\":\"declined\"") && o.contains("stopped at --exact-ms"), "{o}");
     // pbit run: a 12-spin frustrated ring (4,096 plans: enumerated)
     let vars: Vec<String> = (0..12).map(|i| format!("{{\"id\": \"s{i}\", \"h\": {{\"+\": {}}}}}", 0.1 * ((i % 7) as f64 - 3.0))).collect();
     let pairs: Vec<String> = (0..12).map(|i| format!("{{\"i\": \"s{i}\", \"j\": \"s{}\", \"table\": [[0.4, -0.4], [-0.4, 0.4]]}}", (i + 1) % 12)).collect();
@@ -1091,7 +1093,7 @@ fn python_wrapper_tests_pass() {
 /// enforces; a flag without a FLAG_HELP line panics) and, for decide / run, the exit codes; stdout, exit 0, nothing run.
 #[test]
 fn every_command_has_help() {
-    for cmd in ["decide", "run", "demo", "ir", "stats", "version"] { for h in ["--help", "-h"] {
+    for cmd in ["decide", "run", "demo", "ir", "stats", "mcp", "version"] { for h in ["--help", "-h"] {
         let (c, out, err) = pbit(&[cmd, h], ""); assert_eq!(c, 0, "{cmd} {h}: {err}");
         assert!(out.starts_with(&format!("usage: pbit {cmd}")), "{cmd}: {out}"); assert!(err.is_empty(), "{cmd}: {err}"); } }
     let (_, d, _) = pbit(&["decide", "--help"], "");
@@ -1291,4 +1293,156 @@ fn config_file_is_strict_and_echoed() {
     let (c, o, e) = go(r#"{"chains": 3}"#); let _ = std::fs::remove_file(&cfg); assert!(c == 0 || c == 3, "{e}");
     assert!(o.contains("\"telemetry\":{\"chains\":3,") && o.contains(&format!("\"config\":{}", json::write(&json::Json::Str(cfg.to_string_lossy().into_owned()), false))), "{o:.2000}");
     let (_, demo, _) = pbit(&["demo", "--tasks", "60"], ""); let (_, o, _) = pbit(&["decide", "--sweeps", "100", "--polish-ms", "0"], &demo); assert!(!o.contains("\"config\":"), "no config file, no field");
+}
+
+// ---------------- 0.3.0: hero screen, --top, --summary, demo --live, pbit mcp ----------------
+
+/// stdout with the version, the wall-clock fields and the process's nice value normalized (the parity tests compare documents,
+/// not timings or the scheduling class the test runner happens to have)
+fn norm(o: &str) -> String {
+    let mut t = o.replace(&format!("pbit {}", env!("CARGO_PKG_VERSION")), "pbit X");
+    for k in ["\"ms\":", "\"sample_ms\":", "\"gate_ms\":", "\"site_updates_per_s\":", "\"process_cpu_ms\":", "\"peak_rss_mb\":", "\"site_updates_per_s_1_thread\":", "\"speedup\":", "\"nice\":"] {
+        let mut from = 0;
+        while let Some(a) = t[from..].find(k).map(|a| a + from) { let s = a + k.len(); let e = s + t[s..].find([',', '}']).unwrap(); t.replace_range(s..e, "_"); from = s + 1; } }
+    t
+}
+fn fnv(s: &str) -> u64 { s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3)) }
+
+/// The documents are the 0.2.1 documents: FNV-1a digests of `norm(stdout)` captured from the 0.2.1 release binary, for a demo,
+/// `ir`, sampled and exact decisions and programs (fixed work, so every byte but the timings is a function of input + seed).
+#[test]
+fn stdout_matches_the_0_2_1_goldens() {
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let (_, d300, _) = pbit(&["demo", "--tasks", "300"], ""); let (_, d12, _) = pbit(&["demo", "--tasks", "12"], ""); let (_, d60h, _) = pbit(&["demo", "--tasks", "60", "--seed", "5", "--hard"], "");
+    let ks = std::fs::read_to_string(format!("{dir}/../examples/knapsack-20.json")).unwrap(); let ap = std::fs::read_to_string(format!("{dir}/../examples/agent-plan-6.json")).unwrap();
+    let cases: [(&str, Vec<&str>, &str, u64); 7] = [
+        ("demo 300", vec!["demo", "--tasks", "300"], "", 0x50109fdda00c4f80), ("ir 12", vec!["ir"], &d12, 0xf43d89b7e92d29e1),
+        ("decide 300 sweeps", vec!["decide", "--sweeps", "400", "--polish-ms", "0", "--threads", "2"], &d300, 0xdb8644e8b86c691e),
+        ("decide 12 exact", vec!["decide"], &d12, 0xd6b99909e8eb8671), ("decide 60 hard", vec!["decide", "--sweeps", "300", "--polish-sweeps", "50", "--threads", "2"], &d60h, 0xe703125908e79a04),
+        ("run knapsack sample", vec!["run", "--op", "sample", "--sweeps", "300", "--polish-ms", "0", "--threads", "2"], &ks, 0x49df9b96d104e8f3), ("run agent-plan", vec!["run"], &ap, 0x8d73f28e9823e18b)];
+    for (name, args, input, want) in cases { let (_, out, err) = pbit(&args, input); assert_eq!(fnv(&norm(&out)), want, "{name}: {err} {:.300}", norm(&out)); }
+}
+
+/// `args` with stdin from `input`, stdout to a file and stderr on a pseudo-terminal (`script`; Unix). None = no `script` here.
+/// `full`: stdout on the terminal too. Returns (exit, stdout file, terminal transcript).
+fn under_pty(args: &[&str], input: &str, env: &[(&str, &str)], full: bool) -> Option<(i32, String, String)> {
+    if !cfg!(unix) || Command::new("script").arg("-V").output().is_err() && Command::new("sh").args(["-c", "command -v script"]).output().map_or(true, |o| !o.status.success()) { return None; }
+    let tag = format!("{}-{}", std::process::id(), fnv(&format!("{args:?}{env:?}{full}")));
+    let (inp, outp) = (std::env::temp_dir().join(format!("pbit-pty-in-{tag}")), std::env::temp_dir().join(format!("pbit-pty-out-{tag}")));
+    std::fs::write(&inp, input).unwrap();
+    let q = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+    let cmd = format!("{} {} < {}{}", q(env!("CARGO_BIN_EXE_pbit")), args.iter().map(|a| q(a)).collect::<Vec<_>>().join(" "), q(&inp.to_string_lossy()), if full { String::new() } else { format!(" > {}", q(&outp.to_string_lossy())) });
+    let mut c = Command::new("script");
+    if cfg!(target_os = "macos") { c.args(["-q", "/dev/null", "sh", "-c", &cmd]); } else { c.args(["-q", "-e", "-c", &cmd, "/dev/null"]); }
+    c.stdin(Stdio::null()).env("TERM", "xterm-256color").env("COLUMNS", "100").env("LINES", "40").env_remove("NO_COLOR").env_remove("PBIT_THEME").env_remove("PBIT_CONFIG");
+    for (k, v) in env { c.env(k, v); }
+    let o = c.output().unwrap(); let out = std::fs::read_to_string(&outp).unwrap_or_default(); let _ = std::fs::remove_file(&inp); let _ = std::fs::remove_file(&outp);
+    Some((o.status.code().unwrap_or(-1), out, String::from_utf8_lossy(&o.stdout).into_owned()))
+}
+
+/// The JSON contract under a terminal: for decide, run, stats, demo and ir, with stderr on a terminal (where --top, the summary box
+/// and demo --live draw) stdout is the same document as piped, byte for byte (timings normalized), and the visuals did draw.
+#[test]
+fn a_terminal_on_stderr_never_changes_stdout() {
+    let (_, d300, _) = pbit(&["demo", "--tasks", "300"], ""); let dn = include_str!("../../examples/denoise-8x12.json"); let (_, d12, _) = pbit(&["demo", "--tasks", "12"], "");
+    let cases: [(Vec<&str>, Vec<&str>, &str, &str); 7] = [
+        (vec!["decide", "--top", "--sweeps", "6400", "--polish-ms", "0", "--threads", "2"], vec!["decide", "--sweeps", "6400", "--polish-ms", "0", "--threads", "2"], &d300, "pbit decide · top"),
+        (vec!["decide", "--summary", "--pretty", "--sweeps", "800", "--polish-ms", "0"], vec!["decide", "--summary", "--pretty", "--sweeps", "800", "--polish-ms", "0"], &d300, "pbit decide · PARTIAL"),
+        (vec!["run", "--top", "--summary", "--op", "sample", "--sweeps", "40000", "--polish-ms", "0", "--threads", "2"], vec!["run", "--summary", "--op", "sample", "--sweeps", "40000", "--polish-ms", "0", "--threads", "2"], dn, "pbit run · top"),
+        (vec!["stats", "--sweeps", "100"], vec!["stats", "--sweeps", "100"], "", ""), (vec!["ir"], vec!["ir"], &d12, ""),
+        (vec!["demo", "--tasks", "12"], vec!["demo", "--tasks", "12"], "", ""),
+        (vec!["demo", "--live", "--tasks", "300"], vec!["demo", "--tasks", "300"], "", "LADDER")];
+    for (tty, piped, input, drawn) in cases {
+        let Some((c, out, screen)) = under_pty(&tty, input, &[], false) else { eprintln!("no `script` here: pty test skipped"); return };
+        let (c2, want, _) = pbit(&piped, input);
+        assert_eq!((c, norm(&out)), (c2, norm(&want)), "{tty:?}: stdout differs under a terminal");
+        assert!(screen.contains(drawn), "{tty:?}: the terminal shows no {drawn:?}: {:.400}", screen);
+        if tty.contains(&"--top") { assert!(screen.contains("\x1b[J\x1b[?25h"), "{tty:?}: the monitor did not erase itself"); }
+    }
+}
+
+/// NO_COLOR, PBIT_THEME=plain and --plain turn every visual off: no escape sequence reaches the terminal, demo --live says why,
+/// and stdout is the same document.
+#[test]
+fn no_color_plain_and_pbit_theme_turn_visuals_off() {
+    let (_, d300, _) = pbit(&["demo", "--tasks", "300"], ""); let (_, want, _) = pbit(&["decide", "--sweeps", "6400", "--polish-ms", "0", "--threads", "2", "--summary", "--pretty"], &d300);
+    for (env, flag) in [(vec![("NO_COLOR", "1")], None), (vec![("PBIT_THEME", "plain")], None), (vec![], Some("--plain"))] {
+        let mut a = vec!["decide", "--top", "--summary", "--pretty", "--sweeps", "6400", "--polish-ms", "0", "--threads", "2"]; a.extend(flag);
+        let Some((c, out, screen)) = under_pty(&a, &d300, &env, false) else { eprintln!("no `script` here: pty test skipped"); return };
+        assert_eq!(c, 0); assert_eq!(norm(&out), norm(&want)); assert!(!screen.contains('\x1b'), "{env:?} {flag:?}: escapes on the terminal: {screen:?}");
+        let mut a = vec!["demo", "--live"]; a.extend(flag);
+        let (c, out, screen) = under_pty(&a, "", &env, false).unwrap(); assert_eq!(c, 0); assert_eq!(out, d300, "demo --live prints the 300-task problem");
+        assert!(!screen.contains('\x1b') && screen.contains("printed the problem only"), "{env:?} {flag:?}: {screen:?}");
+        let mut h = vec!["--help"]; h.extend(flag);
+        let Some((c, _, screen)) = under_pty(&h, "", &env, true) else { return }; assert_eq!(c, 0); assert!(!screen.contains('\x1b') && screen.contains("PROCESSOR ONLINE"), "{screen:?}");
+    }
+}
+
+/// `pbit` and `pbit --help` at a terminal: the hero screen (status line, spec line from a cached self-test, three commands, usage)
+/// in at most 14 lines, exit 0; the self-test is cached under $XDG_CACHE_HOME/pbit. Piped, `--help` is USAGE and a bare `pbit` exits 2.
+#[test]
+fn hero_screen_at_a_terminal() {
+    let cache = std::env::temp_dir().join(format!("pbit-hero-cache-{}", std::process::id())); let _ = std::fs::remove_dir_all(&cache);
+    let xdg = cache.to_string_lossy().into_owned();
+    for args in [vec![], vec!["--help"], vec!["-h"]] {
+        let Some((c, _, screen)) = under_pty(&args, "", &[("XDG_CACHE_HOME", &xdg)], true) else { eprintln!("no `script` here: pty test skipped"); return };
+        let plain: String = { let mut o = String::new(); let mut esc = false; for ch in screen.chars() { if esc { if ch.is_ascii_alphabetic() { esc = false; } } else if ch == '\x1b' { esc = true; } else { o.push(ch); } } o };
+        assert_eq!(c, 0, "{args:?}: {plain}");
+        assert!(plain.contains(&format!("PROCESSOR ONLINE · {} · exact → sample → gate", env!("CARGO_PKG_VERSION"))) && plain.contains("logical cpus") && plain.contains("site updates/s (self-test"), "{plain}");
+        assert!(plain.contains("pbit demo") && plain.contains("pbit mcp") && plain.contains("usage"), "{plain}");
+        assert!(plain.trim().lines().count() <= 14, "{} lines: {plain}", plain.trim().lines().count()); assert!(screen.contains("\x1b[38;5;51m"), "the neon palette");
+    }
+    let j = json::parse(&std::fs::read_to_string(cache.join("pbit").join("stats.json")).unwrap()).unwrap(); let _ = std::fs::remove_dir_all(&cache);
+    assert!(j.get("site_updates_per_s").and_then(|x| x.as_f64()).is_some_and(|r| r > 0.0), "{j:?}");
+}
+
+/// --summary: the same answer without per-item tables: verdict, exit code, counts that match the full lists, the 5 worst released /
+/// escalated items (largest error bars first on a sampled answer), the gate and telemetry; exact and infeasible answers too.
+#[test]
+fn summary_is_the_answer_without_the_tables() {
+    let (_, d300, _) = pbit(&["demo", "--tasks", "300"], ""); let ks = include_str!("../../examples/knapsack-20.json");
+    let get = |j: &json::Json, k: &str| j.get(k).cloned().unwrap_or(json::Json::Null);
+    for (args, input) in [(vec!["decide", "--sweeps", "800", "--polish-ms", "0"], d300.as_str()), (vec!["decide", "--sweeps", "60", "--polish-ms", "0"], d300.as_str()), (vec!["run"], ks),
+        (vec!["run", "--op", "sample", "--sweeps", "400", "--polish-ms", "0"], ks), (vec!["run"], r#"{"pbit_ir":1,"values":["a"],"vars":[{"id":"x"},{"id":"y"}],"caps":[{"value":"a","limit":1}]}"#)] {
+        let (c1, full, _) = pbit(&args, input); let mut a = args.clone(); a.push("--summary"); let (c2, sum, _) = pbit(&a, input);
+        let (f, s) = (json::parse(&full).unwrap(), json::parse(&sum).unwrap());
+        assert_eq!(c1, c2, "{args:?}"); assert_eq!(get(&f, "verdict"), get(&s, "verdict")); assert_eq!(get(&s, "summary").as_f64(), Some(1.0));
+        for k in ["plan", "odds", "marginals", "released", "escalated", "release_reason", "top_plans"] { assert!(s.get(k).is_none(), "{args:?}: {k} in the summary"); }
+        for k in ["gate", "telemetry", "plan_logw", "violations"] { assert_eq!(get(&f, k).is_null(), get(&s, k).is_null(), "{args:?}: {k}"); }
+        let n = |j: &json::Json, k: &str| j.get(k).and_then(|x| x.as_arr()).map(|a| a.len());
+        let counts = s.get("counts").unwrap(); assert_eq!(counts.get("released").and_then(|x| x.as_f64()).map(|x| x as usize), n(&f, "released"), "{args:?}");
+        assert_eq!(counts.get("escalated").and_then(|x| x.as_f64()).map(|x| x as usize), n(&f, "escalated"));
+        let Some(rel) = f.get("released").and_then(|x| x.as_arr()) else { continue };
+        let worst = s.get("worst_released").and_then(|x| x.as_arr()).unwrap(); assert_eq!(worst.len(), rel.len().min(5), "{args:?}");
+        let bars: Vec<f64> = worst.iter().filter_map(|w| w.get("bar").and_then(|b| b.as_f64())).collect(); assert!(bars.windows(2).all(|w| w[0] >= w[1]), "{bars:?}");
+        for w in worst { assert!(rel.contains(w.get("id").unwrap()), "{w:?}"); assert!(w.get("value").is_some() && w.get("odds").is_some(), "{w:?}"); }
+        assert_eq!(s.get("worst_escalated").and_then(|x| x.as_arr()).unwrap().len(), n(&f, "escalated").unwrap().min(5));
+    }
+}
+
+/// PORTABILITY finding 1: one leading UTF-8 byte-order mark (Windows PowerShell 5.1 pipes) is skipped; a mark alone is the
+/// usual empty-input schema error.
+#[test]
+fn a_byte_order_mark_on_stdin_is_skipped() {
+    let doc = include_str!("../../examples/agent-plan-6.json"); let bom = [&[0xEF, 0xBB, 0xBF][..], doc.as_bytes()].concat();
+    let (c1, a, _) = pbit_bytes(&["run", "--op", "exact"], doc.as_bytes()); let (c2, b, _) = pbit_bytes(&["run", "--op", "exact"], &bom);
+    assert_eq!((c1, norm(&a)), (c2, norm(&b))); assert_eq!(c1, 0);
+    let (_, d12, _) = pbit(&["demo", "--tasks", "12"], ""); let (c, o, _) = pbit_bytes(&["ir"], &[&[0xEF, 0xBB, 0xBF][..], d12.as_bytes()].concat()); assert_eq!(c, 0); assert!(o.starts_with("pbit-ir v0"), "{o:.80}");
+    let (c3, e1, _) = pbit_bytes(&["decide"], &[0xEF, 0xBB, 0xBF]); let (c4, e2, _) = pbit_bytes(&["decide"], b""); assert_eq!((c3, &e1), (c4, &e2)); assert_eq!(c3, 2);
+    one_error(&e1, "schema", "");
+}
+
+/// The MCP tool `pbit_run` takes the pbit-ir schema as its input schema from pbit-cli/src (a published crate carries no
+/// ../docs); it must stay the file docs/pbit-ir.schema.json, which `ir_schema_matches_the_parser` keeps equal to the parser.
+#[test]
+fn mcp_schema_copy_is_the_docs_schema() { assert_eq!(include_str!("../src/pbit-ir.schema.json"), include_str!("../../docs/pbit-ir.schema.json")); }
+
+/// `pbit mcp`: the dependency-free Python client in python/test_mcp.py drives the server over pipes (legacy initialize and the
+/// 2026-07-28 per-request metadata, every tool against the CLI's own output, protocol errors, framing, EOF). Skipped without python3.
+#[test]
+fn mcp_server_python_client_passes() {
+    let ok = Command::new("python3").args(["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)"]).output().is_ok_and(|o| o.status.success());
+    if !ok { eprintln!("python3 >= 3.9 not found: python/test_mcp.py skipped"); return; }
+    let o = Command::new("python3").arg("test_mcp.py").current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../python")).env("PBIT_BIN", env!("CARGO_BIN_EXE_pbit")).output().unwrap();
+    assert!(o.status.success(), "python/test_mcp.py failed:\n{}", String::from_utf8_lossy(&o.stderr));
 }

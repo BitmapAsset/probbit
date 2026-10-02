@@ -15,23 +15,41 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
+          # static: no glibc requirement (the gnu build needs glibc >= 2.34), and Alpine / arm64 Linux get a binary
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            archive: tar.gz
+            linker: aarch64-linux-gnu-gcc
+            cross: true
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: tar.gz
+          # built on Apple silicon, smoke-tested under Rosetta 2
           - os: macos-latest
             target: x86_64-apple-darwin
             archive: tar.gz
-            cross: true
+            rosetta: true
+          # the C runtime linked in: no VCRUNTIME140.dll needed on a clean Windows
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
+            rustflags: -C target-feature=+crt-static
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - name: cross linker
+        if: ${{ matrix.linker }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: build (portable, no CPU pin)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-gnu-gcc
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo build --release --locked -p pbit-cli --target ${{ matrix.target }}
       - name: smoke test
         if: ${{ !matrix.cross }}
@@ -39,8 +57,9 @@ jobs:
         run: |
           BIN="target/${{ matrix.target }}/release/pbit"
           [ "${{ runner.os }}" = "Windows" ] && BIN="$BIN.exe"
-          "$BIN" version
-          "$BIN" demo --tasks 12 | "$BIN" decide --pretty | head -8
+          RUN=""; [ "${{ matrix.rosetta }}" = "true" ] && RUN="arch -x86_64"
+          $RUN "$BIN" version
+          $RUN "$BIN" demo --tasks 12 | $RUN "$BIN" decide --pretty | head -8
       - name: package
         shell: bash
         run: |
@@ -88,5 +107,5 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "pbit $GITHUB_REF_NAME" \
-              --notes "Portable builds (no CPU pin) for Linux x86_64, macOS (Apple silicon and Intel) and Windows x86_64. Verify an archive with the .sha256 file beside it. What changed: see CHANGELOG.md."
+              --notes "Portable builds (no CPU pin) for Linux x86_64 (glibc >= 2.34, or static musl), Linux arm64 (static musl), macOS (Apple silicon and Intel) and Windows x86_64 (static C runtime). Verify an archive with the .sha256 file beside it. What changed: see CHANGELOG.md."
           fi

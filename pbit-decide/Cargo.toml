@@ -3,6 +3,7 @@ name = "pbit-decide"
 description = "Joint constrained decision engine: feasible plans, plan odds, marginals, what-if, calibrated refusal"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "../README.md"
@@ -10,5 +11,5 @@ keywords = ["p-bit", "assignment", "routing", "constraints", "probabilistic"]
 categories = ["algorithms", "science"]
 
 [dependencies]
-pbit-core = { path = "../pbit-core" }
-pbit-ir = { path = "../pbit-ir" }
+pbit-core = { path = "../pbit-core", version = "0.3.0" }
+pbit-ir = { path = "../pbit-ir", version = "0.3.0" }

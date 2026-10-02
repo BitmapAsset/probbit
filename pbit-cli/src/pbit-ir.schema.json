@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pbit/pbit/docs/pbit-ir.schema.json",
+  "title": "pbit-ir program, wire format v1 (pbit run)",
+  "description": "Hand-written (R19.8, P3.1) from docs/pbit-ir-json.md, which is normative where they differ. The CLI additionally rejects: duplicate object keys, duplicate variable ids or value names, names not in `values` / `vars`, non-finite numbers, |weight| > 1e9, nesting > 256, a cap `min` above the variables able to take its value, and a `start` that breaks a rule. Test `ir_schema_matches_the_parser` keeps every object's property list equal to the parser's.",
+  "type": "object",
+  "required": ["pbit_ir", "values", "vars"],
+  "additionalProperties": false,
+  "properties": {
+    "pbit_ir": { "const": 1 },
+    "comment": { "type": "string" },
+    "values": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 65535, "uniqueItems": true },
+    "vars": { "type": "array", "items": { "$ref": "#/$defs/var" } },
+    "pairs": { "type": "array", "items": { "$ref": "#/$defs/pair" } },
+    "caps": { "type": "array", "items": { "$ref": "#/$defs/cap" } },
+    "all_different": { "type": "array", "items": { "type": "object", "required": ["vars"], "additionalProperties": false,
+      "properties": { "vars": { "type": "array", "items": { "type": "string" }, "minItems": 2, "uniqueItems": true } } } },
+    "implies": { "type": "array", "items": { "type": "object", "required": ["if", "then"], "additionalProperties": false,
+      "properties": {
+        "if": { "type": "object", "required": ["var", "value"], "additionalProperties": false, "properties": { "var": { "type": "string" }, "value": { "type": "string" } } },
+        "then": { "type": "object", "required": ["var", "in"], "additionalProperties": false, "properties": { "var": { "type": "string" }, "in": { "type": "array", "items": { "type": "string" } } } } } } },
+    "tables": { "type": "array", "items": { "type": "object", "required": ["vars"], "additionalProperties": false,
+      "oneOf": [ { "required": ["forbid"] }, { "required": ["allow"] } ],
+      "properties": {
+        "vars": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 3, "uniqueItems": true },
+        "forbid": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } },
+        "allow": { "type": "array", "items": { "type": "array", "items": { "type": "string" } } } } } },
+    "precedes": { "type": "array", "items": { "type": "object", "required": ["before", "after"], "additionalProperties": false,
+      "properties": { "before": { "type": "string" }, "after": { "type": "string" }, "gap": { "type": "integer", "minimum": 0 } } } },
+    "linear": { "type": "array", "items": { "type": "object", "required": ["terms", "limit"], "additionalProperties": false,
+      "properties": {
+        "terms": { "type": "array", "items": { "type": "array", "prefixItems": [ { "type": "string" }, { "type": "string" }, { "type": "integer", "minimum": 0, "maximum": 1000000 } ], "minItems": 3, "maxItems": 3 } },
+        "limit": { "type": "integer", "minimum": 0, "maximum": 9007199254740992 } } } },
+    "start": { "type": "object", "description": "warm start: every variable id -> one allowed value name", "additionalProperties": { "type": "string" } }
+  },
+  "$defs": {
+    "weight": { "type": "number", "minimum": -1e9, "maximum": 1e9 },
+    "var": { "type": "object", "required": ["id"], "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "h": { "type": "object", "description": "unary log-weight per value name (missing = 0)", "additionalProperties": { "$ref": "#/$defs/weight" } },
+        "allowed": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "forbid": { "type": "array", "items": { "type": "string" } },
+        "clamp": { "type": "string" } } },
+    "pair": { "type": "object", "required": ["i", "j"], "additionalProperties": false,
+      "oneOf": [ { "required": ["potts"] }, { "required": ["table"] } ],
+      "properties": {
+        "i": { "type": "string" }, "j": { "type": "string" },
+        "potts": { "$ref": "#/$defs/weight" },
+        "table": { "type": "array", "description": "k x k, row = value of i, column = value of j", "items": { "type": "array", "items": { "$ref": "#/$defs/weight" } } } } },
+    "cap": { "type": "object", "additionalProperties": false,
+      "anyOf": [ { "required": ["limit"] }, { "required": ["min"] } ],
+      "properties": {
+        "limit": { "type": "integer", "minimum": 0 },
+        "min": { "type": "integer", "minimum": 0, "description": "at least min (value form only)" },
+        "value": { "type": "string" },
+        "vars": { "type": "array", "items": { "type": "string" } },
+        "members": { "type": "array", "items": { "type": "array", "prefixItems": [ { "type": "string" }, { "type": "string" } ], "minItems": 2, "maxItems": 2 } } } }
+  },
+  "examples": [
+    { "pbit_ir": 1, "comment": "3-colour a triangle with one pre-coloured vertex", "values": ["r", "g", "b"],
+      "vars": [ { "id": "a", "clamp": "r" }, { "id": "b", "h": { "g": 0.5 } }, { "id": "c" } ],
+      "all_different": [ { "vars": ["a", "b", "c"] } ] },
+    { "pbit_ir": 1, "comment": "two tasks, two workers, a quota and a soft preference to share", "values": ["w1", "w2"],
+      "vars": [ { "id": "t1", "h": { "w1": 1.0 } }, { "id": "t2", "h": { "w1": 0.4, "w2": 0.2 } } ],
+      "pairs": [ { "i": "t1", "j": "t2", "potts": 0.3 } ], "caps": [ { "limit": 1, "value": "w1" } ] },
+    { "pbit_ir": 1, "comment": "knapsack of three items", "values": ["in", "out"],
+      "vars": [ { "id": "i0", "h": { "in": 1.2 } }, { "id": "i1", "h": { "in": 0.7 } }, { "id": "i2", "h": { "in": 0.9 } } ],
+      "linear": [ { "terms": [ ["i0", "in", 4], ["i1", "in", 3], ["i2", "in", 2] ], "limit": 6 } ],
+      "implies": [ { "if": { "var": "i0", "value": "in" }, "then": { "var": "i2", "in": ["out"] } } ],
+      "precedes": [], "tables": [ { "vars": ["i1", "i2"], "forbid": [ ["out", "out"] ] } ],
+      "start": { "i0": "out", "i1": "in", "i2": "in" } }
+  ]
+}

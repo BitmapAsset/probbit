@@ -1,6 +1,6 @@
 {
   "name": "pbit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "pbit, a virtual p-bit processor for joint decisions under hard rules: installs the prebuilt pbit CLI (JSON in, JSON out).",
   "license": "Apache-2.0",
   "repository": {

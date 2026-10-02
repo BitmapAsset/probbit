@@ -20,6 +20,19 @@ mod imp {
 #[cfg(all(unix, target_pointer_width = "64"))] pub use imp::usage;
 #[cfg(not(all(unix, target_pointer_width = "64")))] pub fn usage() -> Option<(f64, f64)> { None }
 
+/// CPU time of the calling thread in ms (clock_gettime, CLOCK_THREAD_CPUTIME_ID: 16 on macOS, 3 on Linux; 64-bit timespec);
+/// None elsewhere. `demo --live` charges its renderer with it.
+#[cfg(all(any(target_os = "macos", target_os = "linux"), target_pointer_width = "64"))]
+pub fn thread_cpu_ms() -> Option<f64> {
+    #[repr(C)] struct Timespec { sec: i64, nsec: i64 }
+    extern "C" { fn clock_gettime(clk: i32, tp: *mut Timespec) -> i32; }
+    let clk = if cfg!(target_os = "macos") { 16 } else { 3 };
+    let mut t = Timespec { sec: 0, nsec: 0 };
+    (unsafe { clock_gettime(clk, &mut t) } == 0).then(|| t.sec as f64 * 1e3 + t.nsec as f64 / 1e6)
+}
+#[cfg(not(all(any(target_os = "macos", target_os = "linux"), target_pointer_width = "64")))]
+pub fn thread_cpu_ms() -> Option<f64> { None }
+
 /// `--priority low` = nice 10 for this process (plus the macOS background band, see `set_low`) (setpriority(2) via FFI, PRIO_PROCESS, who = 0 = self), called before any
 /// worker thread starts so the chains inherit it (Linux nice is per-thread; inheritance covers it — Linux unmeasured). Lowering
 /// needs no privilege; raising would, so there is no "high". Returns the nice value read back; a process already at >= 10 is
