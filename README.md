@@ -199,7 +199,8 @@ Linux behaviour of `--priority` and the CPU telemetry is unmeasured; on Windows 
 
 ## Use it from anything (the JSON contract)
 
-`pbit decide` reads one problem document on stdin and writes one decision document on stdout. Exit code 0 = a plan was
+`pbit decide` reads one problem document on stdin and writes one decision document on stdout (`decide`, `run`, `demo` and `stats`
+write exactly one JSON document on stdout; `pbit ir` writes pbit-ir v0 text, `pbit version` one line, `--help` the usage). Exit code 0 = a plan was
 returned (verdict `exact`, `diagnostics_passed` or `partial`), 3 = `refused` (the whole queue should be escalated; the plan is still
 in the output as a best effort), 1 = `infeasible` (no plan satisfies the rules), 2 = bad input.
 

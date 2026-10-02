@@ -68,7 +68,7 @@ def _call(cmd, doc, flags, timeout_s, binary):
     text = doc if isinstance(doc, str) else json.dumps(doc)
     args = [find_binary(binary), *cmd, *_flags(flags)]
     try:
-        p = subprocess.run(args, input=text, capture_output=True, text=True, timeout=timeout_s)
+        p = subprocess.run(args, input=text, capture_output=True, encoding="utf-8", timeout=timeout_s)  # pbit reads and writes UTF-8, whatever the locale
     except subprocess.TimeoutExpired as e:
         raise PbitTimeout(f"pbit {' '.join(cmd)} passed timeout_s={timeout_s}") from e
     try:

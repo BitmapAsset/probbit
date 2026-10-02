@@ -1,5 +1,6 @@
-//! Process resource usage without crates: getrusage(2) via FFI on Unix (macOS and Linux struct layouts); None elsewhere.
-#[cfg(unix)]
+//! Process resource usage without crates: getrusage(2) via FFI on 64-bit Unix (macOS and Linux struct layouts); None elsewhere.
+// 64-bit only: the layouts below assume 64-bit time_t / long (32-bit Linux or BSD would read garbage telemetry)
+#[cfg(all(unix, target_pointer_width = "64"))]
 mod imp {
     #[cfg(target_os = "macos")] #[repr(C)] struct Timeval { sec: i64, usec: i32, _pad: i32 }
     #[cfg(not(target_os = "macos"))] #[repr(C)] struct Timeval { sec: i64, usec: i64 }
@@ -16,8 +17,8 @@ mod imp {
         Some((ms(&r.utime) + ms(&r.stime), rss_mb))
     }
 }
-#[cfg(unix)] pub use imp::usage;
-#[cfg(not(unix))] pub fn usage() -> Option<(f64, f64)> { None }
+#[cfg(all(unix, target_pointer_width = "64"))] pub use imp::usage;
+#[cfg(not(all(unix, target_pointer_width = "64")))] pub fn usage() -> Option<(f64, f64)> { None }
 
 /// `--priority low` = nice 10 for this process (plus the macOS background band, see `set_low`) (setpriority(2) via FFI, PRIO_PROCESS, who = 0 = self), called before any
 /// worker thread starts so the chains inherit it (Linux nice is per-thread; inheritance covers it — Linux unmeasured). Lowering

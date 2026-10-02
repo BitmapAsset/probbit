@@ -22,7 +22,7 @@ fn main() {
     for th in [4usize, 10] {
         let t0 = Instant::now();
         std::thread::scope(|sc| { for k in 0..th { sc.spawn(move || { let mut g = SplitMix64(99 + k as u64); let mut m = multispin::Lattice::random(l, &mut g);
-            for _ in 0..sw { m.sweep(t4, t8, &mut g); } std::hint::black_box(m.w[0]); }); } });
+            for _ in 0..sw { m.sweep(t4, t8, &mut g); } std::hint::black_box(m.w()[0]); }); } });
         println!("T0 multispin splitmix x{:>2} threads : {:.3e} updates/s total", th, n * 64.0 * sw as f64 * th as f64 / t0.elapsed().as_secs_f64());
     }
     // Tuned kernels (bit-identical output, see test fast_kernels_bit_identical_to_reference)
@@ -33,12 +33,12 @@ fn main() {
     for th in [4usize, 10] {
         let t0 = Instant::now();
         std::thread::scope(|sc| { for k in 0..th { sc.spawn(move || { let mut g = SplitMix64(99 + k as u64); let mut m = multispin::Lattice::random(l, &mut g);
-            for _ in 0..sw { m.sweep_fast(t4, t8, &mut g); } std::hint::black_box(m.w[0]); }); } });
+            for _ in 0..sw { m.sweep_fast(t4, t8, &mut g); } std::hint::black_box(m.w()[0]); }); } });
         println!("fast multispin splitmix x{:>2} thr    : {:.3e} updates/s total", th, n * 64.0 * sw as f64 * th as f64 / t0.elapsed().as_secs_f64());
     }
     println!("fast T1 f32 LUT, splitmix          : {:.3e} updates/s/thread", f1);
     println!("fast T1 f32 LUT, Philox            : {:.3e} updates/s/thread", f1p);
     println!("fast T0 multispin, splitmix        : {:.3e} updates/s/thread", f2);
     println!("fast T0 multispin, Philox          : {:.3e} updates/s/thread", f2p);
-    println!("chk {}", ms.w.iter().map(|v| v.count_ones() as u64).sum::<u64>() + hb.s.iter().filter(|&&v| v > 0.0).count() as u64);
+    println!("chk {}", ms.w().iter().map(|v| v.count_ones() as u64).sum::<u64>() + hb.s().iter().filter(|&&v| v > 0.0).count() as u64);
 }

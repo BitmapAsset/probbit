@@ -25,6 +25,7 @@ fn demo(n: usize, seed: u64, hard: bool) -> Problem {
         (false, false, [1.6, 1.2, 0.0, -0.5, 2.0, -1.0]), (false, true, [1.8, 1.0, 1.2, 0.0, 1.5, 1.0]), (false, false, [0.5, 1.0, 1.6, 0.5, -1.0, -1.5]),
         (false, false, [0.3, 0.8, 1.5, 1.0, -1.0, 0.0]), (false, false, [1.0, 0.8, 0.2, -0.5, 1.8, -2.0]), (false, false, [1.8, 1.4, 0.6, 0.2, -1.0, 0.8])];
     let mut r = Philox4x32::new(seed, 4242);
+    #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the published benchmark instances depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
     let scale = (n as f64 / 12.0).max(1.0) * if hard { 0.89 } else { 1.0 };
     let a = 6; let (mut h, mut allowed) = (vec![0.0; n * a], vec![true; n * a]);

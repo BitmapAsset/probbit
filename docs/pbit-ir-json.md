@@ -106,7 +106,7 @@ never ignored or coerced:
 | `pairs[]` | `i`, `j` (two different var ids), exactly one of `potts` (number) or `table` (k arrays of k numbers) |
 | `caps[]` | `limit` (integer 0..2^53) and/or (`value` form only) `min` (integer 0..2^53, at least; R19.5), exactly one of `members` (array of `[var id, value name]`) or `value` (a value name, with optional `vars`: distinct var ids) |
 | `linear[]` | `terms` (array of `[var id, value name, weight]`, weight an integer 0..=1,000,000, each (var, value) once), `limit` (integer 0..2^53) |
-| router problem | `workers` (non-empty array), `tasks` (non-empty array), `affinity` (number >= 0, default 0), `comment` (string, ignored) |
+| router problem | `workers` (non-empty array, at most 65,535), `tasks` (non-empty array; tasks x workers at most 20,000,000), `affinity` (number >= 0, default 0), `comment` (string, ignored) |
 | `workers[]` | `id` (string, unique), exactly one of `cap` / `capacity` (integer 0..2^53) |
 | `tasks[]` | `id` (string, unique; default `task<index>`), `scores` (object: worker id -> number, each key once), `allowed` (non-empty array of distinct worker ids), `group` (string or number), `clamp` (a worker id), `text` (string, ignored) |
 
@@ -119,7 +119,9 @@ empty `values`, an empty `allowed`, or a variable / task left with no allowed va
 (`pbit: bad problem: tasks[3].allowed: must be an array of strings`). `code`: `schema` = not JSON, a wrong type, an unknown,
 duplicate or missing field; `value` = well-typed but unusable (an unknown or duplicate id / value name, an empty domain, a
 negative or fractional cap, a clamp to a forbidden value, `pbit_ir` other than 1); `limit` = beyond a documented limit (a
-number that is not a finite double, nesting deeper than 256, more than 65,535 values, an integer above 2^53). `path` locates
+number that is not a finite double, nesting deeper than 256, more than 65,535 values or workers, an integer above 2^53, the
+size limits in "Limits in v1", stdin above `--max-input-mb`). Unreadable stdin and invalid UTF-8 are `schema` errors too
+(0.2.1; they printed a stderr line only). `path` locates
 the offending field (`""` = the whole document, as for JSON syntax errors and non-finite numbers, whose message gives the byte
 offset). Flag errors keep their convention: exit 2, a message on stderr, nothing on stdout. The same strict reader parses
 both front-ends (`pbit-cli/src/json.rs`; CLI test `input_contract_rejects_malformed_documents`, which includes the 2026-09-30 external
@@ -224,9 +226,12 @@ Every control below works on both `pbit run` (this format) and `pbit decide` (th
 
 - `--chains N` (env `PBIT_CHAINS`, default 4): independent chains (more chains = tighter between-chain checks, more work).
 - `--threads N` (env `PBIT_THREADS`, default min(4, available cores)): worker threads; worker w runs chains w, w+N, ...
-  Precedence: flag > environment > config file > default; values must be ≥ 1 (else exit 2). Config file:
+  Precedence: flag > environment > config file > default; `--chains` must be 1..=100,000 and `--threads` 1..=1,024, from any
+  source (else exit 2; 0.2.1: `--chains 576460752303423488` aborted with exit 134, 1,000,000,000 exhausted memory; 100,000 is
+  the largest count measured, BENCHMARKS §6). Config file:
   `$PBIT_CONFIG`, else `./pbit.json` if it exists, e.g. `{"chains": 4, "threads": 2, "cpu_limit": 50, "priority": "low"}`
-  (CLI test `run_config_file_layer`). At fixed work the thread count does not change the answer: with `--sweeps`
+  (CLI test `run_config_file_layer`); keys `chains`, `threads`, `cpu_limit`, `mem_limit_mb`, `priority` only (0.2.1: another
+  key, or a document that is not an object, exits 2), and `decide` / `run` name the file in `telemetry.config`. At fixed work the thread count does not change the answer: with `--sweeps`
   fixed and a fixed-work polish (`--polish-ms 0` or `--polish-sweeps M`) the decision is identical at 1, 2, 3, 4 and 6 threads
   (each chain's RNG stream is independent of its thread; CLI tests `run_threads_and_chains_are_resource_controls`,
   `polish_sweeps_makes_the_whole_answer_deterministic`). Under a wall-clock budget or polish it does (below). The polish runs its
@@ -378,6 +383,16 @@ Exact answers have sample = gate = polish = 0. Example (20 x 30 precedence chain
 200.0, sample 200.6, gate 88.9, polish 51.5, total 544.6 ms. Test `run_reports_phase_times`.
 
 ## Limits in v1 (measured or stated)
+
+- Size limits (0.2.1; each a `limit` error, exit 2, checked before the allocation it guards): at most 20,000,000
+  (variable, value) pairs, n x k for `pbit run` and tasks x workers for `pbit decide` / `pbit ir`; at most 65,535 workers (the
+  IR's value limit; 65,536 aborted `pbit decide`, exit 134); per `precedes`, at most 100,000 (slot of `before`, slot of
+  `after`) pairs of allowed slots to check, as for a `tables` allow-list (a 30 KB program with 3,000 slots made 9 million caps,
+  1.45 GB); at most 20,000,000 cap members in total after the constructs are lowered; and `--max-input-mb N` (`decide`, `run`,
+  `ir`; default 256, 0 = no limit) on stdin, since parsing costs up to ~9x the input (a 200 MB numeric array peaked at
+  1.78 GB). The dense bound keeps the largest program measured below (200 x 65,535 = 13.1 million) and refuses the review's
+  0.6 MB amplifier (500 x 65,535 = 32.8 million pairs, 4.1 GB). Within the bounds memory still grows with n x k and with the
+  caps (below): a program near both bounds can need several GB.
 
 - Dense domains (FINDING, R19.6; a documented v1 limit since R19.7: sparse domains are not built): memory and per-step cost scale with n x k even when each
   variable allows a few values. k = 65,535 values, 3 allowed per variable, unaries only (`pbit run`, seed 1, M4, load ~10, N = 1): n = 50: `decide` exact (forest) 141 MB peak RSS, 27.5 ms; `--op sample` 1,083 MB,

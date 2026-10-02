@@ -3,6 +3,43 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.2.1 - 2026-10-01
+
+### Fixed (found by the 2026-10-01 independent review)
+- `pbit decide` aborted (exit 134, empty stdout) on a router document with 65,536 or more workers. Workers are now limited to
+  65,535 (the IR's value limit), a `limit` error with exit 2, and `Problem::lower_until` declines instead of panicking.
+- `--chains 576460752303423488` aborted `decide`, `run` and `stats` (exit 134) and `--chains 1000000000` exhausted memory.
+  `--chains` is now 1..=100,000 and `--threads` 1..=1,024 from any source (flag, `PBIT_*`, `pbit.json`), else exit 2; the
+  memory-limit arithmetic is checked.
+- A failed write to stderr (a pipe whose reader had gone) aborted the process (exit 134): a bad flag lost its exit code, and
+  `--progress` into a reader that stopped lost the whole decision. Every stderr line now ignores a failed write.
+- Invalid UTF-8 on stdin and an unreadable stdin (`pbit decide < /`) exited 2 with nothing on stdout. Both are now ONE
+  `schema` error object on stdout, like any bad input.
+- The router sampler's two-group move stored worker indices and bucket loads in 8 bits: with more than 255 workers in a group a
+  task could be placed on a worker it does not allow and the sampled odds were wrong (the gate refused those runs). Such groups
+  now skip the move, which keeps the chain exact; loads add without wrapping, and caps of t or more (legal up to 2^53) no longer
+  truncate in its 32-bit arithmetic. Golden digests unchanged.
+- Small documents could allocate gigabytes (a 0.6 MB program peaked at 4.1-6.3 GB, a 30 KB precedence at 1.45 GB). New `limit`
+  errors, checked before the allocation: at most 20,000,000 (variable, value) pairs (n x k; tasks x workers on the router), at
+  most 100,000 slot pairs per `precedes` (as for `tables`), at most 20,000,000 cap members in total; `--max-input-mb N`
+  (`decide`, `run`, `ir`; default 256, 0 = no limit) bounds stdin. `precedes` loops over allowed slots only (same caps).
+- Escaped UTF-16 surrogate pairs (`"\ud83d\ude00"`, how Python's `json.dumps` writes an emoji) decoded to two U+FFFD, so ids
+  came back changed and two emoji ids collided. A pair is now one character, and a lone surrogate is a `schema` error. The
+  Python wrapper reads pbit's output as UTF-8 whatever the locale.
+- `pbit-core`: the multispin and heat-bath lattices had `pub` fields, so safe code could reach undefined behaviour in the
+  `unsafe` fast kernels (a wrapped `l * l` length check; heat-bath couplings off ±1 read past the lookup table). The fields are
+  private now: build a lattice with `random` or the checked `new` (exact lengths; ±1 values for the heat-bath), read it with
+  `l()`, `w()` / `s()`, `jr()`, `jd()`; the length checks no longer wrap. Kernel output and speed unchanged.
+- `cargo clippy` failed with default lints (and so never reached `pbit-cli`); it now passes. The seeded generators keep the
+  literal 6.283185307 (allowed with a reason), because golden digests and published instances depend on its exact bits.
+- `pbit --help` and `pbit -h` print the usage on stdout and exit 0 (they exited 2 with the usage on stderr).
+- `pbit.json`: an unknown key (`{"thread": 3}`) or a non-object was ignored silently; now exit 2. `decide` and `run` name the
+  config file in `telemetry.config` when there is one (it can change the answer of an otherwise identical command).
+- Process telemetry (`process_cpu_ms`, `peak_rss_mb`) is read only on 64-bit Unix, where the `getrusage` layout is known
+  (`null` elsewhere; 32-bit Linux or BSD would have read garbage).
+- Two wall-clock tests tolerate slow CI runners: `acc1_tv_le_001_within_10ms` allows 25 ms when `CI` is set, and the sudoku
+  test's passing sampled run gets 300 ms instead of 60.
+
 ## 0.2.0 - 2026-10-01
 
 ### Changed (breaking for malformed input)
@@ -283,7 +320,7 @@ All notable changes to this project are documented here. The format follows
   log Z unchanged on the demos; +9-12% wall on the largest DP layers.
 - Seeded 10,000-document fuzz test of both front-ends (CLI test `fuzz_inputs_never_crash_and_outputs_stay_finite_json`).
 
-## 0.1.0 (unreleased)
+## 0.1.0 - 2026-09-30
 
 Initial public release.
 

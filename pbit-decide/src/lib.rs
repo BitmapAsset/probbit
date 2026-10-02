@@ -81,10 +81,12 @@ impl Problem {
     /// the judge logits as unary log-weights, a Potts coupling (+lam when equal) per same-group pair, and one capacity
     /// constraint per agent over its allowed (task, agent) pairs; clamps stay clamps. Through this lowering the IR's
     /// enumeration, sampler (site + swap moves) and gate are bit-identical to this crate's (acceptance `ir_lowering_bit_identical`).
+    /// Panics if the IR rejects the model (more than 65,535 workers; `lower_until` declines instead, and the CLI's loader refuses them).
     pub fn lower(&self) -> pbit_ir::Model { self.lower_until(None).expect("a Problem always lowers") }
     /// `lower` that gives up (None) once `hard` passes: the clock is read once per group member while the O(group size^2)
     /// Potts pairs are built, and before and after `Model::new` (R19.8, P2.3 item 2: the CLI's `--exact-ms` cap did not
-    /// cover this lowering, ~200 ms on one 3,000-task group). None = `lower`.
+    /// cover this lowering, ~200 ms on one 3,000-task group). None = `lower`. Also None when the IR rejects the model (more than
+    /// 65,535 workers): an `expect` here aborted `pbit decide` (exit 134, empty stdout) on a 65,536-worker document.
     pub fn lower_until(&self, hard: Option<std::time::Instant>) -> Option<pbit_ir::Model> {
         let late = || hard.is_some_and(|h| std::time::Instant::now() >= h);
         let mut gm: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
@@ -93,7 +95,7 @@ impl Problem {
         for mem in gm.values() { for (q, &i) in mem.iter().enumerate() { if late() { return None; } for &j in &mem[q + 1..] { pairs.push(pbit_ir::Pair { i, j, c: pbit_ir::Coupling::Potts(self.lam) }); } } }
         let caps = (0..self.a).map(|a| pbit_ir::Cap { weights: vec![], members: (0..self.t).filter(|&i| self.allowed[i * self.a + a]).map(|i| (i, a)).collect(), limit: self.cap[a] }).collect();
         if late() { return None; }
-        let mut m = pbit_ir::Model::new(self.t, self.a, self.h.clone(), self.allowed.clone(), self.clamp.clone(), pairs, caps).expect("a Problem always lowers");
+        let mut m = pbit_ir::Model::new(self.t, self.a, self.h.clone(), self.allowed.clone(), self.clamp.clone(), pairs, caps).ok()?;
         m.collective = self.collective; m.cluster = self.cluster; m.cycles = self.cycles; if late() { None } else { Some(m) }
     }
 
@@ -548,6 +550,7 @@ pub struct Dispatch { pub p: Problem, pub tickets: Vec<String>, pub agents: Vec<
 /// Stub judge: logits = skill match + agent seniority + noise (seeded); groups = same-customer tickets (affinity lam>0).
 pub fn dispatch(t: usize, a: usize, cap: usize, group_size: usize, lam: f64, seed: u64) -> Dispatch {
     let mut r = Philox4x32::new(seed, 999);
+    #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the golden digests of the acceptance tests depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
     let skills = ["billing", "tech", "legal"];
     let agent_skill: Vec<usize> = (0..a).map(|k| k % 3).collect();
@@ -730,7 +733,9 @@ impl GroupPairs {
     }
 }
 /// Per-group assignment tables (see `GroupPairs`).
-/// None if some group has more than 4096 assignments.
+/// None if some group has more than 4096 assignments, or more than 255 workers or members: assignments and bucket loads are
+/// stored as u8, and a 300-worker group wrapped them (a task placed on a worker it does not allow, odds off). Skipping the
+/// move keeps the chain exact, as `WINDOW_MAX_STATES` does for windows.
 fn group_tabs(p: &Problem) -> Option<Vec<GTab>> {
         let mut gm: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
         for i in 0..p.t { if p.group[i] != usize::MAX { gm.entry(p.group[i]).or_default().push(i); } }
@@ -738,6 +743,7 @@ fn group_tabs(p: &Problem) -> Option<Vec<GTab>> {
         let mut gs = vec![];
         for mem in mems {
             let ag: Vec<usize> = (0..p.a).filter(|&a| mem.iter().any(|&i| p.ok(i, a))).collect();
+            if ag.len() > 255 || mem.len() > 255 { return None; }
             let n: f64 = mem.iter().map(|&i| (0..p.a).filter(|&a| p.ok(i, a)).count() as f64).product(); if n > 4096.0 { return None; }
             let mut map: HashMap<Vec<u8>, Vec<(f64, Vec<u8>)>> = HashMap::new();
             let mut cur = vec![0u8; mem.len()];
@@ -762,7 +768,9 @@ impl<'a> Chain<'a> {
         let gp = self.gp.take().unwrap(); let p = self.p;
         let (u, v) = gp.pairs[self.rng.below(gp.pairs.len())]; let (g1, g2) = (&gp.gs[u], &gp.gs[v]);
         for &i in g1.mem.iter().chain(&g2.mem) { self.load[self.x[i]] -= 1; }
-        let free: Vec<i32> = (0..p.a).map(|a| p.cap[a] as i32 - self.load[a] as i32).collect();
+        // A cap of t or more never binds (at most t tasks): min(cap, t) keeps every comparison and fits an i32 (a cap of
+        // 1e12 or 2^32 + 2, legal up to 2^53, truncated to a wrong, even negative, free capacity)
+        let free: Vec<i32> = (0..p.a).map(|a| p.cap[a].min(p.t) as i32 - self.load[a] as i32).collect();
         let fits = |g: &GTab, lv: &[u8]| g.ag.iter().zip(lv).all(|(&a, &l)| l as i32 <= free[a]);
         let b1: Vec<usize> = (0..g1.buckets.len()).filter(|&k| fits(g1, &g1.buckets[k].0)).collect();
         let b2: Vec<usize> = (0..g2.buckets.len()).filter(|&k| fits(g2, &g2.buckets[k].0)).collect();
@@ -770,7 +778,7 @@ impl<'a> Chain<'a> {
         let sh: Vec<(usize, usize, usize)> = g1.ag.iter().enumerate().filter_map(|(q, &a)| g2.ag.iter().position(|&b| b == a).map(|r| (q, r, a))).collect();
         let mut cand: Vec<(usize, usize, f64)> = Vec::with_capacity(b1.len() * b2.len()); let mut mx = f64::NEG_INFINITY;
         for &k1 in &b1 { let l1 = &g1.buckets[k1].0; for &k2 in &b2 { let l2 = &g2.buckets[k2].0;
-            if sh.iter().all(|&(q, r, a)| (l1[q] + l2[r]) as i32 <= free[a]) { let w = g1.buckets[k1].1 + g2.buckets[k2].1; if w > mx { mx = w; } cand.push((k1, k2, w)); } } }
+            if sh.iter().all(|&(q, r, a)| l1[q] as i32 + l2[r] as i32 <= free[a]) { let w = g1.buckets[k1].1 + g2.buckets[k2].1; if w > mx { mx = w; } cand.push((k1, k2, w)); } } }
         if cand.is_empty() { for &i in g1.mem.iter().chain(&g2.mem) { self.load[self.x[i]] += 1; } self.gp = Some(gp); return; } // unreachable: current state fits
         let tot: f64 = cand.iter().map(|c| (c.2 - mx).exp()).sum(); let mut r = self.rng.f64() * tot; let mut pick = cand.len() - 1;
         for (k, c) in cand.iter().enumerate() { let w = (c.2 - mx).exp(); if r < w { pick = k; break; } r -= w; }
@@ -820,7 +828,7 @@ impl<'a> Chain<'a> {
         let fr = frontiers(&gp.gs, &sel, &last);
         if fr.iter().any(|f| f.len() > 16) { self.win = Some(gp); return; }
         for &g in &sel { for &i in &gp.gs[g].mem { self.load[self.x[i]] -= 1; } }
-        let free: Vec<i32> = (0..p.a).map(|a| p.cap[a] as i32 - self.load[a] as i32).collect();
+        let free: Vec<i32> = (0..p.a).map(|a| p.cap[a].min(p.t) as i32 - self.load[a] as i32).collect(); // as `group_pair`
         let lane = |f: &[usize], a: usize| f.iter().position(|&b| b == a);
         // per step: roles of the group's agents (lane in fr[j-1], lane in fr[j]), carried lanes, and buckets that fit on their own
         type Step = (Vec<(Option<usize>, Option<usize>)>, Vec<(usize, usize)>, Vec<usize>);

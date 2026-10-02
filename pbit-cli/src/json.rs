@@ -58,6 +58,10 @@ pub fn number(j: &Json, path: &str) -> Result<f64, InErr> { j.as_f64().ok_or_els
 /// expressible distribution, and it keeps every log-space quantity (sums over variables, pairs and same-group pairs, log Z)
 /// below ~1e9 x (input size), far inside the double range (1.8e308). The arithmetic stays in log space (max-subtracted exp).
 pub const MAX_WEIGHT: f64 = 1e9;
+/// The bound on dense (variable, value) tables: `pbit run`'s vars x values and the router's tasks x workers. h, allowed and the
+/// sampler's and gate's per-pair arrays are dense, so a 0.6 MB program (65,535 values, 2,000 variables) peaked at 6.3 GB RSS.
+/// Above it: a `limit` error before anything is allocated. The largest documented program is 200 x 65,535 = 13.1 million.
+pub const MAX_DENSE: usize = 20_000_000;
 pub fn weight(j: &Json, path: &str) -> Result<f64, InErr> {
     let x = number(j, path)?; if x.abs() > MAX_WEIGHT { return Err(limit(path, format!("{x:e} is beyond the weight limit |x| <= 1e9 (natural-log odds; rescale)"))); } Ok(x)
 }
@@ -113,10 +117,20 @@ fn string(b: &[u8], i: &mut usize) -> Result<String, String> {
         match b[*i] { b'"' => { *i += 1; return Ok(out); }
             b'\\' => { *i += 1; let c = *b.get(*i).ok_or("bad escape")?; *i += 1;
                 match c { b'"' => out.push('"'), b'\\' => out.push('\\'), b'/' => out.push('/'), b'n' => out.push('\n'), b't' => out.push('\t'), b'r' => out.push('\r'), b'b' => out.push('\u{8}'), b'f' => out.push('\u{c}'),
-                    b'u' => { let h = std::str::from_utf8(b.get(*i..*i + 4).ok_or("bad \\u escape")?).map_err(|e| e.to_string())?; *i += 4;
-                        let cp = u32::from_str_radix(h, 16).map_err(|e| e.to_string())?; out.push(char::from_u32(cp).unwrap_or('\u{fffd}')); }
+                    b'u' => { let mut cp = hex4(b, i)?;
+                        // A UTF-16 surrogate pair (`"\ud83d\ude00"`: Python's json.dumps writes every emoji so) is ONE character; each
+                        // half decoded to U+FFFD, so two emoji ids collided. A lone surrogate is no character: an error, not U+FFFD.
+                        if (0xD800..0xDC00).contains(&cp) && b.get(*i..*i + 2) == Some(b"\\u") { let s = *i; *i += 2; let lo = hex4(b, i)?;
+                            if (0xDC00..0xE000).contains(&lo) { cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00); } else { *i = s; } }
+                        out.push(char::from_u32(cp).ok_or_else(|| format!("lone surrogate \\u{cp:04x} at byte {}", *i - 6))?); }
                     _ => return Err(format!("bad escape at byte {i}")) } }
             _ => { let s = *i; while *i < b.len() && b[*i] != b'"' && b[*i] != b'\\' { *i += 1; } out.push_str(std::str::from_utf8(&b[s..*i]).map_err(|e| e.to_string())?); } } }
+}
+
+/// The 4 hex digits of a `\u` escape at `*i` (advanced past them).
+fn hex4(b: &[u8], i: &mut usize) -> Result<u32, String> {
+    let h = std::str::from_utf8(b.get(*i..*i + 4).ok_or("bad \\u escape")?).map_err(|e| e.to_string())?; *i += 4;
+    u32::from_str_radix(h, 16).map_err(|e| e.to_string())
 }
 
 /// Serialize. `pretty` = 2-space indentation. Numbers: integers print without a fraction, others with up to 6 significant decimals.

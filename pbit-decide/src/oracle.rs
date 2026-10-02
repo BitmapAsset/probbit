@@ -10,6 +10,7 @@ pub struct Inst { pub p: Problem, pub capb: usize, pub nb: usize }
 pub fn build(nblocks: usize, capp: usize, capb: usize, lam: f64, seed: u64, pair_swaps: bool) -> Inst {
     let b_ = nblocks; let na = 2 * b_ + (b_ - 1); let t = b_ * M;
     let mut r = Philox4x32::new(seed, 77);
+    #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the oracle instances (and the golden digests built on them) depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
     let mut h = vec![0.0; t * na]; let mut allowed = vec![false; t * na]; let mut cap = vec![capp; na];
     for b in 0..b_ - 1 { cap[2 * b_ + b] = capb; }

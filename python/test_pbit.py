@@ -52,6 +52,12 @@ class PbitWrapper(unittest.TestCase):
         with self.assertRaises(pbit.PbitTimeout):
             pbit.decide(pbit.demo(tasks=24, seed=1), mode="sample", budget_ms=3000, timeout_s=0.2)
 
+    def test_emoji_ids_round_trip(self):
+        # json.dumps escapes them by default ("\ud83d\ude00"); they decoded to U+FFFD, came back changed and collided
+        doc = pbit.demo(tasks=3, seed=1); doc["tasks"][0]["id"] = "T\U0001F600"; doc["tasks"][1]["id"] = "T\U0001F601"
+        a = pbit.decide(doc, budget_ms=50)
+        self.assertEqual(sorted(a["plan"]), sorted(t["id"] for t in doc["tasks"]))
+
     def test_deadline(self):
         a = pbit.run(load("denoise-8x12.json"), deadline_ms=500)  # `met` depends on machine load; the contract is the field
         self.assertEqual(a["deadline"]["ms"], 500); self.assertIsInstance(a["deadline"]["met"], bool)

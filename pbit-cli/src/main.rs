@@ -3,14 +3,15 @@
 //!
 //! JSON problem in on stdin, JSON decision out on stdout. Zero external crates.
 //!
-//!   pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--pretty]
+//!   pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--pretty]
 //!   pbit demo   [--tasks N] [--seed N] [--hard] # emit an agent-routing problem as JSON; --hard = tight quotas + strong affinity
-//!   pbit ir                                   # emit the problem in pbit-ir v0 (the hardware-facing text form)
-//!   pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--pretty]  # a general pbit-ir JSON program
+//!   pbit ir [--max-input-mb N]                # emit the problem in pbit-ir v0 (the hardware-facing text form)
+//!   pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--pretty]  # a general pbit-ir JSON program
 //!   --progress [MS] (decide, run): one JSONL telemetry line on stderr every MS ms (default 100) while the decision runs
 //!   pbit stats [--sweeps N]                  # the processor's spec sheet: machine, build, effective controls + source, measured updates/s
 //!   pbit version
 //!   pbit <command> --help | -h               # usage, every flag with its default, exit codes
+//!   pbit --help | -h                          # the usage above (stdout, exit 0)
 mod json;
 mod run;
 mod sys;
@@ -22,7 +23,11 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 struct Named { p: Problem, tasks: Vec<String>, workers: Vec<String> }
 
-fn fail(msg: &str) -> ! { eprintln!("pbit: {msg}"); std::process::exit(2) }
+/// Every stderr line goes through here. `eprintln!` panicked when stderr was a pipe whose reader had gone (`pbit decide --bogus
+/// 2>&1 >/dev/null | true`, or `--progress` into `head -c 1`: exit 134 with panic = abort, the decision lost to a log line). A
+/// failed write to stderr is ignored: the command keeps its stdout and its exit code.
+fn err_line(s: &str) { let _ = writeln!(std::io::stderr(), "{s}"); }
+fn fail(msg: &str) -> ! { err_line(&format!("pbit: {msg}")); std::process::exit(2) }
 /// `--budget-ms inf` / `1e300` aborted (exit 134: the deadline Duration overflowed) and `NaN` never stopped sampling
 fn budget_ms(args: &[String]) -> f64 {
     let b: f64 = arg(args, "--budget-ms", 200.0);
@@ -57,17 +62,20 @@ pub(crate) fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, J
 fn emit_raw(s: &str) {
     let mut o = std::io::stdout().lock();
     if let Err(e) = o.write_all(s.as_bytes()).and_then(|_| o.flush()) {
-        if e.kind() != std::io::ErrorKind::BrokenPipe { eprintln!("pbit: cannot write the output: {e}"); std::process::exit(2) } }
+        if e.kind() != std::io::ErrorKind::BrokenPipe { err_line(&format!("pbit: cannot write the output: {e}")); std::process::exit(2) } }
 }
 fn emit(s: &str) { emit_raw(&format!("{s}\n")) }
 
 /// JSON problem -> Problem. See README "Problem format"; the strict contract (types, unknown fields, duplicates, empty domains,
 /// structured errors) is docs/pbit-ir-json.md "Input contract".
 fn from_json(j: &Json) -> Result<Named, json::InErr> {
-    use json::{arr, at, fields, ix, opt, req, schema, text, value, weight};
+    use json::{arr, at, fields, ix, limit, opt, req, schema, text, value, weight};
     fields(j, "", &["workers", "tasks", "affinity", "comment"])?;
     if let Some(c) = opt(j, "comment") { text(c, "comment")?; }
     let ws = arr(req(j, "workers", "")?, "workers")?;
+    // Workers are the lowered program's values, at most 65,535 (`pbit_ir::Model::new`, as `pbit run`'s `values`): 65,536 workers
+    // aborted `pbit decide` in the lowering (exit 134, empty stdout)
+    if ws.len() > 65535 { return Err(limit("workers", format!("{} workers; at most 65535", ws.len()))); }
     // Ids go through hash indexes (worker / task duplicate checks, worker and group lookups were linear scans: O(n^2))
     use std::collections::{HashMap, HashSet};
     let mut workers = vec![]; let mut cap = vec![]; let mut windex: HashMap<String, usize> = HashMap::new();
@@ -82,6 +90,8 @@ fn from_json(j: &Json) -> Result<Named, json::InErr> {
     let widx = |id: &str| windex.get(id).copied();
     let ts = arr(req(j, "tasks", "")?, "tasks")?;
     let t = ts.len(); if t == 0 { return Err(value("tasks", "no tasks")); }
+    // Dense (task, worker) tables (as `pbit run`'s n x k): a small document must not ask for gigabytes
+    if t.saturating_mul(a) > json::MAX_DENSE { return Err(limit("tasks", format!("{t} tasks x {a} workers = {} (task, worker) pairs; at most {}", t * a, json::MAX_DENSE))); }
     let (mut h, mut allowed, mut group, mut clamp, mut tasks) = (vec![f64::NEG_INFINITY; t * a], vec![false; t * a], vec![usize::MAX; t], vec![None; t], vec![]);
     let mut gids: Vec<String> = vec![]; let mut gindex: HashMap<String, usize> = HashMap::new(); let mut tseen: HashSet<String> = HashSet::with_capacity(t);
     for (i, tk) in ts.iter().enumerate() { let tp = ix("tasks", i);
@@ -115,7 +125,7 @@ fn from_json(j: &Json) -> Result<Named, json::InErr> {
 }
 /// Bad input (JSON, schema, values): ONE structured error object on stdout, a human line on stderr, exit 2.
 fn bad_input(what: &str, e: json::InErr) -> ! {
-    eprintln!("pbit: {what}{}{}", if e.path.is_empty() { String::new() } else { format!("{}: ", e.path) }, e.msg);
+    err_line(&format!("pbit: {what}{}{}", if e.path.is_empty() { String::new() } else { format!("{}: ", e.path) }, e.msg));
     emit(&json::write(&e.to_json(), false)); std::process::exit(2)
 }
 /// Emit a decision; returns its exit code. Every number in it must be finite (docs/pbit-ir-json.md "Numeric contract"). A
@@ -130,13 +140,13 @@ fn finish(mut doc: Json, code: i32, pretty: bool) -> i32 {
                 g.push(("non_finite".to_string(), Json::Arr(bad.iter().map(|p| jstr(&p["gate.".len()..])).collect()))); } }
         } else {
             let e = json::InErr { code: "numeric", path: bad[0].clone(), msg: format!("{} computed quantit{} not finite (first: {}); no answer is emitted", bad.len(), if bad.len() == 1 { "y is" } else { "ies are" }, bad[0]) };
-            eprintln!("pbit: numeric failure: {}", e.msg); emit(&json::write(&e.to_json(), false)); return 3;
+            err_line(&format!("pbit: numeric failure: {}", e.msg)); emit(&json::write(&e.to_json(), false)); return 3;
         }
     }
     emit(&json::write(&doc, pretty)); code
 }
 /// stdin -> a parsed document, or `bad_input`
-fn read_doc() -> Json { json::parse(&read_stdin()).unwrap_or_else(|e| bad_input(if e.code == "schema" { "" } else { "bad input: " }, e)) }
+fn read_doc(args: &[String]) -> Json { json::parse(&read_stdin(args)).unwrap_or_else(|e| bad_input(if e.code == "schema" { "" } else { "bad input: " }, e)) }
 
 fn odds(n: &Named, marg: &[f64]) -> Json {
     Json::Obj(n.tasks.iter().enumerate().map(|(i, id)| { let mut row: Vec<(usize, f64)> = (0..n.p.a).filter(|&k| n.p.allowed[i * n.p.a + k]).map(|k| (k, marg[i * n.p.a + k])).collect();
@@ -158,15 +168,16 @@ const CONTROLS: [&str; 5] = ["--chains", "--threads", "--cpu-limit", "--mem-limi
 /// Per command: (flags taking a value, switches); `check_flags` enforces exactly these and `help` lists exactly these (R19.8).
 fn flags_of(cmd: &str) -> (Vec<&'static str>, Vec<&'static str>) {
     match cmd {
-        "decide" => ([&SEARCH[..], &CONTROLS[..], &["--mode"]].concat(), vec!["--pretty", "--progress"]),
-        "run" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms"]].concat(), vec!["--pretty", "--progress"]),
+        "decide" => ([&SEARCH[..], &CONTROLS[..], &["--mode", "--max-input-mb"]].concat(), vec!["--pretty", "--progress"]),
+        "run" => ([&SEARCH[..], &CONTROLS[..], &["--op", "--deadline-ms", "--max-input-mb"]].concat(), vec!["--pretty", "--progress"]),
         "stats" => ([&CONTROLS[..], &["--sweeps"]].concat(), vec!["--pretty"]),
         "demo" => (vec!["--tasks", "--seed"], vec!["--hard"]),
+        "ir" => (vec!["--max-input-mb"], vec![]),
         _ => (vec![], vec![]),
     }
 }
 /// One line per flag for `help` (R19.8, P3.1); `help` panics on a flag without a line (test `every_command_has_help`).
-const FLAG_HELP: [(&str, &str); 23] = [
+const FLAG_HELP: [(&str, &str); 24] = [
     ("--budget-ms", "N    sampler wall-clock budget, ms (default 200)"), ("--seed", "N    random seed (default 7)"),
     ("--exact-limit", "N    plans the exact enumeration may count before it declines (default 2000000)"),
     ("--exact-ms", "N    wall-clock cap on the exact tiers that run before the sampler (opt-in; absent = no cap)"),
@@ -174,14 +185,15 @@ const FLAG_HELP: [(&str, &str); 23] = [
     ("--polish-ms", "N    plan polish budget, ms (default 50; 0 = off)"), ("--polish-sweeps", "N    fixed-work plan polish (deterministic)"),
     ("--sweeps", "N    fixed work per chain instead of the wall-clock budget (with --polish-ms 0: a pure function of input + seed)"),
     ("--collective", "on|off    global two-value flips + label swaps (default on)"), ("--cluster", "on|off    Wolff cluster move (default on)"),
-    ("--cycles", "on|off    three-cycle rotations (default on)"), ("--chains", "N    sampler chains (default 4)"),
-    ("--threads", "N    worker threads for the chains, the gate and the polish (default min(cores, 4))"),
+    ("--cycles", "on|off    three-cycle rotations (default on)"), ("--chains", "N    sampler chains, 1..=100000 (default 4)"),
+    ("--threads", "N    worker threads for the chains, the gate and the polish, 1..=1024 (default min(cores, 4))"),
     ("--cpu-limit", "PCT    per-thread duty cycle 1..100 (default 100)"), ("--mem-limit-mb", "N    cap on stored samples (default 1024; 0 = none)"),
     ("--priority", "low|normal    OS scheduling priority (default normal)"), ("--mode", "auto|exact|sample    which tiers may answer (default auto)"),
     ("--op", "decide|exact|sample    decide = exact tiers, then the sampler; exact / sample = only those (default decide)"),
     ("--deadline-ms", "N    whole-call deadline (exact N/4, then sampler + polish); answer has `deadline` + `phases`"),
     ("--pretty", "indented JSON"), ("--progress", "[MS]    one JSONL telemetry line on stderr every MS ms (default 100)"),
     ("--tasks", "N    tasks to generate (default 12)"), ("--hard", "tight quotas + strong affinity"),
+    ("--max-input-mb", "N    largest stdin document read, MB (default 256; 0 = no limit)"),
 ];
 /// `pbit <command> --help` / `-h` (R19.8, P3.1): what it does, every flag it accepts, exit codes. None = not a command.
 fn help(cmd: &str) -> Option<String> {
@@ -233,24 +245,40 @@ fn check_flags(args: &[String], values: &[&str], switches: &[&str]) {
         else if switches.contains(&a) { i += 1; }
         else { fail(&format!("unknown argument {a:?} for `pbit {}` (run `pbit` for usage)", args[0])) } }
 }
-/// Optional config file: `$PBIT_CONFIG`, else `./pbit.json` if present (keys chains, threads, cpu_limit, priority).
+/// Optional config file: `$PBIT_CONFIG`, else `./pbit.json` if present (keys chains, threads, cpu_limit, mem_limit_mb, priority).
+fn config_path() -> Option<String> { std::env::var("PBIT_CONFIG").ok().or_else(|| std::path::Path::new("pbit.json").exists().then(|| "pbit.json".to_string())) }
+const CONFIG_KEYS: [&str; 5] = ["chains", "threads", "cpu_limit", "mem_limit_mb", "priority"];
 fn config() -> Option<json::Json> {
-    let path = std::env::var("PBIT_CONFIG").ok().or_else(|| std::path::Path::new("pbit.json").exists().then(|| "pbit.json".to_string()))?;
+    let path = config_path()?;
     let src = std::fs::read_to_string(&path).unwrap_or_else(|e| fail(&format!("config {path}: {e}")));
-    Some(json::parse(&src).unwrap_or_else(|e| fail(&format!("config {path}: {}", e.msg))))
+    let c = json::parse(&src).unwrap_or_else(|e| fail(&format!("config {path}: {}", e.msg)));
+    // An unknown key (`{"thread": 3}`) or a non-object was ignored silently: exit 2, as for the input documents' unknown fields
+    match &c { Json::Obj(kv) => if let Some((k, _)) = kv.iter().find(|(k, _)| !CONFIG_KEYS.contains(&k.as_str())) { fail(&format!("config {path}: unknown key \"{k}\" (known: {})", CONFIG_KEYS.join(", "))) },
+        _ => fail(&format!("config {path}: must be a JSON object")) }
+    Some(c)
 }
+/// The config file in the telemetry of `decide` and `run` (absent without one): it can change the answer of an otherwise
+/// identical command (`chains` is part of the determinism key), and nothing in the output said it was there.
+pub(crate) fn config_echo() -> Vec<(&'static str, Json)> { config_path().map_or(vec![], |p| vec![("config", jstr(&p))]) }
 /// A config-file value as text (numbers must be whole; anything else fails the caller's parse).
 fn cfg_val(key: &str) -> Option<String> {
     let c = config()?; let v = c.get(key)?;
     Some(if let Some(x) = v.as_f64() { if x.fract() == 0.0 && x >= 0.0 { format!("{}", x as u64) } else { format!("{x}") } } else { v.as_str().map_or("?".into(), str::to_string) })
 }
-/// Processor-style control: CLI flag > `PBIT_*` environment variable > config file > default; must be >= 1.
-fn ctl(args: &[String], name: &str, env: &str, default: usize) -> usize { ctl_min(args, name, env, default, 1) }
-fn ctl_min(args: &[String], name: &str, env: &str, default: usize, min: usize) -> usize {
+/// Processor-style control: CLI flag > `PBIT_*` environment variable > config file > default; must be in 1..=max.
+fn ctl(args: &[String], name: &str, env: &str, default: usize, max: usize) -> usize { ctl_in(args, name, env, default, 1, max) }
+fn ctl_min(args: &[String], name: &str, env: &str, default: usize, min: usize) -> usize { ctl_in(args, name, env, default, min, usize::MAX) }
+fn ctl_in(args: &[String], name: &str, env: &str, default: usize, min: usize, max: usize) -> usize {
     let v = args.iter().position(|a| a == name).and_then(|k| args.get(k + 1)).map(|v| v.to_string()).or_else(|| std::env::var(env).ok())
         .or_else(|| cfg_val(&name[2..].replace('-', "_")));
-    match v { None => default, Some(v) => match v.parse::<usize>() { Ok(n) if n >= min => n, _ => fail(&format!("{name} / {env} must be an integer >= {min}")) } }
+    match v { None => default, Some(v) => match v.parse::<usize>() { Ok(n) if n >= min && n <= max => n,
+        _ => fail(&if max == usize::MAX { format!("{name} / {env} must be an integer >= {min}") } else { format!("{name} / {env} must be an integer from {min} to {max}") }) } }
 }
+/// Upper bounds of --chains and --threads (from any source): `--chains 576460752303423488` aborted (`capacity overflow`, exit 134)
+/// and `--chains 1000000000` exhausted memory. 100,000 chains is the largest count measured (BENCHMARKS §6); the sampler uses
+/// at most `chains` threads, so 1,024 covers any machine.
+const MAX_CHAINS: usize = 100_000;
+const MAX_THREADS: usize = 1024;
 /// The default memory cap (MB). Unbounded, sample memory grew ~190 MB per second of budget on the 300-task demo,
 /// so a long `--budget-ms` could exhaust a small machine; 1024 MB never thins below ~8 s there (inferred from rows per chain).
 const DEFAULT_MEM_LIMIT_MB: usize = 1024;
@@ -259,7 +287,7 @@ const DEFAULT_MEM_LIMIT_MB: usize = 1024;
 /// (`pbit_ir::record_row`), never below 64 rows per chain. Fixed costs (program, JSON, marginals) come on top. -> (N, rows per chain)
 fn mem_limit(args: &[String], chains: usize, n_vars: usize) -> (usize, usize) {
     let mb = ctl_min(args, "--mem-limit-mb", "PBIT_MEM_LIMIT_MB", DEFAULT_MEM_LIMIT_MB, 0);
-    (mb, if mb == 0 { 0 } else { (mb.saturating_mul(1_048_576) / (chains * (2 * n_vars + 8))).max(64) })
+    (mb, if mb == 0 { 0 } else { chains.checked_mul(2 * n_vars + 8).map_or(64, |d| (mb.saturating_mul(1_048_576) / d).max(64)) })
 }
 /// `--progress [MS]` monitor: a thread prints one JSONL line to stderr every MS ms (default 100) while the decision runs:
 /// {"event":"progress","ms","sweeps","site_updates_per_s","process_cpu_ms","peak_rss_mb"} (sweeps = all chains so far, counted in
@@ -277,10 +305,21 @@ fn monitor(args: &[String], n_vars: usize) -> Option<Monitor> {
             let (t, s) = (t0.elapsed().as_secs_f64(), pbit_ir::PROGRESS_SWEEPS.load(Relaxed)); let u = sys::usage();
             let line = obj(vec![("event", jstr("progress")), ("ms", num((t * 1e3).round())), ("sweeps", num(s as f64)), ("site_updates_per_s", num(if t > lt { ((s - ls) as f64 * n_vars as f64 / (t - lt)).round() } else { 0.0 })),
                 ("process_cpu_ms", u.map_or(Json::Null, |u| num(u.0.round()))), ("peak_rss_mb", u.map_or(Json::Null, |u| num(u.1)))]);
-            eprintln!("{}", json::write(&line, false)); (lt, ls) = (t, s); } });
+            err_line(&json::write(&line, false)); (lt, ls) = (t, s); } });
     Some(Monitor { tx: Some(tx), h: Some(h) })
 }
-fn read_stdin() -> String { let mut s = String::new(); std::io::stdin().read_to_string(&mut s).unwrap_or_else(|e| fail(&format!("stdin: {e}"))); s }
+/// `--max-input-mb N` (decide, run, ir; default 256, 0 = no limit): the largest stdin document read. Parsing costs up to ~9x
+/// the input in memory (a 200 MB numeric array peaked at 1.78 GB), so a larger input is a `limit` error before it is parsed.
+const DEFAULT_MAX_INPUT_MB: usize = 256;
+/// stdin -> text, or `bad_input`: ONE error object on stdout, exit 2. An unreadable stdin (`pbit decide < /`) and invalid UTF-8
+/// went to `fail` (a stderr line, stdout empty), although both are document content, not flags.
+fn read_stdin(args: &[String]) -> String {
+    let mb: usize = arg(args, "--max-input-mb", DEFAULT_MAX_INPUT_MB); let cap = mb.saturating_mul(1_048_576); let mut b = Vec::new();
+    if let Err(e) = std::io::stdin().lock().take(if mb == 0 { u64::MAX } else { (cap as u64).saturating_add(1) }).read_to_end(&mut b) {
+        bad_input("", json::schema("", format!("cannot read stdin: {e}"))) }
+    if mb > 0 && b.len() > cap { bad_input("bad input: ", json::limit("", format!("stdin holds more than --max-input-mb {mb} MB"))) }
+    String::from_utf8(b).unwrap_or_else(|e| bad_input("", json::schema("", format!("bad JSON: invalid UTF-8 at byte {}", e.utf8_error().valid_up_to()))))
+}
 /// --priority low|normal (flag > PBIT_PRIORITY > config > normal), applied before any chain thread starts.
 fn priority(args: &[String]) {
     match args.iter().position(|a| a == "--priority").and_then(|k| args.get(k + 1)).cloned().or_else(|| std::env::var("PBIT_PRIORITY").ok()).or_else(|| cfg_val("priority")).as_deref() {
@@ -290,8 +329,8 @@ fn priority(args: &[String]) {
 /// The processor controls shared by `pbit decide` and `pbit run`: (chains, threads, cpu_limit_pct).
 /// R19.8: `--threads` also bounds the gate's per-chain passes (`pbit_ir::GATE_THREADS`; one thread per chain before).
 fn controls(args: &[String]) -> (usize, usize, u32) {
-    let r = (ctl(args, "--chains", "PBIT_CHAINS", 4), ctl(args, "--threads", "PBIT_THREADS", std::thread::available_parallelism().map_or(1, |n| n.get()).min(4)),
-     { let c = ctl(args, "--cpu-limit", "PBIT_CPU_LIMIT", 100); if c > 100 { fail("--cpu-limit / PBIT_CPU_LIMIT must be 1..=100"); } c as u32 });
+    let r = (ctl(args, "--chains", "PBIT_CHAINS", 4, MAX_CHAINS), ctl(args, "--threads", "PBIT_THREADS", std::thread::available_parallelism().map_or(1, |n| n.get()).min(4), MAX_THREADS),
+     { let c = ctl(args, "--cpu-limit", "PBIT_CPU_LIMIT", 100, usize::MAX); if c > 100 { fail("--cpu-limit / PBIT_CPU_LIMIT must be 1..=100"); } c as u32 });
     pbit_ir::GATE_THREADS.store(r.1, std::sync::atomic::Ordering::Relaxed); r
 }
 
@@ -322,7 +361,7 @@ fn decide_cmd(args: &[String]) {
     let polish_sweeps: usize = arg(args, "--polish-sweeps", 0);
     let fr_states: usize = arg(args, "--frontier-states", FRONTIER_MAX_STATES); let sweeps: usize = arg(args, "--sweeps", 0);
     let (chains, threads, cpu_pct) = controls(args); priority(args);
-    let j = read_doc();
+    let j = read_doc(args);
     let mut n = from_json(&j).unwrap_or_else(|e| bad_input("bad problem: ", e)); n.p.collective = collective_arg(args); n.p.cluster = cluster_arg(args); n.p.cycles = cycles_arg(args); let p = &n.p;
     let _mon = monitor(args, p.t); let t0 = std::time::Instant::now();
     let xms = exact_ms(args); let hard = xms.map(|x| t0 + std::time::Duration::from_secs_f64(x / 1e3));
@@ -391,7 +430,7 @@ fn decide_cmd(args: &[String]) {
         ("telemetry", obj([vec![("chains", num(chains as f64)), ("threads", num(threads.clamp(1, chains) as f64)), ("sweeps", num(s.sweeps as f64)), ("site_updates_per_s", num(if sample_s > 0.0 { (s.sweeps as f64 * p.t as f64 / sample_s).round() } else { 0.0 })),
             ("sample_ms", num(sample_s * 1e3)), ("gate_ms", num(gate_ms)), ("polish_ms", num(if polish_sweeps > 0 { 0.0 } else { polish_ms })), ("polish_sweeps", num(polish_sweeps as f64)),
             ("process_cpu_ms", sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", sys::usage().map_or(Json::Null, |u| num(u.1))), ("nice", sys::nice().map_or(Json::Null, |v| num(v as f64))), ("cpu_limit_pct", num(cpu_pct as f64)),
-            ("mem_limit_mb", num(mem_mb as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / p.t).sum::<usize>() as f64))], exact_cap(xms, reached)].concat())),
+            ("mem_limit_mb", num(mem_mb as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / p.t).sum::<usize>() as f64))], exact_cap(xms, reached), config_echo()].concat())),
         ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
     let c = finish(obj(out), if verdict == "refused" { 3 } else { 0 }, pretty); if c != 0 { std::process::exit(c); }
 }
@@ -426,7 +465,7 @@ fn stats_cmd(args: &[String]) {
         ("controls", obj(vec![("chains", ctl_obj(num(chains as f64), "--chains", "PBIT_CHAINS")), ("threads", ctl_obj(num(threads as f64), "--threads", "PBIT_THREADS")),
             ("cpu_limit_pct", ctl_obj(num(cpu as f64), "--cpu-limit", "PBIT_CPU_LIMIT")), ("priority", ctl_obj(jstr(&prio), "--priority", "PBIT_PRIORITY")),
             ("mem_limit_mb", ctl_obj(num(ctl_min(args, "--mem-limit-mb", "PBIT_MEM_LIMIT_MB", DEFAULT_MEM_LIMIT_MB, 0) as f64), "--mem-limit-mb", "PBIT_MEM_LIMIT_MB")),
-            ("config_file", std::env::var("PBIT_CONFIG").ok().or_else(|| std::path::Path::new("pbit.json").exists().then(|| "pbit.json".to_string())).map_or(Json::Null, |f| jstr(&f)))])),
+            ("config_file", config_path().map_or(Json::Null, |f| jstr(&f)))])),
         ("self_test", obj(vec![("program", jstr("400-spin ring, IR sampler, fixed work")), ("chains", num(chains as f64)), ("sweeps_per_chain", num(sweeps as f64)),
             ("site_updates_per_s_1_thread", num(r1)), ("threads", num(threads.clamp(1, chains) as f64)), ("site_updates_per_s", num(rt)), ("speedup", num((rt / r1 * 100.0).round() / 100.0))])),
         ("process_cpu_ms", sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", sys::usage().map_or(Json::Null, |u| num(u.1)))]);
@@ -449,6 +488,7 @@ fn demo_cmd(args: &[String]) {
         ("investor update draft", false, false, [1.8, 1.4, 0.6, 0.2, -1.0, 0.8])];
     let n: usize = arg(args, "--tasks", 12); let seed: u64 = arg(args, "--seed", 7); let hard = args.iter().any(|a| a == "--hard");
     let mut r = pbit_core::Philox4x32::new(seed, 4242);
+    #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the demo's scores, and every test and benchmark built on them, depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
     // quotas grow with the queue: 12 tasks -> 14 slots, 300 -> ~350. --hard: 96% full and strong affinity (near-ties get escalated)
     let scale = (n as f64 / 12.0).max(1.0) * if hard { 0.89 } else { 1.0 };
@@ -470,9 +510,9 @@ fn main() {
     match args.first().map(|s| s.as_str()) {
         Some("decide") => decide_cmd(&args),
         Some("demo") => demo_cmd(&args),
-        Some("ir") => { check_flags(&args, &[], &[]); let j = read_doc();
+        Some("ir") => { let (v, w) = flags_of("ir"); check_flags(&args, &v, &w); let j = read_doc(&args);
             let n = from_json(&j).unwrap_or_else(|e| bad_input("bad problem: ", e)); emit_raw(&pbit_decide::ir::to_ir(&n.p)); }
-        Some("run") => { let (v, w) = flags_of("run"); check_flags(&args, &v, &w); let tp = std::time::Instant::now(); let j = read_doc();
+        Some("run") => { let (v, w) = flags_of("run"); check_flags(&args, &v, &w); let tp = std::time::Instant::now(); let j = read_doc(&args);
             let tc = std::time::Instant::now(); let parse_ms = (tc - tp).as_secs_f64() * 1e3;
             let mut p = run::from_json(&j).unwrap_or_else(|e| bad_input("bad program: ", e)); let compile_ms = tc.elapsed().as_secs_f64() * 1e3; p.m.collective = collective_arg(&args); p.m.cluster = cluster_arg(&args); p.m.cycles = cycles_arg(&args);
             priority(&args); let (chains, threads, cpu_pct) = controls(&args);
@@ -484,6 +524,9 @@ fn main() {
             let c = finish(doc, code, args.iter().any(|a| a == "--pretty")); if c != 0 { std::process::exit(c); } }
         Some("stats") => stats_cmd(&args),
         Some("version") | Some("--version") | Some("-V") => { check_flags(&args, &[], &[]); emit(&format!("pbit {VERSION}")) }
-        _ => { let _ = std::io::stderr().write_all(b"usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--progress [MS]] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard]\n       pbit ir < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--progress [MS]] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit version\n"); std::process::exit(2) }
+        // `pbit --help` / `-h` asked for the usage: stdout, exit 0 (it went to stderr with exit 2, as for a missing command)
+        Some("--help") | Some("-h") => emit_raw(USAGE),
+        _ => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
     }
 }
+const USAGE: &str = "usage: pbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--pretty] < problem.json\n       pbit demo [--tasks N] [--seed N] [--hard]\n       pbit ir [--max-input-mb N] < problem.json\n       pbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--pretty] < program.json   (pbit-ir JSON v1)\n       pbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       pbit version\n       pbit <command> --help | -h\n";

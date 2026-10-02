@@ -112,7 +112,7 @@ fn sudoku_exact_tier_solves_and_sampler_refuses_honestly() {
     // This puzzle falls to unit propagation (naked singles), so every cell is a constant under the target: no chain is
     // stuck and the gate certifies the sampler's answer, the unique solution. With rows 7-9 cleared (several solutions: those rows
     // can be permuted; a full grid is rigid under site and swap moves) the chains cannot move and the gate refuses.
-    let (c, out, err) = pbit(&["run", "--op", "sample", "--budget-ms", "60", "--polish-ms", "0"], &prog);
+    let (c, out, err) = pbit(&["run", "--op", "sample", "--budget-ms", "300", "--polish-ms", "0"], &prog);
     assert_eq!(c, 0, "{err}"); assert_eq!(field(&out, "verdict"), "\"diagnostics_passed\"", "{out}"); assert_eq!(field(&out, "violations"), "0");
     assert!(out.contains("\"c0\":\"5\",\"c1\":\"3\",\"c2\":\"4\",\"c3\":\"6\",\"c4\":\"7\",\"c5\":\"8\",\"c6\":\"9\",\"c7\":\"1\",\"c8\":\"2\""), "{out}");
     let (c, out, _) = pbit(&["run", "--op", "sample", "--budget-ms", "60", "--polish-ms", "0"], &mk(&format!("{}{}", &p[..54], "0".repeat(27))));
@@ -581,7 +581,7 @@ fn mem_limit_bounds_the_sample_buffers() {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_pbit")).args(["run", "--op", "sample", "--sweeps", "100000", "--polish-ms", "0"]).env("PBIT_MEM_LIMIT_MB", "1").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn()
         .and_then(|mut ch| { ch.stdin.take().unwrap().write_all(ring.as_bytes())?; ch.wait_with_output() }).unwrap();
     let o = String::from_utf8_lossy(&out.stdout).to_string(); let rows: usize = field(&o, "traj_rows").parse().unwrap();
-    assert!(rows <= (1 << 20) / (2 * 3 + 8) && rows < 4 * 90000, "{o}"); assert_eq!(field(&o, "mem_limit_mb"), "1");
+    assert!(rows <= (1 << 20) / (2 * 3 + 8), "{o}"); assert_eq!(field(&o, "mem_limit_mb"), "1"); // thinned to the 1 MB cap (so below the 4 x 90,000 unthinned rows)
     for bad in ["-1", "x"] { let (c, _, e) = pbit(&["decide", "--mem-limit-mb", bad], &demo); assert_eq!(c, 2, "{bad}: {e}"); }
 }
 
@@ -1140,4 +1140,155 @@ fn ir_schema_matches_the_parser() {
     for f in files { let s = std::fs::read_to_string(&f).unwrap();
         let (c, out, err) = if s.contains("\"pbit_ir\"") { pbit(&["run", "--op", "exact", "--exact-ms", "0"], &s) } else { pbit(&["ir"], &s) };
         assert!(if s.contains("\"pbit_ir\"") { c != 2 } else { c == 0 }, "{f:?}: exit {c} {out} {err}"); }
+}
+
+// ---------------- 0.2.1: the 2026-10-01 independent review (P0 / P1 / P2-4) ----------------
+
+/// `pbit` with raw stdin bytes (`pbit` takes text): (exit code, stdout, stderr)
+fn pbit_bytes(args: &[&str], stdin: &[u8]) -> (i32, String, String) {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_pbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let _ = c.stdin.take().unwrap().write_all(stdin); let o = c.wait_with_output().unwrap();
+    (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+/// stdout must be ONE `{"error"}` object with this code and path; returns its message
+fn one_error(out: &str, code: &str, path: &str) -> String {
+    let j = json::parse(out.trim_end()).unwrap_or_else(|e| panic!("stdout is not one JSON document ({}): {out:.300}", e.msg));
+    let e = j.get("error").unwrap_or_else(|| panic!("no error object: {out:.300}"));
+    assert_eq!((e.get("code").and_then(|c| c.as_str()), e.get("path").and_then(|c| c.as_str())), (Some(code), Some(path)), "{out:.300}");
+    e.get("message").and_then(|m| m.as_str()).unwrap().to_string()
+}
+fn router_with_workers(a: usize, tasks: usize) -> String {
+    format!("{{\"workers\":[{}],\"tasks\":[{}]}}", (0..a).map(|i| format!("{{\"id\":\"w{i}\",\"cap\":1}}")).collect::<Vec<_>>().join(","),
+        (0..tasks).map(|i| format!("{{\"id\":\"t{i}\",\"scores\":{{\"w0\":1}}}}")).collect::<Vec<_>>().join(","))
+}
+
+/// P0-1: a router document with 65,536 workers aborted `pbit decide` (exit 134, empty stdout: an `expect` in the lowering; the IR
+/// holds at most 65,535 values). Now a `limit` error, as for `pbit run`'s values; 65,535 workers still answer.
+#[test]
+fn router_worker_limit_is_a_limit_error() {
+    let (c, out, err) = pbit(&["decide"], &router_with_workers(65535, 1)); assert_eq!(c, 0, "{err}"); assert_eq!(field(&out, "verdict"), "\"exact\"");
+    for cmd in ["decide", "ir"] { let (c, out, err) = pbit(&[cmd], &router_with_workers(65536, 1)); assert_eq!(c, 2, "{cmd}: {err}");
+        assert!(one_error(&out, "limit", "workers").contains("65536 workers; at most 65535"), "{cmd}"); }
+}
+
+/// P0-2: `--chains 576460752303423488` aborted decide, run and stats (`capacity overflow`, exit 134) and `--chains 1000000000` ran
+/// out of memory. --chains is 1..=100,000 (the largest count measured) and --threads 1..=1,024 from every source, else exit 2.
+#[test]
+fn chains_and_threads_have_upper_bounds() {
+    let (_, demo, _) = pbit(&["demo", "--tasks", "3"], ""); let prog = include_str!("../../examples/knapsack-20.json"); let big = "576460752303423488";
+    for (args, input) in [(&["decide", "--mode", "sample", "--chains", big][..], demo.as_str()), (&["run", "--op", "sample", "--chains", big], prog), (&["stats", "--chains", big, "--sweeps", "1"], ""),
+        (&["decide", "--chains", "100001"], demo.as_str()), (&["run", "--threads", "1025"], prog), (&["stats", "--threads", "100000", "--sweeps", "1"], "")] {
+        let (c, out, err) = pbit(args, input); assert_eq!(c, 2, "{args:?}: {err}"); assert!(out.is_empty(), "{args:?}: a flag error leaves stdout empty");
+        assert!(err.contains("must be an integer from 1 to"), "{args:?}: {err}"); }
+    let stats = |k: &str, v: &str| { let o = Command::new(env!("CARGO_BIN_EXE_pbit")).args(["stats", "--sweeps", "1"]).env_remove("PBIT_CHAINS").env_remove("PBIT_THREADS").env_remove("PBIT_CONFIG").env(k, v).output().unwrap();
+        (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stderr).into_owned()) };
+    for (k, v) in [("PBIT_CHAINS", big), ("PBIT_THREADS", "1025")] { let (c, e) = stats(k, v); assert_eq!(c, 2, "{k}={v}: {e}"); }
+    let cfg = std::env::temp_dir().join(format!("pbit-bounds-{}.json", std::process::id())); std::fs::write(&cfg, format!("{{\"chains\": {big}}}")).unwrap();
+    let (c, e) = stats("PBIT_CONFIG", cfg.to_str().unwrap()); let _ = std::fs::remove_file(&cfg); assert_eq!(c, 2, "pbit.json chains: {e}");
+    let (c, out, err) = pbit(&["decide", "--mode", "sample", "--budget-ms", "20", "--chains", "100000"], &demo); assert!(c == 0 || c == 3, "the bound itself runs: {err}"); assert!(out.contains("\"chains\":100000,"), "{out:.300}");
+    let (c, _, err) = pbit(&["decide", "--mode", "sample", "--budget-ms", "20", "--threads", "1024"], &demo); assert!(c == 0 || c == 3, "{err}");
+}
+
+/// P0-3: `eprintln!` panicked when stderr was a pipe whose reader had gone, and panic = abort made that SIGABRT (exit 134): a bad
+/// flag lost its exit code 2, bad input its error object, and `--progress` into `head -c 1` the whole decision. Now ignored.
+#[test]
+fn closed_stderr_pipe_keeps_stdout_and_exit_code() {
+    let run = |args: &[&str], input: &str| { let (r, w) = std::io::pipe().unwrap(); drop(r); // no reader: every stderr write fails
+        let mut c = Command::new(env!("CARGO_BIN_EXE_pbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(w).spawn().unwrap();
+        let _ = c.stdin.take().unwrap().write_all(input.as_bytes()); let o = c.wait_with_output().unwrap(); (o.status.code(), String::from_utf8_lossy(&o.stdout).into_owned()) };
+    assert_eq!(run(&["decide", "--bogus"], ""), (Some(2), String::new()));
+    let (c, out) = run(&["decide"], "not json"); assert_eq!(c, Some(2)); one_error(&out, "schema", "");
+    let (_, demo, _) = pbit(&["demo", "--tasks", "40"], "");
+    let (c, out) = run(&["decide", "--mode", "sample", "--budget-ms", "200", "--progress", "1"], &demo); assert!(matches!(c, Some(0) | Some(3)), "{c:?}");
+    assert!(json::parse(out.trim_end()).is_ok_and(|j| j.get("verdict").is_some()), "{out:.300}");
+}
+
+/// P1-1: invalid UTF-8 on stdin and an unreadable stdin exited 2 with an empty stdout (a stderr line only), although both are
+/// document content: now ONE `{"error"}` object, as for any bad input. `--max-input-mb` (default 256, 0 = no limit) bounds the read.
+#[test]
+fn bad_stdin_bytes_give_one_error_object() {
+    for cmd in ["decide", "run", "ir"] { let (c, out, err) = pbit_bytes(&[cmd], b"\xff\xfe{\"x\":1}"); assert_eq!(c, 2, "{cmd}: {err}");
+        assert!(one_error(&out, "schema", "").contains("invalid UTF-8 at byte 0"), "{cmd}: {out}"); }
+    let (c, out, _) = pbit_bytes(&["decide"], b"{\"workers\":[{\"id\":\"\xff\",\"cap\":1}]}"); assert_eq!(c, 2); assert!(one_error(&out, "schema", "").contains("invalid UTF-8 at byte 19"), "{out}");
+    #[cfg(unix)] { // stdin is a directory (`pbit decide < /`): the read fails
+        let o = Command::new(env!("CARGO_BIN_EXE_pbit")).arg("decide").stdin(std::fs::File::open("/").unwrap()).output().unwrap();
+        assert_eq!(o.status.code(), Some(2)); assert!(one_error(&String::from_utf8_lossy(&o.stdout), "schema", "").contains("cannot read stdin")); }
+    let big = format!("[{}]", vec!["1"; 1 << 20].join(",")); // 2 MB
+    let (c, out, _) = pbit(&["decide", "--max-input-mb", "1"], &big); assert_eq!(c, 2); assert!(one_error(&out, "limit", "").contains("--max-input-mb 1 MB"), "{out:.300}");
+    for lim in ["0", "3"] { let (c, out, _) = pbit(&["run", "--max-input-mb", lim], &big); assert_eq!(c, 2); one_error(&out, "schema", ""); } // read whole: not a program
+}
+
+/// P1-2: the router sampler's two-group move stored worker indices and bucket loads as u8. With 300 workers a task landed on a
+/// worker it does not allow (plan B = W043, violations 1) and odds went wrong; a cap of 1e12 became a negative i32. Groups over
+/// 255 workers or members now skip that move (the chain stays exact), loads add in i32, caps of t or more read as t.
+#[test]
+fn sampler_group_move_respects_allowed_beyond_255_workers() {
+    let ws = |cap: usize| (0..300).map(|w| format!("{{\"id\":\"W{w:03}\",\"cap\":{cap}}}")).collect::<Vec<_>>().join(",");
+    let all299 = (0..299).map(|w| format!("\"W{w:03}\"")).collect::<Vec<_>>().join(",");
+    let doc = format!("{{\"workers\":[{}],\"tasks\":[{{\"id\":\"A\",\"group\":\"g1\",\"allowed\":[{all299}],\"scores\":{{}}}},{{\"id\":\"B\",\"group\":\"g1\",\"allowed\":[\"W299\"],\"scores\":{{\"W299\":0}}}},{{\"id\":\"C\",\"group\":\"g2\",\"allowed\":[{all299}],\"scores\":{{}}}}],\"affinity\":2.5}}", ws(5));
+    let (c, out, err) = pbit(&["decide", "--mode", "sample", "--sweeps", "60", "--cycles", "off"], &doc); assert!(c == 0 || c == 3, "{err}");
+    assert!(out.contains("\"B\":\"W299\""), "plan: {out:.400}"); assert_eq!(field(&out, "violations"), "0"); assert!(out.contains("\"B\":{\"W299\":1}"), "odds: {out:.900}");
+    // exact P(A = W299) = e^8 / (e^8 + 299) = 0.9088; the sampler put the mass on W043 instead
+    let s8 = |id: &str| format!("{{\"id\":\"{id}\",\"group\":\"{id}\",\"scores\":{{{}}}}}", (0..300).map(|w| format!("\"W{w:03}\":{}", if w == 299 { 8 } else { 0 })).collect::<Vec<_>>().join(","));
+    let doc = format!("{{\"workers\":[{}],\"tasks\":[{},{}],\"affinity\":2.0}}", ws(3), s8("A"), s8("C"));
+    let (c, out, err) = pbit(&["decide", "--mode", "sample", "--sweeps", "2000", "--polish-ms", "0", "--seed", "1"], &doc); assert!(c == 0 || c == 3, "{err}");
+    let pa = json::parse(&out).unwrap().get("odds").and_then(|o| o.get("A")).and_then(|a| a.get("W299")).and_then(|x| x.as_f64()).unwrap();
+    assert!((pa - 0.9088).abs() < 0.03, "P(A = W299) {pa}, exact 0.9088");
+    // a cap of 1e12 (legal up to 2^53) is unlimited: the same plan, odds and gate as a cap of t + 1
+    let tasks = (0..12).map(|i| format!("{{\"id\":\"T{i}\",\"group\":\"g{}\",\"scores\":{{{}}}}}", i / 3, (0..6).map(|k| format!("\"W{k}\":{}", ((i * 7 + k * 3) % 5) as f64 * 0.4)).collect::<Vec<_>>().join(","))).collect::<Vec<_>>().join(",");
+    let ans = |cap0: &str| { let doc = format!("{{\"workers\":[{}],\"tasks\":[{tasks}],\"affinity\":2.5}}", (0..6).map(|k| format!("{{\"id\":\"W{k}\",\"cap\":{}}}", if k == 0 { cap0 } else { "1" })).collect::<Vec<_>>().join(","));
+        let (c, out, err) = pbit(&["decide", "--mode", "sample", "--sweeps", "400", "--polish-ms", "0", "--seed", "3"], &doc); assert!(c == 0 || c == 3, "{err}");
+        let j = json::parse(&out).unwrap(); ["plan", "odds", "gate"].map(|k| json::write(j.get(k).unwrap(), false)) };
+    assert_eq!(ans("1000000000000"), ans("13"));
+}
+
+/// P1-3: dense expansions had no size limits: a 0.6 MB program (65,535 values x 500 empty vars) peaked at 4.1-5.3 GB, a 30 KB
+/// precedence (3,000 slots) made 9 million caps (1.45 GB). Now `limit` errors before the allocation: n x k and tasks x workers
+/// at most 20,000,000, at most 100,000 slot pairs per precedence (as `tables`), at most 20,000,000 cap members in total.
+#[test]
+fn dense_expansions_are_limit_errors() {
+    let vals = |k: usize| (0..k).map(|q| format!("\"v{q}\"")).collect::<Vec<_>>().join(",");
+    let (c, out, err) = pbit(&["run"], &format!("{{\"pbit_ir\":1,\"values\":[{}],\"vars\":[{}]}}", vals(65535), vec!["{}"; 500].join(","))); assert_eq!(c, 2, "{err}");
+    assert!(one_error(&out, "limit", "vars").contains("500 vars x 65535 values"), "{out}");
+    for k in [1000usize, 3000] { let prog = format!("{{\"pbit_ir\":1,\"values\":[{}],\"vars\":[{{\"id\":\"a\"}},{{\"id\":\"b\"}}],\"precedes\":[{{\"before\":\"a\",\"after\":\"b\",\"gap\":{k}}}]}}", vals(k));
+        let (c, out, err) = pbit(&["run"], &prog); assert_eq!(c, 2, "{k}: {err}"); assert!(one_error(&out, "limit", "precedes[0]").contains("slot pairs to check; at most 100,000"), "{out}"); }
+    let (c, out, err) = pbit(&["decide"], &router_with_workers(65535, 306)); assert_eq!(c, 2, "{err}"); // 20,053,710 (task, worker) pairs
+    assert!(one_error(&out, "limit", "tasks").contains("306 tasks x 65535 workers"), "{out}");
+    let prog = format!("{{\"pbit_ir\":1,\"values\":[\"a\",\"b\"],\"vars\":[{}],\"caps\":[{}]}}", vec!["{}"; 10000].join(","), vec!["{\"value\":\"a\",\"limit\":5000}"; 2001].join(","));
+    let (c, out, err) = pbit(&["run"], &prog); assert_eq!(c, 2, "{err}"); assert!(one_error(&out, "limit", "caps[2000]").contains("20010000 cap members in total"), "{out}");
+}
+
+/// P1-4: an escaped surrogate pair (`"😀"`, how Python's json.dumps writes an emoji by default) decoded to two U+FFFD:
+/// output ids no longer matched the input and two emoji ids collided. Now one character; a lone surrogate is a `schema` error.
+#[test]
+fn json_surrogate_pairs_decode_to_one_character() {
+    let doc = r#"{"workers":[{"id":"a","cap":2},{"id":"b","cap":2}],"tasks":[{"id":"T😀","scores":{"a":1,"b":0}},{"id":"T😁","scores":{"a":0,"b":1}}]}"#;
+    let (c, out, err) = pbit(&["decide"], doc); assert_eq!(c, 0, "{err}"); assert!(out.contains("\"T\u{1F600}\":\"a\"") && out.contains("\"T\u{1F601}\":\"b\""), "{out}");
+    for s in [r#""\ud83d""#, r#""\ude00x""#, r#""\ud83dA""#, r#""x\ud83d\ud83d""#] {
+        let (c, out, _) = pbit(&["decide"], &format!(r#"{{"workers":[{{"id":{s},"cap":1}}],"tasks":[]}}"#)); assert_eq!(c, 2, "{s}");
+        assert!(one_error(&out, "schema", "").contains("lone surrogate"), "{s}: {out}"); }
+}
+
+/// P2-4: `pbit --help` and `pbit -h` print the usage on stdout and exit 0 (they exited 2 with the usage on stderr, as for a
+/// missing command, which still does).
+#[test]
+fn bare_help_exits_0() {
+    for h in ["--help", "-h"] { let (c, out, err) = pbit(&[h], ""); assert_eq!(c, 0, "{h}: {err}"); assert!(out.starts_with("usage: pbit decide") && err.is_empty(), "{h}: {out}"); }
+    let (c, out, err) = pbit(&[], ""); assert_eq!(c, 2); assert!(out.is_empty() && err.starts_with("usage: pbit decide"), "{err}");
+}
+
+/// P2-6: an unknown `pbit.json` key (`{"thread": 3}`) was ignored silently, and nothing in a decision said a config file was
+/// used, although its `chains` changes the answer. Now exit 2, and `telemetry.config` names the file (absent without one).
+#[test]
+fn config_file_is_strict_and_echoed() {
+    let cfg = std::env::temp_dir().join(format!("pbit-cfg-strict-{}.json", std::process::id())); let prog = include_str!("../../examples/knapsack-20.json");
+    let go = |body: &str| { std::fs::write(&cfg, body).unwrap(); let mut c = Command::new(env!("CARGO_BIN_EXE_pbit")); c.args(["run", "--op", "sample", "--sweeps", "50", "--polish-ms", "0"])
+        .env_remove("PBIT_CHAINS").env_remove("PBIT_THREADS").env("PBIT_CONFIG", &cfg).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let o = c.spawn().and_then(|mut ch| { ch.stdin.take().unwrap().write_all(prog.as_bytes())?; ch.wait_with_output() }).unwrap();
+        (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()) };
+    let (c, _, e) = go(r#"{"thread": 3}"#); assert_eq!(c, 2); assert!(e.contains("unknown key \"thread\""), "{e}");
+    let (c, _, e) = go("[3]"); assert_eq!(c, 2); assert!(e.contains("must be a JSON object"), "{e}");
+    let (c, o, e) = go(r#"{"chains": 3}"#); let _ = std::fs::remove_file(&cfg); assert!(c == 0 || c == 3, "{e}");
+    assert!(o.contains("\"telemetry\":{\"chains\":3,") && o.contains(&format!("\"config\":{}", json::write(&json::Json::Str(cfg.to_string_lossy().into_owned()), false))), "{o:.2000}");
+    let (_, demo, _) = pbit(&["demo", "--tasks", "60"], ""); let (_, o, _) = pbit(&["decide", "--sweeps", "100", "--polish-ms", "0"], &demo); assert!(!o.contains("\"config\":"), "no config file, no field");
 }

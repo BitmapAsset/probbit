@@ -22,6 +22,7 @@ struct Queue { p: Problem, name: Vec<String>, tpl: Vec<usize> }
 /// task i = template i%8 for customer (i/3)%8; every 3 consecutive tasks are one customer workflow (affinity group)
 fn queue(n: usize, cap: [usize; 6], lam: f64, seed: u64) -> Queue {
     let mut r = Philox4x32::new(seed, 4242);
+    #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the published benchmark instances depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
     let a = W.len(); let (mut h, mut allowed, mut name, mut tpl) = (vec![0.0; n * a], vec![true; n * a], vec![], vec![]);
     for i in 0..n {

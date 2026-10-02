@@ -37,6 +37,7 @@ fn main() {
         println!("pods,tasks_per_pod,t,a,lam,ms_frontier,max_states,ms_enum,max_abs_err_vs_enum,logz_diff");
         for &(np, n, lam) in &[(2usize, 6usize, 1.0f64), (2, 6, 3.0), (3, 4, 2.0), (20, 12, 1.0), (20, 12, 3.0), (100, 12, 2.0), (100, 15, 2.0)] {
             let a = 3 * np + (np - 1); let t = np * n; let mut r = pbit_core::Philox4x32::new(np as u64 * 31 + n as u64, 5);
+            #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the published benchmark instances depend on these exact bits
             let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
             let mut h = vec![0.0; t * a]; let mut allowed = vec![false; t * a]; let mut cap = vec![(n + 2) / 3; a];
             for b in 0..np - 1 { cap[3 * np + b] = 2; }

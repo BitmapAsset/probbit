@@ -11,6 +11,7 @@ struct Inst { p: Problem, capb: usize }
 fn build(capp: usize, capb: usize, lam: f64, seed: u64) -> Inst {
     let na = 2 * B + (B - 1); let t = B * M;
     let mut r = Philox4x32::new(seed, 77);
+    #[allow(clippy::approx_constant)] // 6.283185307, not TAU: the published benchmark instances depend on these exact bits
     let mut g = || { let u = r.f64() + 1e-12; let v = r.f64(); (-2.0 * u.ln()).sqrt() * (6.283185307 * v).cos() };
     let mut h = vec![0.0; t * na]; let mut allowed = vec![false; t * na]; let mut cap = vec![capp; na];
     for b in 0..B - 1 { cap[2 * B + b] = capb; }

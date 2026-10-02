@@ -62,15 +62,26 @@ impl Rng32 for Philox4x32 { #[inline(always)] fn u32(&mut self) -> u32 { self.ne
 /// 2D ±J periodic lattice, bit-sliced: w[i] holds spin i of 64 replicas (bit=1 means -1).
 pub mod multispin {
     use super::Rng32;
-    pub struct Lattice { pub l: usize, pub w: Vec<u64>, pub jr: Vec<u64>, pub jd: Vec<u64> }
+    /// The fields are private: `sweep_fast` reads through raw pointers and relies on `w`, `jr` and `jd` holding exactly `l * l`
+    /// words. With `pub` fields safe code could break that (`l = 2^32` on empty vectors: `l * l` wrapped to 0 in release, the
+    /// length check passed, the sweep read through a dangling pointer). Build one with `random` or `new`.
+    pub struct Lattice { l: usize, w: Vec<u64>, jr: Vec<u64>, jd: Vec<u64> }
     impl Lattice {
         pub fn random(l: usize, rng: &mut super::SplitMix64) -> Self {
-            let n = l * l;
+            let n = l.checked_mul(l).expect("l * l overflows usize");
             let jr = (0..n).map(|_| if rng.next_u64() & 1 == 1 { !0 } else { 0 }).collect();
             let jd = (0..n).map(|_| if rng.next_u64() & 1 == 1 { !0 } else { 0 }).collect();
             let w = (0..n).map(|_| rng.next_u64()).collect();
             Lattice { l, w, jr, jd }
         }
+        /// A lattice from its spins `w` and couplings `jr` (right), `jd` (down), row-major; None unless each holds `l * l` words.
+        pub fn new(l: usize, w: Vec<u64>, jr: Vec<u64>, jd: Vec<u64>) -> Option<Self> {
+            let n = l.checked_mul(l)?; (w.len() == n && jr.len() == n && jd.len() == n).then_some(Lattice { l, w, jr, jd })
+        }
+        pub fn l(&self) -> usize { self.l }
+        pub fn w(&self) -> &[u64] { &self.w }
+        pub fn jr(&self) -> &[u64] { &self.jr }
+        pub fn jd(&self) -> &[u64] { &self.jd }
         /// One checkerboard Metropolis sweep, all 64 lanes at one beta (thresholds th4=exp(-4b), th8=exp(-8b) in u32 scale).
         #[inline(never)]
         pub fn sweep<R: Rng32>(&mut self, th4: u32, th8: u32, rng: &mut R) {
@@ -114,7 +125,8 @@ pub mod multispin {
         /// access (no bounds checks), wrap-around only at the two row ends, no per-site modulo.
         #[inline(never)]
         pub fn sweep_fast<R: Rng32>(&mut self, th4: u32, th8: u32, rng: &mut R) {
-            let l = self.l; assert!(l >= 4 && l % 2 == 0 && self.w.len() == l * l && self.jr.len() == l * l && self.jd.len() == l * l);
+            let l = self.l; let n = l.checked_mul(l); // checked: a wrapped l * l passed this assert
+            assert!(l >= 4 && l % 2 == 0 && n.is_some_and(|n| self.w.len() == n && self.jr.len() == n && self.jd.len() == n));
             let w = self.w.as_mut_ptr(); let (jr, jd) = (self.jr.as_ptr(), self.jd.as_ptr());
             for c in 0..2 { for y in 0..l {
                 let yu = if y == 0 { l - 1 } else { y - 1 }; let yd = if y + 1 == l { 0 } else { y + 1 };
@@ -164,15 +176,28 @@ pub mod multispin {
 /// T1: SoA f32 heat-bath on 2D ±J lattice, LUT for tanh(beta*h), h in {-4,-2,0,2,4}.
 pub mod heatbath_f32 {
     use super::Rng32;
-    pub struct Lattice { pub l: usize, pub s: Vec<f32>, pub jr: Vec<f32>, pub jd: Vec<f32> }
+    /// The fields are private: besides the `multispin` lengths, `sweep_fast` reads its 9-entry table at h + 4 unchecked, which
+    /// is in range only for ±1 spins and couplings (`pub` couplings of 1000.0 read past the table). `random` and `new` build
+    /// only such lattices, and the sweeps write only ±1.
+    pub struct Lattice { l: usize, s: Vec<f32>, jr: Vec<f32>, jd: Vec<f32> }
     impl Lattice {
         pub fn random(l: usize, rng: &mut super::SplitMix64) -> Self {
-            let n = l * l;
+            let n = l.checked_mul(l).expect("l * l overflows usize");
             let pm = |r: &mut super::SplitMix64| if r.next_u64() & 1 == 1 { -1.0 } else { 1.0 };
             let jr = (0..n).map(|_| pm(rng)).collect(); let jd = (0..n).map(|_| pm(rng)).collect();
             let s = (0..n).map(|_| pm(rng)).collect();
             Lattice { l, s, jr, jd }
         }
+        /// A lattice from its spins `s` and couplings `jr` (right), `jd` (down), row-major; None unless each holds `l * l`
+        /// values and every value is exactly 1.0 or -1.0.
+        pub fn new(l: usize, s: Vec<f32>, jr: Vec<f32>, jd: Vec<f32>) -> Option<Self> {
+            let n = l.checked_mul(l)?; let pm = |v: &f32| *v == 1.0 || *v == -1.0;
+            (s.len() == n && jr.len() == n && jd.len() == n && s.iter().chain(&jr).chain(&jd).all(pm)).then_some(Lattice { l, s, jr, jd })
+        }
+        pub fn l(&self) -> usize { self.l }
+        pub fn s(&self) -> &[f32] { &self.s }
+        pub fn jr(&self) -> &[f32] { &self.jr }
+        pub fn jd(&self) -> &[f32] { &self.jd }
         #[inline(never)]
         pub fn sweep<R: Rng32>(&mut self, lut: &[f32; 9], rng: &mut R) {
             let l = self.l; let (s, jr, jd) = (&mut self.s, &self.jr, &self.jd);
@@ -192,11 +217,13 @@ pub mod heatbath_f32 {
         /// Tuned: raw-pointer rows, no modulo, branch-free select, unchecked LUT. Same output as `sweep` for the same RNG.
         #[inline(never)]
         pub fn sweep_fast<R: Rng32>(&mut self, lut: &[f32; 9], rng: &mut R) {
-            let l = self.l; assert!(l >= 4 && l % 2 == 0 && self.s.len() == l * l && self.jr.len() == l * l && self.jd.len() == l * l);
+            let l = self.l; let n = l.checked_mul(l); // checked: a wrapped l * l passed this assert
+            assert!(l >= 4 && l % 2 == 0 && n.is_some_and(|n| self.s.len() == n && self.jr.len() == n && self.jd.len() == n));
             let s = self.s.as_mut_ptr(); let (jr, jd) = (self.jr.as_ptr(), self.jd.as_ptr()); let lp = lut.as_ptr();
             for c in 0..2 { for y in 0..l {
                 let yu = if y == 0 { l - 1 } else { y - 1 }; let yd = if y + 1 == l { 0 } else { y + 1 };
                 // SAFETY: indices < l*l (asserted); h is an integer in [-4,4] for ±1 spins and ±1 couplings -> LUT index in 0..9.
+                // The fields are private and every lattice holds only ±1 values (`random`, `new`; the sweeps write ±1).
                 unsafe {
                     let row = s.add(y * l); let up = s.add(yu * l); let dn = s.add(yd * l);
                     let jrr = jr.add(y * l); let jdr = jd.add(y * l); let jdu = jd.add(yu * l);
@@ -232,8 +259,8 @@ mod tests {
     #[test]
     fn multispin_ferromagnet_orders_at_low_t() {
         // all-ferro couplings (J=+1 -> jr bits 0); at beta=1.0 (> beta_c=0.4407) lanes should order: |m| large
-        let mut g = SplitMix64(1); let mut lat = multispin::Lattice::random(32, &mut g);
-        for v in lat.jr.iter_mut() { *v = 0 } for v in lat.jd.iter_mut() { *v = 0 }
+        let mut g = SplitMix64(1); let r = multispin::Lattice::random(32, &mut g);
+        let mut lat = multispin::Lattice::new(32, r.w().to_vec(), vec![0; 32 * 32], vec![0; 32 * 32]).unwrap();
         let (t4, t8) = multispin::thresholds(1.0);
         for _ in 0..400 { lat.sweep(t4, t8, &mut g); }
         let e = lat.energies(); let n = 32 * 32;
@@ -243,12 +270,29 @@ mod tests {
     #[test]
     fn fast_kernels_bit_identical_to_reference() {
         for l in [4usize, 6, 32] {
-            let mut g = SplitMix64(5); let mut a = multispin::Lattice::random(l, &mut g); let mut b = multispin::Lattice { l, w: a.w.clone(), jr: a.jr.clone(), jd: a.jd.clone() };
+            let mut g = SplitMix64(5); let mut a = multispin::Lattice::random(l, &mut g); let mut b = multispin::Lattice::new(l, a.w().to_vec(), a.jr().to_vec(), a.jd().to_vec()).unwrap();
             let (t4, t8) = multispin::thresholds(0.6); let (mut r1, mut r2) = (Philox4x32::new(9, 1), Philox4x32::new(9, 1));
-            for _ in 0..20 { a.sweep(t4, t8, &mut r1); b.sweep_fast(t4, t8, &mut r2); } assert_eq!(a.w, b.w);
-            let mut g = SplitMix64(6); let mut a = heatbath_f32::Lattice::random(l, &mut g); let mut b = heatbath_f32::Lattice { l, s: a.s.clone(), jr: a.jr.clone(), jd: a.jd.clone() };
+            for _ in 0..20 { a.sweep(t4, t8, &mut r1); b.sweep_fast(t4, t8, &mut r2); } assert_eq!(a.w(), b.w());
+            let mut g = SplitMix64(6); let mut a = heatbath_f32::Lattice::random(l, &mut g); let mut b = heatbath_f32::Lattice::new(l, a.s().to_vec(), a.jr().to_vec(), a.jd().to_vec()).unwrap();
             let lut = heatbath_f32::lut(0.6); let (mut r1, mut r2) = (SplitMix64(3), SplitMix64(3));
-            for _ in 0..20 { a.sweep(&lut, &mut r1); b.sweep_fast(&lut, &mut r2); } assert_eq!(a.s, b.s);
+            for _ in 0..20 { a.sweep(&lut, &mut r1); b.sweep_fast(&lut, &mut r2); } assert_eq!(a.s(), b.s());
         }
+    }
+    /// The 2026-10-01 review reached undefined behaviour in `sweep_fast` from safe code through the `pub` fields (exit 139):
+    /// `l = 2^32` on empty vectors (`l * l` wrapped to 0) and heat-bath couplings of 1000.0 (a read past the 9-entry table).
+    /// With private fields both lattices come only from these constructors, which refuse them.
+    #[test]
+    fn lattice_constructors_refuse_what_the_fast_kernels_cannot_take() {
+        let big = 1usize << (usize::BITS / 2); // big * big overflows usize
+        assert!(multispin::Lattice::new(big, vec![], vec![], vec![]).is_none());
+        assert!(heatbath_f32::Lattice::new(big, vec![], vec![], vec![]).is_none());
+        assert!(multispin::Lattice::new(4, vec![0; 15], vec![0; 16], vec![0; 16]).is_none());
+        assert!(heatbath_f32::Lattice::new(4, vec![1.0; 16], vec![1000.0; 16], vec![1000.0; 16]).is_none());
+        assert!(heatbath_f32::Lattice::new(4, vec![1.0; 16], vec![1.0; 16], vec![f32::NAN; 16]).is_none());
+        let (mut a, mut b) = (heatbath_f32::Lattice::new(4, vec![1.0; 16], vec![1.0; 16], vec![-1.0; 16]).unwrap(), heatbath_f32::Lattice::new(4, vec![1.0; 16], vec![1.0; 16], vec![-1.0; 16]).unwrap());
+        let (lut, mut r1, mut r2) = (heatbath_f32::lut(0.6), SplitMix64(3), SplitMix64(3));
+        for _ in 0..20 { a.sweep(&lut, &mut r1); b.sweep_fast(&lut, &mut r2); } assert_eq!(a.s(), b.s());
+        let mut m = multispin::Lattice::new(4, vec![!0; 16], vec![0; 16], vec![!0; 16]).unwrap(); let (t4, t8) = multispin::thresholds(0.6);
+        m.sweep_fast(t4, t8, &mut SplitMix64(1)); assert_eq!((m.l(), m.w().len(), m.jr().len(), m.jd().len()), (4, 16, 16, 16));
     }
 }

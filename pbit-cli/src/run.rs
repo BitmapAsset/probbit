@@ -5,6 +5,16 @@
 use crate::json::{num, obj, str as jstr, InErr, Json};
 use pbit_ir::*;
 
+/// At most this many (variable, value) cap members in total, after the constructs are lowered (all_different, implies, tables,
+/// precedes and the `min` form expand to caps): a few KB of constructs could ask for gigabytes. The same bound as n x k
+/// (`json::MAX_DENSE`), so one all_different over every variable and value always fits.
+pub const MAX_CAP_MEMBERS: usize = crate::json::MAX_DENSE;
+/// The members the caps from `from` on add to `total`; a `limit` error at `path` past MAX_CAP_MEMBERS.
+fn tally(caps: &[Cap], from: usize, total: &mut usize, path: &str) -> Result<(), InErr> {
+    *total += caps[from..].iter().map(|c| c.members.len()).sum::<usize>();
+    if *total > MAX_CAP_MEMBERS { return Err(crate::json::limit(path, format!("{} cap members in total after lowering; at most {MAX_CAP_MEMBERS}", *total))); } Ok(())
+}
+
 pub struct Prog { pub m: Model, pub vars: Vec<String>, pub values: Vec<String>, /// R19 P1.3(a): what the compile pass removed
     pub compiled: Compiled }
 
@@ -22,6 +32,8 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
     let vindex: std::collections::HashMap<&str, usize> = values.iter().enumerate().map(|(q, v)| (v.as_str(), q)).collect();
     let vidx = |s: &str, path: &str| vindex.get(s).copied().ok_or_else(|| value(path, format!("unknown value {s}")));
     let vs = arr(req(j, "vars", "")?, "vars")?; let n = vs.len(); if n == 0 { return Err(value("vars", "no vars")); }
+    // Dense domains (h, allowed, the sampler's and gate's per-(variable, value) arrays): bounded before anything is allocated
+    if n.saturating_mul(k) > crate::json::MAX_DENSE { return Err(limit("vars", format!("{n} vars x {k} values = {} (variable, value) pairs; at most {}", n * k, crate::json::MAX_DENSE))); }
     // Ids are looked up in a hash index; `vars.contains` + linear `position` made parsing O(n^2) (8.3 s of an 8.4 s call
     // on 100,000 variables)
     let mut vars: Vec<String> = vec![]; let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::with_capacity(n);
@@ -58,8 +70,8 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
             (None, None) => return Err(schema(&pp, "pair needs \"potts\" or \"table\"")) };
         pairs.push(Pair { i: a, j: b, c });
     } }
-    let mut caps = vec![];
-    if let Some(cs) = opt(j, "caps") { for (q, c) in arr(cs, "caps")?.iter().enumerate() { let cp = ix("caps", q);
+    let mut caps = vec![]; let mut total = 0usize;
+    if let Some(cs) = opt(j, "caps") { for (q, c) in arr(cs, "caps")?.iter().enumerate() { let cp = ix("caps", q); let c0 = caps.len();
         fields(c, &cp, &["limit", "min", "value", "vars", "members"])?;
         // R19.5 (P2.1, IR v2 cardinality): "limit" = at most, "min" = at least (value form only), both = a range (exactly k: equal)
         let lim = match opt(c, "limit") { Some(x) => Some(count(x, &at(&cp, "limit"))?), None => None };
@@ -84,27 +96,30 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
             (Some(_), Some(_)) => return Err(schema(&cp, "a cap has \"members\" or \"value\", not both")),
             (None, None) => return Err(schema(&cp, "cap needs \"members\" or \"value\"")) }
         if let Some(lim) = lim { caps.push(Cap { weights: vec![], members, limit: lim }); }
+        tally(&caps, c0, &mut total, &cp)?;
     } }
     // R19.5 (P2.1, IR v2 constructs lowered to caps, so every tier runs them unchanged):
     // all_different {"vars": [ids]} = per value, at most one of those variables takes it;
     // implies {"if": {"var", "value"}, "then": {"var", "in": [values]}} = at most one of (x = a) and (y outside `in`) holds.
-    if let Some(ad) = opt(j, "all_different") { for (q, c) in arr(ad, "all_different")?.iter().enumerate() { let cp = ix("all_different", q);
+    if let Some(ad) = opt(j, "all_different") { for (q, c) in arr(ad, "all_different")?.iter().enumerate() { let cp = ix("all_different", q); let c0 = caps.len();
         fields(c, &cp, &["vars"])?; let xp = at(&cp, "vars"); let ns = names(req(c, "vars", &cp)?, &xp)?;
         let mut over = vec![]; for (r, x) in ns.iter().enumerate() { let i = index.get(*x).copied().ok_or_else(|| value(&ix(&xp, r), format!("unknown var {x}")))?;
             if over.contains(&i) { return Err(value(&ix(&xp, r), format!("duplicate var {x}"))); } over.push(i); }
         if over.len() < 2 { return Err(value(&xp, "all_different needs at least two variables")); }
-        for v in 0..k { let mem: Vec<(usize, usize)> = over.iter().filter(|&&i| allowed[i * k + v]).map(|&i| (i, v)).collect(); if mem.len() >= 2 { caps.push(Cap { weights: vec![], members: mem, limit: 1 }); } } } }
-    if let Some(im) = opt(j, "implies") { for (q, c) in arr(im, "implies")?.iter().enumerate() { let cp = ix("implies", q);
+        for v in 0..k { let mem: Vec<(usize, usize)> = over.iter().filter(|&&i| allowed[i * k + v]).map(|&i| (i, v)).collect(); if mem.len() >= 2 { caps.push(Cap { weights: vec![], members: mem, limit: 1 }); } }
+        tally(&caps, c0, &mut total, &cp)?; } }
+    if let Some(im) = opt(j, "implies") { for (q, c) in arr(im, "implies")?.iter().enumerate() { let cp = ix("implies", q); let c0 = caps.len();
         fields(c, &cp, &["if", "then"])?; let (ip, tp) = (at(&cp, "if"), at(&cp, "then")); let (ci, ct) = (req(c, "if", &cp)?, req(c, "then", &cp)?);
         fields(ci, &ip, &["var", "value"])?; fields(ct, &tp, &["var", "in"])?;
         let x = xidx(req(ci, "var", &ip)?, &at(&ip, "var"))?; let vp = at(&ip, "value"); let a = vidx(text(req(ci, "value", &ip)?, &vp)?, &vp)?;
         let y = xidx(req(ct, "var", &tp)?, &at(&tp, "var"))?; if x == y { return Err(value(&at(&tp, "var"), "an implication needs two different variables")); }
         let sp = at(&tp, "in"); let mut ins = vec![false; k]; for (r, w) in names(req(ct, "in", &tp)?, &sp)?.iter().enumerate() { ins[vidx(w, &ix(&sp, r))?] = true; }
         let mut mem = vec![(x, a)]; for w in 0..k { if !ins[w] && allowed[y * k + w] { mem.push((y, w)); } }
-        if allowed[x * k + a] && mem.len() >= 2 { caps.push(Cap { weights: vec![], members: mem, limit: 1 }); } } }
+        if allowed[x * k + a] && mem.len() >= 2 { caps.push(Cap { weights: vec![], members: mem, limit: 1 }); }
+        tally(&caps, c0, &mut total, &cp)?; } }
     // tables {"vars": [1-3 distinct ids], "forbid" | "allow": [[value per var], ...]} (hard): a forbidden tuple = a cap with
     // limit arity - 1 over its (var, value) pairs; `allow` forbids every other tuple of the vars' allowed values (<= 100,000)
-    if let Some(ts) = opt(j, "tables") { for (q, c) in arr(ts, "tables")?.iter().enumerate() { let cp = ix("tables", q);
+    if let Some(ts) = opt(j, "tables") { for (q, c) in arr(ts, "tables")?.iter().enumerate() { let cp = ix("tables", q); let c0 = caps.len();
         fields(c, &cp, &["vars", "forbid", "allow"])?; let xp = at(&cp, "vars"); let ns = names(req(c, "vars", &cp)?, &xp)?;
         let mut over = vec![]; for (r, x) in ns.iter().enumerate() { let i = index.get(*x).copied().ok_or_else(|| value(&ix(&xp, r), format!("unknown var {x}")))?;
             if over.contains(&i) { return Err(value(&ix(&xp, r), format!("duplicate var {x}"))); } over.push(i); }
@@ -121,19 +136,25 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
             let mut all: Vec<Vec<usize>> = vec![vec![]]; for d in &doms { all = all.into_iter().flat_map(|t| d.iter().map(move |&v| { let mut u = t.clone(); u.push(v); u })).collect(); }
             let set: std::collections::HashSet<Vec<usize>> = listed.into_iter().collect(); all.into_iter().filter(|t| !set.contains(t)).collect() };
         for t in bad { if t.iter().zip(&over).all(|(&v, &i)| allowed[i * k + v]) {
-            caps.push(Cap { weights: vec![], members: over.iter().zip(&t).map(|(&i, &v)| (i, v)).collect(), limit: over.len() - 1 }); } } } }
+            caps.push(Cap { weights: vec![], members: over.iter().zip(&t).map(|(&i, &v)| (i, v)).collect(), limit: over.len() - 1 }); } }
+        tally(&caps, c0, &mut total, &cp)?; } }
     // precedes {"before": x, "after": y, "gap": g (integer, default 1)}: the (job, slot) pattern, values read as ordered slots
     // (their order in `values`): slot(y) >= slot(x) + g; every violating (slot x, slot y) pair is forbidden (a cap, limit 1)
-    if let Some(pr) = opt(j, "precedes") { for (q, c) in arr(pr, "precedes")?.iter().enumerate() { let cp = ix("precedes", q);
+    if let Some(pr) = opt(j, "precedes") { for (q, c) in arr(pr, "precedes")?.iter().enumerate() { let cp = ix("precedes", q); let c0 = caps.len();
         fields(c, &cp, &["before", "after", "gap"])?;
         let (x, y) = (xidx(req(c, "before", &cp)?, &at(&cp, "before"))?, xidx(req(c, "after", &cp)?, &at(&cp, "after"))?);
         if x == y { return Err(value(&at(&cp, "after"), "a precedence needs two different variables")); }
         let g = match opt(c, "gap") { Some(v) => count(v, &at(&cp, "gap"))?, None => 1 };
-        for a in 0..k { for b in 0..k { if b < a + g && allowed[x * k + a] && allowed[y * k + b] { caps.push(Cap { weights: vec![], members: vec![(x, a), (y, b)], limit: 1 }); } } } } }
+        // At most 100,000 (slot of x, slot of y) pairs to check, as `tables` (a 30 KB program, 3,000 slots, made 9 million caps,
+        // 1.45 GB); the loops run over the allowed slots only (the same caps in the same order, no k^2 scan)
+        let (sx, sy): (Vec<usize>, Vec<usize>) = ((0..k).filter(|&a| allowed[x * k + a]).collect(), (0..k).filter(|&b| allowed[y * k + b]).collect());
+        if sx.len() * sy.len() > 100_000 { return Err(limit(&cp, format!("{} slot pairs to check; at most 100,000", sx.len() * sy.len()))); }
+        for &a in &sx { for &b in &sy { if b < a + g { caps.push(Cap { weights: vec![], members: vec![(x, a), (y, b)], limit: 1 }); } } }
+        tally(&caps, c0, &mut total, &cp)?; } }
     // R19.7 (P2.1) linear {"terms": [[var, value, weight], ...], "limit": L}: sum of weight x [var = value] <= L, weights whole
     // numbers 0..=1,000,000 (0, or a value the var cannot take: term dropped), each (var, value) once. One WEIGHTED cap: members
     // are never replicated, so every tier, the sampler and the gate read the weights (knapsack: one per budget; bin packing: one per bin)
-    if let Some(ls) = opt(j, "linear") { for (q, c) in arr(ls, "linear")?.iter().enumerate() { let cp = ix("linear", q);
+    if let Some(ls) = opt(j, "linear") { for (q, c) in arr(ls, "linear")?.iter().enumerate() { let cp = ix("linear", q); let c0 = caps.len();
         fields(c, &cp, &["terms", "limit"])?; let lim = count(req(c, "limit", &cp)?, &at(&cp, "limit"))?;
         let tp = at(&cp, "terms"); let (mut members, mut weights, mut seen) = (vec![], vec![], std::collections::HashSet::new());
         for (r, t) in arr(req(c, "terms", &cp)?, &tp)?.iter().enumerate() { let rp = ix(&tp, r);
@@ -142,7 +163,8 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
             let wp = ix(&rp, 2); let w = count(&e[2], &wp)?; if w > MAX_CAP_WEIGHT { return Err(limit(&wp, format!("weight {w}; at most {MAX_CAP_WEIGHT}"))); }
             if !seen.insert((i, v)) { return Err(value(&rp, format!("duplicate term ({}, {})", vars[i], values[v]))); }
             if w > 0 && allowed[i * k + v] { members.push((i, v)); weights.push(w); } }
-        if !members.is_empty() { caps.push(Cap { members, limit: lim, weights }); } } }
+        if !members.is_empty() { caps.push(Cap { members, limit: lim, weights }); }
+        tally(&caps, c0, &mut total, &cp)?; } }
     // R19 P1.3(a), inference compiler: zero pairs and never-binding caps dropped, constant / separable tables folded into the
     // unaries (`pbit_ir::compile_parts`: no odds, log Z or plan changes; kept, they hid independence from the exact tiers)
     // R19.6 (P2.1) warm start {"var": "value", ...}: every variable once, each on an allowed (and clamped) value, every cap
@@ -335,7 +357,7 @@ pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_
             ("process_cpu_ms", crate::sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", crate::sys::usage().map_or(Json::Null, |u| num(u.1))), ("nice", crate::sys::nice().map_or(Json::Null, |v| num(v as f64))), ("cpu_limit_pct", num(cpu_pct as f64)),
             ("mem_limit_mb", num(mem.0 as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / m.n).sum::<usize>() as f64))], crate::exact_cap(exact_ms, reached),
             if auto && reached { vec![("exact_budget_reached", Json::Bool(true))] } else { vec![] },
-            vec![("exact_phase_ms", num((ts - t0).as_secs_f64() * 1e3)), ("polish_wall_ms", num(polish_wall))]].concat())), ("ms", ms(t0))]);
+            vec![("exact_phase_ms", num((ts - t0).as_secs_f64() * 1e3)), ("polish_wall_ms", num(polish_wall))], crate::config_echo()].concat())), ("ms", ms(t0))]);
     let code = if verdict == "refused" { 3 } else { 0 };
     (obj(out), code)
 }

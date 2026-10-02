@@ -1925,7 +1925,7 @@ mod tests {
         }
         assert!(checked > 2000 && infeasible > 50, "coverage: {checked} feasible, {infeasible} capacity-refused");
         // detailed balance end to end: three values, two-candidate variables over different value pairs, a binding cap
-        let (n, k) = (6, 3); let mut allowed = vec![true; n * k]; allowed[0 * k + 2] = false; allowed[1 * k + 2] = false; allowed[2 * k] = false; allowed[3 * k + 1] = false;
+        let (n, k) = (6, 3); let mut allowed = vec![true; n * k]; allowed[2] = false; allowed[1 * k + 2] = false; allowed[2 * k] = false; allowed[3 * k + 1] = false;
         let pairs = vec![Pair { i: 0, j: 1, c: Coupling::Potts(1.5) }, Pair { i: 1, j: 2, c: Coupling::Table(vec![0.3, -0.2, 0.1, 0.0, 0.5, -0.4, 0.2, 0.0, -0.1]) },
             Pair { i: 2, j: 3, c: Coupling::Potts(-0.7) }, Pair { i: 4, j: 5, c: Coupling::Potts(0.9) }, Pair { i: 0, j: 5, c: Coupling::Potts(0.6) }];
         let h: Vec<f64> = (0..n * k).map(|q| 0.2 * ((q * 7 % 5) as f64 - 2.0)).collect();
