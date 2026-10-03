@@ -8,6 +8,9 @@
     answer = probbit.run(program, deadline_ms=1000)    # whole-call deadline (the process is also killed past a slack)
     answer = probbit.decide(router_doc, summary=True)  # compact answer: verdict, counts, gate, the worst items (no per-item tables)
     answer = probbit.evaluate(request, judge="http://127.0.0.1:8080", auth_env="JUDGE_KEY")   # a judge's System One answers + rules
+    state = probbit.persona_init("examples/persona/tutor.yaml", seed=2)          # an individual of a persona (docs/persona.md)
+    turn = probbit.persona_turn(persona, state, {"loss": True})                  # {"stance": ..., "state": ...}; put turn["stance"]["line"] in the prompt
+    trace = probbit.persona_replay(persona, script, seed=2)                      # init + every turn of a script -> the stances
 
 Answers: `probbit run` reports per-variable odds under "marginals", `probbit decide` under "odds" (docs/probbit-ir-json.md, README).
 Every call returns the decoded JSON answer for exit 0 (exact / diagnostics_passed / partial), exit 1 (`infeasible`, a proof)
@@ -22,10 +25,10 @@ Keyword flags map to CLI flags: budget_ms=200 -> --budget-ms 200; collective=Fal
 cycles take on / off); any other boolean is a switch: summary=True -> --summary, pretty=True -> --pretty, False leaves it out.
 The binary: `binary=` argument, else $PROBBIT_BIN, else `probbit` on PATH, else ../target/release/probbit next to this file.
 """
-import json, os, shutil, subprocess, urllib.error, urllib.parse, urllib.request
+import json, os, shutil, subprocess, tempfile, urllib.error, urllib.parse, urllib.request
 
-__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "find_binary", "ProbbitError", "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout",
-           "ProbbitJudgeError"]
+__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "find_binary", "ProbbitError",
+           "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout", "ProbbitJudgeError"]
 
 
 class ProbbitError(Exception):
@@ -213,3 +216,74 @@ def evaluate(request, judge=None, *, auth_env=None, judge_timeout_s=30, timeout_
             raise ProbbitJudgeError(f"the judge returned {type(reply).__name__}, not a System One response or per-question probabilities")
         req["probbit"] = block
     return _call(["evaluate"], req, dict(flags, deadline_ms=deadline_ms), _timeout(timeout_s, deadline_ms), binary)
+
+
+# ---------------------------------------------------------------- persona: the individuality layer (docs/persona.md)
+def _persona_path(persona, d):
+    """A persona file path (YAML subset or JSON) as is; a dict (the JSON form of a persona file) written to a file in d."""
+    if isinstance(persona, dict):
+        path = os.path.join(d, "persona.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(persona, f, ensure_ascii=False)
+        return path
+    if isinstance(persona, (str, os.PathLike)):
+        return os.fspath(persona)
+    raise TypeError("persona must be a file path or a dict (the JSON form of a persona file)")
+
+
+def _json_file(d, name, doc):
+    path = os.path.join(d, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False)
+    return path
+
+
+def _persona_call(args, timeout_s, binary, lines=False):
+    try:
+        p = subprocess.run([find_binary(binary), "persona", *args], capture_output=True, encoding="utf-8", timeout=timeout_s)
+    except subprocess.TimeoutExpired as e:
+        raise ProbbitTimeout(f"probbit persona {args[0]} passed timeout_s={timeout_s}") from e
+    try:
+        out = [json.loads(x) for x in p.stdout.splitlines()] if lines and p.returncode == 0 else (json.loads(p.stdout) if p.stdout.strip() else None)
+    except ValueError:
+        raise ProbbitError(f"unparseable output (exit {p.returncode})", p.returncode, p.stdout, p.stderr)
+    if p.returncode == 2:
+        err = out.get("error") if isinstance(out, dict) else None
+        if err:
+            raise ProbbitInputError(err.get("code"), err.get("path"), err.get("message"), 2, p.stdout, p.stderr)
+        raise ProbbitInputError("flag", None, p.stderr.strip().removeprefix("probbit: "), 2, p.stdout, p.stderr)
+    if p.returncode == 0 and out is not None:
+        return out
+    raise ProbbitError(f"probbit persona {args[0]} exited {p.returncode}: {p.stderr.strip()[:300]}", p.returncode, p.stdout, p.stderr)
+
+
+def persona_init(persona, seed=None, *, timeout_s=None, binary=None):
+    """`probbit persona init`: a new individual of a persona (a file path or the document as a dict) -> its state (a dict to store
+    and pass to persona_turn). seed: the individual (default: the persona's identity.seed)."""
+    with tempfile.TemporaryDirectory() as d:
+        args = ["init", _persona_path(persona, d)] + (["--seed", str(seed)] if seed is not None else [])
+        return _persona_call(args, timeout_s, binary)
+
+
+def persona_turn(persona, state, inputs=None, *, timeout_s=None, binary=None, **flags):
+    """`probbit persona turn`: the persona, the individual's state and this turn's inputs -> {"stance": ..., "state": ...}, the same
+    shape as the MCP tool probbit_persona_turn. Put stance["line"] into the model's prompt and keep the returned state for the next
+    turn. Flags: timing=True (a non-canonical timing object), no_inertia=True. A bad persona, state or input raises
+    ProbbitInputError (code "persona", .path, .message); a refused or fallback stance is an answer."""
+    with tempfile.TemporaryDirectory() as d:
+        nxt = os.path.join(d, "next.json")
+        args = ["turn", _persona_path(persona, d), "--state", _json_file(d, "state.json", state), "--inputs", _json_file(d, "inputs.json", inputs or {}),
+                "--out", nxt, *_flags(flags)]
+        stance = _persona_call(args, timeout_s, binary)
+        with open(nxt, encoding="utf-8") as f:
+            return {"stance": stance, "state": json.load(f)}
+
+
+def persona_replay(persona, script, seed=None, *, timeout_s=None, binary=None, **flags):
+    """`probbit persona replay`: init at seed, then every turn of the script (a list of input dicts, or {"turns": [...]}) ->
+    the list of stances, byte for byte what persona_turn would give turn by turn. Flags: no_inertia=True."""
+    with tempfile.TemporaryDirectory() as d:
+        args = ["replay", _persona_path(persona, d), "--script", _json_file(d, "script.json", script), *_flags(flags)]
+        if seed is not None:
+            args += ["--seed", str(seed)]
+        return _persona_call(args, timeout_s, binary, lines=True)

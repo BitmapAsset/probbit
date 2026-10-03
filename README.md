@@ -330,6 +330,53 @@ Build the binary once with `cargo build --release -p probbit-cli` (it lands in `
 bindings and no MCP server yet; every script in `bench/` is an example of the subprocess pattern. `probbit <command> --help`
 lists every flag of a command with its default, and the exit codes.
 
+## The individuality layer: `probbit persona`
+
+Give an agent a temperament that lives outside the model. A **persona** is a small file (YAML subset or JSON): traits with
+priors, moods with inertia, soft couplings, per-turn evidence, and habits that are hard rules. A seed makes an individual. Every
+turn compiles persona + the individual's state + the turn's inputs into ONE probbit-ir program, answered exactly in process; the
+**stance** (a level per trait with exact odds, the habits in force and the ones that changed it, a refusal when the engine cannot
+vouch) comes with a short **stance line** a host puts into any model's prompt. The model still writes every word; the persona
+decides how they are written, and the same individual answers whatever model the host calls. [docs/persona.md](docs/persona.md)
+is the format; [examples/persona/](examples/persona/) has three fictional personas and their goldens.
+
+```sh
+probbit persona init examples/persona/tutor.yaml --seed 2 --out pip.json      # an individual: genes from the seed
+probbit persona turn examples/persona/tutor.yaml --state pip.json --inputs '{"loss": true, "sentiment": "negative"}'
+#   "status":"ok", "humour":{"level":"none","p":1,...}, "warmth":{"level":"warm","p":0.952032,...}, habits active: no_jokes_on_loss, ...
+#   "line":"Stance: no jokes, be kind; one emoji at most; gentle; explain step by step; warm and encouraging; suggest what to try next; ask what they think first; casual."
+#   "why":"learner reports a failure -> humour none, valence down; learner upset -> valence down, humour none"     (pip.json is now turn 1)
+probbit persona replay examples/persona/tutor.yaml --seed 2 --script examples/persona/workday.json   # 20 stances, the same bytes every run
+probbit persona lint examples/persona/tutor.yaml   # contradicting habits: confused_no_playful vs after_error_check, resolved by priority
+```
+
+```python
+import probbit                                        # python/probbit.py, stdlib only
+state = probbit.persona_init("examples/persona/tutor.yaml", seed=2)
+turn = probbit.persona_turn("examples/persona/tutor.yaml", state, {"loss": True})
+prompt_tail, state = turn["stance"]["line"], turn["state"]   # the line goes after any cached prompt prefix
+```
+
+MCP: `probbit_persona_init` and `probbit_persona_turn` in `probbit mcp` (stateless: the persona, inline or a path, and the state go
+in; the state comes back). Browser: the playground's "Meet three individuals from one persona" (probbit-wasm ops 4 and 5, no
+threads). Every surface gives the CLI's documents byte for byte (tests/persona.rs, python/test_mcp.py, probbit-wasm/tests).
+
+Measured in this run (Apple M4, macOS 26.5.2, 2026-10-02; the three example personas):
+- a whole turn in process (compile, engine, decode, digests): median 0.20-0.32 ms, p95 0.22-0.67 ms, of which the engine 0.09-0.18
+  ms (median); N = 1,000 turns per persona, 1-minute load 3.3-3.5, `nice 10`;
+- the stance line: 36-38 estimated tokens on average over the 20 workday turns, at most 40;
+- individuals: three seeds of the tutor differ by a mean total-variation distance of 0.12-0.18 between their trait odds on the
+  workday script; the tutor and the ops engineer (two persona files) by 0.45; the same persona and seed by 0;
+- habits: 0 violations over 2,160 turns of 12 random personas (every habit in force re-checked from the file), and each of the 481
+  habits reported as binding is broken by the habit-free twin;
+- determinism: 1,000-turn replays are byte-identical across processes (3 personas x 2 seeds); the documents equal an independent
+  reference implementation's on 5,460 turns (the 60 golden turns and 5,400 turns of random inputs).
+
+What a persona can NOT do: write, read or check text (text rules stay in the prompt or a checker); see what the host does not tell
+it; be a safety gate (keep approvals and permissions in plain code); its odds are its own model's, not measured probabilities that
+a user will like the reply; and it cannot make a model follow the line: whether a given model writes in the stance it is given has
+to be measured per model (no such measurement has been made here).
+
 ## After any judge: `probbit evaluate`
 
 Decision models (TypeSafe's Jev, Cloudflare's Clef and Clef-flash, local System One servers) are judges: content in, a
@@ -520,8 +567,10 @@ or Windows.
   keeps every object's fields equal to the parser's).
 - [docs/agents.md](docs/agents.md): calling probbit from a shell, Python, Node, PowerShell, MCP agents and a browser, and
   `probbit evaluate` after a decision model.
-- [python/](python/): `probbit.py`, a zero-dependency subprocess wrapper (with `evaluate` and a stdlib mock judge), its tests and
-  three examples.
+- [docs/persona.md](docs/persona.md): `probbit persona`, the individuality layer: the persona file, the compilation, the stance and
+  state documents, the canonical JSON, what a persona can not do; [examples/persona/](examples/persona/): three personas + goldens.
+- [python/](python/): `probbit.py`, a zero-dependency subprocess wrapper (with `evaluate`, the persona functions and a stdlib mock
+  judge), its tests and three examples.
 - [playground/](playground/): one static page that runs probbit in a browser (`probbit-wasm`, built by `playground/build.sh`).
 - [bench/](bench/): the scripts behind BENCHMARKS §2 and §5 (Python 3; the ILP baselines need `numpy` and `scipy >= 1.9`).
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md).

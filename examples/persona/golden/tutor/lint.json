@@ -1,0 +1,1 @@
+{"conflicts":[{"habits":["confused_no_playful","after_error_check"],"resolution":"yield: after_error_check yields","when_prev":[{"caution":"bold","verbosity":"terse"},{"caution":"bold","verbosity":"short"},{"caution":"measured","verbosity":"terse"},{"caution":"measured","verbosity":"short"},{"caution":"careful","verbosity":"terse"},{"caution":"careful","verbosity":"short"}]}]}

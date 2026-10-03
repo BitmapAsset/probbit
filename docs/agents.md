@@ -80,7 +80,7 @@ mark with `[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)` a
 ## MCP: one line per agent
 
 `probbit mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (JSON-RPC 2.0, one message per
-line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its five tools take the
+line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its seven tools take the
 commands' own documents and return the commands' own JSON, byte for byte:
 
 | tool | arguments | returns |
@@ -90,6 +90,12 @@ commands' own documents and return the commands' own JSON, byte for byte:
 | `probbit_stats` | optional `sweeps`, `chains`, `threads` | `probbit stats` |
 | `probbit_demo` | optional `tasks`, `seed`, `hard` | `probbit demo` (a router document) |
 | `probbit_evaluate` | a System One request plus the optional `probbit` block ([probbit-ir-json.md](probbit-ir-json.md#decision-api-probbit-evaluate)) plus optional `flags` | `probbit evaluate` |
+| `probbit_persona_init` | `persona` (the document) or `persona_path`, optional `seed` | `probbit persona init` (the state) |
+| `probbit_persona_turn` | `persona` or `persona_path`, `state`, `inputs`, optional `flags` (`timing`, `no_inertia`) | `{stance, state}`: `probbit persona turn`'s stance and the state it writes ([persona.md](persona.md)) |
+
+The two persona tools run in the server's process and keep nothing between calls: pass the returned state back on the next turn and
+put `stance.line` into the model's prompt (after any cached prefix). A refused or fallback stance is an answer; a bad persona,
+state or input is a tool error with the `{"error": {"code": "persona", ...}}` object.
 
 `flags` are the command's flags without the dashes: `{"budget_ms": 200, "seed": 3, "summary": true}`; `summary: true`
 returns the compact answer (README, "First five minutes"). `infeasible` and `refused` / `declined` are answers; bad input

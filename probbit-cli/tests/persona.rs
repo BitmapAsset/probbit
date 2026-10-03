@@ -1,0 +1,401 @@
+//! `probbit persona` (docs/persona.md): the goldens byte for byte (they equal the reference implementation's, R31 parity), the YAML
+//! subset's accepted and rejected inputs, 1,000-turn replays, habit properties over random personas, lint, the `evaluate` bridge,
+//! refusals, malformed documents, the Python wrapper.
+use std::io::Write;
+use std::process::{Command, Stdio};
+#[allow(dead_code)]
+#[path = "../src/json.rs"]
+mod json;
+#[allow(dead_code)]
+#[path = "../src/yaml.rs"]
+mod yaml;
+use json::Json;
+
+fn probbit(args: &[&str], stdin: &str) -> (i32, String, String) {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let _ = c.stdin.take().unwrap().write_all(stdin.as_bytes());
+    let o = c.wait_with_output().unwrap();
+    (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+fn ex(p: &str) -> String { format!("{}/../examples/persona/{p}", env!("CARGO_MANIFEST_DIR")) }
+/// A file as text with "\n" line ends (a Windows checkout may have made them "\r\n")
+fn read(p: &str) -> String { std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{p}: {e}")).replace("\r\n", "\n") }
+fn tmp(name: &str) -> String { format!("{}/persona-{}-{name}", env!("CARGO_TARGET_TMPDIR"), std::process::id()) }
+fn parse(s: &str) -> Json { json::parse(s).unwrap_or_else(|e| panic!("not JSON ({}): {s:.300}", e.msg)) }
+fn jw(j: &Json) -> String { json::write(j, false) }
+fn s<'a>(j: &'a Json, path: &[&str]) -> &'a Json { path.iter().fold(j, |x, k| x.get(k).unwrap_or_else(|| panic!("no {k} in {:.200}", jw(x)))) }
+const NAMES: [&str; 3] = ["ops-engineer", "tutor", "trader-assistant"];
+fn workday() -> Vec<Json> { s(&parse(&read(&ex("workday.json"))), &["turns"]).as_arr().unwrap().to_vec() }
+
+struct Mix(u64);
+impl Mix {
+    fn next(&mut self) -> u64 { self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15); let mut z = self.0; z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9); z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB); z ^ (z >> 31) }
+    fn below(&mut self, k: usize) -> usize { (self.next() % k as u64) as usize }
+    fn unit(&mut self) -> f64 { (self.next() >> 11) as f64 / (1u64 << 53) as f64 }
+}
+
+/// The acceptance test. For the three example personas, in both forms (YAML subset and JSON: one document, one digest), driven as
+/// a host drives them: `init` = state0.json, `compile` of turn 0 = program-turn0.json, 20 `turn --state FILE` calls = workday.jsonl
+/// line by line, the state file after them = final-state.json, `replay` = workday.jsonl, `lint` = lint.json. Every document is
+/// canonical JSON. These files equal the R31 reference implementation's goldens (the R30 prototype with the canonical number
+/// rule, docs/persona.md §5.2) byte for byte, except that each `engine.program` digest is of a program whose IR version key is
+/// `probbit_ir` (the reference ran a 0.4.0 engine, whose key was `pbit_ir`; the program texts are otherwise byte-identical).
+#[test]
+fn stdout_matches_the_persona_goldens() {
+    let turns = workday(); assert_eq!(turns.len(), 20);
+    for n in NAMES { for form in ["yaml", "json"] {
+        let p = ex(&format!("{n}.{form}")); let g = |f: &str| read(&ex(&format!("golden/{n}/{f}")));
+        let (c, s0, e) = probbit(&["persona", "init", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(s0, g("state0.json"), "{n}.{form} state0");
+        let st = tmp(&format!("{n}-{form}-state.json")); std::fs::write(&st, &s0).unwrap();
+        let (c, prog, e) = probbit(&["persona", "compile", &p, "--state", &st, "--inputs", &jw(&turns[0])], ""); assert_eq!(c, 0, "{e}");
+        assert_eq!(prog, g("program-turn0.json"), "{n}.{form} program of turn 0");
+        let gold = g("workday.jsonl"); let lines: Vec<&str> = gold.lines().collect(); assert_eq!(lines.len(), 20);
+        for (i, t) in turns.iter().enumerate() {
+            let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", &jw(t)], ""); assert_eq!(c, 0, "{e}");
+            assert_eq!(out.trim_end(), lines[i], "{n}.{form} turn {i}"); }
+        assert_eq!(read(&st), g("final-state.json"), "{n}.{form} final state");
+        let (c, rep, e) = probbit(&["persona", "replay", &p, "--script", &ex("workday.json")], ""); assert_eq!(c, 0, "{e}"); assert_eq!(rep, gold, "{n}.{form} replay");
+        assert!(e.contains(&format!("final state {}", s(&parse(&g("final-state.json")), &["digest"]).as_str().unwrap())), "{e}");
+        let (_, lint, _) = probbit(&["persona", "lint", &p], ""); assert_eq!(jw(s(&parse(&lint), &["conflicts"])), jw(s(&parse(&g("lint.json")), &["conflicts"])), "{n} lint");
+        let _ = std::fs::remove_file(&st);
+    } }
+    // the three individuals are different people: same script, different persona files
+    let first: Vec<String> = NAMES.iter().map(|n| read(&ex(&format!("golden/{n}/workday.jsonl"))).lines().next().unwrap().to_string()).collect();
+    assert!(first[0] != first[1] && first[1] != first[2]);
+}
+
+/// `probbit persona --help` documents every subcommand and the exit codes; bad flags and subcommands exit 2.
+#[test]
+fn persona_help_and_flags() {
+    let (c, h, e) = probbit(&["persona", "--help"], ""); assert_eq!(c, 0, "{e}"); assert!(h.starts_with("usage: probbit persona"), "{h}");
+    for w in ["init", "turn", "replay", "explain", "diff", "lint", "check", "compile", "describe", "--no-inertia", "--timing", "exit: 0"] { assert!(h.contains(w), "help lacks {w}"); }
+    let p = ex("tutor.yaml");
+    for args in [vec!["persona"], vec!["persona", "nope", &p], vec!["persona", "init"], vec!["persona", "init", &p, "--bogus"], vec!["persona", "turn", &p], vec!["persona", "init", &p, "--seed", "x"], vec!["persona", "init", &p, "--seed", "-1"]] {
+        let (c, out, e) = probbit(&args, ""); assert_eq!(c, 2, "{args:?}: {out} {e}"); assert!(out.is_empty(), "{args:?}: a flag error goes to stderr"); }
+    let (c, d, _) = probbit(&["persona", "describe", &p], ""); assert_eq!(c, 0);
+    assert_eq!(s(&parse(&d), &["agenda"]).as_arr().unwrap().len(), 4); assert!(s(&parse(&d), &["traits", "emoji", "levels"]).as_arr().is_some());
+    let (c, k, _) = probbit(&["persona", "check", &p], ""); assert_eq!(c, 0); let k = parse(&k);
+    assert_eq!((s(&k, &["traits"]).as_f64(), s(&k, &["moods"]).as_f64(), s(&k, &["habits"]).as_f64()), (Some(9.0), Some(2.0), Some(6.0)));
+    let (c, x, e) = probbit(&["persona", "explain", &p, "--script", &ex("workday.json"), "--turn", "4"], ""); assert_eq!(c, 0, "{e}");
+    assert!(x.contains("turn 4") && x.contains("odds (exact, joint)") && x.contains("line (") && x.contains("why: "), "{x}");
+    let (c, d, e) = probbit(&["persona", "diff", &p, "--seed", "1", "--seed2", "2", "--script", &ex("workday.json")], ""); assert_eq!(c, 0, "{e}");
+    let tv = s(&parse(&d), &["distance", "tv"]).as_f64().unwrap(); assert!(tv > 0.0 && tv < 1.0, "{d}");
+    let (_, same, _) = probbit(&["persona", "diff", &p, "--seed", "3", "--seed2", "3", "--script", &ex("workday.json")], "");
+    assert_eq!(s(&parse(&same), &["distance", "tv"]).as_f64(), Some(0.0)); // the same individual: distance 0
+}
+
+/// The YAML subset reads what the reference reader (miniyaml.py) reads, to the same values, and refuses what it refuses, at the same
+/// line. Two deliberate differences, both on inputs the reference got wrong, are pinned at the end.
+#[test]
+fn yaml_subset_reads_and_refuses_like_the_reference() {
+    let ok: [(&str, &str); 15] = [
+        ("a: 1\nb: [x, y]\n", r#"{"a":1,"b":["x","y"]}"#),
+        ("- a\n- b: 2\n  c: 3\n- [1, 2]\n", r#"["a",{"b":2,"c":3},[1,2]]"#),
+        ("key:\n  - x\n  - y\n", r#"{"key":["x","y"]}"#),
+        ("key:\n- x\n- y\nnext: 1\n", r#"{"key":["x","y"],"next":1}"#),
+        ("a: 'it''s'\nb: \"q\\\"x\\u00e9\"\n", r#"{"a":"it's","b":"q\"xé"}"#),
+        ("a: ~\nb: null\nc: true\nd: FALSE\ne: -0.5e2\nf: +3\n", r#"{"a":null,"b":null,"c":true,"d":false,"e":-50,"f":3}"#),
+        ("# comment\na: x # trailing\nb: 'a # not a comment'\nc: x#y\n", r##"{"a":"x","b":"a # not a comment","c":"x#y"}"##),
+        ("---\na: {x: 1, w: [a, b], 'z': c, 'y': d}\n", r#"{"a":{"x":1,"w":["a","b"],"z":"c","y":"d"}}"#),
+        ("\u{feff}a: 1\r\nb: 2\r\n", r#"{"a":1,"b":2}"#),
+        ("a: [x, ]\n", r#"{"a":["x",null]}"#),
+        ("a:\nb: 2\n", r#"{"a":null,"b":2}"#),
+        ("say: [plain and businesslike, \"\", \"blunt: state it\"]\n", r#"{"say":["plain and businesslike","","blunt: state it"]}"#),
+        ("a: 01x\nb: yes\n", r#"{"a":"01x","b":"yes"}"#),
+        ("seq:\n  -\n    a: 1\n  - b\n", r#"{"seq":[{"a":1},"b"]}"#),
+        ("[1, 2.5, x]\n", r#"[1,2.5,"x"]"#),
+    ];
+    for (src, want) in ok { match yaml::load(src) { Ok(v) => assert_eq!(jw(&v), jw(&parse(want)), "{src:?}"), Err(e) => panic!("{src:?} refused at line {}: {}", e.line, e.msg) } }
+    let bad: [(&str, usize, &str); 21] = [
+        ("a:\n\tb: 1\n", 2, "tab in indentation"), ("a: &x 1\n", 1, "anchor"), ("a: *x\n", 1, "alias"), ("a: !!str 1\n", 1, "tag"), ("a: |\n  text\n", 1, "block scalars"),
+        ("a: [1,\n  2]\n", 1, "ends early"), ("a: 1\na: 2\n", 2, "duplicate key"), ("yes: 1\n", 1, "would not be a string"), ("1: x\n", 1, "would not be a string"),
+        ("a: 1\n---\nb: 2\n", 2, "only one document"), ("a: 'x\n", 1, "unterminated"), ("a:\n  b: 1\n c: 2\n", 3, "bad indentation"), ("? a\n: b\n", 1, "expected `key: value`"),
+        ("- a\nb: 1\n", 2, "unexpected text"), ("a: \"x\ty\"\n", 1, "bad double-quoted string"), ("a: [x, y\n", 1, "unterminated ["), ("a: {b: 1, b: 2}\n", 1, "duplicate key"),
+        ("a: {on: 1}\n", 1, "would not be a string"), ("a: ]\n", 1, "unexpected ']'"), ("a: `x`\n", 1, "unexpected '`'"), ("- &a x\n", 1, "anchor"),
+    ];
+    for (src, line, msg) in bad { match yaml::load(src) { Ok(v) => panic!("{src:?} read as {}", jw(&v)), Err(e) => { assert_eq!(e.line, line, "{src:?}: {}", e.msg); assert!(e.msg.contains(msg), "{src:?}: {}", e.msg); } } }
+    // differences from the reference reader: a quoted scalar is a sequence item (it refused it), and no number that is not exact
+    // in a double is read (it read 1e999 as infinity and kept big integers exact, so digests would differ between implementations)
+    assert_eq!(jw(&yaml::load("- \"x\"\n- 'y'\n").ok().unwrap()), r#"["x","y"]"#);
+    for src in ["a: 1e999\n", "a: 12345678901234567890\n"] { assert!(yaml::load(src).is_err(), "{src:?}"); }
+    // every example persona reads to the same document as its JSON form
+    for n in NAMES { assert_eq!(jw(&yaml::load(&read(&ex(&format!("{n}.yaml")))).ok().unwrap()), jw(&parse(&read(&ex(&format!("{n}.json"))))), "{n}"); }
+}
+
+/// The standard inputs at random (fixed seed): sentiment, error, loss, praise, criticism, claim_done, stakes, time_pressure, and
+/// the example personas' own (confused, task); every persona ignores what it does not declare.
+fn random_script(r: &mut Mix, n: usize) -> Vec<Json> {
+    (0..n).map(|_| { let mut t: Vec<(String, Json)> = vec![];
+        let u = r.unit(); if u < 0.2 { t.push(("sentiment".into(), Json::Str("negative".into()))); } else if u > 0.8 { t.push(("sentiment".into(), Json::Str("positive".into()))); }
+        for (k, p) in [("error", 0.15), ("loss", 0.03), ("praise", 0.1), ("criticism", 0.07), ("claim_done", 0.1), ("confused", 0.1)] { if r.unit() < p { t.push((k.into(), Json::Bool(true))); } }
+        let x = (r.unit().powi(2) * 100.0).round() / 100.0; if x >= 0.05 { t.push(("stakes".into(), Json::Num(x))); }
+        let x = (r.unit().powi(3) * 100.0).round() / 100.0; if x >= 0.05 { t.push(("time_pressure".into(), Json::Num(x))); }
+        if r.unit() < 0.3 { t.push(("task".into(), Json::Str(["chat", "question", "code", "ops", "explain"][r.below(5)].into()))); }
+        if r.unit() < 0.03 { t.push(("elapsed_hours".into(), Json::Num((r.unit() * 1000.0).round() / 100.0))); }
+        Json::Obj(t) }).collect()
+}
+
+/// A 1,000-turn random script replays byte for byte: twice in two processes, and through `turn --state FILE` one process per turn
+/// (the first 60 turns), for every example persona and two seeds.
+#[test]
+fn a_1000_turn_replay_is_byte_identical() {
+    let mut r = Mix(20_261_002); let script = Json::Arr(random_script(&mut r, 1000)); let sp = tmp("long1000.json"); std::fs::write(&sp, jw(&script)).unwrap();
+    let turns = script.as_arr().unwrap();
+    for n in NAMES { for seed in ["1", "7"] {
+        let p = ex(&format!("{n}.yaml"));
+        let (c, a, e) = probbit(&["persona", "replay", &p, "--seed", seed, "--script", &sp], ""); assert_eq!(c, 0, "{e}");
+        let (_, b, e2) = probbit(&["persona", "replay", &p, "--seed", seed, "--script", &sp], "");
+        assert_eq!(a.lines().count(), 1000); assert!(a == b && e == e2, "{n} seed {seed}: two replays differ");
+        let st = tmp(&format!("{n}-{seed}-long.json")); let (_, s0, _) = probbit(&["persona", "init", &p, "--seed", seed], ""); std::fs::write(&st, s0).unwrap();
+        for (i, (t, line)) in turns.iter().zip(a.lines()).take(60).enumerate() {
+            let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", &jw(t)], ""); assert_eq!(c, 0, "{e}"); assert_eq!(out.trim_end(), line, "{n} seed {seed} turn {i}"); }
+        let _ = std::fs::remove_file(&st);
+    } }
+    let _ = std::fs::remove_file(&sp);
+}
+
+/// A restriction of a `then` habit -> the allowed levels (docs/persona.md §2.5), independently of the implementation
+fn allowed(levels: &[String], r: &Json, prev: &str) -> Vec<String> {
+    let idx = |l: &str| -> usize { if let Some(i) = levels.iter().position(|x| x == l) { return i; }
+        let p = levels.iter().position(|x| x == prev).unwrap() as i64; (p + match l { "prev-1" => -1, "prev+1" => 1, _ => 0 }).clamp(0, levels.len() as i64 - 1) as usize };
+    match r { Json::Arr(a) => levels.iter().filter(|l| a.iter().any(|x| x.as_str() == Some(l.as_str()))).cloned().collect(),
+        _ => { let (k, x) = &r.as_obj().unwrap()[0];
+            match k.as_str() { "not" => levels.iter().filter(|l| !x.as_arr().unwrap().iter().any(|y| y.as_str() == Some(l.as_str()))).cloned().collect(),
+                "at_most" => levels[..=idx(x.as_str().unwrap())].to_vec(), _ => levels[idx(x.as_str().unwrap())..].to_vec() } } }
+}
+/// A random persona (JSON): 3-5 traits, maybe a mood, couplings, a flag, a level and a number input, maybe a streak, 2-4 conditional
+/// habits restricting traits (level lists, `not`, `at_most` / `at_least` with levels and prev, prev-1, prev+1), conflicts resolved by
+/// fallback or yield. Every trait's fallback is its first level.
+/// (trait id, its levels) and (habit id, its `then` restrictions)
+type Levels = Vec<(String, Vec<String>)>;
+type Thens = Vec<(String, Vec<(String, Json)>)>;
+fn random_persona(r: &mut Mix, k: usize) -> (Json, Levels, Thens) {
+    let names = ["low", "mid", "high", "max"]; let num = |x: f64| Json::Num((x * 100.0).round() / 100.0); let st = |x: &str| Json::Str(x.into());
+    let nt = 3 + r.below(3); let mut traits = vec![]; let mut levels = vec![];
+    for t in 0..nt { let n = 2 + r.below(3); let lv: Vec<String> = names[..n].iter().map(|s| s.to_string()).collect();
+        traits.push(Json::Obj(vec![("id".into(), st(&format!("t{t}"))), ("levels".into(), Json::Arr(lv.iter().map(|l| st(l)).collect())),
+            ("prior".into(), Json::Arr((0..n).map(|_| Json::Num((1 + r.below(9)) as f64)).collect())), ("spread".into(), num(r.below(6) as f64 * 0.1)),
+            ("say".into(), Json::Arr(lv.iter().map(|l| st(&format!("t{t} {l}"))).collect())), ("fallback".into(), st(&lv[0]))]));
+        levels.push((format!("t{t}"), lv)); }
+    let mood = r.below(2) == 0; let mut ids: Vec<String> = levels.iter().map(|x| x.0.clone()).collect(); if mood { ids.push("m0".into()); }
+    let target = |r: &mut Mix| ids[r.below(ids.len())].clone();
+    let eff = |r: &mut Mix| Json::Obj((0..1 + r.below(3)).map(|_| (target(r), num(r.unit() * 3.0 - 1.5))).fold(vec![], |mut v: Vec<(String, Json)>, (k, x)| { if !v.iter().any(|y| y.0 == k) { v.push((k, x)); } v }));
+    let mut couplings = vec![]; for _ in 0..1 + r.below(3) { let (a, b) = (target(r), target(r)); if a != b { couplings.push(Json::Obj(vec![("vars".into(), Json::Arr(vec![st(&a), st(&b)])), ("align".into(), num(r.unit() * 2.0 - 1.0))])); } }
+    let inputs = vec![Json::Obj(vec![("id".into(), st("f0")), ("kind".into(), st("flag")), ("effects".into(), eff(r))]),
+        Json::Obj(vec![("id".into(), st("lv")), ("kind".into(), st("level")), ("levels".into(), Json::Arr(vec![st("neg"), st("neu"), st("pos")])), ("default".into(), st("neu")), ("effects".into(), Json::Obj(vec![("neg".into(), eff(r)), ("pos".into(), eff(r))]))]),
+        Json::Obj(vec![("id".into(), st("n0")), ("kind".into(), st("number")), ("reactivity_spread".into(), num(0.3)), ("effects".into(), eff(r))])];
+    let streak = r.below(2) == 0;
+    let whens = [("f0", Json::Bool(true)), ("lv", st("neg")), ("n0", num(0.5)), ("streak", Json::Num(2.0))];
+    let mut habits = vec![]; let mut hdefs = vec![];
+    for h in 0..2 + r.below(3) { let (wk, wv) = whens[r.below(if streak { 4 } else { 3 })].clone();
+        let mut then: Vec<(String, Json)> = vec![];
+        for _ in 0..1 + r.below(2) { let (t, lv) = levels[r.below(nt)].clone(); if then.iter().any(|x| x.0 == t) { continue; }
+            let restr = match r.below(5) { 0 => Json::Arr(vec![st(&lv[r.below(lv.len())])]), 1 => Json::Obj(vec![("not".into(), Json::Arr(vec![st(&lv[r.below(lv.len())])]))]),
+                2 => Json::Obj(vec![("at_most".into(), st(["prev", "prev-1", &lv[r.below(lv.len())]][r.below(3)]))]),
+                3 => Json::Obj(vec![("at_least".into(), st(["prev", "prev+1", &lv[r.below(lv.len())]][r.below(3)]))]),
+                _ => Json::Arr(vec![st(&lv[0]), st(&lv[lv.len() - 1])]) };
+            then.push((t, restr)); }
+        hdefs.push((format!("h{h}"), then.clone()));
+        habits.push(Json::Obj(vec![("id".into(), st(&format!("h{h}"))), ("when".into(), Json::Obj(vec![(wk.into(), wv)])), ("then".into(), Json::Obj(then)),
+            ("say".into(), st(&format!("habit {h}"))), ("priority".into(), Json::Num(r.below(3) as f64))])); }
+    let mut doc = vec![("probbit_persona".to_string(), Json::Num(1.0)), ("identity".into(), Json::Obj(vec![("name".into(), st(&format!("Random {k}"))), ("version".into(), st("1")), ("seed".into(), Json::Num(1.0))])),
+        ("traits".into(), Json::Arr(traits))];
+    if mood { doc.push(("moods".into(), Json::Arr(vec![Json::Obj(vec![("id".into(), st("m0")), ("levels".into(), Json::Arr(vec![st("down"), st("even"), st("up")])), ("inertia".into(), num(0.5))])]))); }
+    doc.push(("couplings".into(), Json::Arr(couplings))); doc.push(("inputs".into(), Json::Arr(inputs)));
+    if streak { doc.push(("history".into(), Json::Arr(vec![Json::Obj(vec![("id".into(), st("streak")), ("of".into(), st("f0")), ("kind".into(), st("streak")), ("cap".into(), Json::Num(3.0)), ("effects".into(), eff(r))])]))); }
+    doc.push(("habits".into(), Json::Arr(habits)));
+    doc.push(("engine".into(), Json::Obj(vec![("on_conflict".into(), st(if r.below(2) == 0 { "yield" } else { "fallback" }))])));
+    (Json::Obj(doc), levels, hdefs)
+}
+fn with(doc: &Json, k: &str, v: Json) -> Json { let Json::Obj(o) = doc else { panic!() }; let mut o = o.clone(); o.retain(|(x, _)| x != k); o.push((k.into(), v)); Json::Obj(o) }
+
+/// Habit properties over random personas and random inputs (12 personas x 2 seeds x 90 turns = 2,160 turns): whenever there is a
+/// stance, every habit in force holds (`violations` 0, and re-checked here from the persona's own rules and the previous turn's
+/// levels); every habit reported `bound` is broken by the habit-free twin (the same persona without habits: its unaries do not
+/// depend on earlier stances, so its plan is the twin's); `values: positional` and `values: semantic` give the same stances.
+#[test]
+fn habits_hold_bound_habits_bind_and_value_alphabets_agree() {
+    let (mut turns, mut bound_seen, mut checked) = (0, 0, 0); let mut r = Mix(0xBEEF);
+    for k in 0..12 {
+        let (doc, levels, hdefs) = random_persona(&mut r, k);
+        let lvl = |t: &str| &levels.iter().find(|x| x.0 == t).unwrap().1;
+        let sem = with(&doc, "engine", Json::Obj(vec![("on_conflict".into(), s(&doc, &["engine", "on_conflict"]).clone()), ("values".into(), Json::Str("semantic".into()))]));
+        let free = with(&with(&doc, "habits", Json::Arr(vec![])), "engine", Json::Obj(vec![("twin".into(), Json::Bool(false))]));
+        let script = Json::Arr((0..90).map(|_| { let mut t = vec![]; if r.unit() < 0.35 { t.push(("f0".to_string(), Json::Bool(true))); }
+            if r.unit() < 0.5 { t.push(("lv".into(), Json::Str(["neg", "neu", "pos"][r.below(3)].into()))); }
+            if r.unit() < 0.6 { t.push(("n0".into(), Json::Num((r.unit() * 100.0).round() / 100.0))); }
+            Json::Obj(t) }).collect());
+        let (pp, ps, pf, sp) = (tmp(&format!("rand{k}.json")), tmp(&format!("rand{k}-sem.json")), tmp(&format!("rand{k}-free.json")), tmp(&format!("rand{k}-script.json")));
+        for (f, d) in [(&pp, &doc), (&ps, &sem), (&pf, &free), (&sp, &script)] { std::fs::write(f, jw(d)).unwrap(); }
+        for seed in ["1", "2"] {
+            let run = |p: &str| -> Vec<Json> { let (c, out, e) = probbit(&["persona", "replay", p, "--seed", seed, "--script", &sp], ""); assert_eq!(c, 0, "{e} {}", jw(&doc)); out.lines().map(parse).collect() };
+            let (main, semantic, twin) = (run(&pp), run(&ps), run(&pf));
+            let mut prev: Vec<(String, String)> = levels.iter().map(|(t, lv)| (t.clone(), lv[0].clone())).collect();
+            for (i, ((a, b), f)) in main.iter().zip(&semantic).zip(&twin).enumerate() {
+                turns += 1; let status = s(a, &["status"]).as_str().unwrap();
+                // positional == semantic (the persona digest, the program and the state digest name the variant)
+                let strip = |x: &Json| { let Json::Obj(o) = x else { panic!() }; Json::Obj(o.iter().filter(|(k, _)| !["persona", "engine", "state_digest"].contains(&k.as_str())).cloned().collect()) };
+                assert_eq!(jw(&strip(a)), jw(&strip(b)), "persona {k} seed {seed} turn {i}: positional != semantic");
+                let level = |x: &Json, t: &str| s(x, &["stance", t, "level"]).as_str().unwrap().to_string();
+                let pv = |t: &str| prev.iter().find(|x| x.0 == t).unwrap().1.clone();
+                if status != "fallback" {
+                    assert_eq!(s(a, &["habits", "violations"]).as_f64(), Some(0.0), "persona {k} turn {i}");
+                    for h in s(a, &["habits", "active"]).as_arr().unwrap() { let then = &hdefs.iter().find(|x| x.0 == h.as_str().unwrap()).unwrap().1;
+                        for (t, restr) in then { checked += 1; assert!(allowed(lvl(t), restr, &pv(t)).contains(&level(a, t)), "persona {k} turn {i}: habit {} broken on {t}", h.as_str().unwrap()); } }
+                    for h in s(a, &["habits", "bound"]).as_arr().unwrap() { bound_seen += 1; let then = &hdefs.iter().find(|x| x.0 == h.as_str().unwrap()).unwrap().1;
+                        assert_eq!(s(f, &["status"]).as_str(), Some("ok"));
+                        assert!(then.iter().any(|(t, restr)| !allowed(lvl(t), restr, &pv(t)).contains(&level(f, t))), "persona {k} turn {i}: bound habit {} holds on the twin", h.as_str().unwrap()); }
+                }
+                prev = levels.iter().map(|(t, _)| (t.clone(), level(a, t))).collect();
+            }
+        }
+        for f in [&pp, &ps, &pf, &sp] { let _ = std::fs::remove_file(f); }
+    }
+    eprintln!("habit properties: {turns} turns, {checked} restrictions re-checked, {bound_seen} bound habits broken by the twin");
+    assert!(turns >= 2000 && bound_seen > 50 && checked > 1000, "{turns} {bound_seen} {checked}");
+}
+
+/// `lint` passes clean personas and finds planted contradictions: statically (`lint`), at load (an unconditional habit the fallback
+/// stance breaks) and at run time (`fallback` with the conflicting habits named, or the lower-priority habit yielding).
+#[test]
+fn lint_finds_planted_contradictions_and_passes_clean_personas() {
+    for (n, conflicts) in [("ops-engineer", 0), ("trader-assistant", 0), ("tutor", 1)] {
+        let (c, out, e) = probbit(&["persona", "lint", &ex(&format!("{n}.yaml"))], ""); assert_eq!(c, 0, "{e}"); let l = parse(&out);
+        assert_eq!(s(&l, &["conflicts"]).as_arr().unwrap().len(), conflicts, "{n}"); assert_eq!(s(&l, &["ok"]), &Json::Bool(true)); }
+    let base = parse(&read(&ex("ops-engineer.json")));
+    let habits = |extra: &str| { let mut h = s(&base, &["habits"]).as_arr().unwrap().to_vec(); h.push(parse(extra)); with(&base, "habits", Json::Arr(h)) };
+    let planted = habits(r#"{"id": "planted_long", "when": {"stakes": 0.5}, "then": {"verbosity": ["full"]}, "say": "at stakes, full detail"}"#);
+    let pf = tmp("planted.json"); std::fs::write(&pf, jw(&planted)).unwrap();
+    let (c, out, _) = probbit(&["persona", "lint", &pf], ""); assert_eq!(c, 1, "{out}"); let l = parse(&out);
+    let f = &s(&l, &["conflicts"]).as_arr().unwrap()[0];
+    assert_eq!(jw(s(f, &["habits"])), r#"["after_error_shorter","planted_long"]"#); assert_eq!(s(f, &["when_prev"]).as_arr().unwrap().len(), 9); // every previous caution x verbosity
+    assert!(s(f, &["resolution"]).as_str().unwrap().starts_with("fallback"));
+    // at run time: both in force -> no stance, the conflict named, the line without them
+    let st = tmp("planted-state.json"); let (_, s0, _) = probbit(&["persona", "init", &pf], ""); std::fs::write(&st, s0).unwrap();
+    let (c, out, e) = probbit(&["persona", "turn", &pf, "--state", &st, "--inputs", r#"{"error": true, "stakes": 0.8}"#], ""); assert_eq!(c, 0, "{e}"); let t = parse(&out);
+    assert_eq!(s(&t, &["status"]).as_str(), Some("fallback")); assert_eq!(jw(s(&t, &["habits", "conflict"])), r#"["after_error_shorter","planted_long"]"#);
+    assert!(s(&t, &["escalate"]).as_str().unwrap().contains("habits conflict here")); let line = s(&t, &["line"]).as_str().unwrap();
+    assert!(!line.contains("at stakes, full detail") && !line.contains("shorter than last time"), "{line}");
+    // on_conflict yield: resolved by priority (a tie: the later-declared habit yields), and the turn has a stance again
+    let yielding = with(&planted, "engine", parse(r#"{"on_conflict": "yield"}"#)); std::fs::write(&pf, jw(&yielding)).unwrap();
+    let (c, out, _) = probbit(&["persona", "lint", &pf], ""); assert_eq!(c, 0, "{out}");
+    assert_eq!(s(&s(&parse(&out), &["conflicts"]).as_arr().unwrap()[0], &["resolution"]).as_str(), Some("yield: planted_long yields (priority tie: the later-declared habit yields)"));
+    let (_, s0, _) = probbit(&["persona", "init", &pf], ""); std::fs::write(&st, s0).unwrap();
+    let (_, out, _) = probbit(&["persona", "turn", &pf, "--state", &st, "--inputs", r#"{"error": true, "stakes": 0.8}"#], ""); let t = parse(&out);
+    assert_eq!(s(&t, &["status"]).as_str(), Some("ok")); assert_eq!(jw(s(&t, &["habits", "yielded"])), r#"["planted_long"]"#); assert_eq!(s(&t, &["habits", "violations"]).as_f64(), Some(0.0));
+    // an unconditional habit the fallback stance breaks: refused when the persona is read
+    std::fs::write(&pf, jw(&habits(r#"{"id": "always_full", "then": {"verbosity": ["full"]}}"#))).unwrap();
+    let (c, out, _) = probbit(&["persona", "check", &pf], ""); assert_eq!(c, 2);
+    assert_eq!(jw(s(&parse(&out), &["error"])), r#"{"code":"persona","path":"traits","message":"the fallback stance breaks unconditional habit(s): always_full"}"#);
+    for f in [&pf, &st] { let _ = std::fs::remove_file(f); }
+}
+
+/// Refusals map to the stance: forced onto the sampler at 8 sweeps (`engine.op: sample`), the gate vouches for nothing; every turn
+/// is then `refused` (or `fallback` when no chain started) with `escalate` naming what is unvouched, and the line carries only the
+/// habits in force (always safe to state): no unvouched trait's phrase. At the default (exact) the same turns are `ok`.
+#[test]
+fn refusals_leave_unvouched_traits_out_of_the_line() {
+    let doc = parse(&read(&ex("tutor.json"))); let says: Vec<String> = s(&doc, &["traits"]).as_arr().unwrap().iter().flat_map(|t| s(t, &["say"]).as_arr().unwrap().iter().filter_map(|x| x.as_str().map(str::to_string)).filter(|x| !x.is_empty()).collect::<Vec<_>>()).collect();
+    let habit_says: Vec<String> = s(&doc, &["habits"]).as_arr().unwrap().iter().filter_map(|h| h.get("say").and_then(Json::as_str).map(str::to_string)).collect();
+    let f = tmp("sample8.json"); std::fs::write(&f, jw(&with(&doc, "engine", parse(r#"{"op": "sample", "sweeps": 8, "on_conflict": "yield"}"#)))).unwrap();
+    let (c, out, e) = probbit(&["persona", "replay", &f, "--script", &ex("workday.json")], ""); assert_eq!(c, 0, "{e}");
+    let mut refused = 0;
+    for (i, l) in out.lines().enumerate() { let t = parse(l); let st = s(&t, &["status"]).as_str().unwrap(); assert!(["refused", "partial", "fallback"].contains(&st), "turn {i}: {st}");
+        let line = s(&t, &["line"]).as_str().unwrap(); let esc = s(&t, &["escalate"]).as_str().unwrap();
+        if st == "refused" { refused += 1; assert!(esc.starts_with("engine refused: unvouched: "), "{esc}");
+            let items: Vec<&str> = line.trim_start_matches("Stance: ").trim_end_matches('.').split("; ").collect();
+            assert!(line == "Stance: neutral." || items.iter().all(|x| habit_says.iter().any(|h| h == x)), "turn {i}: {line}");
+            assert!(!says.iter().any(|x| items.contains(&x.as_str())), "turn {i}: a trait phrase in a refused line: {line}"); }
+        for (k, e) in s(&t, &["stance"]).as_obj().unwrap() { if e.get("released") == Some(&Json::Bool(false)) && st == "partial" {
+            let v = s(&doc, &["traits"]).as_arr().unwrap().iter().find(|x| s(x, &["id"]).as_str() == Some(k)).unwrap();
+            let lv = s(e, &["level"]).as_str().unwrap(); let i = s(v, &["levels"]).as_arr().unwrap().iter().position(|x| x.as_str() == Some(lv)).unwrap();
+            let phrase = s(v, &["say"]).as_arr().unwrap()[i].as_str().unwrap(); assert!(phrase.is_empty() || !line.contains(phrase), "unvouched {k} in {line}"); } } }
+    assert!(refused >= 10, "{refused}");
+    let (_, exact, _) = probbit(&["persona", "replay", &ex("tutor.yaml"), "--script", &ex("workday.json")], "");
+    assert!(exact.lines().all(|l| s(&parse(l), &["status"]).as_str() == Some("ok")));
+    let _ = std::fs::remove_file(&f);
+}
+
+/// The `evaluate` bridge (docs/persona.md §8): a turn's program as a System One request, one `choice` question per variable, the
+/// persona's own field as `probbit.logw` (judge weight 0) and its pairs and habits as `probbit.rules`. `probbit evaluate` then gives
+/// the stance the `run` path gave, level and odds (within 2e-6), on every workday turn of the three example personas.
+#[test]
+fn the_evaluate_bridge_at_judge_weight_0_equals_the_run_path() {
+    let mut same = 0;
+    for n in NAMES {
+        let p = ex(&format!("{n}.yaml")); let st = tmp(&format!("{n}-bridge.json")); let (_, s0, _) = probbit(&["persona", "init", &p], ""); std::fs::write(&st, s0).unwrap();
+        let levels: Vec<(String, Vec<String>)> = { let d = parse(&probbit(&["persona", "describe", &p], "").1);
+            s(&d, &["traits"]).as_obj().unwrap().iter().map(|(k, v)| (k.clone(), s(v, &["levels"]).as_arr().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect())).collect() };
+        for (i, t) in workday().iter().enumerate() {
+            let (_, prog, _) = probbit(&["persona", "compile", &p, "--state", &st, "--inputs", &jw(t)], ""); let prog = parse(&prog);
+            let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", &jw(t)], ""); assert_eq!(c, 0, "{e}"); let stance = parse(&out);
+            let main = |j: &Json| !jw(j).contains("\"free.");
+            let vars: Vec<&Json> = s(&prog, &["vars"]).as_arr().unwrap().iter().filter(|v| main(v)).collect();
+            let questions: Vec<(String, Json)> = vars.iter().map(|v| (s(v, &["id"]).as_str().unwrap().to_string(), Json::Obj(vec![("type".into(), Json::Str("choice".into())),
+                ("criteria".into(), Json::Obj(s(v, &["allowed"]).as_arr().unwrap().iter().map(|a| (a.as_str().unwrap().to_string(), a.clone())).collect()))]))).collect();
+            let logw: Vec<(String, Json)> = vars.iter().map(|v| (s(v, &["id"]).as_str().unwrap().to_string(), s(v, &["h"]).clone())).collect();
+            let rules: Vec<(String, Json)> = ["pairs", "tables", "precedes", "implies", "linear", "caps", "all_different"].iter().filter_map(|k| prog.get(k).and_then(Json::as_arr)
+                .map(|l| (k.to_string(), Json::Arr(l.iter().filter(|r| main(r)).cloned().collect())))).filter(|(_, l)| !l.as_arr().unwrap().is_empty()).collect();
+            let req = Json::Obj(vec![("model".into(), Json::Str("judge+persona".into())), ("questions".into(), Json::Obj(questions)),
+                ("probbit".into(), Json::Obj(vec![("logw".into(), Json::Obj(logw)), ("rules".into(), Json::Obj(rules))]))]);
+            let (c, out, e) = probbit(&["evaluate"], &jw(&req)); assert_eq!(c, 0, "{n} turn {i}: {e} {out:.300}"); let ev = parse(&out);
+            for (tr, lv) in &levels {
+                let a = s(&ev, &["answers", tr]); let idx = |v: &str| v[1..].parse::<usize>().unwrap();
+                assert_eq!(lv[idx(s(a, &["choice"]).as_str().unwrap())], s(&stance, &["stance", tr, "level"]).as_str().unwrap(), "{n} turn {i} {tr}");
+                for (o, x) in s(a, &["probabilities"]).as_obj().unwrap() { let want = s(&stance, &["stance", tr, "odds", &lv[idx(o)]]).as_f64().unwrap();
+                    assert!((x.as_f64().unwrap() - want).abs() < 2e-6, "{n} turn {i} {tr} {o}: {} vs {want}", jw(x)); }
+                same += 1; }
+        }
+        let _ = std::fs::remove_file(&st);
+    }
+    assert_eq!(same, 20 * (8 + 9 + 8));
+}
+
+/// Malformed persona documents (byte edits, inserted tabs / anchors / quotes / brackets, truncation, swapped or duplicated lines of
+/// the example files, in both forms), states and inputs: never a crash; exit 0 (still a valid persona) or exit 2 with exactly one
+/// `{"error": {"code": "persona", "path", "message"}}` object on stdout.
+#[test]
+fn malformed_documents_are_one_error_object_never_a_crash() {
+    let mut r = Mix(0xF022); let (mut ok, mut err) = (0, 0); let f = tmp("fuzz-persona");
+    for case in 0..600 {
+        let n = NAMES[r.below(3)]; let json_form = r.below(3) == 0; let mut b = read(&ex(&format!("{n}.{}", if json_form { "json" } else { "yaml" }))).into_bytes();
+        for _ in 0..1 + r.below(3) { let p = r.below(b.len());
+            match r.below(7) {
+                0 => { b.remove(p); }
+                1 => { const INS: [&str; 16] = ["\t", "&a ", "*a", "!t ", "| ", "[", "{", ":", "- ", "#", "\"", "'", " ", "\n", "1e999", "yes: 1\n"]; let x = INS[r.below(INS.len())]; b.splice(p..p, x.bytes()); }
+                2 => b.truncate(p),
+                3 => { let q = (p + 1 + r.below(40)).min(b.len()); let s = b[p..q].to_vec(); b.splice(q..q, s); }
+                4 => { let mut lines: Vec<String> = String::from_utf8_lossy(&b).lines().map(str::to_string).collect(); let (i, j) = (r.below(lines.len()), r.below(lines.len())); lines.swap(i, j); b = lines.join("\n").into_bytes(); }
+                5 => { const W: [&str; 6] = ["-1", "99", "true", "null", "\"x\"", "[]"]; let s = String::from_utf8_lossy(&b).to_string(); let digits: Vec<usize> = s.char_indices().filter(|c| c.1.is_ascii_digit()).map(|c| c.0).collect();
+                    if let Some(&d) = digits.get(r.below(digits.len().max(1))) { let mut t = s.clone(); t.replace_range(d..d + 1, W[r.below(W.len())]); b = t.into_bytes(); } }
+                _ => { let s = String::from_utf8_lossy(&b).to_string(); b = s.replacen(["levels", "prior", "when", "then", "kind", "effects"][r.below(6)], ["level", "priors", "If", "than", "type", "effect"][r.below(6)], 1).into_bytes(); }
+            } }
+        let path = format!("{f}-{case}.{}", if json_form { "json" } else { "yaml" }); std::fs::write(&path, &b).unwrap();
+        let (c, out, e) = probbit(&["persona", "check", &path], "");
+        match c { 0 => { ok += 1; assert_eq!(s(&parse(&out), &["ok"]), &Json::Bool(true)); }
+            2 => { err += 1; assert_eq!(out.lines().count(), 1, "case {case}: {out}"); let d = parse(&out); let Json::Obj(o) = &d else { panic!() }; assert_eq!(o.len(), 1, "case {case}");
+                assert_eq!(s(&d, &["error", "code"]).as_str(), Some("persona"), "case {case}: {out}"); assert!(s(&d, &["error", "path"]).as_str().is_some() && s(&d, &["error", "message"]).as_str().is_some()); }
+            _ => panic!("case {case}: exit {c}\n{e}\n{}", String::from_utf8_lossy(&b)) }
+        let _ = std::fs::remove_file(&path);
+    }
+    eprintln!("malformed personas: {ok} still valid, {err} one error object each");
+    assert!(ok > 30 && err > 300, "{ok} {err}");
+    // states and inputs
+    let p = ex("tutor.yaml"); let st = tmp("fuzz-state.json"); let (_, s0, _) = probbit(&["persona", "init", &p], ""); let s0j = parse(&s0);
+    for (state, inputs, path) in [(s0.clone(), r#"{"stakes": "high"}"#, "inputs.stakes"), (s0.clone(), r#"{"sentiment": "angry"}"#, "inputs.sentiment"), (s0.clone(), "[1]", "inputs"),
+        (s0.clone(), "{\"loss\": 1}", "inputs.loss"), (s0.clone(), "{not json", "inputs"), (s0.replace("\"turn\":0", "\"turn\":5"), "{}", "state.digest"),
+        ("[]".into(), "{}", "state"), ("{\"probbit_persona_state\": 2}".into(), "{}", "state"), (jw(&with(&s0j, "seed", Json::Num(9.0))), "{}", "state.digest")] {
+        std::fs::write(&st, &state).unwrap(); let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", inputs], "");
+        assert_eq!(c, 2, "{state:.80} {inputs}: {out} {e}"); assert_eq!(s(&parse(&out), &["error", "path"]).as_str(), Some(path), "{inputs}: {out}");
+        assert_eq!(read(&st), state, "a refused turn must not write the state"); }
+    let _ = std::fs::remove_file(&st);
+}
+
+/// The Python wrapper's persona functions (python/test_persona.py), on Python >= 3.9, stdlib only
+#[test]
+fn python_persona_tests_pass() {
+    let ok = Command::new("python3").args(["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)"]).output().is_ok_and(|o| o.status.success());
+    if !ok { eprintln!("python3 >= 3.9 not found: python/test_persona.py skipped"); return; }
+    let o = Command::new("python3").arg("test_persona.py").current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../python")).env("PROBBIT_BIN", env!("CARGO_BIN_EXE_probbit")).output().unwrap();
+    assert!(o.status.success(), "python/test_persona.py failed:\n{}", String::from_utf8_lossy(&o.stderr));
+}

@@ -1,16 +1,19 @@
 //! probbit-wasm: probbit in a browser (wasm32-unknown-unknown), without threads, on the page's clock. JSON in, JSON out, with the
 //! CLI's own documents: `decide` (a router document, as `probbit decide`), `run` (a probbit-ir program, as `probbit run`), `evaluate` (a
-//! System One request, as `probbit evaluate`) and `demo` (as `probbit demo`). Flags go in an optional `flags` object, as in `probbit mcp`:
+//! System One request, as `probbit evaluate`), `demo` (as `probbit demo`) and the persona ops `persona_init` / `persona_turn` (the
+//! arguments of the MCP tools probbit_persona_init / probbit_persona_turn, with the persona inline; docs/persona.md). Flags go in an
+//! optional `flags` object, as in `probbit mcp`:
 //! `{"workers": [...], "tasks": [...], "flags": {"sweeps": 3200, "polish_ms": 0}}`.
 //!
-//! The code is the CLI's (probbit-cli's json.rs, run.rs, router.rs, evaluate.rs and sys.rs, included below) run with
+//! The code is the CLI's (probbit-cli's json.rs, run.rs, router.rs, evaluate.rs, persona.rs, yaml.rs and sys.rs, included below) run with
 //! `probbit_core::rt::set_sequential(true)`: every chain, gate pass and polish chain runs in order on the calling thread. At fixed
 //! work the documents equal the CLI's at any `--threads` (timings and `telemetry.threads` aside; tests/no_threads.rs).
 //! Not here: `--summary`, `--pretty`, `--top`, `--progress`, `--cpu-limit`, `--priority` and the config file (an unknown flag is
 //! an error). `threads` above 1 is accepted only off wasm (the native tests' comparison runs).
 //!
 //! JavaScript calls the C ABI at the end (playground/index.html): `probbit_alloc(len)` -> a buffer for the UTF-8 input;
-//! `probbit_call(op, ptr, len)` -> the output's length (op 0 decide, 1 run, 2 evaluate, 3 demo; the input buffer is consumed);
+//! `probbit_call(op, ptr, len)` -> the output's length (op 0 decide, 1 run, 2 evaluate, 3 demo, 4 persona init, 5 persona turn; the
+//! input buffer is consumed);
 //! `probbit_out_ptr()` / `probbit_out_code()` -> the output bytes and the CLI's exit code (0 answer, 1 infeasible, 2 bad input or flag,
 //! 3 refused / declined). The clock is the import `probbit.now_ms` (`performance.now()`). No dependencies (no wasm-bindgen).
 #[allow(dead_code)]
@@ -28,6 +31,12 @@ mod evaluate;
 #[allow(dead_code, unused_imports)]
 #[path = "../../probbit-cli/src/sys.rs"]
 mod sys;
+#[allow(dead_code)]
+#[path = "../../probbit-cli/src/persona.rs"]
+mod persona;
+#[allow(dead_code)]
+#[path = "../../probbit-cli/src/yaml.rs"]
+mod yaml;
 /// The CLI's `--top` monitor hooks (probbit-cli/src/tui.rs): nothing is drawn here.
 mod tui {
     pub fn tier(_: &'static str) {}
@@ -62,6 +71,19 @@ pub fn demo(input: &str) -> (String, i32) {
         Ok(json::write(&router::demo_doc(tasks, int("seed", 7)? as u64, hard), true))
     };
     match go() { Ok(s) => (s, 0), Err(e) => (json::write(&e, false), 2) }
+}
+
+/// `probbit persona init` (MCP tool probbit_persona_init): `{"persona": {...}, "seed": 2}` -> the individual's state, exactly the CLI's
+/// document (`probbit persona init PERSONA --seed 2`). Without threads; resource controls at the CLI's defaults (they never change it).
+pub fn persona_init(input: &str) -> (String, i32) { persona_call(input, "probbit_persona_init") }
+/// `probbit persona turn` (MCP tool probbit_persona_turn): `{"persona": {...}, "state": {...}, "inputs": {...}, "flags": {"timing": true}}`
+/// -> `{"stance": ..., "state": ...}`, the stance and next state exactly as the CLI prints and writes them.
+pub fn persona_turn(input: &str) -> (String, i32) { persona_call(input, "probbit_persona_turn") }
+fn persona_call(input: &str, tool: &str) -> (String, i32) {
+    let eng = |prog: &Json, f: &persona::Flags| on_threads(1, || persona::run_program(prog, f, 1, 100, 1024));
+    let r = json::parse(input).map_err(|e| persona::perr(&e.path, e.msg)).and_then(|j| match j { Json::Obj(v) => persona::tool(tool, &v, &eng, false),
+        _ => Err(persona::perr("", "the arguments must be a JSON object")) });
+    match r { Ok(d) => (persona::canon(&d), 0), Err(e) => (persona::canon(&e.to_json()), 2) }
 }
 
 /// The flags of one call, with the CLI's defaults and ranges.
@@ -171,7 +193,7 @@ fn page_clock() -> f64 { unsafe { now_ms() } }
 /// A buffer of `len` bytes for `probbit_call`'s input.
 #[no_mangle]
 pub extern "C" fn probbit_alloc(len: usize) -> *mut u8 { let mut v = Vec::<u8>::with_capacity(len.max(1)); let p = v.as_mut_ptr(); std::mem::forget(v); p }
-/// Run op 0 decide, 1 run, 2 evaluate, 3 demo on the UTF-8 JSON at `ptr` (`len` bytes); returns the output's length (read it at
+/// Run op 0 decide, 1 run, 2 evaluate, 3 demo, 4 persona init, 5 persona turn on the UTF-8 JSON at `ptr` (`len` bytes); returns the output's length (read it at
 /// `probbit_out_ptr()`, valid until the next call; the exit code at `probbit_out_code()`).
 ///
 /// # Safety
@@ -183,7 +205,7 @@ pub unsafe extern "C" fn probbit_call(op: u32, ptr: *mut u8, len: usize) -> usiz
     probbit_core::rt::set_clock(page_clock);
     let (out, code) = match std::str::from_utf8(&input) {
         Err(e) => (json::write(&json::schema("", format!("bad JSON: invalid UTF-8 at byte {}", e.valid_up_to())).to_json(), false), 2),
-        Ok(s) => match op { 0 => decide(s), 1 => run(s), 2 => evaluate(s), 3 => demo(s), _ => (json::write(&json::value("", format!("unknown op {op}")).to_json(), false), 2) } };
+        Ok(s) => match op { 0 => decide(s), 1 => run(s), 2 => evaluate(s), 3 => demo(s), 4 => persona_init(s), 5 => persona_turn(s), _ => (json::write(&json::value("", format!("unknown op {op}")).to_json(), false), 2) } };
     let n = out.len(); OUT.with(|o| *o.borrow_mut() = (out.into_bytes(), code)); n
 }
 /// The last output's bytes.

@@ -5,7 +5,22 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.5.0 - unreleased
 
+### Added
+- **`probbit persona`, the individuality layer** (docs/persona.md): a persona file (YAML subset or JSON: traits with priors,
+  moods with inertia, couplings, per-turn inputs, history features, habits as hard rules in the probbit-ir vocabulary) + an
+  individual's state + a turn's inputs compile to one probbit-ir program, run in process at fixed work; the stance (levels with
+  exact odds, habits in force and bound, refusals, a why and a stance line of at most 40 estimated tokens) and the next state are
+  canonical JSON. Subcommands `init`, `turn`, `replay`, `explain`, `diff`, `lint`, `check`, `compile`, `describe`. A strict YAML
+  subset reader (probbit-cli/src/yaml.rs) and a strict validator (one `{"error": {"code": "persona", ...}}` object, exit 2). Three
+  example personas with goldens in examples/persona/; the documents equal an independent reference implementation's.
+- **MCP tools `probbit_persona_init` and `probbit_persona_turn`** in `probbit mcp` (stateless; the CLI's documents).
+- **Python `probbit.persona_init`, `persona_turn`, `persona_replay`** (python/probbit.py; tests python/test_persona.py).
+- **probbit-wasm ops 4 (persona init) and 5 (persona turn)**; the playground's "Meet three individuals from one persona".
+- `probbit persona ... --timing` reports the 1-minute load average next to its timings (`sys::loadavg`).
+
 ### Changed
+- `probbit mcp` lists seven tools (the two persona tools after the five before; their order and contracts are unchanged).
+
 - **Renamed: pbit → probbit everywhere** (crates, binary, env vars, MCP tools, Python module, npm package). 'p-bit' remains the
   term for the probabilistic bit. No behaviour changes.
   - Crates `probbit-core`, `probbit-ir`, `probbit-decide`, `probbit-cli` (binary `probbit`), `probbit-wasm`; Rust paths

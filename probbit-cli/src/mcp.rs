@@ -12,6 +12,10 @@
 //! document on its stdin, the `flags` object as command-line flags) and returns the command's stdout JSON unchanged, as text and
 //! as `structuredContent`: a tool answer is the CLI's answer byte for byte. Exit 2 (bad input or flag) and error objects come back
 //! as tool errors (`isError`); `infeasible` (exit 1), `refused` / `declined` (exit 3) are answers.
+//!
+//! `probbit_persona_init` and `probbit_persona_turn` (docs/persona.md) run in this process and are stateless: the persona (an inline
+//! document or a path) and the state go in, the state comes back. Their documents are the CLI's (`probbit persona init` / `turn`);
+//! a refusal or a fallback stance is an answer, a bad persona, state or input a tool error with the `persona` error object.
 use crate::json::{self, num, obj, str as jstr, Json};
 use std::io::{BufRead, Write};
 
@@ -38,7 +42,7 @@ fn result(id: Json, era: &Era, mut r: Vec<(&str, Json)>) -> Json {
     obj(vec![("jsonrpc", jstr("2.0")), ("id", id), ("result", obj(r))])
 }
 fn server_info() -> Json { obj(vec![("name", jstr("probbit")), ("title", jstr("probbit virtual p-bit processor")), ("version", jstr(VERSION))]) }
-const INSTRUCTIONS: &str = "probbit is a virtual p-bit processor for joint decisions under hard rules. probbit_decide routes tasks to workers (allowed sets, quotas, clamps, affinity) and returns a plan that obeys every rule, odds per task and a verdict: exact, diagnostics_passed, partial (act on `released`, escalate `escalated`), refused or infeasible. probbit_run does the same for a general probbit-ir program. probbit_evaluate takes a decision model's System One request and the judge's per-question probabilities plus rules over question ids, and returns the most likely answer set that obeys every rule in the judge's response shape, with odds and the gate's verdict. Pass \"flags\": {\"summary\": true} for a compact answer. probbit_demo makes a sample routing document; probbit_stats measures the machine.";
+const INSTRUCTIONS: &str = "probbit is a virtual p-bit processor for joint decisions under hard rules. probbit_decide routes tasks to workers (allowed sets, quotas, clamps, affinity) and returns a plan that obeys every rule, odds per task and a verdict: exact, diagnostics_passed, partial (act on `released`, escalate `escalated`), refused or infeasible. probbit_run does the same for a general probbit-ir program. probbit_evaluate takes a decision model's System One request and the judge's per-question probabilities plus rules over question ids, and returns the most likely answer set that obeys every rule in the judge's response shape, with odds and the gate's verdict. Pass \"flags\": {\"summary\": true} for a compact answer. probbit_demo makes a sample routing document; probbit_stats measures the machine. probbit_persona_init and probbit_persona_turn give an agent an individual temperament that lives outside the model: start an individual with probbit_persona_init, then each turn pass the persona, the returned state and the turn's inputs to probbit_persona_turn and put the returned stance `line` into the model's prompt (after any cached prefix).";
 
 /// Serve until stdin closes.
 pub fn serve() {
@@ -103,6 +107,7 @@ fn handle(msg: &Json, session: &mut Option<String>) -> Option<Json> {
 /// Run one tool: `Err` = a protocol error (unknown tool, arguments not an object); `Ok((text, structured JSON, isError))`.
 fn call(name: &str, args: Option<&Json>) -> Result<(String, Option<Json>, bool), String> {
     let args: Vec<(String, Json)> = match args { None | Some(Json::Null) => vec![], Some(Json::Obj(v)) => v.clone(), Some(_) => return Err("invalid params: \"arguments\" must be an object".into()) };
+    if name == "probbit_persona_init" || name == "probbit_persona_turn" { return Ok(persona_tool(name, &args)); }
     let (cmd, doc, flags) = match name {
         "probbit_decide" | "probbit_run" | "probbit_evaluate" => { let (f, d): (Vec<_>, Vec<_>) = args.into_iter().partition(|(k, _)| k == "flags");
             let flags = match f.into_iter().next().map(|(_, x)| x) { None | Some(Json::Null) => vec![], Some(Json::Obj(v)) => v, Some(_) => return Ok(("\"flags\" must be an object".into(), None, true)) };
@@ -129,6 +134,15 @@ fn call(name: &str, args: Option<&Json>) -> Result<(String, Option<Json>, bool),
     log(&format!("tools/call {name} ({}) -> exit {code}, {} bytes, {:.0} ms", argv[1..].join(" "), text.len(), t0.elapsed().as_secs_f64() * 1e3));
     if parsed.is_none() { let e = String::from_utf8_lossy(&out.stderr).trim().to_string(); return Ok((if e.is_empty() { format!("probbit {cmd} exited {code}") } else { e }, None, true)); }
     Ok((text, parsed, is_error))
+}
+
+/// `probbit_persona_init` / `probbit_persona_turn`, in process -> (text, structured JSON, isError)
+fn persona_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, bool) {
+    let t0 = std::time::Instant::now();
+    let eng = crate::persona_engine(); let r = crate::persona::tool(name, args, &eng, true);
+    let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
+    log(&format!("tools/call {name} -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
+    (crate::persona::canon(&doc), Some(doc), is_error)
 }
 
 /// The tool list: input schemas are the commands' own contracts (the router document, the probbit-ir v1 schema) plus `flags`.
@@ -174,9 +188,19 @@ fn tools() -> Json {
         tool("probbit_demo", "Sample routing document", "probbit demo: a seeded synthetic agent-routing document (PII and prod-DB rules, quotas, workflow affinity) to pass to probbit_decide.",
             p(r#"{"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "integer", "minimum": 1, "description": "tasks to generate (default 12)"}, "seed": {"type": "integer", "minimum": 0}, "hard": {"type": "boolean", "description": "tight quotas + strong affinity"}}}"#)),
         tool("probbit_evaluate", "Decide after a judge", "probbit evaluate: a decision model's System One request (questions noul | choice | score keyed by id) with the judge's answers or per-question weights and rules over question ids (caps, implies, tables, precedes, linear, all_different, pairs). Returns the judge's response shape (model, answers keyed by question id, usage) filled with the most likely answer set that obeys every rule, odds per option under the rules and a probbit object per answer (value, p, judge, changed, released), plus the probbit run document (verdict, gate, violations, plan_logw, released / escalated, telemetry). Without rules the answers are the judge's own.", evaluate),
+        tool("probbit_persona_init", "Start a persona individual", "probbit persona init: a persona (inline document or a file path) and a seed -> the individual's initial state (genes from the seed, resting stance, empty mood and history). Pass the state to probbit_persona_turn. Stateless: the server keeps nothing.",
+            p(&format!(r#"{{"type": "object", "additionalProperties": false, "properties": {{{PERSONA_ARG}, "seed": {{"type": "integer", "minimum": 0, "description": "the individual (default: the persona's identity.seed)"}}}}}}"#))),
+        tool("probbit_persona_turn", "This turn's stance from a persona", "probbit persona turn: a persona (inline document or a file path), the individual's state and this turn's inputs (the persona's evidence: sentiment, error, loss, praise, criticism, stakes, time_pressure, claim_done, elapsed_hours, and the persona's own) -> {stance, state}. The stance has a level for every trait with exact odds, the mood, the habits in force and the ones that changed the stance (habits are hard rules: 0 violations by construction), status ok | partial | refused | fallback with an escalate reason, a one-line why, and `line`: a short stance line to put into the model's prompt (after any cached prefix). Pass the returned state back on the next turn. The persona never writes the reply; it decides how the reply is written.",
+            p(&format!(r#"{{"type": "object", "additionalProperties": false, "required": ["state"], "properties": {{{PERSONA_ARG},
+              "state": {{"type": "object", "description": "the state returned by probbit_persona_init or by the previous probbit_persona_turn"}},
+              "inputs": {{"type": "object", "description": "this turn's evidence, keyed by input id; flags true/false, level inputs a level name, numbers 0..max; inputs the persona does not declare are listed in stance.ignored", "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
+              "flags": {{"type": "object", "additionalProperties": false, "properties": {{"timing": {{"type": "boolean", "description": "add a non-canonical timing object to the stance"}}, "no_inertia": {{"type": "boolean", "description": "ignore mood inertia for this turn (diagnostics)"}}}}}}}}}}"#))),
     ])
 }
 
+/// The persona argument of both persona tools: an inline document or a path on the server's disk
+const PERSONA_ARG: &str = r#""persona": {"type": "object", "description": "the persona document (the JSON form of a persona file, docs/persona.md); give this or persona_path"},
+              "persona_path": {"type": "string", "description": "a persona file on the server's disk (YAML subset or JSON)"}"#;
 fn get_mut<'a>(j: &'a mut Json, k: &str) -> Option<&'a mut Json> { match j { Json::Obj(v) => v.iter_mut().find(|(x, _)| x == k).map(|(_, x)| x), _ => None } }
 /// `probbit_evaluate`'s input schema: the System One request (TypeSafe OpenAPI 0.2.0 and the Workers AI clef schema: `model`,
 /// `state`, `questions`, `images`) plus the `probbit` block, whose `rules` are the probbit-ir schema's own rule definitions.

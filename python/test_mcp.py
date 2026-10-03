@@ -71,12 +71,12 @@ class Mcp(unittest.TestCase):
         self.assertIn("result", r, r)
         return r["result"]
 
-    def test_legacy_handshake_lists_five_tools(self):
+    def test_legacy_handshake_lists_seven_tools(self):
         init = self.legacy()
         self.assertEqual(init["protocolVersion"], "2025-06-18"); self.assertEqual(init["serverInfo"]["name"], "probbit")
         self.assertIn("tools", init["capabilities"]); self.assertNotIn("resultType", init)
         tools = self.c.request("tools/list")["result"]["tools"]
-        self.assertEqual([t["name"] for t in tools], ["probbit_decide", "probbit_run", "probbit_stats", "probbit_demo", "probbit_evaluate"])
+        self.assertEqual([t["name"] for t in tools], ["probbit_decide", "probbit_run", "probbit_stats", "probbit_demo", "probbit_evaluate", "probbit_persona_init", "probbit_persona_turn"])
         for t in tools:
             self.assertEqual(t["inputSchema"]["type"], "object"); self.assertTrue(t["description"])
         self.assertIn("flags", tools[0]["inputSchema"]["properties"]); self.assertIn("vars", tools[1]["inputSchema"]["properties"])
@@ -134,6 +134,38 @@ class Mcp(unittest.TestCase):
         bad = self.call("probbit_evaluate", {"questions": {"a": {"type": "boolean"}}})
         self.assertTrue(bad["isError"]); self.assertEqual(bad["structuredContent"]["error"], {"code": "value", "path": "questions.a.type", "message": bad["structuredContent"]["error"]["message"]})
 
+    def test_persona_tools_answer_exactly_as_the_cli(self):
+        self.legacy("2025-11-25")
+        path = os.path.join(EX, "persona", "tutor.yaml")
+        with open(os.path.join(EX, "persona", "tutor.json")) as f:
+            doc = json.load(f)
+        init = self.call("probbit_persona_init", {"persona": doc, "seed": 2})
+        code, out = cli(["persona", "init", path, "--seed", "2"])
+        self.assertFalse(init["isError"]); self.assertEqual(code, 0); self.assertEqual(init["content"][0]["text"], out.rstrip("\n"))
+        state = init["structuredContent"]
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            sp = os.path.join(d, "state.json")
+            with open(sp, "w") as f:
+                f.write(out)
+            for inputs in ({"confused": True, "error": True}, {"loss": True, "sentiment": "negative"}, {}):
+                r = self.call("probbit_persona_turn", {"persona_path": path, "state": state, "inputs": inputs})
+                code, out = cli(["persona", "turn", path, "--state", sp, "--inputs", json.dumps(inputs)])
+                self.assertFalse(r["isError"]); self.assertEqual(code, 0)
+                self.assertEqual(r["structuredContent"]["stance"], json.loads(out))  # MCP answer == CLI answer
+                with open(sp) as f:
+                    self.assertEqual(r["structuredContent"]["state"], json.load(f))  # and the same next state
+                self.assertEqual(json.loads(r["content"][0]["text"]), r["structuredContent"])
+                state = r["structuredContent"]["state"]
+        refused = self.call("probbit_persona_turn", {"persona": dict(doc, engine={"op": "sample", "sweeps": 8}), "state": self.call("probbit_persona_init", {"persona": dict(doc, engine={"op": "sample", "sweeps": 8})})["structuredContent"], "inputs": {}})
+        self.assertFalse(refused["isError"]); self.assertIn(refused["structuredContent"]["stance"]["status"], ("refused", "partial", "fallback"))  # a refusal is an answer
+        bad = self.call("probbit_persona_turn", {"persona": doc, "state": state, "inputs": {"stakes": 2}})
+        self.assertTrue(bad["isError"]); self.assertEqual(bad["structuredContent"]["error"]["code"], "persona"); self.assertEqual(bad["structuredContent"]["error"]["path"], "inputs.stakes")
+        for args, where in (({"persona": doc, "persona_path": path, "state": state}, "arguments"), ({"persona": doc, "state": state, "extra": 1}, "arguments.extra"),
+                            ({"persona": doc}, "arguments.state"), ({"persona": [1], "state": state}, "arguments.persona")):
+            e = self.call("probbit_persona_turn", args)
+            self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
+
     def test_structured_content_from_2025_06_18_on(self):
         self.legacy("2024-11-05")
         r = self.call("probbit_demo", {"tasks": 3})
@@ -144,7 +176,7 @@ class Mcp(unittest.TestCase):
         self.assertEqual(d["resultType"], "complete"); self.assertIn("2026-07-28", d["supportedVersions"])
         self.assertEqual(d["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "probbit"); self.assertIn("tools", d["capabilities"])
         t = self.c.request("tools/list", meta=MODERN)["result"]
-        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 5)
+        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 7)
         r = self.call("probbit_demo", {"tasks": 4, "seed": 2}, MODERN)
         self.assertEqual(r["resultType"], "complete"); self.assertEqual(len(r["structuredContent"]["tasks"]), 4)
         e = self.c.request("tools/list", meta={"io.modelcontextprotocol/protocolVersion": "1999-01-01", "io.modelcontextprotocol/clientCapabilities": {}})["error"]

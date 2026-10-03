@@ -52,3 +52,13 @@ mod prio {
 #[cfg(unix)] pub use prio::{nice, set_low};
 #[cfg(not(unix))] pub fn nice() -> Option<i32> { None }
 #[cfg(not(unix))] pub fn set_low() -> Option<i32> { None }
+
+/// The 1-minute load average (getloadavg(3), macOS and Linux); None elsewhere. `probbit persona turn --timing` reports it next
+/// to every timing (a shared machine's timings are only comparable at a known load).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub fn loadavg() -> Option<f64> {
+    extern "C" { fn getloadavg(loadavg: *mut f64, nelem: i32) -> i32; }
+    let mut l = [0.0f64; 3]; (unsafe { getloadavg(l.as_mut_ptr(), 3) } >= 1).then_some(l[0])
+}
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn loadavg() -> Option<f64> { None }

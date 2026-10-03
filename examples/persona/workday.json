@@ -1,0 +1,94 @@
+{
+ "comment": "the 20-turn workday script of the persona goldens (docs/persona.md): one object of inputs per turn; notes say what each turn is",
+ "notes": [
+  "neutral open",
+  "user upbeat",
+  "mild stakes",
+  "first error",
+  "second error, user upset",
+  "third error in a row, upset, critical",
+  "about to report done",
+  "praise",
+  "time pressure",
+  "time pressure and high stakes",
+  "user reports a loss",
+  "still upset",
+  "quiet turn after the loss",
+  "high stakes, about to report done",
+  "praise",
+  "next day (10 h later), upbeat",
+  "criticism",
+  "error under some pressure",
+  "moderate stakes",
+  "praise and done"
+ ],
+ "turns": [
+  {},
+  {
+   "sentiment": "positive"
+  },
+  {
+   "stakes": 0.3
+  },
+  {
+   "error": true
+  },
+  {
+   "error": true,
+   "sentiment": "negative"
+  },
+  {
+   "error": true,
+   "sentiment": "negative",
+   "criticism": true
+  },
+  {
+   "claim_done": true
+  },
+  {
+   "praise": true,
+   "sentiment": "positive"
+  },
+  {
+   "time_pressure": 0.9
+  },
+  {
+   "time_pressure": 0.9,
+   "stakes": 0.8
+  },
+  {
+   "loss": true,
+   "sentiment": "negative"
+  },
+  {
+   "sentiment": "negative"
+  },
+  {},
+  {
+   "stakes": 0.9,
+   "claim_done": true
+  },
+  {
+   "praise": true
+  },
+  {
+   "sentiment": "positive",
+   "elapsed_hours": 10
+  },
+  {
+   "criticism": true
+  },
+  {
+   "error": true,
+   "time_pressure": 0.5
+  },
+  {
+   "stakes": 0.5
+  },
+  {
+   "praise": true,
+   "sentiment": "positive",
+   "claim_done": true
+  }
+ ]
+}
