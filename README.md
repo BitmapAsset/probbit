@@ -112,7 +112,7 @@ cargo run --release --example agent_router                         # the full na
 The demo problem is an AI-agent task router: a queue of tasks and a set of workers (`opus`, `sonnet`, `luna-pro`,
 `local-gemma`, `codex`, `human`) under hard policy (PII only on-prem or with a human; production-DB migrations never on
 cheap models), per-hour quotas, and a bonus for keeping one customer's workflow on one worker. A rule-ignoring per-task argmax over
-the demo's synthetic scores (a strawman baseline) produces **144 violations and 60 PII leaks** on 300 tasks. `probbit` produces **0 violations**,
+synthetic scores (a strawman baseline) produces **60 PII leaks** on 300 tasks, with **133 violations** on `probbit demo`'s queue and **144** on the `agent_router` example's. `probbit` produces **0 violations**,
 per-task odds that match exact enumeration wherever exact enumeration is possible, and escalates the tasks whose odds it
 cannot pin down in the time budget.
 
