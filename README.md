@@ -35,6 +35,7 @@ probbit demo --tasks 300 | probbit decide --summary --pretty    # the same queue
 probbit demo --tasks 300 --hard | probbit decide --budget-ms 50 # too little time: "refused", exit 3, nothing released
 probbit demo | probbit decide --top > answer.json               # 12 tasks, the full answer, with a live monitor while it runs (tier, updates/s, gate)
 probbit evaluate --summary --pretty < examples/evaluate/support-12.json   # in a clone: after a decision model, its answers + your rules
+probbit run --sweeps 2000 --polish-ms 0 --seed 7 --summary < examples/rabbit-field.json   # in a clone: the white rabbit, 3,840 p-bits: partial, 31 cells escalated
 claude mcp add probbit -- probbit mcp                           # hand the processor to an agent: probbit_decide, probbit_run, probbit_evaluate, ...
 ```
 Visuals go to stderr, only at a terminal; `NO_COLOR`, `--plain` or `PROBBIT_THEME=plain` turn them off. Piped, every command
