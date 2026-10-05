@@ -334,23 +334,7 @@ pub fn build(doc: &Json) -> R<Persona> {
         history.push(Hist { id, of, streak, window, cap, say, effects }); }
     // habits
     let mut habits: Vec<Habit> = vec![];
-    for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { let path = ix("habits", i);
-        let hkv = keys(hb, &path, &["id", "when", "then", "rules", "say", "priority", "comment"], &["id"])?;
-        let id = ident(get(hkv, "id"), &at(&path, "id"), "id")?;
-        need(get(hkv, "then").is_some() || get(hkv, "rules").is_some(), &path, "a habit needs then and/or rules")?;
-        let wp = at(&path, "when"); let when: Vec<(String, Json)> = match get_t(hkv, "when") { None => vec![], Some(w) => w.as_obj().ok_or_else(|| perr(&wp, "a mapping input -> condition"))?.to_vec() };
-        for (k, c) in &when { check_cond(k, c, &at(&wp, k), &inputs, &history)?; }
-        let tp = at(&path, "then"); let then: Vec<(String, Json)> = match get_t(hkv, "then") { None => vec![], Some(t) => t.as_obj().ok_or_else(|| perr(&tp, "a mapping trait -> allowed levels"))?.to_vec() };
-        for (k, r) in &then { let lv = vlev(k).ok_or_else(|| perr(&at(&tp, k), "unknown trait or mood"))?; check_restr(r, &at(&tp, k), &lv)?; }
-        let rp = at(&path, "rules"); let mut rules: Vec<(String, Vec<Json>)> = vec![];
-        if let Some(r) = get_t(hkv, "rules") { for (k, lst) in r.as_obj().ok_or_else(|| perr(&rp, "a mapping of IR rule lists"))? {
-            need(RULE_KEYS.contains(&k.as_str()), &at(&rp, k), &format!("one of {}", RULE_KEYS.join(", ")))?;
-            let l = lst.as_arr().filter(|l| !l.is_empty()).ok_or_else(|| perr(&at(&rp, k), "a non-empty list"))?;
-            for (j, r) in l.iter().enumerate() { check_rule(k, r, &ix(&at(&rp, k), j), &vars, &steps)?; }
-            rules.push((k.clone(), l.to_vec())); } }
-        let say = match get(hkv, "say") { None => String::new(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr(&at(&path, "say"), "a string")) };
-        let priority = num_or(hkv, "priority", 0.0, &path, Some(-100.0), Some(100.0), true)?;
-        habits.push(Habit { id, when, then, rules, say, priority }); }
+    for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { habits.push(habit_spec(hb, &ix("habits", i), &inputs, &history, &vars, &steps)?); }
     need((1..habits.len()).all(|i| habits[..i].iter().all(|h| h.id != habits[i].id)), "habits", "habit ids must be distinct")?;
     // engine
     let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false };
@@ -385,6 +369,26 @@ pub fn build(doc: &Json) -> R<Persona> {
     Ok(p)
 }
 
+/// One habit, checked against the persona's inputs, history features, traits, moods and agenda steps. A character property
+/// (`persona fuzz` / `prove`, §5.6) has the same shape and is read by the same function.
+fn habit_spec(hb: &Json, path: &str, inputs: &[Input], history: &[Hist], vars: &[Var], steps: &[String]) -> R<Habit> {
+    let hkv = keys(hb, path, &["id", "when", "then", "rules", "say", "priority", "comment"], &["id"])?;
+    let id = ident(get(hkv, "id"), &at(path, "id"), "id")?;
+    need(get(hkv, "then").is_some() || get(hkv, "rules").is_some(), path, "a habit needs then and/or rules")?;
+    let wp = at(path, "when"); let when: Vec<(String, Json)> = match get_t(hkv, "when") { None => vec![], Some(w) => w.as_obj().ok_or_else(|| perr(&wp, "a mapping input -> condition"))?.to_vec() };
+    for (k, c) in &when { check_cond(k, c, &at(&wp, k), inputs, history)?; }
+    let tp = at(path, "then"); let then: Vec<(String, Json)> = match get_t(hkv, "then") { None => vec![], Some(t) => t.as_obj().ok_or_else(|| perr(&tp, "a mapping trait -> allowed levels"))?.to_vec() };
+    for (k, r) in &then { let lv = vars.iter().find(|v| v.id == *k).ok_or_else(|| perr(&at(&tp, k), "unknown trait or mood"))?; check_restr(r, &at(&tp, k), &lv.levels)?; }
+    let rp = at(path, "rules"); let mut rules: Vec<(String, Vec<Json>)> = vec![];
+    if let Some(r) = get_t(hkv, "rules") { for (k, lst) in r.as_obj().ok_or_else(|| perr(&rp, "a mapping of IR rule lists"))? {
+        need(RULE_KEYS.contains(&k.as_str()), &at(&rp, k), &format!("one of {}", RULE_KEYS.join(", ")))?;
+        let l = lst.as_arr().filter(|l| !l.is_empty()).ok_or_else(|| perr(&at(&rp, k), "a non-empty list"))?;
+        for (j, r) in l.iter().enumerate() { check_rule(k, r, &ix(&at(&rp, k), j), vars, steps)?; }
+        rules.push((k.clone(), l.to_vec())); } }
+    let say = match get(hkv, "say") { None => String::new(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr(&at(path, "say"), "a string")) };
+    let priority = num_or(hkv, "priority", 0.0, path, Some(-100.0), Some(100.0), true)?;
+    Ok(Habit { id, when, then, rules, say, priority })
+}
 fn check_cond(k: &str, c: &Json, path: &str, inputs: &[Input], history: &[Hist]) -> R<()> {
     let range = |c: &Json| -> R<()> { if let Json::Num(_) = c { return Ok(()); }
         let kv = c.as_obj().filter(|kv| !kv.is_empty() && kv.iter().all(|(k, _)| k == "at_least" || k == "at_most")).ok_or_else(|| perr(path, "a number (at least) or {at_least, at_most}"))?;
@@ -481,19 +485,23 @@ fn resolve_level(spec: &str, levels: &[String], prev: &str) -> usize {
     let i = levels.iter().position(|l| l == prev).unwrap_or(0) as i64;
     (i + match spec { "prev-1" => -1, "prev+1" => 1, _ => 0 }).clamp(0, levels.len() as i64 - 1) as usize
 }
+/// The levels a `then` restriction allows; `prev`, `prev-1` and `prev+1` read `pl`, the previous turn's level
+fn allowed<'a>(levels: &'a [String], r: &Json, pl: &str) -> Vec<&'a String> {
+    match r {
+        Json::Arr(a) => levels.iter().filter(|l| a.iter().any(|x| x.as_str() == Some(l.as_str()))).collect(),
+        _ => { let (rk, x) = &r.as_obj().unwrap()[0];
+            match rk.as_str() {
+                "not" => levels.iter().filter(|l| !x.as_arr().unwrap().iter().any(|y| y.as_str() == Some(l.as_str()))).collect(),
+                "at_most" => levels[..=resolve_level(x.as_str().unwrap(), levels, pl)].iter().collect(),
+                _ => levels[resolve_level(x.as_str().unwrap(), levels, pl)..].iter().collect() } } }
+}
 /// Habit h's IR rules (semantic level names) appended to `out` (lists in RULE_KEYS order) and its id to `owners` once per rule.
 /// `prev` = the previous turn's levels (`prev`, `prev-1`, `prev+1` restrictions read them; a missing one = the fallback level).
 fn habit_rules(p: &Persona, h: &Habit, prev: &HashMap<String, String>, out: &mut [Vec<Json>], owners: &mut Vec<(String, usize)>) {
     let ti = RULE_KEYS.iter().position(|k| *k == "tables").unwrap();
     for (k, r) in &h.then {
-        let v = p.var(k).expect("then target"); let levels = &v.levels; let pl = prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone());
-        let keep: Vec<&String> = match r {
-            Json::Arr(a) => levels.iter().filter(|l| a.iter().any(|x| x.as_str() == Some(l.as_str()))).collect(),
-            _ => { let (rk, x) = &r.as_obj().unwrap()[0];
-                match rk.as_str() {
-                    "not" => levels.iter().filter(|l| !x.as_arr().unwrap().iter().any(|y| y.as_str() == Some(l.as_str()))).collect(),
-                    "at_most" => levels[..=resolve_level(x.as_str().unwrap(), levels, &pl)].iter().collect(),
-                    _ => levels[resolve_level(x.as_str().unwrap(), levels, &pl)..].iter().collect() } } };
+        let v = p.var(k).expect("then target"); let pl = prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone());
+        let keep = allowed(&v.levels, r, &pl);
         out[ti].push(Json::Obj(vec![("vars".into(), Json::Arr(vec![Json::Str(k.clone())])), ("allow".into(), Json::Arr(keep.into_iter().map(|l| Json::Arr(vec![Json::Str(l.clone())])).collect()))]));
         owners.push((h.id.clone(), ti));
     }
@@ -1110,4 +1118,95 @@ pub fn explain(p: &Persona, st: &State, raw: &Json, eng: Engine) -> R<String> {
     l.push(format!("program: {} vars, {} values, {}; {}", prog.get("vars").and_then(Json::as_arr).map_or(0, <[Json]>::len), prog.get("values").and_then(Json::as_arr).map_or(0, <[Json]>::len), cnt.join(", "), &pd[..pd.len().min(23)]));
     l.push(format!("line ({} tokens est.): {}", g("line_tokens").as_f64().unwrap_or(0.0) as i64, s(&g("line")))); l.push(format!("why: {}", s(&g("why"))));
     Ok(l.join("\n"))
+}
+
+// ------------------------------------------------------------------------------------------- character properties (§5.6)
+/// A character property: a habit-shaped rule (`when` / `then` / `rules`) an individual's stance must never break. `persona fuzz`
+/// searches event scripts for a turn that breaks it; `persona prove` decides it for every event sequence where it can.
+#[derive(Clone)]
+pub struct Prop { pub id: String, pub rule: Json, habit: Habit }
+/// A broken `then` entry: the trait (or mood), the level the stance has, the levels the property allows. Raw `rules` that break
+/// are one entry with `var` = "rules".
+pub struct Broken { pub var: String, pub level: String, pub allowed: Vec<String> }
+/// A property document: one rule, a list of rules, or {"props": [...]}. A rule's `id` is optional: `one` names a single rule,
+/// list entries default to prop1, prop2, ...; ids must be distinct.
+pub fn props(p: &Persona, doc: &Json, path: &str, one: &str) -> R<Vec<Prop>> {
+    let (list, single) = match doc { Json::Arr(a) => (a.to_vec(), false), Json::Obj(kv) if get(kv, "props").is_some() => {
+            need(kv.len() == 1, path, "{\"props\": [...]} takes no other field")?;
+            (get(kv, "props").and_then(Json::as_arr).ok_or_else(|| perr(&at(path, "props"), "a list of rules"))?.to_vec(), false) }
+        Json::Obj(_) => (vec![doc.clone()], true), _ => return Err(perr(path, "a rule {when, then}, a list of rules or {\"props\": [...]}")) };
+    need(!list.is_empty(), path, "at least one rule")?;
+    let mut out: Vec<Prop> = vec![];
+    for (i, r) in list.iter().enumerate() {
+        let rp = if single { path.to_string() } else { ix(path, i) };
+        let Json::Obj(kv) = r else { return Err(perr(&rp, "a rule is a mapping {when, then} (habit syntax)")) };
+        let id = if get(kv, "id").is_some() { None } else if single { Some(one.to_string()) } else { Some(format!("prop{}", i + 1)) };
+        let mut full = kv.clone(); if let Some(id) = &id { full.insert(0, ("id".into(), Json::Str(id.clone()))); }
+        let habit = habit_spec(&Json::Obj(full), &rp, &p.inputs, &p.history, &p.vars, &p.steps)?;
+        need(!out.iter().any(|q| q.id == habit.id), &at(&rp, "id"), "property ids must be distinct")?;
+        let rule = Json::Obj(kv.iter().filter(|(k, _)| k != "id" && k != "comment" && k != "say" && k != "priority").cloned().collect());
+        out.push(Prop { id: habit.id.clone(), rule, habit });
+    }
+    Ok(out)
+}
+/// Does this turn's stance break the property? `before` is the state the turn ran on (its `prev` levels resolve `prev`
+/// restrictions), `doc` the turn's stance document. None: it holds, it is not in force, or the turn has no vouched stance (status
+/// refused or fallback: the host then uses the habits-only line; unreleased traits of a partial turn are not checked).
+pub fn breaks(p: &Persona, pr: &Prop, before: &State, doc: &Json) -> Option<Vec<Broken>> {
+    let status = doc.get("status").and_then(Json::as_str)?; if status != "ok" && status != "partial" { return None; }
+    let inputs = doc.get("inputs").and_then(Json::as_obj)?;
+    if !pr.habit.when.iter().all(|(k, c)| cond_true(p, k, c, inputs, &[])) { return None; }
+    let entry = |id: &str| doc.get("stance").and_then(|s| s.get(id)).or_else(|| doc.get("mood").and_then(|m| m.get(id)));
+    let mut out = vec![];
+    for (k, r) in &pr.habit.then {
+        let v = p.var(k)?; let e = entry(k)?; if e.get("released") != Some(&Json::Bool(true)) { continue; }
+        let lvl = e.get("level").and_then(Json::as_str)?; let pl = before.prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone());
+        let ok = allowed(&v.levels, r, &pl);
+        if !ok.iter().any(|l| l.as_str() == lvl) { out.push(Broken { var: k.clone(), level: lvl.to_string(), allowed: ok.into_iter().cloned().collect() }); } }
+    if !pr.habit.rules.is_empty() && status == "ok" {
+        let mut flat: HashMap<String, String> = p.vars.iter().filter_map(|v| entry(&v.id).and_then(|e| e.get("level")).and_then(Json::as_str).map(|l| (v.id.clone(), l.to_string()))).collect();
+        if let Some(a) = doc.get("agenda").and_then(Json::as_arr) { for (i, s) in a.iter().enumerate() { if let (Some(s), Some(slot)) = (s.as_str(), p.slots.get(i)) { flat.insert(format!("step.{s}"), slot.clone()); } } }
+        let (mut rules, mut owners) = (empty_rules(), vec![]);
+        habit_rules(p, &Habit { then: vec![], ..pr.habit.clone() }, &before.prev, &mut rules, &mut owners);
+        if !violations(&flat, &rules, &values_of(p)).is_empty() { out.push(Broken { var: "rules".into(), level: String::new(), allowed: vec![] }); } }
+    (!out.is_empty()).then_some(out)
+}
+/// The odds mass the stance puts on levels the property's `then` entries forbid (the largest over its entries; 0 for raw rules):
+/// what the fuzzer's beam climbs
+pub fn pressure(p: &Persona, pr: &Prop, before: &State, doc: &Json) -> f64 {
+    let entry = |id: &str| doc.get("stance").and_then(|s| s.get(id)).or_else(|| doc.get("mood").and_then(|m| m.get(id)));
+    pr.habit.then.iter().filter_map(|(k, r)| { let v = p.var(k)?; let odds = entry(k)?.get("odds")?;
+        let pl = before.prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone()); let ok = allowed(&v.levels, r, &pl);
+        Some(v.levels.iter().filter(|l| !ok.contains(l)).map(|l| odds.get(l).and_then(Json::as_f64).unwrap_or(0.0)).fold(0.0, |a, b| a + b)) })
+        .fold(0.0, f64::max)
+}
+/// The event alphabet: per declared input its non-default values (a flag: true; a level input: its other levels; a number: `grid`
+/// x its max, without its default), then `elapsed_hours` (`hours`) when a mood has a half-life. -> (id, kind, values)
+pub fn alphabet(p: &Persona, grid: &[f64], hours: &[f64]) -> Vec<(String, &'static str, Vec<Json>)> {
+    let mut out: Vec<(String, &'static str, Vec<Json>)> = p.inputs.iter().map(|x| match x.kind {
+        Kind::Flag => (x.id.clone(), "flag", vec![Json::Bool(true)]),
+        Kind::Level => (x.id.clone(), "level", x.levels.iter().filter(|l| Some(l.as_str()) != x.default.as_str()).map(|l| Json::Str(l.clone())).collect()),
+        Kind::Number => { let mut v: Vec<f64> = vec![]; for g in grid { let n = r6(g * x.max); if Some(n) != x.default.as_f64() && !v.contains(&n) { v.push(n); } }
+            (x.id.clone(), "number", v.into_iter().map(Json::Num).collect()) } }).filter(|e| !e.2.is_empty()).collect();
+    if p.vars.iter().any(|v| v.mood && v.half_life.is_some()) && hours.iter().any(|h| *h > 0.0) {
+        let mut h: Vec<Json> = vec![]; for x in hours.iter().filter(|h| **h > 0.0) { if !h.contains(&Json::Num(*x)) { h.push(Json::Num(*x)); } }
+        out.push(("elapsed_hours".into(), "hours", h)); }
+    out
+}
+/// The input assignments that put the property in force: one per combination of its input conditions (a level list gives one
+/// per level; a number the smallest grid value in range). History conditions are left to the search. [] = no input can.
+pub fn forcing(p: &Persona, pr: &Prop, grid: &[f64]) -> Vec<Vec<(String, Json)>> {
+    let mut bases: Vec<Vec<(String, Json)>> = vec![vec![]];
+    for (k, c) in &pr.habit.when {
+        let Some(x) = p.input(k) else { continue };
+        let opts: Vec<Json> = match x.kind {
+            Kind::Flag => vec![c.clone()],
+            Kind::Level => match c { Json::Arr(a) => a.to_vec(), _ => vec![c.clone()] },
+            Kind::Number => { let (lo, hi) = match c { Json::Num(t) => (*t, f64::INFINITY), _ => (c.get("at_least").and_then(Json::as_f64).unwrap_or(f64::NEG_INFINITY), c.get("at_most").and_then(Json::as_f64).unwrap_or(f64::INFINITY)) };
+                let mut v: Vec<f64> = grid.iter().map(|g| r6(g * x.max)).filter(|v| *v >= lo && *v <= hi).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                if v.is_empty() { let b = lo.max(0.0).min(x.max); if b >= lo && b <= hi { v.push(b); } }
+                v.into_iter().take(1).map(Json::Num).collect() } };
+        bases = bases.iter().flat_map(|b| opts.iter().map(move |o| { let mut nb = b.clone(); nb.push((k.clone(), o.clone())); nb })).collect();
+    }
+    bases
 }

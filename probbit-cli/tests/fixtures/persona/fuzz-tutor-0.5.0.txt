@@ -1,0 +1,15 @@
+persona fuzz  Pip 1.0.1 (sha256:1e9c6697e3d0), 100 individuals (seeds 0-99), fuzz seed 0
+search        60 random scripts of 1-8 events per individual, then an odds-guided beam (width 4); counterexamples shrunk by delta debugging
+inputs        sentiment negative/positive, confused true, error true, loss true, praise true, criticism true, stakes 0.5/1, time_pressure 0.5/1, claim_done true, elapsed_hours 1/12/48
+
+never  {when: {sentiment: negative}, then: {humour: {at_most: light}}}
+  FAIL  67 of 100 individuals break it; shortest counterexample per individual: 1 event: 64, 2 events: 3
+  seed 1, 1 event: [{"sentiment":"negative"}]
+  turn 0: humour playful (odds none 0.164, light 0.425, playful 0.411); the rule allows none, light
+  why:     learner upset -> valence down, humour none
+  line:    Stance: explain step by step; playful; warm and encouraging; suggest what to try next; ask what they think first; one emoji at most; gentle; casual.
+  replay:  probbit persona replay probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml --seed 1 --script '[{"sentiment":"negative"}]'
+  explain: probbit persona explain probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml --seed 1 --script '[{"sentiment":"negative"}]' --turn 0
+  failing seeds: 1,3-4,6,9-11,14,16-20,22,25-27,29,31-33,35-38,40-41,44-53,55,58-59,61-63,65-66,68,71-74,76-78,80-83,86-88,90-91,93-97
+
+1 property, 1 broken; 42833 turns searched

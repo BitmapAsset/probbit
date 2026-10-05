@@ -399,3 +399,74 @@ fn python_persona_tests_pass() {
     let o = Command::new("python3").arg("test_persona.py").current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../python")).env("PROBBIT_BIN", env!("CARGO_BIN_EXE_probbit")).output().unwrap();
     assert!(o.status.success(), "python/test_persona.py failed:\n{}", String::from_utf8_lossy(&o.stderr));
 }
+
+// ------------------------------------------------------------------------------------- persona fuzz (docs/persona.md §5.6)
+/// The command run from the repository root, so every path it prints is the same on every OS
+fn probbit_at_root(args: &[&str]) -> (i32, String, String) {
+    let o = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).current_dir(format!("{}/..", env!("CARGO_MANIFEST_DIR"))).stdin(Stdio::null()).output().unwrap();
+    (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
+}
+/// The tutor as it shipped in 0.5.0, byte for byte: the counterexample stays reproducible whatever happens to the example
+const TUTOR_050: &str = "probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml";
+const TUTOR_050_DIGEST: &str = "sha256:1e9c6697e3d07ba8ed24110f8203d17f41d7a56d2ebd93b73c36f58105441740";
+const UPSET_NOT_PLAYFUL: &str = "{when: {sentiment: negative}, then: {humour: {at_most: light}}}";
+
+/// The golden: on the 0.5.0 tutor, "never playful with an upset learner" breaks; the shortest counterexample is seed 1's single
+/// event {"sentiment":"negative"} (humour playful with odds 0.411, although light has 0.425); the human report is pinned byte for
+/// byte, exit 1; the JSON document says the same; the printed replay command reproduces the breaking stance.
+#[test]
+fn fuzz_finds_the_0_5_0_tutor_counterexample() {
+    let (_, k, _) = probbit_at_root(&["persona", "check", TUTOR_050]); assert_eq!(s(&parse(&k), &["digest"]).as_str(), Some(TUTOR_050_DIGEST), "the fixture is the 0.5.0 tutor");
+    let (c, out, e) = probbit_at_root(&["persona", "fuzz", TUTOR_050, "--seeds", "0-99", "--never", UPSET_NOT_PLAYFUL]);
+    assert_eq!(c, 1, "{e}"); assert!(e.contains("turns/s"), "{e}");
+    assert_eq!(out, read(&format!("{}/tests/fixtures/persona/fuzz-tutor-0.5.0.txt", env!("CARGO_MANIFEST_DIR"))));
+    let (c, j, e) = probbit_at_root(&["persona", "fuzz", TUTOR_050, "--seeds", "0-99", "--never", UPSET_NOT_PLAYFUL, "--json"]); assert_eq!(c, 1, "{e}");
+    let j = parse(&j); assert_eq!(s(&j, &["probbit_persona_fuzz"]).as_f64(), Some(1.0)); assert_eq!(s(&j, &["found"]), &Json::Bool(true));
+    let pr = &s(&j, &["properties"]).as_arr().unwrap()[0];
+    assert_eq!((s(pr, &["verdict"]).as_str(), s(pr, &["shortest", "seed"]).as_f64(), jw(s(pr, &["shortest", "script"]))), (Some("counterexample"), Some(1.0), r#"[{"sentiment":"negative"}]"#.to_string()));
+    assert_eq!(jw(s(pr, &["shortest", "broken"])), r#"[{"allowed":["none","light"],"level":"playful","var":"humour"}]"#);
+    let replay = s(pr, &["shortest", "replay"]).as_str().unwrap().to_string();
+    assert_eq!(replay, format!("probbit persona replay {TUTOR_050} --seed 1 --script '[{{\"sentiment\":\"negative\"}}]'"));
+    let (c, rep, e) = probbit_at_root(&["persona", "replay", TUTOR_050, "--seed", "1", "--script", r#"[{"sentiment":"negative"}]"#]); assert_eq!(c, 0, "{e}");
+    assert_eq!(&parse(rep.trim_end()), s(pr, &["shortest", "stance"]), "the replayed stance is the reported one");
+    assert_eq!(s(&parse(rep.trim_end()), &["stance", "humour", "level"]).as_str(), Some("playful"));
+}
+
+/// Determinism: the same inputs give byte-identical output whatever the number of search threads (and again on a second run);
+/// another --fuzz-seed searches other scripts. Hard properties never break: the tutor's habits as rules, and on 8 random personas
+/// (conflicts resolved by fallback, so no habit ever yields) every habit as a rule, over 10 individuals each.
+#[test]
+fn fuzz_is_deterministic_and_never_breaks_a_habit() {
+    let base = ["persona", "fuzz", TUTOR_050, "--seeds", "0-24", "--scripts", "15", "--never", UPSET_NOT_PLAYFUL, "--json"];
+    let run = |extra: &[&str]| { let a: Vec<&str> = base.iter().chain(extra).copied().collect(); probbit_at_root(&a) };
+    let (c1, a, _) = run(&["--threads", "1"]); let (c2, b, _) = run(&["--threads", "5"]); let (_, a2, _) = run(&["--threads", "1"]);
+    assert_eq!((c1, c2), (1, 1)); assert!(a == b && a == a2, "fuzz output depends on the threads or the run");
+    let (_, other, _) = run(&["--fuzz-seed", "9"]); assert_ne!(a, other, "--fuzz-seed changes the random scripts");
+    for rule in ["{when: {loss: true}, then: {humour: [none], emoji: {at_most: sparse}}}", "{when: {confused: true}, then: {humour: {at_most: light}, verbosity: {at_least: short}}}"] {
+        let (c, out, e) = probbit_at_root(&["persona", "fuzz", TUTOR_050, "--seeds", "0-19", "--scripts", "20", "--never", rule]); assert_eq!(c, 0, "{rule}: {out} {e}");
+        assert!(out.contains("none found  0 of 20 individuals broke it"), "{out}"); }
+    let mut r = Mix(0xF022);
+    for k in 0..8 {
+        let (doc, _, hdefs) = random_persona(&mut r, k);
+        let doc = with(&doc, "engine", Json::Obj(vec![("on_conflict".into(), Json::Str("fallback".into()))]));
+        let habits = s(&doc, &["habits"]).as_arr().unwrap().iter().map(|h| Json::Obj(vec![("id".into(), s(h, &["id"]).clone()), ("when".into(), s(h, &["when"]).clone()), ("then".into(), s(h, &["then"]).clone())])).collect();
+        let (pp, rp) = (tmp(&format!("fuzz-rand{k}.json")), tmp(&format!("fuzz-rand{k}-props.json")));
+        std::fs::write(&pp, jw(&doc)).unwrap(); std::fs::write(&rp, jw(&Json::Obj(vec![("props".into(), Json::Arr(habits))]))).unwrap();
+        let (c, out, e) = probbit(&["persona", "fuzz", &pp, "--seeds", "0-9", "--scripts", "20", "--depth", "6", "--props", &rp, "--json"], "");
+        assert_eq!(c, 0, "random persona {k}: a habit broke: {out:.600} {e}");
+        assert_eq!(s(&parse(&out), &["properties"]).as_arr().unwrap().len(), hdefs.len());
+        for f in [&pp, &rp] { let _ = std::fs::remove_file(f); }
+    }
+}
+
+/// A bad rule is one error object at its path (exit 2), like a bad habit; a missing rule or a bad flag is a stderr line (exit 2)
+#[test]
+fn fuzz_refuses_bad_rules_and_flags() {
+    for (rule, path) in [("{when: {sentiment: grumpy}, then: {humour: [none]}}", "--never.when.sentiment"), ("{when: {loss: true}, then: {humourz: [none]}}", "--never.then.humourz"),
+        ("{when: {loss: true}}", "--never"), (r#"{"when": {"loss": true}, "then": {"humour": {"at_most": "loud"}}}"#, "--never.then.humour.at_most"), ("[1, 2]", "--never[0]")] {
+        let (c, out, e) = probbit_at_root(&["persona", "fuzz", TUTOR_050, "--never", rule]); assert_eq!(c, 2, "{rule}: {e}");
+        assert_eq!(s(&parse(&out), &["error", "path"]).as_str(), Some(path), "{rule}: {out}"); }
+    for args in [vec!["--seeds", "5-1"], vec!["--seeds", "x"], vec!["--grid", "0,2"], vec!["--depth", "0"], vec![]] {
+        let mut a = vec!["persona", "fuzz", TUTOR_050]; if !args.is_empty() { a.extend(["--never", UPSET_NOT_PLAYFUL]); } a.extend(args.iter().copied());
+        let (c, out, e) = probbit_at_root(&a); assert_eq!(c, 2, "{a:?}: {e}"); assert!(out.is_empty(), "{a:?}: {out}"); }
+}
