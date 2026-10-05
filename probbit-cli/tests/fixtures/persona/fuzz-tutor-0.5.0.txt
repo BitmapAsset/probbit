@@ -6,7 +6,7 @@ never  {when: {sentiment: negative}, then: {humour: {at_most: light}}}
   FAIL  67 of 100 individuals break it; shortest counterexample per individual: 1 event: 64, 2 events: 3
   seed 1, 1 event: [{"sentiment":"negative"}]
   turn 0: humour playful (odds none 0.164, light 0.425, playful 0.411); the rule allows none, light
-  why:     learner upset -> valence down, humour none
+  why:     learner upset -> valence down, humour down
   line:    Stance: explain step by step; playful; warm and encouraging; suggest what to try next; ask what they think first; one emoji at most; gentle; casual.
   replay:  probbit persona replay probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml --seed 1 --script '[{"sentiment":"negative"}]'
   explain: probbit persona explain probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml --seed 1 --script '[{"sentiment":"negative"}]' --turn 0

@@ -801,9 +801,11 @@ fn line(p: &Persona, stance: &HashMap<String, String>, active: &[String], bound:
     loop { let text = format!("{}{}", p.prefix, if keep.is_empty() { "neutral.".to_string() } else { format!("{}.", keep.join("; ")) });
         if est_tokens(&text) <= p.max_tokens || keep.is_empty() { return text; } keep.pop(); }
 }
+/// An input's push on one variable in words: the direction ("humour down"), not a level name (the push can point at a level the
+/// stance does not take)
 fn direction_word(p: &Persona, var: &str, vec: &[f64]) -> Option<(String, f64)> {
-    let v = p.var(var)?; let d = vec.iter().zip(centered(vec.len())).fold(0.0, |a, (x, c)| a + x * c);
-    (d.abs() >= 0.15).then(|| (format!("{var} {}", if d > 0.0 { v.levels.last().unwrap() } else { &v.levels[0] }), d.abs()))
+    p.var(var)?; let d = vec.iter().zip(centered(vec.len())).fold(0.0, |a, (x, c)| a + x * c);
+    (d.abs() >= 0.15).then(|| (format!("{var} {}", if d > 0.0 { "up" } else { "down" }), d.abs()))
 }
 fn why(p: &Persona, meta: &Meta, bound: &[String], status: &str) -> String {
     let mut parts: Vec<String> = p.habits.iter().filter(|h| bound.contains(&h.id)).map(|h| format!("{} (habit)", if h.say.is_empty() { h.id.replace('_', " ") } else { h.say.clone() })).collect();

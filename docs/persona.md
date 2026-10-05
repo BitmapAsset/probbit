@@ -283,7 +283,7 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "inputs": {"error": true, "stakes": 0.8, "errors_in_row": 2, "...": "..."}, "ignored": [],
  "line": "Stance: shorter than last time, check more; 1-2 sentences; verify before claiming anything; no jokes.",
  "line_tokens": 24,
- "why": "shorter than last time, check more (habit); last action failed -> caution careful, verbosity terse",
+ "why": "shorter than last time, check more (habit); last action failed -> caution up, verbosity down",
  "state_digest": "sha256:..."}
 ```
 
@@ -305,7 +305,8 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
 - `line`: phrases by priority — (1) bound habits, (2) other conditional habits in force, (3) unsure notes, (4) traits off
   this individual's resting level, (5) traits at rest, (6) agenda order — cut from the lowest priority until it fits
   `max_tokens`. Unconditional habits that did not bind are not repeated (the trait phrases already carry them).
-- `why`: the bound habits, then the two strongest live inputs with the two traits each pushes hardest.
+- `why`: the bound habits, then the two strongest live inputs with the two traits each pushes hardest, by direction
+  (`learner upset -> valence down, humour down`): a push is evidence, not the level the stance took.
 - `held`: the unsure traits held at their `hold` level; such a trait also carries `odds_unheld`, its odds before the hold.
 - Timing is never part of the stance: `--timing` adds a separate, non-canonical `timing` object (compile, engine and decode ms,
   engine calls, the 1-minute load average).
@@ -351,10 +352,12 @@ state with another JSON library (Python writes `0.0` where probbit wrote `0`) st
 - The engine runs at fixed work, so this holds on the sampled tier too (the engine's documented fixed-work determinism).
 - Genes use the platform's `ln`, `sqrt` and `cos` and are rounded to 4 decimals; weights to 6. A last-place difference in a
   maths library could, in principle, flip a rounding boundary on another platform (not observed; not proven impossible).
-- The documents equal an independent reference implementation's (Python, written first, from this document) byte for byte on
-  the example personas: their state0, all 20 workday stances and the final state (the goldens in examples/persona/golden/), and on
-  5,400 further turns of random inputs over every input each persona declares, three seeds each, as written, with
-  `values: semantic` and forced onto the sampler, held, yielded, refused and fallback turns included (measured on 2026-10-02).
+- The 0.5.0 documents equalled an independent reference implementation's (Python, written before this one, from this document) byte
+  for byte on the example personas: their state0, all 20 workday stances and the final state (the 0.5.0 goldens), and on 5,400
+  further turns of random inputs over every input each persona declares, three seeds each, as written, with `values: semantic`
+  and forced onto the sampler, held, yielded, refused and fallback turns included (measured on 2026-10-02). 0.6.0 changed two
+  things that check did not cover: `why` names a direction (`humour down`) where it named a level, and the tutor has one habit
+  more. Its goldens in examples/persona/golden/ are regenerated from this implementation; the parity claim is for 0.5.0.
 
 ### 5.4 Individuality and distance
 
@@ -409,6 +412,12 @@ found" is evidence over the scripts searched, not a proof.
   Held traits and habit conflicts are replayed as the turn resolves them.
 - `unknown`: the bound could not decide some individual. The report names the earliest such cell (inputs, history, previous
   levels) and the `fuzz` command that searches it. Unknown is not broken: run `fuzz`.
+
+Example: the tutor as it shipped in 0.5.0 (kept byte for byte as `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`) breaks
+"never playful when the learner is upset" for 67 of seeds 0-99, 64 of them on one message `{"sentiment": "negative"}`; `prove`
+says unknown. 0.6.0's tutor adds one habit, `no_play_when_upset` (`when: {sentiment: negative}`, `then: {humour: {at_most:
+light}}`): `prove` says held by construction and `fuzz` finds nothing. The habit fixes the stance the host gets; whether a model
+writes jokes anyway is the model's (section 6).
 
 Limits. Both commands cover the stance, not the model's words (section 6). `prove` reads exact engine answers: a cell whose
 program leaves the exact tiers is `unknown`. `held by construction` relies on every plan the engine returns keeping
