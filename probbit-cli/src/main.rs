@@ -504,7 +504,8 @@ fn seeds_arg(args: &[String]) -> Vec<u64> {
     for part in v.split(',') { let (a, b) = part.split_once('-').unwrap_or((part, part));
         let (a, b): (u64, u64) = (a.trim().parse().unwrap_or_else(|_| bad()), b.trim().parse().unwrap_or_else(|_| bad()));
         if a > b || b > 1 << 53 || b - a >= 100_000 { bad() }
-        for x in a..=b { if !out.contains(&x) { out.push(x); } if out.len() > 100_000 { bad() } } }
+        for x in a..=b { if !out.contains(&x) { out.push(x); }
+            if out.len() > 100_000 { bad() } } }
     out
 }
 /// `probbit persona fuzz PERSONA (--never RULE | --props FILE) [flags]` (docs/persona.md §5.6): exit 0 nothing found, 1 a

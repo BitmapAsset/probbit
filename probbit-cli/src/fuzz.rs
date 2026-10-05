@@ -62,7 +62,9 @@ fn beam(p: &Persona, pr: &Prop, st0: &State, limit: usize, s: &Search, eng: pers
             next.push((persona::pressure(p, pr, st, &doc), sc, ns)); } }
         next.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // stable: ties keep the move order
         kept.clear(); let mut seen: Vec<String> = vec![];
-        for (_, sc, ns) in next { if kept.len() == s.beam { break; } if seen.contains(&ns.digest) { continue; } seen.push(ns.digest.clone()); kept.push((sc, ns)); }
+        for (_, sc, ns) in next {
+            if kept.len() == s.beam { break; }
+            if !seen.contains(&ns.digest) { seen.push(ns.digest.clone()); kept.push((sc, ns)); } }
     }
     None
 }
