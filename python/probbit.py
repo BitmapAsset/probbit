@@ -11,6 +11,8 @@
     state = probbit.persona_init("examples/persona/tutor.yaml", seed=2)          # an individual of a persona (docs/persona.md)
     turn = probbit.persona_turn(persona, state, {"loss": True})                  # {"stance": ..., "state": ...}; put turn["stance"]["line"] in the prompt
     trace = probbit.persona_replay(persona, script, seed=2)                      # init + every turn of a script -> the stances
+    report = probbit.persona_fuzz(persona, never={"when": {"sentiment": "negative"}, "then": {"humour": {"at_most": "light"}}})
+    verdicts = probbit.persona_prove(persona, props=[rule1, rule2], seeds="0-9")  # held_by_construction | proved | unknown per rule
 
 Answers: `probbit run` reports per-variable odds under "marginals", `probbit decide` under "odds" (docs/probbit-ir-json.md, README).
 Every call returns the decoded JSON answer for exit 0 (exact / diagnostics_passed / partial), exit 1 (`infeasible`, a proof)
@@ -27,7 +29,7 @@ The binary: `binary=` argument, else $PROBBIT_BIN, else `probbit` on PATH, else 
 """
 import json, os, shutil, subprocess, tempfile, urllib.error, urllib.parse, urllib.request
 
-__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "find_binary", "ProbbitError",
+__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "persona_fuzz", "persona_prove", "find_binary", "ProbbitError",
            "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout", "ProbbitJudgeError"]
 
 
@@ -238,7 +240,7 @@ def _json_file(d, name, doc):
     return path
 
 
-def _persona_call(args, timeout_s, binary, lines=False):
+def _persona_call(args, timeout_s, binary, lines=False, answers=(0,)):
     try:
         p = subprocess.run([find_binary(binary), "persona", *args], capture_output=True, encoding="utf-8", timeout=timeout_s)
     except subprocess.TimeoutExpired as e:
@@ -252,7 +254,7 @@ def _persona_call(args, timeout_s, binary, lines=False):
         if err:
             raise ProbbitInputError(err.get("code"), err.get("path"), err.get("message"), 2, p.stdout, p.stderr)
         raise ProbbitInputError("flag", None, p.stderr.strip().removeprefix("probbit: "), 2, p.stdout, p.stderr)
-    if p.returncode == 0 and out is not None:
+    if p.returncode in answers and out is not None:
         return out
     raise ProbbitError(f"probbit persona {args[0]} exited {p.returncode}: {p.stderr.strip()[:300]}", p.returncode, p.stdout, p.stderr)
 
@@ -287,3 +289,38 @@ def persona_replay(persona, script, seed=None, *, timeout_s=None, binary=None, *
         if seed is not None:
             args += ["--seed", str(seed)]
         return _persona_call(args, timeout_s, binary, lines=True)
+
+
+def _rules(d, never, props, seeds, flags):
+    """The rule arguments of persona fuzz / prove: one rule (a dict, or one line of YAML) or several (a list, or a props file)"""
+    if (never is None) == (props is None):
+        raise TypeError("give exactly one of never= (a rule in habit syntax) or props= (a list of rules, or a props file path)")
+    if never is not None:
+        args = ["--never", never if isinstance(never, str) else json.dumps(never, ensure_ascii=False)]
+    elif isinstance(props, (str, os.PathLike)):
+        args = ["--props", os.fspath(props)]
+    else:
+        args = ["--props", _json_file(d, "props.json", {"props": list(props)})]
+    if not isinstance(seeds, str):
+        seeds = ",".join(str(int(s)) for s in seeds)
+    lists = {k: ",".join(repr(float(x)) for x in v) if isinstance(v, (list, tuple)) else v for k, v in flags.items()}
+    return args + ["--seeds", seeds, "--json", *_flags(lists)]
+
+
+def persona_fuzz(persona, never=None, props=None, seeds="0-99", *, timeout_s=None, binary=None, **flags):
+    """`probbit persona fuzz --json` (docs/persona.md §5.6): search event scripts for each individual's shortest counterexample to
+    a character property -> the probbit_persona_fuzz document (a dict; "found" says whether any rule broke, each property its
+    shortest counterexample with the replay command). never: one rule in habit syntax ({"when": {...}, "then": {...}}, or one line
+    of YAML); props: a list of rules (each with an optional "id") or a props file. seeds: "0-99", "1,4,9" or a list. Flags:
+    fuzz_seed, scripts, depth, beam, grid and hours (lists or comma strings), threads. A counterexample is an answer, not an error;
+    it tests the stance, not the words a model writes."""
+    with tempfile.TemporaryDirectory() as d:
+        return _persona_call(["fuzz", _persona_path(persona, d), *_rules(d, never, props, seeds, flags)], timeout_s, binary, answers=(0, 1))
+
+
+def persona_prove(persona, never=None, props=None, seeds="0-99", *, timeout_s=None, binary=None, **flags):
+    """`probbit persona prove --json` (docs/persona.md §5.6): per rule one verdict over the individuals -> the probbit_persona_prove
+    document: "held_by_construction" (with the habits), "proved" (for every event sequence) or "unknown" (with the cells the bound
+    could not decide; fuzz them). Arguments as persona_fuzz; flag: threads. An unknown rule is an answer, not an error."""
+    with tempfile.TemporaryDirectory() as d:
+        return _persona_call(["prove", _persona_path(persona, d), *_rules(d, never, props, seeds, flags)], timeout_s, binary, answers=(0, 1))

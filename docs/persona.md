@@ -462,8 +462,10 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
   refusal or a fallback is an answer; a bad persona, state or input is a tool error carrying the error object.
 - **Python** (python/probbit.py, standard library only): `probbit.persona_init(persona, seed=None)` -> the state;
   `probbit.persona_turn(persona, state, inputs, timing=False, no_inertia=False)` -> `{"stance", "state"}`;
-  `probbit.persona_replay(persona, script, seed=None)` -> the stances. `persona` is a file path or the document as a dict; bad
-  input raises `ProbbitInputError` (`.code == "persona"`, `.path`, `.message`).
+  `probbit.persona_replay(persona, script, seed=None)` -> the stances; `probbit.persona_fuzz(persona, never=None, props=None,
+  seeds="0-99", **flags)` and `probbit.persona_prove(...)` -> the `--json` documents of section 5.6 (a counterexample or an
+  unknown rule is an answer). `persona` is a file path or the document as a dict; bad input raises `ProbbitInputError`
+  (`.code == "persona"`, `.path`, `.message`).
 - **Browser** (probbit-wasm, no threads): `probbit_call` op 4 = persona init, op 5 = persona turn, with the MCP tools' arguments
   (the persona inline). The playground's "meet three individuals from one persona" runs three seeds of one persona side by side.
 
