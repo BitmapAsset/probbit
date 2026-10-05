@@ -470,3 +470,28 @@ fn fuzz_refuses_bad_rules_and_flags() {
         let mut a = vec!["persona", "fuzz", TUTOR_050]; if !args.is_empty() { a.extend(["--never", UPSET_NOT_PLAYFUL]); } a.extend(args.iter().copied());
         let (c, out, e) = probbit_at_root(&a); assert_eq!(c, 2, "{a:?}: {e}"); assert!(out.is_empty(), "{a:?}: {out}"); }
 }
+
+/// `persona prove` on the 0.5.0 tutor (5 individuals): its own habit's rule is held by construction, "never blunt when upset" is
+/// proved for every event sequence, "never playful when upset" is unknown (the fuzzer breaks it); exit 1 while a rule is unknown, 0
+/// when every rule is held or proved; the JSON document says the same; a bad rule is one error object, exit 2.
+#[test]
+fn prove_gives_the_three_verdicts_on_the_0_5_0_tutor() {
+    let props = tmp("prove-props.json");
+    std::fs::write(&props, r#"{"props": [{"id": "loss_no_jokes", "when": {"loss": true}, "then": {"humour": ["none"]}},
+        {"id": "not_blunt_upset", "when": {"sentiment": "negative"}, "then": {"directness": {"at_most": "balanced"}}},
+        {"id": "not_playful_upset", "when": {"sentiment": "negative"}, "then": {"humour": {"at_most": "light"}}}]}"#).unwrap();
+    let (c, out, e) = probbit_at_root(&["persona", "prove", TUTOR_050, "--seeds", "0-4", "--props", &props]); assert_eq!(c, 1, "{e}"); assert!(e.contains("prove: "), "{e}");
+    for want in ["loss_no_jokes  {when: {loss: true}, then: {humour: [none]}}\n  held by construction  (habit no_jokes_on_loss)",
+        "not_blunt_upset  {when: {sentiment: negative}, then: {directness: {at_most: balanced}}}\n  proved for every event sequence  (5 individuals; ",
+        "not_playful_upset  {when: {sentiment: negative}, then: {humour: {at_most: light}}}\n  unknown  the bound decides 0 of 5 individuals; not seeds 0-4\n  seed 0: humour: the score gap ",
+        &format!("  search it: probbit persona fuzz {TUTOR_050} --seeds 0-4 --never '{{when: {{sentiment: negative}}, then: {{humour: {{at_most: light}}}}}}'")] {
+        assert!(out.contains(want), "missing {want:?} in\n{out}"); }
+    let (c, j, e) = probbit_at_root(&["persona", "prove", TUTOR_050, "--seeds", "0-1", "--props", &props, "--json", "--threads", "2"]); assert_eq!(c, 1, "{e}");
+    let j = parse(&j); assert_eq!(s(&j, &["probbit_persona_prove"]).as_f64(), Some(1.0));
+    let v: Vec<&str> = s(&j, &["properties"]).as_arr().unwrap().iter().map(|p| s(p, &["verdict"]).as_str().unwrap()).collect();
+    assert_eq!(v, ["held_by_construction", "proved", "unknown"]);
+    let (c, _, e) = probbit_at_root(&["persona", "prove", TUTOR_050, "--seeds", "0-2", "--never", "{when: {sentiment: negative}, then: {directness: {at_most: balanced}}}"]); assert_eq!(c, 0, "{e}");
+    let (c, out, _) = probbit_at_root(&["persona", "prove", TUTOR_050, "--never", "{when: {sentimentx: negative}, then: {humour: [none]}}"]); assert_eq!(c, 2);
+    assert_eq!(s(&parse(&out), &["error", "code"]).as_str(), Some("persona"));
+    let _ = std::fs::remove_file(&props);
+}

@@ -103,14 +103,58 @@ fn individual(p: &Persona, props: &[Prop], seed: u64, s: &Search, eng: persona::
 /// The search over every individual (threads take individuals in turn; each one's search is independent) -> per property, per
 /// seed (in the order given) its counterexample, and the number of turns run
 pub fn fuzz(p: &Persona, props: &[Prop], s: &Search, eng: SyncEngine) -> (Vec<Vec<Option<Found>>>, usize) {
-    let (turns, next) = (AtomicUsize::new(0), AtomicUsize::new(0));
-    let slots: Vec<Mutex<Option<Vec<Option<Found>>>>> = s.seeds.iter().map(|_| Mutex::new(None)).collect();
-    std::thread::scope(|sc| { for _ in 0..s.threads.clamp(1, s.seeds.len().max(1)) {
-        std::thread::Builder::new().stack_size(8 << 20).spawn_scoped(sc, || loop {
-            let i = next.fetch_add(1, Ordering::Relaxed); if i >= s.seeds.len() { break; }
-            let r = individual(p, props, s.seeds[i], s, eng, &turns); *slots[i].lock().unwrap() = Some(r); }).expect("a search thread"); } });
-    let mut per: Vec<Vec<Option<Found>>> = slots.into_iter().map(|m| m.into_inner().unwrap().unwrap_or_default()).collect();
+    let turns = AtomicUsize::new(0);
+    let mut per = par(s.seeds.len(), s.threads, |i| individual(p, props, s.seeds[i], s, eng, &turns));
     ((0..props.len()).map(|i| per.iter_mut().map(|v| v.get_mut(i).and_then(Option::take)).collect()).collect(), turns.into_inner())
+}
+/// `f(0) .. f(n-1)` on up to `threads` threads (each takes the next index; 8 MiB stacks, as the engine's threads), in index order
+fn par<T: Send>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
+    let next = AtomicUsize::new(0); let slots: Vec<Mutex<Option<T>>> = (0..n).map(|_| Mutex::new(None)).collect();
+    std::thread::scope(|sc| { for _ in 0..threads.clamp(1, n.max(1)) {
+        std::thread::Builder::new().stack_size(8 << 20).spawn_scoped(sc, || loop {
+            let i = next.fetch_add(1, Ordering::Relaxed); if i >= n { break; } let r = f(i); *slots[i].lock().unwrap() = Some(r); }).expect("a search thread"); } });
+    slots.into_iter().map(|m| m.into_inner().unwrap().expect("every index ran")).collect()
+}
+
+// ------------------------------------------------------------------------------------------------------------- prove
+/// `probbit persona prove`'s answer for one property over the population
+pub enum Verdict { Held(Vec<String>), Proved { cells: usize, calls: usize }, Unknown { proved: usize, failed: Vec<(u64, Json, String)> } }
+/// Per property: held by construction (a habit implies it), else the bound per individual (persona::prove_seed): proved when every
+/// individual is, else unknown with every individual the bound cannot decide (in seed order)
+pub fn prove(p: &Persona, props: &[Prop], seeds: &[u64], threads: usize, eng: SyncEngine) -> Vec<Verdict> {
+    props.iter().map(|pr| { if let Some(h) = persona::by_construction(p, pr, eng) { return Verdict::Held(h); }
+        let res = par(seeds.len(), threads, |i| persona::prove_seed(p, pr, seeds[i], eng));
+        let (mut cells, mut calls, mut failed) = (0, 0, vec![]);
+        for (sd, r) in seeds.iter().zip(res) { match r { Ok((c, k)) => { cells += c; calls += k; } Err((cell, why)) => failed.push((*sd, cell, why)) } }
+        if failed.is_empty() { Verdict::Proved { cells, calls } } else { Verdict::Unknown { proved: seeds.len() - failed.len(), failed } } }).collect()
+}
+/// The `probbit_persona_prove` document
+pub fn prove_doc(p: &Persona, props: &[Prop], seeds: &[u64], out: &[Verdict]) -> Json {
+    let n = |x: f64| Json::Num(x); let st = |x: &str| Json::Str(x.to_string());
+    let props_j: Vec<Json> = props.iter().zip(out).map(|(pr, v)| { let mut f = vec![("id".to_string(), st(&pr.id)), ("rule".into(), pr.rule.clone()), ("individuals".into(), n(seeds.len() as f64))];
+        match v {
+            Verdict::Held(h) => { f.push(("verdict".into(), st("held_by_construction"))); f.push(("habits".into(), Json::Arr(h.iter().map(|x| st(x)).collect()))); }
+            Verdict::Proved { cells, calls } => { f.push(("verdict".into(), st("proved"))); f.push(("cells".into(), n(*cells as f64))); f.push(("engine_calls".into(), n(*calls as f64))); }
+            Verdict::Unknown { proved, failed } => { f.push(("verdict".into(), st("unknown"))); f.push(("proved_individuals".into(), n(*proved as f64)));
+                f.push(("unknown".into(), Json::Arr(failed.iter().map(|(sd, cell, why)| Json::Obj(vec![("seed".into(), n(*sd as f64)), ("cell".into(), cell.clone()), ("reason".into(), st(why))])).collect()))); } }
+        Json::Obj(f) }).collect();
+    Json::Obj(vec![("probbit_persona_prove".into(), n(1.0)), ("persona".into(), Json::Obj(vec![("name".into(), st(&p.name)), ("version".into(), st(&p.version)), ("digest".into(), st(&p.digest))])),
+        ("seeds".into(), Json::Arr(seeds.iter().map(|x| n(*x as f64)).collect())), ("properties".into(), Json::Arr(props_j))])
+}
+/// The human report of `prove`
+pub fn prove_human(p: &Persona, path: &str, props: &[Prop], seeds: &[u64], out: &[Verdict]) -> String {
+    let mut o = vec![format!("persona prove  {} {} ({}), {} individuals (seeds {})", p.name, p.version, &p.digest[..p.digest.len().min(19)], seeds.len(), ranges(seeds))];
+    for (pr, v) in props.iter().zip(out) {
+        o.push(String::new()); o.push(format!("{}  {}", pr.id, flow(&pr.rule)));
+        match v {
+            Verdict::Held(h) => o.push(format!("  held by construction  (habit{} {})", if h.len() == 1 { "" } else { "s" }, h.join(", "))),
+            Verdict::Proved { cells, calls } => o.push(format!("  proved for every event sequence  ({} individuals; {cells} cells, {calls} engine calls)", seeds.len())),
+            Verdict::Unknown { proved, failed } => { let (sd, cell, why) = &failed[0];
+                o.push(format!("  unknown  the bound decides {proved} of {} individuals; not seed{} {}", seeds.len(), if failed.len() == 1 { "" } else { "s" }, ranges(&failed.iter().map(|f| f.0).collect::<Vec<_>>())));
+                o.push(format!("  seed {sd}: {why}; cell {}", persona::canon(cell)));
+                o.push(format!("  search it: probbit persona fuzz {} --seeds {} --never {}", word(path), ranges(seeds), word(&flow(&pr.rule)))); } }
+    }
+    o.join("\n")
 }
 
 // ------------------------------------------------------------------------------------------------------------- output
@@ -205,3 +249,4 @@ pub fn human(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Opt
     o.push(format!("{} propert{}, {broke} broken; {turns} turns searched", props.len(), if props.len() == 1 { "y" } else { "ies" }));
     o.join("\n")
 }
+

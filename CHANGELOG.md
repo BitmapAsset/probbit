@@ -15,6 +15,14 @@ All notable changes to this project are documented here. The format follows
   Deterministic: Philox (probbit-core) keyed by `--fuzz-seed`; byte-identical output for the same inputs on any number of
   threads (timing on stderr). Exit 0 nothing found, 1 a counterexample, 2 bad input. It tests the stance a host gets, not the
   words a model writes; "none found" is evidence, not a proof.
+- **`probbit persona prove`**: the same rules, decided for every event sequence where it can be. One verdict per rule over the
+  population: `held by construction` (the habits in force whenever the rule applies imply it; under `on_conflict: yield` a habit
+  counts when no conflict on such a turn ever drops it), `proved for every event sequence` (a sound bound per individual: the mood accumulators
+  stay in a box, inputs, history values and previous levels fall into finitely many cells, and in every cell the best allowed
+  stance beats the best forbidden one by more than the box can move them), or `unknown` (the earliest cell the bound cannot
+  decide, with the `fuzz` command to search it). Human report or `--json` (`probbit_persona_prove: 1`). Exit 0 every rule held
+  or proved, 1 some unknown, 2 bad input. Soundness tests: every event sequence of tiny random personas, the fuzzer on random
+  personas, and mutations of the bound that the tests catch. It covers the stance, not the model's words.
 - `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`: the tutor as it shipped in 0.5.0, byte for byte, with the pinned
   fuzz report on it (one upset message, `{"sentiment":"negative"}`, gives seed 1 a playful stance).
 
