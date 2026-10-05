@@ -1,24 +1,46 @@
-# probbit
+<p align="center">
+  <img src="docs/probbit-hero-1600x900.jpg" alt="probbit" width="100%">
+</p>
 
-**The p-bit processor your agents decide on:** a virtual probabilistic processor for joint decisions under hard rules.
+<h1 align="center">probbit</h1>
 
-[![ci](https://github.com/BitmapAsset/probbit/actions/workflows/ci.yml/badge.svg)](https://github.com/BitmapAsset/probbit/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+<p align="center">
+  <b>The p-bit processor your agents decide on.</b><br>
+  A p-bit is a bit that holds a probability. probbit couples thousands of them on the CPU you already own,<br>
+  settles a whole plan under hard rules, prints the odds for every part, and refuses when it can't vouch for the answer.
+</p>
 
-![probbit](docs/probbit-hero-1600x900.jpg)
+<p align="center">
+  <a href="https://github.com/BitmapAsset/probbit/actions/workflows/ci.yml"><img src="https://github.com/BitmapAsset/probbit/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="license"></a>
+</p>
 
-## First five minutes
+| **60 PII leaks → 0** | **180,540 plans, counted exactly** | **refused → partial → passed** |
+|:---|:---|:---|
+| 300 agent tasks, six workers, privacy rules and quotas. A rule-ignoring router sends 60 private tasks to cloud models (133 broken rules on `probbit demo`'s queue, 144 on the `agent_router` example's). Every plan probbit returns breaks 0: the sampler never leaves the rule-abiding set. | 12 tasks × 6 workers: every rule-abiding plan enumerated, exact odds for every task, in 7.3-8.2 ms on an Apple M4 ([measured](#what-it-does-measured-apple-m4-one-machine)). | Too little time and it says "I can't vouch for this" (exit 3) instead of guessing. More time: it releases what passed its own error bar and escalates the rest ([watch it refuse](#60-second-tour)). |
 
 ```sh
-probbit                                         # at a terminal: the spec line of this machine and three commands to try
-probbit demo                                    # 300 agent tasks routed live: a field of p-bits, the gate, the verdict (~5 s)
-probbit demo | probbit decide --summary --pretty   # the same router as one compact JSON answer, plus a boxed summary on stderr
-probbit demo | probbit decide --top > answer.json  # the full answer, with a live monitor while it runs (tier, updates/s, gate)
-probbit evaluate --summary --pretty < examples/evaluate/support-12.json   # after a decision model: its answers + your rules
-claude mcp add probbit -- probbit mcp              # hand the processor to an agent: probbit_decide, probbit_run, probbit_evaluate, ...
+curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
+```
+Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
+One binary under 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
+`probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
+
+## Try it in 30 seconds
+
+```sh
+probbit                                                         # at a terminal: the spec line of this machine and three commands to try
+probbit demo                                                    # at a terminal: 300 agent tasks routed live (~4 s): a field of p-bits, the gate, the verdict
+probbit demo --tasks 300 | probbit decide --summary --pretty    # the same queue as one JSON answer: verdict, 0 violations, the least certain tasks
+probbit demo --tasks 300 --hard | probbit decide --budget-ms 50 # too little time: "refused", exit 3, nothing released
+probbit demo | probbit decide --top > answer.json               # 12 tasks, the full answer, with a live monitor while it runs (tier, updates/s, gate)
+probbit evaluate --summary --pretty < examples/evaluate/support-12.json   # in a clone: after a decision model, its answers + your rules
+probbit run --sweeps 2000 --polish-ms 0 --seed 7 --summary < examples/rabbit-field.json   # in a clone: the white rabbit, 3,840 p-bits: partial, 31 cells escalated
+claude mcp add probbit -- probbit mcp                           # hand the processor to an agent: probbit_decide, probbit_run, probbit_evaluate, ...
 ```
 Visuals go to stderr, only at a terminal; `NO_COLOR`, `--plain` or `PROBBIT_THEME=plain` turn them off. Piped, every command
-writes exactly one JSON document, the same bytes as 0.2.1 apart from the name, the version and the timings. Install: [below](#install).
+writes exactly one JSON document, the same bytes as 0.2.1 apart from the name, the version and the timings. Piped, `probbit demo`
+writes a 12-task queue unless `--tasks` says otherwise.
 
 `probbit` is a **software processor built from p-bits**: bits that are 1 with a probability you set, coupled so that they
 sample whole configurations together. You give it a *program* (variables, their allowed values, scores, pairwise
@@ -65,7 +87,7 @@ Today, from source with Rust 1.78 or later: `cargo install --git https://github.
 `probbit` binary; or clone and `cargo build --release -p probbit-cli` (it lands in `target/release/probbit`). Nothing is downloaded
 after the clone: there are no external crates.
 
-After the first public release (none exists yet; the commands below are tested against a local server, PORTABILITY.md):
+From a release (the installers fetch the latest archive from the Releases page; the commands below were tested against a local server, PORTABILITY.md):
 
 | how | command |
 |---|---|
@@ -90,7 +112,7 @@ cargo run --release --example agent_router                         # the full na
 The demo problem is an AI-agent task router: a queue of tasks and a set of workers (`opus`, `sonnet`, `luna-pro`,
 `local-gemma`, `codex`, `human`) under hard policy (PII only on-prem or with a human; production-DB migrations never on
 cheap models), per-hour quotas, and a bonus for keeping one customer's workflow on one worker. A rule-ignoring per-task argmax over
-the demo's synthetic scores (a strawman baseline) produces **144 violations and 60 PII leaks** on 300 tasks. `probbit` produces **0 violations**,
+synthetic scores (a strawman baseline) produces **60 PII leaks** on 300 tasks, with **133 violations** on `probbit demo`'s queue and **144** on the `agent_router` example's. `probbit` produces **0 violations**,
 per-task odds that match exact enumeration wherever exact enumeration is possible, and escalates the tasks whose odds it
 cannot pin down in the time budget.
 
@@ -327,7 +349,7 @@ r = subprocess.run(["probbit", "decide", "--budget-ms", "200"], input=json.dumps
 decision = json.loads(r.stdout)          # r.returncode: 0 plan, 3 refused, 1 infeasible, 2 bad input (or --mode exact stopped by --exact-ms)
 ```
 Build the binary once with `cargo build --release -p probbit-cli` (it lands in `target/release/probbit`). There are no native Python
-bindings and no MCP server yet; every script in `bench/` is an example of the subprocess pattern. `probbit <command> --help`
+bindings (`probbit mcp` is the MCP server, docs/agents.md); every script in `bench/` is an example of the subprocess pattern. `probbit <command> --help`
 lists every flag of a command with its default, and the exit codes.
 
 ## The individuality layer: `probbit persona`
@@ -404,7 +426,7 @@ sh playground/build.sh && python3 -m webbrowser "file://$PWD/playground/index.ht
 
 On the example (12 questions, 12 rules): `exact`, 5 answers moved, 1.24 ms inside the answer (Apple M4, median of 7). Python can
 also ask the judge first (`probbit.evaluate(request, judge=<a callable or a System One URL>)`, stdlib `urllib`); the browser page
-runs the CLI's own code compiled to WebAssembly without threads (830 KB; the 300-task router demo at 3,200 sweeps in 531 ms in
+runs the CLI's own code compiled to WebAssembly without threads (1.17 MB with the persona ops, 830 KB before them; the 300-task router demo at 3,200 sweeps in 531 ms in
 Chrome against 346 / 133 ms native at 1 / 4 threads). More in [docs/agents.md](docs/agents.md), "After a judge". The refusal is the point: when the gate does not pass, the verdict is `refused` (exit 3) and every answer is
 marked unreleased instead of guessed.
 
@@ -449,7 +471,7 @@ calibration reports are not included in this repository. Everything else reprodu
 | | |
 |---|---|
 | exact joint answer, 12 tasks × 6 workers | 180,540 rule-abiding plans enumerated in 7.3-8.2 ms (8.2 on 0.2.0: +10-12% at 12 tasks and +22% under full enumeration of small groups, BENCHMARKS §6), exact odds; the forced sampler takes 34-37x longer and is only approximately right (BENCHMARKS §6) |
-| 300-task router queue, 6 workers, 315 quota slots (95 % full) | rule-ignoring argmax over synthetic scores: 144 violations, 60 PII leaks; `probbit`: 0 violations; 25 ms: 0-128/300 released (the budget is wall-clock and this one sits at the R-hat threshold: 0, 0, 121 and 126 in four 0.2.0 runs, 128 in an earlier build), 200 ms: 300/300; anytime `diagnostics_passed` after 211-215 ms (0.2.0 runs; 186 ms in an earlier one) |
+| 300-task router queue, 6 workers, 315 quota slots (95 % full) | rule-ignoring argmax over synthetic scores (the `agent_router` example's queue): 144 violations, 60 PII leaks; `probbit`: 0 violations; 25 ms: 0-128/300 released (the budget is wall-clock and this one sits at the R-hat threshold: 0, 0, 121 and 126 in four 0.2.0 runs, 128 in an earlier build), 200 ms: 300/300; anytime `diagnostics_passed` after 211-215 ms (0.2.0 runs; 186 ms in an earlier one) |
 | 300-task pod queue with a computable exact answer (89 workers) | 200 ms: 291-298 of 300 released, 1 s: 300/300; **0 released tasks wrong across 11 seeds**; polished plan within 0.75-3.6 nats of the proven optimum (*earlier build*; current build, seed 7: 298/300 released, 0 wrong; 296-297/300, 0 wrong on 0.2.0 re-runs) |
 | released tasks that were wrong (vs exact oracles, all families) | **0 of 28,007** on a fully out-of-sample calibration set (*earlier build*; a rule-of-three bound of ≈ 1.1e-4 per task would assume independent tasks, which tasks sharing a run are not). Current build (gate/3; all four re-run on 0.2.0): 0 wrong of 1,731 released router tasks, 929 max-cut spins, 525 colouring vertices and 428 scheduled jobs (BENCHMARKS §2-§4) |
 | whole-answer false passes on exact-oracle sets | 1 of 408 (*earlier build*); the guard added for it gives 0 of 393 **in-sample**; the one fresh set after it (96 hard runs) passed none. 0 false of 72 max-cut whole answers on the 0.1.0 gate, 0 of 61 on 0.2.0 (BENCHMARKS §3, re-run on 0.2.0). **Adversarial stress corpus (0.2.0): 2-3 of 20 seeds per family pass with every released item wrong** (Known failure modes) |
