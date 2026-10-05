@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.5.0 - unreleased
+## 0.5.0 - 2026-10-05
 
 ### Added
 - **`probbit persona`, the individuality layer** (docs/persona.md): a persona file (YAML subset or JSON: traits with priors,
