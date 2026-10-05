@@ -378,6 +378,46 @@ tie, the later-declared one), the turn is re-solved, and `habits.yielded` and `e
 previous level their `prev` restrictions read) for an empty stance, and reports each contradiction with its resolution.
 Run it before shipping a persona.
 
+### 5.6 Testing a character
+
+A **character property** is a rule in habit syntax that a stance must never break, for example "never playful when the
+learner is upset": `{when: {sentiment: negative}, then: {humour: {at_most: light}}}`. It is checked on the stance a host gets
+(status `ok` or `partial`, released traits; `prev` restrictions read the previous turn's levels), never on the words a model
+writes. Two commands test it over a population of individuals (`--seeds 0-99`); `--never RULE` gives one rule (JSON or one
+line of YAML), `--props FILE` several (`{"props": [...]}`, each with an optional `id`).
+
+**`fuzz`** searches event scripts built from the persona's declared inputs (flags, levels, numbers on `--grid` x their max,
+idle hours on `--hours`): random scripts, then a beam guided by the exact odds (the next events that put the most odds on a
+level the rule forbids). Each individual's shortest counterexample is shrunk (drop events, then single inputs) and printed with
+the breaking turn's levels, odds, why and line, and the `replay` / `explain` commands that reproduce it. The search is Philox
+keyed by `--fuzz-seed` and the seed: the same inputs give the same report, byte for byte, on any number of threads. "None
+found" is evidence over the scripts searched, not a proof.
+
+**`prove`** gives each rule one verdict over the population:
+
+- `held by construction`: habits that are in force whenever the rule applies (their conditions follow from its own) imply it,
+  for every previous level. With `on_conflict: yield` a habit counts here when no turn where the rule applies ever drops it
+  (a scan of every cell replays the conflicts; which habit yields depends on the habits in force and the previous levels, not on
+  genes or moods).
+- `proved for every event sequence`: for each individual, a bound covers every turn of every script and decides all of them.
+  The mood accumulators stay in a box (per level, between the most negative and the most positive evidence one turn's inputs
+  and history can add, 0 included), whatever the inputs, idle hours or `--no-inertia`. The rest of a turn falls into finitely
+  many cells: flags and levels, each number at every threshold a habit or the rule reads and on each interval between them,
+  history values that fit the turn's own flags, and the previous levels the restrictions in force read. In every cell the best
+  stance the rule allows must beat the best one it forbids by more than the box, the number intervals and the 6-decimal
+  rounding can move their scores. Moods linked to the rule's trait by no coupling or rule cannot move it and are left out.
+  Held traits and habit conflicts are replayed as the turn resolves them.
+- `unknown`: the bound could not decide some individual. The report names the earliest such cell (inputs, history, previous
+  levels) and the `fuzz` command that searches it. Unknown is not broken: run `fuzz`.
+
+Limits. Both commands cover the stance, not the model's words (section 6). `prove` reads exact engine answers: a cell whose
+program leaves the exact tiers is `unknown`. `held by construction` relies on every plan the engine returns keeping
+every rule in force. A rule with raw `rules` (not `then`) is fuzzed but not proved. The bound is per cell with the moods at
+the edges of their box, so a soft rule whose margin is small stays `unknown` even when no script breaks it.
+
+Exit codes: `fuzz` 0 nothing found, 1 a counterexample; `prove` 0 every rule held or proved, 1 some rule unknown; both 2 bad
+input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); timing goes to stderr.
+
 ## 6. What a persona can NOT do
 
 - It does not write, read or check text. Text-level rules (banned phrases, exact formats, facts) stay in the prompt or in
@@ -405,11 +445,14 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
 | `probbit persona lint PERSONA` | contradicting habits (section 5.5); exit 1 if one is unresolved |
+| `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
+| `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 
 A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes:
-0 done (every turn status is an answer), 1 `lint` found an unresolved contradiction, 2 a bad persona, state, input or script
+0 done (every turn status is an answer), 1 `lint` found an unresolved contradiction, `fuzz` a counterexample or `prove` an
+unknown rule, 2 a bad persona, state, input, script or rule
 (ONE `{"error": {"code": "persona", "path", "message"}}` object on stdout) or a bad flag (stderr). The engine's resource controls
 are `probbit run`'s (`PROBBIT_THREADS`, `PROBBIT_CPU_LIMIT`, `PROBBIT_MEM_LIMIT_MB`, `PROBBIT_PRIORITY`, the config file); they
 never change a document. The persona's own `engine.chains` is used whatever `PROBBIT_CHAINS` says (it is part of the answer).
