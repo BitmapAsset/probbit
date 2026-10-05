@@ -40,11 +40,12 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - Version 0.6.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
   `stdout_matches_the_0_6_0_goldens` (the documents are unchanged).
-- **The tutor example** (examples/persona/tutor.yaml, persona version 1.1.0) has one habit more, `no_play_when_upset`
-  (`when: {sentiment: negative}`, `then: {humour: {at_most: light}}`). In 0.5.0 one upset message made 67 of seeds 0-99
-  playful (`persona fuzz`), and the shipped workday golden itself had seed 1 playful on turn 11 ("still upset"); that turn is
-  now light, and `persona prove` says the rule is held by construction. The tutor's digest and goldens change; its genes
-  (individuals) do not. The habit fixes the stance the host gets, not the words a model writes.
+- **The tutor example** (examples/persona/tutor.yaml, persona version 1.1.0) has one habit more, `no_play_when_upset` (`when:
+  {sentiment: negative}`, `then: {humour: {at_most: light}}`). In 0.5.0 `persona fuzz` found 67 of seeds 0-99 playful with an
+  upset learner (37 of them after the single message `{"sentiment": "negative"}`), and the shipped workday golden itself had
+  seed 1 playful on turn 11 ("still upset"); that turn is now light, and `persona prove` says the rule is held by construction.
+  The tutor's digest and goldens change; its genes (individuals) do not. The habit fixes the stance the host gets, not the words
+  a model writes.
 - `why` names an input's push by its direction (`learner upset -> valence down, humour down`) where it named the trait's
   lowest or highest level ("humour none" printed next to a playful stance read as a contradiction). In the ops engineer's and
   the trader assistant's goldens nothing but `why` changes.

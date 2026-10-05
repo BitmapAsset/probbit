@@ -424,8 +424,8 @@ found" is evidence over the scripts searched, not a proof.
   levels) and the `fuzz` command that searches it. Unknown is not broken: run `fuzz`.
 
 Example: the tutor as it shipped in 0.5.0 (kept byte for byte as `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`) breaks
-"never playful when the learner is upset" for 67 of seeds 0-99, 64 of them on one message `{"sentiment": "negative"}`; `prove`
-says unknown. 0.6.0's tutor adds one habit, `no_play_when_upset` (`when: {sentiment: negative}`, `then: {humour: {at_most:
+"never playful when the learner is upset" for 67 of seeds 0-99: 37 on the single message `{"sentiment": "negative"}`, 27 when
+that message also carries praise, 3 on two messages; `prove` says unknown. 0.6.0's tutor adds one habit, `no_play_when_upset` (`when: {sentiment: negative}`, `then: {humour: {at_most:
 light}}`): `prove` says held by construction and `fuzz` finds nothing. The habit fixes the stance the host gets; whether a model
 writes jokes anyway is the model's (section 6).
 
