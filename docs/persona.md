@@ -458,8 +458,10 @@ are `probbit run`'s (`PROBBIT_THREADS`, `PROBBIT_CPU_LIMIT`, `PROBBIT_MEM_LIMIT_
 never change a document. The persona's own `engine.chains` is used whatever `PROBBIT_CHAINS` says (it is part of the answer).
 
 - **MCP** (`probbit mcp`): `probbit_persona_init {persona | persona_path, seed}` -> the state; `probbit_persona_turn {persona |
-  persona_path, state, inputs, flags: {timing, no_inertia}}` -> `{stance, state}`. Stateless; the documents are the CLI's. A
-  refusal or a fallback is an answer; a bad persona, state or input is a tool error carrying the error object.
+  persona_path, state, inputs, flags: {timing, no_inertia}}` -> `{stance, state}`; `probbit_persona_fuzz {persona | persona_path,
+  never | props, seeds, fuzz_seed, scripts, depth, beam, grid, hours, threads}` -> the `fuzz --json` document (section 5.6).
+  Stateless; the documents are the CLI's. A refusal, a fallback or a counterexample is an answer; a bad persona, state, input
+  or rule is a tool error carrying the error object.
 - **Python** (python/probbit.py, standard library only): `probbit.persona_init(persona, seed=None)` -> the state;
   `probbit.persona_turn(persona, state, inputs, timing=False, no_inertia=False)` -> `{"stance", "state"}`;
   `probbit.persona_replay(persona, script, seed=None)` -> the stances; `probbit.persona_fuzz(persona, never=None, props=None,

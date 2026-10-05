@@ -250,6 +250,55 @@ pub fn human(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Opt
     o.join("\n")
 }
 
+// --------------------------------------------------------------------------------------------------------------- MCP
+/// `0-99` / `3` / `1,4,9` / `0-9,20-29`: the individuals, in the order given, each once; None when unreadable (seeds 0 to 2^53,
+/// at most 100,000)
+pub fn seeds(v: &str) -> Option<Vec<u64>> {
+    let mut out: Vec<u64> = vec![];
+    for part in v.split(',') { let (a, b) = part.split_once('-').unwrap_or((part, part));
+        let (a, b): (u64, u64) = (a.trim().parse().ok()?, b.trim().parse().ok()?);
+        if a > b || b > 1 << 53 || b - a >= 100_000 { return None; }
+        for x in a..=b { if !out.contains(&x) { out.push(x); }
+            if out.len() > 100_000 { return None; } } }
+    Some(out)
+}
+/// The MCP tool `probbit_persona_fuzz` (stateless): {persona | persona_path, never | props, seeds, fuzz_seed, scripts, depth, beam,
+/// grid, hours, threads} -> the `probbit_persona_fuzz` document, `probbit persona fuzz --json`'s for the same arguments (an inline
+/// persona is named PERSONA in the replay commands)
+pub fn tool(args: &[(String, Json)], eng: SyncEngine) -> Result<Json, crate::json::InErr> {
+    use persona::perr;
+    let get = |k: &str| args.iter().find(|(x, _)| x == k).map(|(_, v)| v).filter(|v| !v.is_null());
+    const KNOWN: [&str; 12] = ["persona", "persona_path", "never", "props", "seeds", "fuzz_seed", "scripts", "depth", "beam", "grid", "hours", "threads"];
+    let mut extra: Vec<&str> = args.iter().map(|(k, _)| k.as_str()).filter(|k| !KNOWN.contains(k)).collect(); extra.sort_unstable();
+    if let Some(k) = extra.first() { return Err(perr(&format!("arguments.{k}"), "unknown argument")); }
+    let (p, path) = match (get("persona"), get("persona_path")) {
+        (Some(d @ Json::Obj(_)), None) => (persona::build(d)?, "PERSONA".to_string()),
+        (Some(_), None) => return Err(perr("arguments.persona", "must be an object (the JSON form of a persona file)")),
+        (None, Some(Json::Str(f))) => (persona::load(f)?.0, f.clone()),
+        (None, Some(_)) => return Err(perr("arguments.persona_path", "a file path")),
+        _ => return Err(perr("arguments", "give exactly one of persona (a document) or persona_path")) };
+    let props = match (get("never"), get("props")) {
+        // a rule: an object, or one line of the YAML subset (as `--never`)
+        (Some(Json::Str(t)), None) => { let d = persona::parse_doc(&format!("never: {t}"), false).map_err(|e| perr("arguments.never", e))?;
+            persona::props(&p, d.get("never").unwrap_or(&Json::Null), "arguments.never", "never")? }
+        (Some(r), None) => persona::props(&p, r, "arguments.never", "never")?,
+        (None, Some(d)) => persona::props(&p, d, "arguments.props", "prop1")?,
+        _ => return Err(perr("arguments", "give exactly one of never (a rule) or props (a list of rules)")) };
+    let whole = |k: &str, d: usize, lo: usize, hi: usize| -> Result<usize, crate::json::InErr> { match get(k) { None => Ok(d),
+        Some(Json::Num(x)) if x.fract() == 0.0 && *x >= lo as f64 && *x <= hi as f64 => Ok(*x as usize), _ => Err(perr(&format!("arguments.{k}"), format!("an integer from {lo} to {hi}"))) } };
+    let nums = |k: &str, d: &[f64], hi: f64| -> Result<Vec<f64>, crate::json::InErr> { match get(k) { None => Ok(d.to_vec()),
+        Some(Json::Arr(a)) if !a.is_empty() => a.iter().map(|x| x.as_f64().filter(|x| *x >= 0.0 && *x <= hi)).collect::<Option<Vec<f64>>>().ok_or_else(|| perr(&format!("arguments.{k}"), format!("numbers from 0 to {hi}"))),
+        _ => Err(perr(&format!("arguments.{k}"), format!("a list of numbers from 0 to {hi}"))) } };
+    let sd = match get("seeds") { None => Some((0..100).collect()), Some(Json::Str(v)) => seeds(v),
+        Some(Json::Arr(a)) => a.iter().map(|x| x.as_f64().filter(|x| x.fract() == 0.0 && *x >= 0.0 && *x <= 9_007_199_254_740_992.0).map(|x| x as u64)).collect::<Option<Vec<u64>>>().filter(|v| !v.is_empty() && v.len() <= 100_000), _ => None }
+        .ok_or_else(|| perr("arguments.seeds", "e.g. \"0-99\", \"1,4,9\" or a list of integers (0 to 2^53, at most 100000)"))?;
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let s = Search { seeds: sd, fuzz_seed: whole("fuzz_seed", 0, 0, 1 << 53)? as u64, scripts: whole("scripts", 60, 0, 1_000_000)?, depth: whole("depth", 8, 1, 64)?, beam: whole("beam", 4, 0, 64)?,
+        grid: nums("grid", &[0.0, 0.5, 1.0], 1.0)?, hours: nums("hours", &[1.0, 12.0, 48.0], 1e6)?, threads: whole("threads", cores, 1, 1024)? };
+    let (res, turns) = fuzz(&p, &props, &s, eng);
+    Ok(doc(&p, &path, &props, &s, &res, turns))
+}
+
 #[cfg(test)]
 mod tests {
     //! `prove` never says proved (or held) where a stance breaks the property: against every event sequence of tiny random

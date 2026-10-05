@@ -71,12 +71,12 @@ class Mcp(unittest.TestCase):
         self.assertIn("result", r, r)
         return r["result"]
 
-    def test_legacy_handshake_lists_seven_tools(self):
+    def test_legacy_handshake_lists_eight_tools(self):
         init = self.legacy()
         self.assertEqual(init["protocolVersion"], "2025-06-18"); self.assertEqual(init["serverInfo"]["name"], "probbit")
         self.assertIn("tools", init["capabilities"]); self.assertNotIn("resultType", init)
         tools = self.c.request("tools/list")["result"]["tools"]
-        self.assertEqual([t["name"] for t in tools], ["probbit_decide", "probbit_run", "probbit_stats", "probbit_demo", "probbit_evaluate", "probbit_persona_init", "probbit_persona_turn"])
+        self.assertEqual([t["name"] for t in tools], ["probbit_decide", "probbit_run", "probbit_stats", "probbit_demo", "probbit_evaluate", "probbit_persona_init", "probbit_persona_turn", "probbit_persona_fuzz"])
         for t in tools:
             self.assertEqual(t["inputSchema"]["type"], "object"); self.assertTrue(t["description"])
         self.assertIn("flags", tools[0]["inputSchema"]["properties"]); self.assertIn("vars", tools[1]["inputSchema"]["properties"])
@@ -166,6 +166,25 @@ class Mcp(unittest.TestCase):
             e = self.call("probbit_persona_turn", args)
             self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
 
+    def test_persona_fuzz_answers_exactly_as_the_cli(self):
+        self.legacy("2025-11-25")
+        tutor = os.path.join(EX, "..", "probbit-cli", "tests", "fixtures", "persona", "tutor-0.5.0.yaml")
+        rule = "{when: {sentiment: negative}, then: {humour: {at_most: light}}}"
+        r = self.call("probbit_persona_fuzz", {"persona_path": tutor, "never": rule, "seeds": "0-4", "scripts": 10})
+        code, out = cli(["persona", "fuzz", tutor, "--never", rule, "--seeds", "0-4", "--scripts", "10", "--json"])
+        self.assertFalse(r["isError"]); self.assertEqual(code, 1)  # a counterexample: an answer (exit 1 on the CLI)
+        self.assertEqual(r["content"][0]["text"], out.rstrip("\n"))  # MCP answer == CLI answer, byte for byte
+        self.assertTrue(r["structuredContent"]["found"])
+        self.assertEqual(r["structuredContent"]["properties"][0]["shortest"]["script"], [{"sentiment": "negative"}])
+        with open(os.path.join(EX, "persona", "tutor.json"), encoding="utf-8") as f:
+            doc = json.load(f)
+        inline = self.call("probbit_persona_fuzz", {"persona": doc, "never": {"when": {"loss": True}, "then": {"humour": ["none"]}}, "seeds": [0, 1], "scripts": 5})
+        self.assertFalse(inline["isError"]); self.assertFalse(inline["structuredContent"]["found"])  # a habit never breaks
+        for args, where in (({"persona_path": tutor}, "arguments"), ({"persona_path": tutor, "never": rule, "seeds": "9-1"}, "arguments.seeds"),
+                            ({"persona_path": tutor, "never": rule, "extra": 1}, "arguments.extra"), ({"persona_path": tutor, "never": {"when": {"sentimentx": "negative"}, "then": {"humour": ["none"]}}}, "arguments.never.when.sentimentx")):
+            e = self.call("probbit_persona_fuzz", args)
+            self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
+
     def test_structured_content_from_2025_06_18_on(self):
         self.legacy("2024-11-05")
         r = self.call("probbit_demo", {"tasks": 3})
@@ -176,7 +195,7 @@ class Mcp(unittest.TestCase):
         self.assertEqual(d["resultType"], "complete"); self.assertIn("2026-07-28", d["supportedVersions"])
         self.assertEqual(d["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "probbit"); self.assertIn("tools", d["capabilities"])
         t = self.c.request("tools/list", meta=MODERN)["result"]
-        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 7)
+        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 8)
         r = self.call("probbit_demo", {"tasks": 4, "seed": 2}, MODERN)
         self.assertEqual(r["resultType"], "complete"); self.assertEqual(len(r["structuredContent"]["tasks"]), 4)
         e = self.c.request("tools/list", meta={"io.modelcontextprotocol/protocolVersion": "1999-01-01", "io.modelcontextprotocol/clientCapabilities": {}})["error"]

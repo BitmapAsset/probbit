@@ -11,7 +11,7 @@
 //!   --progress [MS] (decide, run, evaluate): one JSONL telemetry line on stderr every MS ms (default 100) while the decision runs
 //!   probbit stats [--sweeps N]                  # the processor's spec sheet: machine, build, effective controls + source, measured updates/s
 //!   probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]  # the individuality layer (docs/persona.md)
-//!   probbit mcp                                 # a Model Context Protocol server on stdio (tools probbit_decide, probbit_run, probbit_stats, probbit_demo, probbit_evaluate, probbit_persona_init, probbit_persona_turn)
+//!   probbit mcp                                 # a Model Context Protocol server on stdio (tools probbit_decide, probbit_run, probbit_stats, probbit_demo, probbit_evaluate, probbit_persona_init, probbit_persona_turn, probbit_persona_fuzz)
 //!   probbit version
 //!   probbit <command> --help | -h               # usage, every flag with its default, exit codes
 //!   probbit --help | -h                          # the usage above (stdout, exit 0); at a terminal the hero screen
@@ -500,13 +500,7 @@ fn list_arg(args: &[String], name: &str, default: &[f64], lo: f64, hi: f64) -> V
 fn seeds_arg(args: &[String]) -> Vec<u64> {
     let Some(k) = args.iter().position(|a| a == "--seeds") else { return (0..100).collect() };
     let v = args.get(k + 1).map_or("", String::as_str); let bad = || -> ! { fail(&format!("--seeds: cannot read {v:?} (e.g. 0-99, 7, or 1,4,9; seeds 0 to 2^53, at most 100000)")) };
-    let mut out: Vec<u64> = vec![];
-    for part in v.split(',') { let (a, b) = part.split_once('-').unwrap_or((part, part));
-        let (a, b): (u64, u64) = (a.trim().parse().unwrap_or_else(|_| bad()), b.trim().parse().unwrap_or_else(|_| bad()));
-        if a > b || b > 1 << 53 || b - a >= 100_000 { bad() }
-        for x in a..=b { if !out.contains(&x) { out.push(x); }
-            if out.len() > 100_000 { bad() } } }
-    out
+    fuzz::seeds(v).unwrap_or_else(|| bad())
 }
 /// `probbit persona fuzz PERSONA (--never RULE | --props FILE) [flags]` (docs/persona.md §5.6): exit 0 nothing found, 1 a
 /// counterexample, 2 bad input

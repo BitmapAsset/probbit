@@ -16,6 +16,8 @@
 //! `probbit_persona_init` and `probbit_persona_turn` (docs/persona.md) run in this process and are stateless: the persona (an inline
 //! document or a path) and the state go in, the state comes back. Their documents are the CLI's (`probbit persona init` / `turn`);
 //! a refusal or a fallback stance is an answer, a bad persona, state or input a tool error with the `persona` error object.
+//! `probbit_persona_fuzz` (docs/persona.md §5.6) runs in this process too: `probbit persona fuzz --json`'s document; a counterexample
+//! is an answer, a bad persona or rule a tool error.
 use crate::json::{self, num, obj, str as jstr, Json};
 use std::io::{BufRead, Write};
 
@@ -42,7 +44,7 @@ fn result(id: Json, era: &Era, mut r: Vec<(&str, Json)>) -> Json {
     obj(vec![("jsonrpc", jstr("2.0")), ("id", id), ("result", obj(r))])
 }
 fn server_info() -> Json { obj(vec![("name", jstr("probbit")), ("title", jstr("probbit virtual p-bit processor")), ("version", jstr(VERSION))]) }
-const INSTRUCTIONS: &str = "probbit is a virtual p-bit processor for joint decisions under hard rules. probbit_decide routes tasks to workers (allowed sets, quotas, clamps, affinity) and returns a plan that obeys every rule, odds per task and a verdict: exact, diagnostics_passed, partial (act on `released`, escalate `escalated`), refused or infeasible. probbit_run does the same for a general probbit-ir program. probbit_evaluate takes a decision model's System One request and the judge's per-question probabilities plus rules over question ids, and returns the most likely answer set that obeys every rule in the judge's response shape, with odds and the gate's verdict. Pass \"flags\": {\"summary\": true} for a compact answer. probbit_demo makes a sample routing document; probbit_stats measures the machine. probbit_persona_init and probbit_persona_turn give an agent an individual temperament that lives outside the model: start an individual with probbit_persona_init, then each turn pass the persona, the returned state and the turn's inputs to probbit_persona_turn and put the returned stance `line` into the model's prompt (after any cached prefix).";
+const INSTRUCTIONS: &str = "probbit is a virtual p-bit processor for joint decisions under hard rules. probbit_decide routes tasks to workers (allowed sets, quotas, clamps, affinity) and returns a plan that obeys every rule, odds per task and a verdict: exact, diagnostics_passed, partial (act on `released`, escalate `escalated`), refused or infeasible. probbit_run does the same for a general probbit-ir program. probbit_evaluate takes a decision model's System One request and the judge's per-question probabilities plus rules over question ids, and returns the most likely answer set that obeys every rule in the judge's response shape, with odds and the gate's verdict. Pass \"flags\": {\"summary\": true} for a compact answer. probbit_demo makes a sample routing document; probbit_stats measures the machine. probbit_persona_init and probbit_persona_turn give an agent an individual temperament that lives outside the model: start an individual with probbit_persona_init, then each turn pass the persona, the returned state and the turn's inputs to probbit_persona_turn and put the returned stance `line` into the model's prompt (after any cached prefix). probbit_persona_fuzz tests a persona's character: a rule in habit syntax and a population of individuals -> the shortest event script whose stance breaks it, per individual.";
 
 /// Serve until stdin closes.
 pub fn serve() {
@@ -108,6 +110,7 @@ fn handle(msg: &Json, session: &mut Option<String>) -> Option<Json> {
 fn call(name: &str, args: Option<&Json>) -> Result<(String, Option<Json>, bool), String> {
     let args: Vec<(String, Json)> = match args { None | Some(Json::Null) => vec![], Some(Json::Obj(v)) => v.clone(), Some(_) => return Err("invalid params: \"arguments\" must be an object".into()) };
     if name == "probbit_persona_init" || name == "probbit_persona_turn" { return Ok(persona_tool(name, &args)); }
+    if name == "probbit_persona_fuzz" { return Ok(fuzz_tool(&args)); }
     let (cmd, doc, flags) = match name {
         "probbit_decide" | "probbit_run" | "probbit_evaluate" => { let (f, d): (Vec<_>, Vec<_>) = args.into_iter().partition(|(k, _)| k == "flags");
             let flags = match f.into_iter().next().map(|(_, x)| x) { None | Some(Json::Null) => vec![], Some(Json::Obj(v)) => v, Some(_) => return Ok(("\"flags\" must be an object".into(), None, true)) };
@@ -142,6 +145,15 @@ fn persona_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, b
     let eng = crate::persona_engine(); let r = crate::persona::tool(name, args, &eng, true);
     let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
     log(&format!("tools/call {name} -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
+    (crate::persona::canon(&doc), Some(doc), is_error)
+}
+
+/// `probbit_persona_fuzz`, in process -> (text, structured JSON, isError); a counterexample is an answer
+fn fuzz_tool(args: &[(String, Json)]) -> (String, Option<Json>, bool) {
+    let t0 = std::time::Instant::now();
+    let eng = crate::persona_engine(); let r = crate::fuzz::tool(args, &eng);
+    let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
+    log(&format!("tools/call probbit_persona_fuzz -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
     (crate::persona::canon(&doc), Some(doc), is_error)
 }
 
@@ -195,6 +207,14 @@ fn tools() -> Json {
               "state": {{"type": "object", "description": "the state returned by probbit_persona_init or by the previous probbit_persona_turn"}},
               "inputs": {{"type": "object", "description": "this turn's evidence, keyed by input id; flags true/false, level inputs a level name, numbers 0..max; inputs the persona does not declare are listed in stance.ignored", "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
               "flags": {{"type": "object", "additionalProperties": false, "properties": {{"timing": {{"type": "boolean", "description": "add a non-canonical timing object to the stance"}}, "no_inertia": {{"type": "boolean", "description": "ignore mood inertia for this turn (diagnostics)"}}}}}}}}}}"#))),
+        tool("probbit_persona_fuzz", "Test a persona's character", "probbit persona fuzz: a persona (inline document or a file path) and a character property in habit syntax (never: {when, then}; or props: a list of them) -> for each individual (seeds, default 0-99) the shortest event script whose stance breaks it, shrunk, with the replay command; `found` says whether any did. It tests the stance a host gets, not the words a model writes; none found is evidence, not a proof. The document of probbit persona fuzz --json.",
+            p(&format!(r#"{{"type": "object", "additionalProperties": false, "properties": {{{PERSONA_ARG},
+              "never": {{"type": ["object", "string"], "description": "one rule in habit syntax, e.g. {{\"when\": {{\"sentiment\": \"negative\"}}, \"then\": {{\"humour\": {{\"at_most\": \"light\"}}}}}} (or one line of YAML)"}},
+              "props": {{"type": ["array", "object"], "description": "several rules, each with an optional id (or {{\"props\": [...]}})"}},
+              "seeds": {{"type": ["string", "array"], "description": "the individuals: \"0-99\" (default), \"1,4,9\" or a list of integers"}},
+              "fuzz_seed": {{"type": "integer", "minimum": 0}}, "scripts": {{"type": "integer", "minimum": 0, "maximum": 1000000}}, "depth": {{"type": "integer", "minimum": 1, "maximum": 64}},
+              "beam": {{"type": "integer", "minimum": 0, "maximum": 64}}, "grid": {{"type": "array", "items": {{"type": "number", "minimum": 0, "maximum": 1}}}},
+              "hours": {{"type": "array", "items": {{"type": "number", "minimum": 0}}}}, "threads": {{"type": "integer", "minimum": 1, "maximum": 1024}}}}}}"#))),
     ])
 }
 
