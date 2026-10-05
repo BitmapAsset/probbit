@@ -514,3 +514,24 @@ fn lint_with_rules_proves_then_fuzzes_the_unknown_ones() {
     assert_eq!(s(&parse(&out), &["ok"]), &Json::Bool(true));
     let _ = std::fs::remove_file(&props);
 }
+
+/// The tutor as it ships now (one habit more, no_play_when_upset): "never playful when upset" is held by construction and the
+/// fuzzer finds nothing. On the 0.5.0 tutor's counterexample, `why` names the push's direction ("humour down", not "humour none"
+/// next to a playful stance), and `lint` warns that seed 1's planned humour (playful) is not its most likely level (light); a
+/// warning does not change the exit code.
+#[test]
+fn the_fixed_tutor_holds_and_lint_warns_when_the_plan_is_not_the_mode() {
+    let tutor = "examples/persona/tutor.yaml";
+    let (c, out, e) = probbit_at_root(&["persona", "prove", tutor, "--seeds", "0-99", "--never", UPSET_NOT_PLAYFUL]); assert_eq!(c, 0, "{e}");
+    assert!(out.contains("  held by construction  (habit no_play_when_upset)"), "{out}");
+    let (c, out, e) = probbit_at_root(&["persona", "fuzz", tutor, "--seeds", "0-19", "--scripts", "20", "--never", UPSET_NOT_PLAYFUL]); assert_eq!(c, 0, "{e}");
+    assert!(out.contains("none found  0 of 20 individuals broke it"), "{out}");
+    let (c, rep, e) = probbit_at_root(&["persona", "replay", TUTOR_050, "--seed", "1", "--script", r#"[{"sentiment":"negative"}]"#]); assert_eq!(c, 0, "{e}");
+    let t = parse(rep.trim_end()); assert_eq!(s(&t, &["stance", "humour", "level"]).as_str(), Some("playful"));
+    assert_eq!(s(&t, &["why"]).as_str(), Some("learner upset -> valence down, humour down"));
+    let (c, l, e) = probbit_at_root(&["persona", "lint", TUTOR_050, "--seeds", "1"]); assert_eq!(c, 0, "{e}");
+    let w = s(&parse(&l), &["warnings"]).as_arr().unwrap().to_vec(); assert_eq!(w.len(), 1, "{l}");
+    assert_eq!((s(&w[0], &["trait"]).as_str(), jw(s(&w[0], &["example", "inputs"])), s(&w[0], &["example", "plan"]).as_str(), s(&w[0], &["example", "mode"]).as_str()),
+        (Some("humour"), r#"{"sentiment":"negative"}"#.to_string(), Some("playful"), Some("light")));
+    assert_eq!((s(&w[0], &["example", "p_plan"]).as_f64(), s(&w[0], &["example", "p_mode"]).as_f64()), (Some(0.410818), Some(0.424967)));
+}

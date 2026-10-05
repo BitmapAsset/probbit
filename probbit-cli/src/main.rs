@@ -582,10 +582,11 @@ fn persona_cmd(args: &[String]) {
         "describe" => emit(&persona::canon(&persona::describe(&p))),
         "fuzz" | "prove" => fuzz_cmd(args, path, &p, &engine),
         _ => { let found = persona::lint(&p, eng); let unresolved = found.iter().filter(|f| !f.get("resolution").and_then(Json::as_str).is_some_and(|r| r.starts_with("yield"))).count();
-            let mut doc = vec![("persona", jstr(&p.name)), ("conflicts", Json::Arr(found)), ("unresolved", num(unresolved as f64))]; let mut broken = 0;
+            let seeds = seeds_arg(args); let warnings = persona::plan_warnings(&p, &seeds, eng);
+            let mut doc = vec![("persona", jstr(&p.name)), ("conflicts", Json::Arr(found)), ("unresolved", num(unresolved as f64)), ("warnings", Json::Arr(warnings))]; let mut broken = 0;
             // with rules (§5.6): prove each one, then fuzz the ones the bound leaves unknown
             if args.iter().any(|a| a == "--never" || a == "--props") {
-                let props = rules_arg(args, &p); let (seeds, threads) = (seeds_arg(args), arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024));
+                let props = rules_arg(args, &p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);
                 let verdicts = fuzz::prove(&p, &props, &seeds, threads, &engine);
                 let unknown: Vec<persona::Prop> = props.iter().zip(&verdicts).filter(|(_, v)| matches!(v, fuzz::Verdict::Unknown { .. })).map(|(q, _)| q.clone()).collect();
                 let s = fuzz::Search { seeds: seeds.clone(), fuzz_seed: 0, scripts: 60, depth: 8, beam: 4, grid: vec![0.0, 0.5, 1.0], hours: vec![1.0, 12.0, 48.0], threads };

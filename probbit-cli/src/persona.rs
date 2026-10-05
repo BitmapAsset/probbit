@@ -1044,6 +1044,31 @@ pub fn lint(p: &Persona, eng: Engine) -> Vec<Json> {
         Json::Obj(vec![("habits".into(), jstrs(&hs)), ("when_prev".into(), Json::Arr(when)), ("resolution".into(), Json::Str(res))]) }).collect()
 }
 
+/// `lint`'s decoding check (a warning, not an error): the stance is the joint plan, the most likely stance as a whole, so on
+/// coupled traits a trait's planned level can differ from its own most likely level (its marginal mode). Probes: each seed's
+/// individual at rest, then a quiet turn and every declared input alone (numbers at their maximum). -> per trait where that
+/// happens on a vouched, not unsure, turn: how many probe turns, out of how many, and the earliest one.
+pub fn plan_warnings(p: &Persona, seeds: &[u64], eng: Engine) -> Vec<Json> {
+    let mut probes: Vec<Vec<(String, Json)>> = vec![vec![]];
+    for (id, _, vals) in alphabet(p, &[1.0], &[]) { for v in vals { probes.push(vec![(id.clone(), v)]); } }
+    let traits: Vec<&Var> = p.vars.iter().filter(|v| !v.mood).collect();
+    let (mut found, mut total): (Vec<(usize, Option<Json>)>, usize) = (vec![(0, None); traits.len()], 0);
+    for &seed in seeds { let st = init(p, Some(seed), true, eng);
+        for e in &probes { let Ok((doc, _)) = turn(p, &st, &Json::Obj(e.clone()), false, eng, false) else { continue }; total += 1;
+            let unsure = doc.get("unsure").and_then(Json::as_arr).unwrap_or(&[]).to_vec();
+            for (i, v) in traits.iter().enumerate() { let Some(x) = doc.get("stance").and_then(|s| s.get(&v.id)) else { continue };
+                if x.get("released") != Some(&Json::Bool(true)) || unsure.contains(&Json::Str(v.id.clone())) { continue; }
+                let plan = x.get("level").and_then(Json::as_str).unwrap_or(""); let odds = x.get("odds").and_then(Json::as_obj).unwrap_or(&[]);
+                let pp = odds.iter().find(|(l, _)| l == plan).and_then(|(_, q)| q.as_f64()).unwrap_or(0.0);
+                let (mut mode, mut pm) = (plan, pp); for (l, q) in odds { if q.as_f64().unwrap_or(0.0) > pm { (mode, pm) = (l.as_str(), q.as_f64().unwrap_or(0.0)); } }
+                if pm <= pp + 1e-9 { continue; } found[i].0 += 1;
+                if found[i].1.is_none() { found[i].1 = Some(Json::Obj(vec![("seed".into(), Json::Num(seed as f64)), ("inputs".into(), Json::Obj(e.clone())),
+                    ("plan".into(), Json::Str(plan.into())), ("p_plan".into(), Json::Num(pp)), ("mode".into(), Json::Str(mode.into())), ("p_mode".into(), Json::Num(pm))])); } } } }
+    traits.iter().zip(found).filter(|(_, f)| f.0 > 0).map(|(v, (n, example))| Json::Obj(vec![("trait".into(), Json::Str(v.id.clone())), ("turns".into(), Json::Num(n as f64)),
+        ("of".into(), Json::Num(total as f64)), ("example".into(), example.unwrap_or(Json::Null)),
+        ("note".into(), Json::Str("planned level differs from the trait's own most likely level (the stance is the most likely stance as a whole); a habit pins the level, a `vouch` floor with a `hold` holds it when the odds are low".into()))])).collect()
+}
+
 /// Total-variation distance between two odds objects over the same levels (None if their levels differ)
 fn tv(oa: &[(String, Json)], ob: &[(String, Json)]) -> Option<f64> {
     let mut ka: Vec<&String> = oa.iter().map(|(k, _)| k).collect(); let mut kb: Vec<&String> = ob.iter().map(|(k, _)| k).collect(); ka.sort(); kb.sort();

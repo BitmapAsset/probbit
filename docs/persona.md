@@ -381,6 +381,16 @@ tie, the later-declared one), the turn is re-solved, and `habits.yielded` and `e
 previous level their `prev` restrictions read) for an empty stance, and reports each contradiction with its resolution.
 Run it before shipping a persona.
 
+**Plan and mode.** A stance level is the joint plan's, so on coupled traits it can differ from the trait's own most likely level
+(section 4): the 0.5.0 tutor's seed 1, told the learner is upset, planned humour `playful` (odds 0.411) while `light` had 0.425,
+and valence `up` (0.386) while `even` had 0.457; the two are coupled (`align: 1.0`) and the plan took their high levels
+together. `lint` also probes every individual of `--seeds` (default 0-99): at rest, a quiet turn, then every declared input
+alone (numbers at their maximum). `warnings` lists each trait whose planned level differs from its marginal mode on a released,
+not unsure, probe turn, with the count and the earliest case (`example`). A warning is advice and leaves the exit code alone.
+The options, none of which changes decoding: a habit pins the level where it matters (what the tutor does now); a `vouch` floor
+with a `hold` holds the trait when its top odds are low; a host that wants each trait's own most likely level can read it from
+`odds`.
+
 ### 5.6 Testing a character
 
 A **character property** is a rule in habit syntax that a stance must never break, for example "never playful when the
@@ -457,7 +467,7 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona replay PERSONA [--seed N] --script JSON\|FILE [--out TRACE] [--no-inertia] [--timing]` | `init`, then every turn of a script: one stance per line; stderr: the trace's sha256 and the final state digest |
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
-| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); exit 1 if a contradiction is unresolved or a rule breaks |
+| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); exit 1 if a contradiction is unresolved or a rule breaks |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |
