@@ -250,3 +250,112 @@ pub fn human(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Opt
     o.join("\n")
 }
 
+#[cfg(test)]
+mod tests {
+    //! `prove` never says proved (or held) where a stance breaks the property: against every event sequence of tiny random
+    //! personas, against the fuzzer on random personas, and with habits as properties
+    use super::*;
+    use crate::json;
+
+    fn run(prog: &Json, f: &persona::Flags) -> Json { persona::run_program(prog, f, 1, 100, 0) }
+    /// A habit of a generated persona: id, `when`, `then` (JSON text) and priority
+    struct H { id: String, when: String, then: String, priority: usize }
+    /// A random persona: 2-3 traits (2-3 levels), a mood (inertia 0.3-0.8) coupled to each, flags f0 and f1, a level input lv (neg,
+    /// neu, pos); with `big` also a number n0 and a streak of f0. 0-2 conditional habits (level lists, not, at_most / at_least with
+    /// levels or prev); conflicts by fallback or yield. -> (persona, trait ids with their level counts, habits)
+    fn persona_at(r: &mut Philox4x32, big: bool) -> (Persona, Vec<(String, usize)>, Vec<H>) {
+        let w = |r: &mut Philox4x32| ((r.f64() * 4.0 - 2.0) * 100.0).round() / 100.0;
+        let lv = |n: usize| (0..n).map(|i| format!("\"l{i}\"")).collect::<Vec<_>>().join(",");
+        let (mut traits, mut tl) = (vec![], vec![]);
+        for t in ["a", "b", "c"].iter().take(2 + r.below(2)) { let n = 2 + r.below(2); tl.push((t.to_string(), n));
+            traits.push(format!(r#"{{"id":"{t}","levels":[{}],"logw":[{}],"spread":0.4}}"#, lv(n), (0..n).map(|_| w(r).to_string()).collect::<Vec<_>>().join(","))); }
+        let couplings: Vec<String> = tl.iter().map(|(t, _)| format!(r#"{{"vars":["m","{t}"],"align":{}}}"#, w(r))).collect();
+        let eff = |r: &mut Philox4x32| { let mut e = vec![format!(r#""m":{}"#, w(r) * 1.5)]; for (t, _) in &tl { if r.below(2) == 0 { e.push(format!(r#""{t}":{}"#, w(r))); } } format!("{{{}}}", e.join(",")) };
+        let mut inputs = vec![format!(r#"{{"id":"f0","kind":"flag","effects":{}}}"#, eff(r)), format!(r#"{{"id":"f1","kind":"flag","effects":{}}}"#, eff(r)),
+            format!(r#"{{"id":"lv","kind":"level","levels":["neg","neu","pos"],"default":"neu","effects":{{"neg":{},"pos":{}}}}}"#, eff(r), eff(r))];
+        let mut whens = vec![r#"{"f0":true}"#, r#"{"f1":true}"#, r#"{"lv":"neg"}"#, r#"{"lv":["neg","pos"]}"#];
+        let mut history = String::new();
+        if big { inputs.push(format!(r#"{{"id":"n0","kind":"number","effects":{}}}"#, eff(r)));
+            history = format!(r#","history":[{{"id":"streak","of":"f0","kind":"streak","cap":3,"effects":{}}}]"#, eff(r)); whens.extend([r#"{"n0":0.5}"#, r#"{"streak":2}"#]); }
+        let mut habits = vec![];
+        for i in 0..r.below(3) { let (t, n) = tl[r.below(tl.len())].clone();
+            let then = match r.below(4) { 0 => format!(r#"{{"{t}":["l{}"]}}"#, r.below(n)), 1 => format!(r#"{{"{t}":{{"not":["l{}"]}}}}"#, r.below(n)),
+                2 => format!(r#"{{"{t}":{{"at_most":"{}"}}}}"#, ["prev".to_string(), format!("l{}", r.below(n))][r.below(2)]), _ => format!(r#"{{"{t}":{{"at_least":"{}"}}}}"#, ["prev".to_string(), format!("l{}", r.below(n))][r.below(2)]) };
+            habits.push(H { id: format!("h{i}"), when: whens[r.below(whens.len())].to_string(), then, priority: r.below(2) }); }
+        let hj: Vec<String> = habits.iter().map(|h| format!(r#"{{"id":"{}","when":{},"then":{},"priority":{}}}"#, h.id, h.when, h.then, h.priority)).collect();
+        let doc = format!(r#"{{"probbit_persona":1,"identity":{{"name":"T","version":"1","seed":1}},"traits":[{}],"moods":[{{"id":"m","levels":["down","even","up"],"inertia":{}}}],"couplings":[{}],"inputs":[{}]{history},"habits":[{}],"engine":{{"on_conflict":"{}"}}}}"#,
+            traits.join(","), (30 + r.below(51)) as f64 / 100.0, couplings.join(","), inputs.join(","), hj.join(","), ["fallback", "yield"][r.below(2)]);
+        let p = persona::build(&json::parse(&doc).unwrap()).unwrap_or_else(|e| panic!("{}: {} in {doc}", e.path, e.msg));
+        (p, tl, habits)
+    }
+    /// Three random properties (a condition on f0, f1 or lv, or none; a restriction of one trait or the mood) and every habit's own
+    /// rule as a property
+    fn props_of(r: &mut Philox4x32, p: &Persona, tl: &[(String, usize)], habits: &[H]) -> Vec<Prop> {
+        let mut out: Vec<String> = (0..3).map(|i| { let when = [r#"{"f0":true}"#, r#"{"f1":true}"#, r#"{"lv":"neg"}"#, r#"{"lv":"pos"}"#, "{}"][r.below(5)];
+            let (t, n) = if r.below(4) == 0 { ("m".to_string(), 3) } else { tl[r.below(tl.len())].clone() }; let lvl = |k: usize| if t == "m" { ["down", "even", "up"][k].to_string() } else { format!("l{k}") };
+            let restr = match r.below(3) { 0 => format!(r#"{{"at_most":"{}"}}"#, lvl(r.below(n - 1))), 1 => format!(r#"{{"at_least":"{}"}}"#, lvl(1 + r.below(n - 1))), _ => format!(r#"{{"not":["{}"]}}"#, lvl(r.below(n))) };
+            format!(r#"{{"id":"p{i}","when":{when},"then":{{"{t}":{restr}}}}}"#) }).collect();
+        out.extend(habits.iter().map(|h| format!(r#"{{"id":"{}","when":{},"then":{}}}"#, h.id, h.when, h.then)));
+        persona::props(p, &json::parse(&format!(r#"{{"props":[{}]}}"#, out.join(","))).unwrap(), "props", "prop1").unwrap_or_else(|e| panic!("{}: {}", e.path, e.msg))
+    }
+    /// Every event sequence over `alpha` up to `depth` events from `st`: which properties some turn breaks
+    fn every_sequence(p: &Persona, prs: &[Prop], st: &State, alpha: &[Json], depth: usize, broken: &mut [bool]) {
+        if depth == 0 { return; }
+        for e in alpha { let (doc, ns) = persona::turn(p, st, e, false, &run, false).unwrap();
+            for (i, pr) in prs.iter().enumerate() { if persona::breaks(p, pr, st, &doc).is_some() { broken[i] = true; } }
+            every_sequence(p, prs, &ns, alpha, depth - 1, broken); }
+    }
+
+    /// (i) Brute force: 16 tiny personas x 2 individuals x their properties, every sequence of up to 3 events over all 12 input
+    /// combinations and up to 5 over 4 of them; a property prove calls held or proved never breaks
+    #[test]
+    fn prove_agrees_with_every_event_sequence_of_tiny_personas() {
+        let ev = |s: &str| json::parse(s).unwrap();
+        let all: Vec<Json> = [false, true].iter().flat_map(|a| [false, true].iter().flat_map(move |b| ["neg", "neu", "pos"].iter().map(move |l| ev(&format!(r#"{{"f0":{a},"f1":{b},"lv":"{l}"}}"#))))).collect();
+        let few: Vec<Json> = [r#"{}"#, r#"{"f0":true}"#, r#"{"lv":"neg"}"#, r#"{"f1":true,"lv":"pos"}"#].iter().map(|s| ev(s)).collect();
+        let res = par(16, std::thread::available_parallelism().map_or(1, |n| n.get()), |k| {
+            let mut r = Philox4x32::new(38, k as u64); let (p, tl, habits) = persona_at(&mut r, false); let prs = props_of(&mut r, &p, &tl, &habits);
+            let mut out = vec![];
+            for seed in [0u64, 7] {
+                let st0 = persona::init(&p, Some(seed), true, &run); let mut broken = vec![false; prs.len()];
+                every_sequence(&p, &prs, &st0, &all, 3, &mut broken); every_sequence(&p, &prs, &st0, &few, 5, &mut broken);
+                for (i, pr) in prs.iter().enumerate() { let held = persona::by_construction(&p, pr, &run).is_some(); let proved = persona::prove_seed(&p, pr, seed, &run).is_ok();
+                    assert!(!(broken[i] && (held || proved)), "persona {k} seed {seed}: {} {} is {} but a sequence breaks it", pr.id, persona::canon(&pr.rule), if held { "held" } else { "proved" });
+                    out.push((held || proved, broken[i])); } }
+            out });
+        let all: Vec<(bool, bool)> = res.into_iter().flatten().collect();
+        let (yes, broke) = (all.iter().filter(|x| x.0).count(), all.iter().filter(|x| x.1).count());
+        assert!(yes >= 5 && broke >= 5, "the check must see both sides: {yes} held or proved, {broke} broken of {}", all.len());
+    }
+
+    /// (ii) Property-based: 16 random personas (numbers, a streak, habits) x 3 individuals x their properties: whenever the fuzzer
+    /// finds a counterexample, prove did not say held or proved
+    #[test]
+    fn prove_never_proves_what_the_fuzzer_breaks() {
+        let s = Search { seeds: vec![0, 1, 2], fuzz_seed: 5, scripts: 40, depth: 5, beam: 3, grid: vec![0.0, 0.5, 1.0], hours: vec![1.0], threads: 1 };
+        let res = par(16, std::thread::available_parallelism().map_or(1, |n| n.get()), |k| {
+            let mut r = Philox4x32::new(380, k as u64); let (p, tl, habits) = persona_at(&mut r, true); let prs = props_of(&mut r, &p, &tl, &habits);
+            let (found, _) = fuzz(&p, &prs, &s, &run); let mut n = (0, 0);
+            for (pr, f) in prs.iter().zip(&found) { let held = persona::by_construction(&p, pr, &run).is_some();
+                for (seed, f) in s.seeds.iter().zip(f) { if f.is_none() { continue; } n.0 += 1;
+                    assert!(!held, "persona {k}: {} held by construction but the fuzzer breaks it (seed {seed})", pr.id);
+                    assert!(persona::prove_seed(&p, pr, *seed, &run).is_err(), "persona {k}: {} proved for seed {seed} but the fuzzer breaks it", pr.id); }
+                n.1 += s.seeds.iter().filter(|sd| persona::prove_seed(&p, pr, **sd, &run).is_ok()).count(); }
+            n });
+        let (found, proved) = res.iter().fold((0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+        assert!(found >= 10 && proved >= 10, "the check must see both sides: {found} counterexamples, {proved} proved");
+    }
+
+    /// (iii) A habit's own rule is held by construction: every habit under on_conflict fallback, the top-ranked habit under yield
+    #[test]
+    fn habits_are_held_by_construction() {
+        let mut checked = 0;
+        for k in 0..40u64 {
+            let mut r = Philox4x32::new(3800, k); let (p, tl, habits) = persona_at(&mut r, true); if habits.is_empty() { continue; }
+            let prs = props_of(&mut r, &p, &tl, &habits);
+            let top = habits.iter().enumerate().max_by(|(i, a), (j, b)| a.priority.cmp(&b.priority).then(j.cmp(i))).map(|(_, h)| h.id.clone()).unwrap();
+            for pr in prs.iter().filter(|pr| habits.iter().any(|h| h.id == pr.id)) {
+                if !p.yields() || pr.id == top { assert!(persona::by_construction(&p, pr, &run).is_some(), "persona {k}: habit {} is not held by construction", pr.id); checked += 1; } } }
+        assert!(checked >= 20, "{checked} habits checked");
+    }
+}
