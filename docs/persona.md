@@ -415,6 +415,10 @@ program leaves the exact tiers is `unknown`. `held by construction` relies on ev
 every rule in force. A rule with raw `rules` (not `then`) is fuzzed but not proved. The bound is per cell with the moods at
 the edges of their box, so a soft rule whose margin is small stays `unknown` even when no script breaks it.
 
+**`lint --props FILE`** (or `--never RULE`) runs both for CI: `prove` on every rule, then `fuzz` (the default search) on the
+ones it leaves unknown; the lint document gets `props` (each rule's `prove` entry, with a `fuzz` entry when it was unknown) and
+`broken`; exit 1 when a contradiction is unresolved or a rule breaks.
+
 Exit codes: `fuzz` 0 nothing found, 1 a counterexample; `prove` 0 every rule held or proved, 1 some rule unknown; both 2 bad
 input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); timing goes to stderr.
 
@@ -444,7 +448,7 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona replay PERSONA [--seed N] --script JSON\|FILE [--out TRACE] [--no-inertia] [--timing]` | `init`, then every turn of a script: one stance per line; stderr: the trace's sha256 and the final state digest |
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
-| `probbit persona lint PERSONA` | contradicting habits (section 5.5); exit 1 if one is unresolved |
+| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); exit 1 if a contradiction is unresolved or a rule breaks |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |

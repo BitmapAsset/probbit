@@ -23,6 +23,8 @@ All notable changes to this project are documented here. The format follows
   decide, with the `fuzz` command to search it). Human report or `--json` (`probbit_persona_prove: 1`). Exit 0 every rule held
   or proved, 1 some unknown, 2 bad input. Soundness tests: every event sequence of tiny random personas, the fuzzer on random
   personas, and mutations of the bound that the tests catch. It covers the stance, not the model's words.
+- `probbit persona lint --props FILE` (or `--never RULE`): the contradictions as before, then every rule proved, and the ones
+  the bound leaves unknown fuzzed; the lint document gets `props` and `broken`; exit 1 when a rule breaks (CI-friendly).
 - MCP tool `probbit_persona_fuzz` (the eighth tool of `probbit mcp`): `probbit persona fuzz --json`'s document for a persona
   (inline or a path) and `never` / `props`, byte for byte, in the server's process. Python: `probbit.persona_fuzz(...)` and
   `probbit.persona_prove(...)` return the `--json` documents (a counterexample or an unknown rule is an answer).

@@ -495,3 +495,21 @@ fn prove_gives_the_three_verdicts_on_the_0_5_0_tutor() {
     assert_eq!(s(&parse(&out), &["error", "code"]).as_str(), Some("persona"));
     let _ = std::fs::remove_file(&props);
 }
+
+/// `persona lint --props`: the contradictions as before, then every rule proved or held, and the unknown ones fuzzed; exit 1 and
+/// `ok` false when the fuzzer breaks one (the 0.5.0 tutor: never playful when upset), exit 0 when every rule is held or proved.
+#[test]
+fn lint_with_rules_proves_then_fuzzes_the_unknown_ones() {
+    let props = tmp("lint-props.json");
+    std::fs::write(&props, r#"{"props": [{"id": "loss_no_jokes", "when": {"loss": true}, "then": {"humour": ["none"]}},
+        {"id": "not_playful_upset", "when": {"sentiment": "negative"}, "then": {"humour": {"at_most": "light"}}}]}"#).unwrap();
+    let (c, out, e) = probbit_at_root(&["persona", "lint", TUTOR_050, "--props", &props, "--seeds", "0-4"]); assert_eq!(c, 1, "{e}");
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), s(&l, &["broken"]).as_f64(), s(&l, &["unresolved"]).as_f64()), (&Json::Bool(false), Some(1.0), Some(0.0)));
+    let p = s(&l, &["props"]).as_arr().unwrap();
+    assert_eq!((s(&p[0], &["verdict"]).as_str(), p[0].get("fuzz").is_none()), (Some("held_by_construction"), true));
+    assert_eq!((s(&p[1], &["verdict"]).as_str(), s(&p[1], &["fuzz", "verdict"]).as_str()), (Some("unknown"), Some("counterexample")));
+    assert_eq!(jw(s(&p[1], &["fuzz", "shortest", "script"])), r#"[{"sentiment":"negative"}]"#);
+    let (c, out, e) = probbit_at_root(&["persona", "lint", TUTOR_050, "--never", "{when: {sentiment: negative}, then: {directness: {at_most: balanced}}}", "--seeds", "0-2"]); assert_eq!(c, 0, "{e}");
+    assert_eq!(s(&parse(&out), &["ok"]), &Json::Bool(true));
+    let _ = std::fs::remove_file(&props);
+}
