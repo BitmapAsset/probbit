@@ -3,6 +3,25 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.6.0 - unreleased
+
+### Added
+- **`probbit persona fuzz`, character testing** (docs/persona.md): a rule in habit syntax (`--never '{when: {...}, then:
+  {...}}'`, or several in `--props FILE`) and a population of individuals (`--seeds 0-99`). It searches event scripts built from
+  the persona's declared inputs (flags, levels, numbers on `--grid`, idle hours on `--hours`): random scripts, then a beam guided
+  by the exact odds (the next events that put the most odds on a level the rule forbids). It shrinks each individual's shortest
+  counterexample by delta debugging and prints it with the breaking turn's levels, odds, why and stance line and the exact
+  `probbit persona replay` / `explain` commands that reproduce it. Human report or `--json` (`probbit_persona_fuzz: 1`).
+  Deterministic: Philox (probbit-core) keyed by `--fuzz-seed`; byte-identical output for the same inputs on any number of
+  threads (timing on stderr). Exit 0 nothing found, 1 a counterexample, 2 bad input. It tests the stance a host gets, not the
+  words a model writes; "none found" is evidence, not a proof.
+- `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`: the tutor as it shipped in 0.5.0, byte for byte, with the pinned
+  fuzz report on it (one upset message, `{"sentiment":"negative"}`, gives seed 1 a playful stance).
+
+### Changed
+- Version 0.6.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
+  `stdout_matches_the_0_6_0_goldens` (the documents are unchanged).
+
 ## 0.5.0 - 2026-10-05
 
 ### Added
