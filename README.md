@@ -365,11 +365,11 @@ is the format; [examples/persona/](examples/persona/) has three fictional person
 ```sh
 probbit persona init examples/persona/tutor.yaml --seed 2 --out pip.json      # an individual: genes from the seed
 probbit persona turn examples/persona/tutor.yaml --state pip.json --inputs '{"loss": true, "sentiment": "negative"}'
-#   "status":"ok", "humour":{"level":"none","p":1,...}, "warmth":{"level":"warm","p":0.952032,...}, habits active: no_jokes_on_loss, ...
-#   "line":"Stance: no jokes, be kind; one emoji at most; gentle; explain step by step; warm and encouraging; suggest what to try next; ask what they think first; casual."
-#   "why":"learner reports a failure -> humour none, valence down; learner upset -> valence down, humour none"     (pip.json is now turn 1)
+#   "status":"ok", "humour":{"level":"none","p":1,...}, "warmth":{"level":"warm","p":0.952032,...}, habits active: no_jokes_on_loss, no_play_when_upset, ...
+#   "line":"Stance: no jokes, be kind; go easy on the jokes; one emoji at most; gentle; explain step by step; warm and encouraging; suggest what to try next."
+#   "why":"learner reports a failure -> humour down, valence down; learner upset -> valence down, humour down"     (pip.json is now turn 1)
 probbit persona replay examples/persona/tutor.yaml --seed 2 --script examples/persona/workday.json   # 20 stances, the same bytes every run
-probbit persona lint examples/persona/tutor.yaml   # contradicting habits: confused_no_playful vs after_error_check, resolved by priority
+probbit persona lint examples/persona/tutor.yaml   # contradicting habits (confused_no_playful vs after_error_check, resolved by priority), plan-vs-odds warnings
 ```
 
 ```python
@@ -391,13 +391,38 @@ Measured in this run (Apple M4, macOS 26.5.2, 2026-10-02; the three example pers
   workday script; the tutor and the ops engineer (two persona files) by 0.45; the same persona and seed by 0;
 - habits: 0 violations over 2,160 turns of 12 random personas (every habit in force re-checked from the file), and each of the 481
   habits reported as binding is broken by the habit-free twin;
-- determinism: 1,000-turn replays are byte-identical across processes (3 personas x 2 seeds); the documents equal an independent
-  reference implementation's on 5,460 turns (the 60 golden turns and 5,400 turns of random inputs).
+- determinism: 1,000-turn replays are byte-identical across processes (3 personas x 2 seeds); the 0.5.0 documents equalled an
+  independent reference implementation's on 5,460 turns (the 60 golden turns and 5,400 turns of random inputs; 0.6.0 reworded
+  `why` and added a habit to the tutor, docs/persona.md §5.3).
 
 What a persona can NOT do: write, read or check text (text rules stay in the prompt or a checker); see what the host does not tell
 it; be a safety gate (keep approvals and permissions in plain code); its odds are its own model's, not measured probabilities that
 a user will like the reply; and it cannot make a model follow the line: whether a given model writes in the stance it is given has
 to be measured per model (no such measurement has been made here).
+
+### Test a character
+
+A character property is a rule in habit syntax the stance must never break. `fuzz` searches event scripts for each
+individual's shortest counterexample; `prove` says `held by construction`, `proved for every event sequence` or `unknown`. The
+tutor as it shipped in 0.5.0 is kept as a fixture, so this runs from a clone with no keys and no model:
+
+```sh
+probbit persona fuzz probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml --seeds 0-99 \
+  --never '{when: {sentiment: negative}, then: {humour: {at_most: light}}}'
+#   FAIL  67 of 100 individuals break it; shortest counterexample per individual: 1 event: 64, 2 events: 3
+#   seed 1, 1 event: [{"sentiment":"negative"}]
+#   turn 0: humour playful (odds none 0.164, light 0.425, playful 0.411); the rule allows none, light
+#   replay:  probbit persona replay probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml --seed 1 --script '[{"sentiment":"negative"}]'
+#   (exit 1; 42,833 turns searched, 2.3 s on an Apple M4 with 10 threads)
+probbit persona prove examples/persona/tutor.yaml --seeds 0-99 \
+  --never '{when: {sentiment: negative}, then: {humour: {at_most: light}}}'
+#   held by construction  (habit no_play_when_upset)      (exit 0; the tutor now ships with that one habit)
+```
+
+`probbit persona lint PERSONA --props rules.json` runs both in CI (exit 1 when a rule breaks); MCP `probbit_persona_fuzz` and
+Python `probbit.persona_fuzz` / `persona_prove` give the same documents. Both commands test the stance the host gets, not the
+words a model writes; "none found" from `fuzz` is evidence over the scripts it searched, not a proof
+([docs/persona.md](docs/persona.md) §5.6 has the bound and its limits).
 
 ## After any judge: `probbit evaluate`
 

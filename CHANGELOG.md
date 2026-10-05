@@ -31,10 +31,25 @@ All notable changes to this project are documented here. The format follows
 - docs/persona.md §5.6 "Testing a character": what a property is, both commands, the verdicts and the bound, the limits.
 - `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`: the tutor as it shipped in 0.5.0, byte for byte, with the pinned
   fuzz report on it (one upset message, `{"sentiment":"negative"}`, gives seed 1 a playful stance).
+- `probbit persona lint` warnings: a trait whose planned level differs from its own most likely level (its marginal mode) on a
+  probe turn (each individual of `--seeds` at rest, a quiet turn, then every declared input alone) is listed under `warnings`
+  with the count and the earliest case. A warning leaves the exit code alone, and decoding is unchanged (the stance is still the
+  joint plan); docs/persona.md §5.5 gives the options (a habit, a `vouch` floor with a `hold`, or the trait's `odds`).
+- README "Test a character": the fuzz counterexample on the 0.5.0 tutor and `held by construction` on the tutor as it ships now.
 
 ### Changed
 - Version 0.6.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
   `stdout_matches_the_0_6_0_goldens` (the documents are unchanged).
+- **The tutor example** (examples/persona/tutor.yaml, persona version 1.1.0) has one habit more, `no_play_when_upset`
+  (`when: {sentiment: negative}`, `then: {humour: {at_most: light}}`). In 0.5.0 one upset message made 67 of seeds 0-99
+  playful (`persona fuzz`), and the shipped workday golden itself had seed 1 playful on turn 11 ("still upset"); that turn is
+  now light, and `persona prove` says the rule is held by construction. The tutor's digest and goldens change; its genes
+  (individuals) do not. The habit fixes the stance the host gets, not the words a model writes.
+- `why` names an input's push by its direction (`learner upset -> valence down, humour down`) where it named the trait's
+  lowest or highest level ("humour none" printed next to a playful stance read as a contradiction). In the ops engineer's and
+  the trader assistant's goldens nothing but `why` changes.
+- docs/persona.md §5.3: the byte-for-byte parity with the reference implementation is stated for the 0.5.0 documents; the 0.6.0
+  goldens are regenerated from this implementation.
 
 ## 0.5.0 - 2026-10-05
 
