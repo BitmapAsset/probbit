@@ -124,6 +124,26 @@ mod tests {
         let t5 = &text[..text.len() - 10]; assert_eq!(verify(t5, &run).unwrap_err().0, 31);
     }
 
+    /// Idle time decays a mood by its half-life: one upset event, then a quiet gap of g hours, leaves the valence accumulator at
+    /// k · 0.5^(g / 6) · a1 (inertia k = 0.5, half-life 6 h), to the 6 decimals the state keeps; n quiet events with gaps g_i
+    /// leave k^n · 0.5^(Σ g_i / 6) · a1
+    #[test]
+    fn idle_time_decays_moods_by_the_closed_form() {
+        let doc = json::parse(DOC).unwrap(); let p = persona::build(&doc).unwrap();
+        let mood = |live: &Live| live.st.to_json(&live.p).get("mood").and_then(|m| m.get("valence")).and_then(Json::as_arr).unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<f64>>();
+        for g in [0.0, 0.5, 6.0, 12.0, 48.0, 1.234567] {
+            let (mut live, _) = Live::start(p.clone(), &doc, persona::init(&p, Some(4), true, &run), Clock::Fixed, "t");
+            live.event(&json::parse(r#"{"loss":true}"#).unwrap(), &run).unwrap(); let a1 = mood(&live); assert_eq!(a1, vec![0.5, 0.0, -0.5]);
+            live.event(&json::parse(&format!(r#"{{"elapsed_hours":{g}}}"#)).unwrap(), &run).unwrap();
+            let want: Vec<f64> = a1.iter().map(|a| persona::r6(0.5 * 0.5f64.powf(g / 6.0) * a)).collect(); assert_eq!(mood(&live), want, "gap {g} h");
+        }
+        let (mut live, _) = Live::start(p.clone(), &doc, persona::init(&p, Some(4), true, &run), Clock::Fixed, "t");
+        live.event(&json::parse(r#"{"loss":true}"#).unwrap(), &run).unwrap();
+        let gaps = [0.25, 3.0, 0.0, 7.5]; for g in gaps { live.event(&json::parse(&format!(r#"{{"elapsed_hours":{g}}}"#)).unwrap(), &run).unwrap(); }
+        let closed = 0.5f64.powi(4) * 0.5f64.powf(gaps.iter().sum::<f64>() / 6.0) * 0.5;
+        assert!((mood(&live)[0] - closed).abs() < 4e-6 && (mood(&live)[2] + closed).abs() < 4e-6, "{:?} vs ±{closed}", mood(&live));
+    }
+
     /// With the real clock an event may not carry its own elapsed hours; with the fixed clock it may, and a bad one is refused
     #[test]
     fn the_clock_owns_time() {
