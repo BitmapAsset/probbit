@@ -29,6 +29,25 @@ One binary under 2 MB, zero third-party dependencies, nothing phones home. Also 
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
 <p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
 
+## probbit in two minutes
+
+probbit is a p-bit processor: it couples bits that hold a probability on the CPU you already own, settles a whole plan under
+hard rules, gives the odds for every part (exact when the program allows) and refuses when it can't vouch for the answer.
+`probbit persona` adds an individual (a persona file + a seed): every turn, a stance line for the model's prompt and habits the
+stance never breaks; `fuzz` and `prove` test them.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh   # one binary, SHA-256 checked, no sudo
+probbit demo --tasks 12 | probbit decide --pretty     # 12 tasks, 6 workers: "verdict": "exact", 0 violations
+# the persona examples live in a clone: git clone https://github.com/BitmapAsset/probbit && cd probbit
+probbit persona init examples/persona/tutor.yaml --seed 2 --out tutor.state             # an individual: the tutor, seed 2
+probbit persona turn examples/persona/tutor.yaml --state tutor.state --inputs '{"sentiment":"negative"}'   # its stance line
+probbit persona prove examples/persona/tutor.yaml --seeds 0-99 --never '{when: {sentiment: negative}, then: {humour: {at_most: light}}}'   # held by construction
+probbit live examples/persona/tutor.yaml --seed 2 --demo week --plain | tail -4   # a week on the clock: learning inside caps, 0 rule breaks, replayable
+```
+What now? The [60-second tour](#60-second-tour), [docs/persona.md](docs/persona.md), [docs/agents.md](docs/agents.md) and
+[docs/CHEATSHEET.md](docs/CHEATSHEET.md) (verdicts, tiers, `bound`, exit codes, every command on one page).
+
 ## Try it in 30 seconds
 
 ```sh
@@ -369,7 +388,9 @@ Give an agent a temperament that lives outside the model. A **persona** is a sma
 priors, moods with inertia, soft couplings, per-turn evidence, and habits that are hard rules. A seed makes an individual. Every
 turn compiles persona + the individual's state + the turn's inputs into ONE probbit-ir program, answered exactly in process; the
 **stance** (a level per trait with exact odds, the habits in force and the ones that changed it, a refusal when the engine cannot
-vouch) comes with a short **stance line** a host puts into any model's prompt. The model still writes every word; the persona
+vouch) comes with a short **stance line** a host puts into any model's prompt: it is addressed to the model, which reads it as its
+instructions for this turn; an agent can read it to know its own stance; it is not addressed to the end user. The model still
+writes every word; the persona
 decides how they are written, and the same individual answers whatever model the host calls. [docs/persona.md](docs/persona.md)
 is the format; [examples/persona/](examples/persona/) has three fictional personas and their goldens.
 
@@ -660,6 +681,7 @@ or Windows.
 - Hardware backend through `probbit-ir` when a p-bit fabric is available.
 
 ## Documentation map
+- [docs/CHEATSHEET.md](docs/CHEATSHEET.md): one page: the verdicts, the tiers, `bound`, the exit codes, every persona and live command.
 - [BENCHMARKS.md](BENCHMARKS.md): every number, with machine, load and `N`.
 - [USE-CASES.md](USE-CASES.md): what the measurements support, by problem shape and by industry.
 - [docs/probbit-ir-json.md](docs/probbit-ir-json.md): the `probbit-ir` JSON v1 wire format, instructions, resource controls, limits.

@@ -5,6 +5,8 @@ traits, moods, habits and evidence rules. Every turn it compiles, with the agent
 probbit IR program**. probbit answers with the **stance** for that turn: a level for every trait with exact odds, the habits
 that were in force and the ones that changed the outcome, a refusal when the engine cannot vouch, a one-line explanation,
 and a short **stance line** (at most 40 tokens by default) that the host puts into whatever model writes the reply.
+The stance line is addressed to the model: the host puts it into the model's prompt for this turn (section 7), so the model
+reads it as its instructions for how to write; an agent can read it to know its own stance; it is not addressed to the end user.
 
 - **Same persona file + a different seed = a different, stable individual.** The seed fixes each individual's small,
   permanent offsets ("genes"); the same individual is recognisable on inputs it has never seen.
@@ -27,7 +29,8 @@ probbit persona turn examples/persona/tutor.yaml --state pip.json --inputs '{"lo
 ```
 
 Contents: 1 Files · 2 Schema · 3 Compilation · 4 The stance document · 5 State, canonical JSON, replay, testing, live · 6 What a
-persona can NOT do · 7 Commands and surfaces · 8 A model-proposed stance (the `evaluate` bridge) · 9 Versioning
+persona can NOT do · 7 Commands and surfaces · 8 A model-proposed stance (the `evaluate` bridge) · 9 Versioning.
+On one page (verdicts, tiers, `bound`, exit codes, every command): [CHEATSHEET.md](CHEATSHEET.md).
 
 ## 1. Files
 
