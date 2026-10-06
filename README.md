@@ -23,7 +23,7 @@
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
 Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
-One binary under 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
+One binary of about 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
 `probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
 
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
