@@ -108,9 +108,9 @@ class Live(unittest.TestCase):
             self.assertEqual(r["strand"]["events"], 3)
             v = probbit.live_verify(strand)
             self.assertEqual((v["ok"], v["events"], v["last_line"], v["final_state"]), (True, 3, r["strand"]["head"], r["state"]["digest"]))
-            with open(strand, encoding="utf-8") as f:
+            with open(strand, encoding="utf-8", newline="") as f:  # bytes as written: a strand is verified byte for byte (no CRLF on Windows)
                 text = f.read()
-            with open(strand, "w", encoding="utf-8") as f:
+            with open(strand, "w", encoding="utf-8", newline="") as f:
                 f.write(text.replace('"elapsed_hours":2.5', '"elapsed_hours":2.6'))
             self.assertEqual(probbit.live_verify(strand), {"ok": False, "line": 3, "diverges": "the stance differs"})
             with self.assertRaises(probbit.ProbbitInputError) as e:
