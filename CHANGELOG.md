@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.7.0 - unreleased
+## 0.7.0 - 2026-10-06
 
 ### Added
 - **Bounded learning** (docs/persona.md §2.8): an optional persona block `learning: {from: [reward, correction], traits, rate,
