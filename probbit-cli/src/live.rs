@@ -18,15 +18,24 @@ fn q6(h: f64) -> f64 { persona::r6(h) }
 
 /// A live individual: the persona, the current state, the clock and the strand's chain
 pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: String, pub n: u64 }
+/// A document with its keys sorted at every level (`persona::text` of it is its canonical JSON)
+fn sorted(j: &Json) -> Json {
+    match j { Json::Obj(v) => { let mut o: Vec<(String, Json)> = v.iter().map(|(k, x)| (k.clone(), sorted(x))).collect(); o.sort_by(|a, b| a.0.cmp(&b.0)); Json::Obj(o) }
+        Json::Arr(v) => Json::Arr(v.iter().map(sorted).collect()), x => x.clone() }
+}
+/// One line of a strand without its line ending: strands are written with `\n`; a `\r\n` copy (Windows text mode, an editor)
+/// reads the same, since a canonical JSON line never ends in `\r` itself
+fn bare(l: &str) -> &str { l.strip_suffix('\r').unwrap_or(l) }
 impl Live {
     /// Start a life from `st` (an `init` state or a stored one) -> (the individual, the strand's header line). The header keeps
     /// the persona document in its own key order (the compiled program follows it, and `engine.program` with it) and the
-    /// state as `to_json` writes it; it is compact JSON, not key-sorted.
+    /// state as canonical JSON (keys sorted), so a state read from a file and the same state from `init` give one header; the
+    /// header is compact JSON, not key-sorted.
     pub fn start(p: Persona, doc: &Json, st: State, clock: Clock, engine: &str) -> (Live, String) {
         let s = |x: &str| Json::Str(x.to_string());
         let header = persona::text(&Json::Obj(vec![("probbit_strand".into(), Json::Num(FORMAT)), ("engine".into(), s(engine)),
             ("persona".into(), Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest))])),
-            ("seed".into(), Json::Num(st.seed as f64)), ("state".into(), st.to_json(&p)), ("document".into(), doc.clone())]));
+            ("seed".into(), Json::Num(st.seed as f64)), ("state".into(), sorted(&st.to_json(&p))), ("document".into(), doc.clone())]));
         let prev = persona::digest_of(&header);
         (Live { p, st, clock, last: 0.0, prev, n: 0 }, header)
     }
@@ -53,9 +62,9 @@ impl Live {
 }
 
 /// `probbit live verify`: replay a strand from its header -> Ok(summary) when every line is as recorded; Err((1-based line
-/// number, what differs)) at the earliest line that is not
+/// number, what differs)) at the earliest line that is not. Lines end in `\n` or `\r\n`; the chain hashes the line text alone.
 pub fn verify(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
-    let lines: Vec<&str> = text.split('\n').collect();
+    let lines: Vec<&str> = text.split('\n').map(bare).collect();
     let lines = if lines.last() == Some(&"") { &lines[..lines.len() - 1] } else { &lines[..] };
     let head = lines.first().copied().unwrap_or("");
     let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
@@ -94,7 +103,7 @@ pub fn engine() -> String { format!("probbit {}", env!("CARGO_PKG_VERSION")) }
 pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, InErr> {
     let bad = |m: String| perr("strand", m);
     if !text.ends_with('\n') { return Err(bad("its last line is incomplete (no newline at the end)".into())); }
-    let lines: Vec<&str> = text.split('\n').filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = text.split('\n').map(bare).filter(|l| !l.is_empty()).collect();
     let h = json::parse(lines.first().copied().unwrap_or("")).map_err(|e| bad(format!("the header is not JSON: {}", e.msg)))?;
     if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err(bad("not a probbit strand (format 1)".into())); }
     let q = persona::build(h.get("document").unwrap_or(&Json::Null)).map_err(|e| bad(format!("the header's persona: {}: {}", e.path, e.msg)))?;
@@ -398,6 +407,30 @@ mod tests {
         let t4 = text.replacen(r#""rate":0.5"#, r#""rate":0.6"#, 1); assert_eq!(verify(&t4, &run).unwrap_err().0, 1);
         // a truncated last line
         let t5 = &text[..text.len() - 10]; assert_eq!(verify(t5, &run).unwrap_err().0, 31);
+    }
+
+    /// The header holds the state as canonical JSON, so one individual starts one header whether it comes fresh from `init`
+    /// (genes in persona order) or back from a key-sorted state file; a `\r\n` copy of a strand verifies to the same head, and
+    /// continuing it (new lines end in `\n`) gives a strand that still verifies, the one-run strand up to line endings
+    #[test]
+    fn one_individual_one_header_and_crlf_reads_the_same() {
+        let doc = json::parse(&DOC.replace(r#""logw":[0,0.3,0.1]}"#, r#""logw":[0,0.3,0.1],"spread":0.3}"#)).unwrap(); let p = persona::build(&doc).unwrap();
+        let st = persona::init(&p, Some(2), true, &run);
+        let filed = State::read(&p, &json::parse(&persona::canon(&st.to_json(&p))).unwrap()).unwrap();
+        assert_ne!(persona::text(&filed.to_json(&p)), persona::text(&st.to_json(&p)), "the genes' key order differs between the two");
+        assert_eq!(Live::start(p.clone(), &doc, st, Clock::Fixed, "probbit test").1, Live::start(p, &doc, filed, Clock::Fixed, "probbit test").1);
+        let (text, _) = strand(12);
+        let ok = verify(&text, &run).unwrap();
+        assert_eq!(verify(&text.replace('\n', "\r\n"), &run).unwrap(), ok, "a \\r\\n copy verifies to the same head");
+        assert_eq!(verify(&text.replace('\n', "\r\r\n"), &run).unwrap_err().0, 1, "one \\r is a line ending, two are not");
+        let doc = json::parse(DOC).unwrap(); let p = persona::build(&doc).unwrap();
+        let (mut live, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit test");
+        let mut t = format!("{header}\r\n");
+        for k in 0..5 { t += &live.event(&ev(k), &run).unwrap().1; t.push_str("\r\n"); }
+        let mut again = resume(&t, &p, live.st.clone(), Clock::Fixed).unwrap();
+        for k in 5..12 { t += &again.event(&ev(k), &run).unwrap().1; t.push('\n'); }
+        assert_eq!(t.replace("\r\n", "\n"), text);
+        assert_eq!(verify(&t, &run).unwrap(), ok);
     }
 
     /// Idle time decays a mood by its half-life: one upset event, then a quiet gap of g hours, leaves the valence accumulator at
