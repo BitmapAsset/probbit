@@ -311,8 +311,9 @@ mod tests {
     struct H { id: String, when: String, then: String, priority: usize }
     /// A random persona: 2-3 traits (2-3 levels), a mood (inertia 0.3-0.8) coupled to each, flags f0 and f1, a level input lv (neg,
     /// neu, pos); with `big` also a number n0 and a streak of f0. 0-2 conditional habits (level lists, not, at_most / at_least with
-    /// levels or prev); conflicts by fallback or yield. -> (persona, trait ids with their level counts, habits)
-    fn persona_at(r: &mut Philox4x32, big: bool) -> (Persona, Vec<(String, usize)>, Vec<H>) {
+    /// levels or prev); conflicts by fallback or yield. With `learn`, a learning block on every trait (f0 rewards, f1 corrects; rate
+    /// 1-3, total cap 0.05-2, step cap 50-100% of it). -> (persona, trait ids with their level counts, habits)
+    fn persona_at(r: &mut Philox4x32, big: bool, learn: bool) -> (Persona, Vec<(String, usize)>, Vec<H>) {
         let w = |r: &mut Philox4x32| ((r.f64() * 4.0 - 2.0) * 100.0).round() / 100.0;
         let lv = |n: usize| (0..n).map(|i| format!("\"l{i}\"")).collect::<Vec<_>>().join(",");
         let (mut traits, mut tl) = (vec![], vec![]);
@@ -332,8 +333,10 @@ mod tests {
                 2 => format!(r#"{{"{t}":{{"at_most":"{}"}}}}"#, ["prev".to_string(), format!("l{}", r.below(n))][r.below(2)]), _ => format!(r#"{{"{t}":{{"at_least":"{}"}}}}"#, ["prev".to_string(), format!("l{}", r.below(n))][r.below(2)]) };
             habits.push(H { id: format!("h{i}"), when: whens[r.below(whens.len())].to_string(), then, priority: r.below(2) }); }
         let hj: Vec<String> = habits.iter().map(|h| format!(r#"{{"id":"{}","when":{},"then":{},"priority":{}}}"#, h.id, h.when, h.then, h.priority)).collect();
-        let doc = format!(r#"{{"probbit_persona":1,"identity":{{"name":"T","version":"1","seed":1}},"traits":[{}],"moods":[{{"id":"m","levels":["down","even","up"],"inertia":{}}}],"couplings":[{}],"inputs":[{}]{history},"habits":[{}],"engine":{{"on_conflict":"{}"}}}}"#,
+        let mut doc = format!(r#"{{"probbit_persona":1,"identity":{{"name":"T","version":"1","seed":1}},"traits":[{}],"moods":[{{"id":"m","levels":["down","even","up"],"inertia":{}}}],"couplings":[{}],"inputs":[{}]{history},"habits":[{}],"engine":{{"on_conflict":"{}"}}}}"#,
             traits.join(","), (30 + r.below(51)) as f64 / 100.0, couplings.join(","), inputs.join(","), hj.join(","), ["fallback", "yield"][r.below(2)]);
+        if learn { let tc = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0][r.below(6)]; let names: Vec<String> = tl.iter().map(|(t, _)| format!("\"{t}\"")).collect(); doc.pop();
+            doc.push_str(&format!(r#","learning":{{"from":["f0","f1"],"traits":[{}],"rate":{},"step_cap":{},"total_cap":{tc}}}}}"#, names.join(","), (100 + r.below(201)) as f64 / 100.0, ((50 + r.below(51)) as f64 / 100.0 * tc * 100.0).round() / 100.0)); }
         let p = persona::build(&json::parse(&doc).unwrap()).unwrap_or_else(|e| panic!("{}: {} in {doc}", e.path, e.msg));
         (p, tl, habits)
     }
@@ -363,7 +366,7 @@ mod tests {
         let all: Vec<Json> = [false, true].iter().flat_map(|a| [false, true].iter().flat_map(move |b| ["neg", "neu", "pos"].iter().map(move |l| ev(&format!(r#"{{"f0":{a},"f1":{b},"lv":"{l}"}}"#))))).collect();
         let few: Vec<Json> = [r#"{}"#, r#"{"f0":true}"#, r#"{"lv":"neg"}"#, r#"{"f1":true,"lv":"pos"}"#].iter().map(|s| ev(s)).collect();
         let res = par(16, std::thread::available_parallelism().map_or(1, |n| n.get()), |k| {
-            let mut r = Philox4x32::new(38, k as u64); let (p, tl, habits) = persona_at(&mut r, false); let prs = props_of(&mut r, &p, &tl, &habits);
+            let mut r = Philox4x32::new(38, k as u64); let (p, tl, habits) = persona_at(&mut r, false, false); let prs = props_of(&mut r, &p, &tl, &habits);
             let mut out = vec![];
             for seed in [0u64, 7] {
                 let st0 = persona::init(&p, Some(seed), true, &run); let mut broken = vec![false; prs.len()];
@@ -383,7 +386,7 @@ mod tests {
     fn prove_never_proves_what_the_fuzzer_breaks() {
         let s = Search { seeds: vec![0, 1, 2], fuzz_seed: 5, scripts: 40, depth: 5, beam: 3, grid: vec![0.0, 0.5, 1.0], hours: vec![1.0], threads: 1 };
         let res = par(16, std::thread::available_parallelism().map_or(1, |n| n.get()), |k| {
-            let mut r = Philox4x32::new(380, k as u64); let (p, tl, habits) = persona_at(&mut r, true); let prs = props_of(&mut r, &p, &tl, &habits);
+            let mut r = Philox4x32::new(380, k as u64); let (p, tl, habits) = persona_at(&mut r, true, false); let prs = props_of(&mut r, &p, &tl, &habits);
             let (found, _) = fuzz(&p, &prs, &s, &run); let mut n = (0, 0);
             for (pr, f) in prs.iter().zip(&found) { let held = persona::by_construction(&p, pr, &run).is_some();
                 for (seed, f) in s.seeds.iter().zip(f) { if f.is_none() { continue; } n.0 += 1;
@@ -395,12 +398,52 @@ mod tests {
         assert!(found >= 10 && proved >= 10, "the check must see both sides: {found} counterexamples, {proved} proved");
     }
 
+    /// (iv) Brute force with learning: 16 tiny personas whose traits all learn (f0 rewards, f1 corrects, large rates and caps) x 2
+    /// individuals x their properties, every sequence of up to 3 events over all 12 input combinations and up to 5 over 4 of them;
+    /// a property prove calls held or proved never breaks, whatever the learned deltas became
+    #[test]
+    fn prove_agrees_with_every_event_sequence_of_tiny_learning_personas() {
+        let ev = |s: &str| json::parse(s).unwrap();
+        let all: Vec<Json> = [false, true].iter().flat_map(|a| [false, true].iter().flat_map(move |b| ["neg", "neu", "pos"].iter().map(move |l| ev(&format!(r#"{{"f0":{a},"f1":{b},"lv":"{l}"}}"#))))).collect();
+        let few: Vec<Json> = [r#"{"f0":true}"#, r#"{"f1":true}"#, r#"{"lv":"neg"}"#, r#"{"f0":true,"lv":"pos"}"#].iter().map(|s| ev(s)).collect();
+        let res = par(16, std::thread::available_parallelism().map_or(1, |n| n.get()), |k| {
+            let mut r = Philox4x32::new(45, k as u64); let (p, tl, habits) = persona_at(&mut r, false, true); let prs = props_of(&mut r, &p, &tl, &habits);
+            let mut out = vec![];
+            for seed in [0u64, 7] {
+                let st0 = persona::init(&p, Some(seed), true, &run); let mut broken = vec![false; prs.len()];
+                every_sequence(&p, &prs, &st0, &all, 3, &mut broken); every_sequence(&p, &prs, &st0, &few, 5, &mut broken);
+                for (i, pr) in prs.iter().enumerate() { let held = persona::by_construction(&p, pr, &run).is_some(); let proved = persona::prove_seed(&p, pr, seed, &run).is_ok();
+                    assert!(!(broken[i] && (held || proved)), "persona {k} seed {seed}: {} {} is {} but a sequence breaks it", pr.id, persona::canon(&pr.rule), if held { "held" } else { "proved" });
+                    out.push((held || proved, broken[i], proved && !held)); } }
+            out });
+        let all: Vec<(bool, bool, bool)> = res.into_iter().flatten().collect();
+        let (yes, broke, proved) = (all.iter().filter(|x| x.0).count(), all.iter().filter(|x| x.1).count(), all.iter().filter(|x| x.2).count());
+        assert!(yes >= 5 && broke >= 5, "the check must see both sides: {yes} held or proved ({proved} by the bound), {broke} broken of {}", all.len());
+    }
+
+    /// (v) The learned box is what the bound needs: one trait, l0 ahead of l1 by 1 nat, both levels learning (f0 rewards, f1
+    /// corrects, rate 3). With total_cap 0.2 prove proves "never l1" and no sequence breaks it; with total_cap 2 one correction
+    /// after an l0 turn makes it l1, and prove says unknown (without the learned term in the bound it would say proved)
+    #[test]
+    fn prove_covers_the_learned_box() {
+        let alpha: Vec<Json> = [r#"{}"#, r#"{"f0":true}"#, r#"{"f1":true}"#, r#"{"f0":true,"f1":true}"#].iter().map(|s| json::parse(s).unwrap()).collect();
+        for (cap, breaks) in [(0.2, false), (2.0, true)] {
+            let doc = format!(r#"{{"probbit_persona":1,"identity":{{"name":"T","version":"1","seed":1}},"traits":[{{"id":"a","levels":["l0","l1"],"logw":[1,0]}}],
+                "inputs":[{{"id":"f0","kind":"flag"}},{{"id":"f1","kind":"flag"}}],"learning":{{"from":["f0","f1"],"traits":["a"],"rate":3,"step_cap":{cap},"total_cap":{cap}}}}}"#);
+            let p = persona::build(&json::parse(&doc).unwrap()).unwrap();
+            let prs = persona::props(&p, &json::parse(r#"{"id":"never_l1","then":{"a":["l0"]}}"#).unwrap(), "never", "prop1").unwrap();
+            let st0 = persona::init(&p, Some(0), true, &run); let mut broken = vec![false];
+            every_sequence(&p, &prs, &st0, &alpha, 4, &mut broken);
+            assert_eq!(broken[0], breaks, "cap {cap}"); assert_eq!(persona::prove_seed(&p, &prs[0], 0, &run).is_ok(), !breaks, "cap {cap}");
+        }
+    }
+
     /// (iii) A habit's own rule is held by construction: every habit under on_conflict fallback, the top-ranked habit under yield
     #[test]
     fn habits_are_held_by_construction() {
         let mut checked = 0;
         for k in 0..40u64 {
-            let mut r = Philox4x32::new(3800, k); let (p, tl, habits) = persona_at(&mut r, true); if habits.is_empty() { continue; }
+            let mut r = Philox4x32::new(3800, k); let (p, tl, habits) = persona_at(&mut r, true, false); if habits.is_empty() { continue; }
             let prs = props_of(&mut r, &p, &tl, &habits);
             let top = habits.iter().enumerate().max_by(|(i, a), (j, b)| a.priority.cmp(&b.priority).then(j.cmp(i))).map(|(_, h)| h.id.clone()).unwrap();
             for pr in prs.iter().filter(|pr| habits.iter().any(|h| h.id == pr.id)) {
