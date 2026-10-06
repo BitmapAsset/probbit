@@ -3,6 +3,61 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.7.0 - unreleased
+
+### Added
+- **Bounded learning** (docs/persona.md §2.8): an optional persona block `learning: {from: [reward, correction], traits, rate,
+  step_cap, total_cap}`, read strictly (`probbit_persona` stays 1). With it the state keeps `learned` (a weight Δ per level of each
+  learned trait, 0 at `init`) and `credit` (the previous stance's onehot(level) − odds; 0 for a level a habit or a hold forced),
+  both checked on read (Δ within ±total_cap, credit within ±1). On a turn whose reward flag is on (correction: sign −1) each
+  learned trait's step is clip(sign x rate x credit, ±step_cap) per level, recentred to sum 0, added, and Δ is clipped to
+  ±total_cap (6 decimals); Δ is added to the trait's unary weights when the turn compiles. The learner's whole output is the Δ
+  table: habits and allowed levels are rules of every program, so every stance obeys every habit in force whatever Δ is. A
+  persona without the block gives every document byte for byte as 0.6.0 did (the three example goldens are unchanged).
+- **`prove` covers learning**: the learned weights of traits linked to the rule's trait stay in their box (±total_cap per
+  level) whatever the feedback, and the bound includes it; verdicts unchanged. Soundness tests: every event sequence of tiny
+  learning personas (brute force, learned deltas included), a targeted case the learned box decides, and a mutation that drops
+  the learned term from the bound, which the tests catch (0.6.0's mutation checks still fail as they should).
+- **`probbit live`** (docs/persona.md §5.7, probbit-cli/src/live.rs): a resident individual. JSONL events in (`--events FILE` or
+  stdin), one stance per event out. `--clock real` (default) stamps each event's `elapsed_hours` from a monotonic clock,
+  quantised to 1e-6 h, so moods decay by their half-lives between events; `--clock fixed` reads them from the events (a pure
+  function of the events). `--seed N` or `--state FILE` (rewritten after every event). `--strand FILE` logs the life: a header
+  (engine version, persona name / version / digest, seed, the initial state as canonical JSON, the persona document in its own
+  key order), then per event the inputs as used, the stance digest, the new state's digest and the sha256 of the line before. A
+  strand is never rewritten, just appended to: `--strand` on an existing strand continues it from the state after its last line,
+  and a life continued over runs is the strand of one run, byte for byte. `--events FILE --watch` follows a file as lines are appended.
+- **`probbit live verify STRAND`**: replays a strand from its header alone and prints `{"ok": true, events, persona, seed,
+  engine, final_state, last_line}` (exit 0) or `{"ok": false, line, diverges}` for the earliest line that differs (exit 1). The
+  hashes cover each line's text without its line ending, so a `\r\n` copy verifies.
+- **`probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]`**: one individual's scripted week on the fixed clock
+  (events hourly 09:00-15:00, quiet nights): praise for short answers until the learned verbosity weights reach their cap, an
+  upset and a quiet night, then a campaign that praises every joke while every third hour reports a failure. A persona without a
+  learning block gets the demo's (the opening line says so; the strand records the document). Bars on stderr at a colour
+  terminal (1 s per hour, nights fast-forwarded), else one line per event. The tutor, seed 2: 50 events, the verbosity cap on
+  day 1 at 15:00, valence back to its resting level after a 17-hour night, P(joke) off failure turns 0.57 on day 1 and 0.89 on
+  days 3-7, 13 failure turns with no joke, 0 rule breaks, a strand that verifies; the same bytes every run.
+- MCP tools `probbit_live_event` (one event: the persona, the state or a seed, the event, optionally a strand file to log to ->
+  `{stance, state}`) and `probbit_live_verify` (a strand's text or path -> verify's document; a divergence is an answer): ten
+  tools. Python: `probbit.live_event(...)` and `probbit.live_verify(...)` (the same documents, through the CLI).
+- `probbit persona describe` lists the learning block when there is one.
+- `bench/live_learning.py` (stdlib, drives the binary) and BENCHMARKS.md §8: an adversary that praises every joke and
+  criticises every joke-free stance, failures included, over 10,000 turns on each of seeds 0-9 of the tutor: 0 rule breaks and
+  no joke on any of the 33,330 failure turns, while the learned humour weights reach their cap within 8-26 turns; a 10,000-event
+  strand verifies in 3.3 s; how far learning moves an individual is set by `total_cap`, not by time in use (at 0.25 all 20
+  learners stay nearer their own initial self than any of 99 siblings; at 1, 9 of 20 have a sibling as near or nearer).
+- Tests: mood decay against the closed form on the fixed clock; caps; an adversary over 2,000 turns (no rule broken, humour
+  learned to its cap); identity against the 99 siblings at two caps; strands replayed, continued, changed (divergence at the
+  changed line), converted to `\r\n`; one header per individual (from `init` or a state file); the demo deterministic; the MCP
+  and Python live surfaces.
+- docs/persona.md §2.8 Learning and §5.7 Live (what decays, what learns, what can never change, how far learning moves an
+  individual, the strand, verify, `--watch`, the demo); README "Live"; docs/agents.md the two tools.
+
+### Changed
+- Version 0.7.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
+  `stdout_matches_the_0_7_0_goldens` (the documents are unchanged).
+- docs/persona.md: compilation step 2 adds the learned weights, the state (§5.1) shows `learned` and `credit`, `prove`'s bound
+  (§5.6) includes the learned box, §9 lists the strand's format number.
+
 ## 0.6.0 - 2026-10-06
 
 ### Added
