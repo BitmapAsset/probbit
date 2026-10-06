@@ -178,10 +178,10 @@ struct Row { day: u64, hour: u64, n: u64, frac: f64, campaign: u8, what: String,
 fn level_of(s: &Json, group: &str, t: &str) -> String { s.get(group).and_then(|x| x.get(t)).and_then(|x| x.get("level")).and_then(Json::as_str).unwrap_or("").to_string() }
 fn signed(v: &[f64]) -> String { v.iter().map(|x| format!("{x:+.2}")).collect::<Vec<_>>().join(" ") }
 
-/// `probbit live PERSONA --demo week` (docs/persona.md §5.7): one individual's scripted week on the fixed clock. Days 1-3 praise
-/// short answers and criticise long ones (the learned verbosity deltas go to their cap); day 3 ends upset and a quiet night
-/// follows (the mood relaxes to this individual's resting level); days 4-7 try to teach it to joke about failures: every joke is
-/// praised and every third event reports a failure (humour rises on the other turns; on a failure the habit keeps it at its
+/// `probbit live PERSONA --demo week` (docs/persona.md §5.7): one individual's scripted week on the fixed clock. Campaign 1 praises
+/// short answers and criticises long ones until the learned verbosity deltas reach their cap (day 3 at the latest); an upset an
+/// hour later and a quiet night follow (the mood relaxes to this individual's resting level); campaign 2, to the end of day 7,
+/// tries to teach it to joke about failures: every joke is praised and every third event reports a failure (humour rises on the other turns; on a failure the habit keeps it at its
 /// lowest level). The script reads nothing but the stances, so a run is a pure function of (persona, seed, version): the same lines and
 /// the same strand, byte for byte. `out` gets the plain lines; with a theme the bars are drawn on stderr, paced 1 s per hour
 /// (each night fast-forwards in 2 s). -> the strand's last line sha256
