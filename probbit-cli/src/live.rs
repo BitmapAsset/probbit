@@ -420,6 +420,75 @@ mod tests {
         assert!((mood(&live)[0] - closed).abs() < 4e-6 && (mood(&live)[2] + closed).abs() < 4e-6, "{:?} vs ±{closed}", mood(&live));
     }
 
+    /// The shipped tutor, with the demo's learning block or as shipped
+    fn tutor(learning: bool) -> (Persona, Json) {
+        let (_, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/tutor.yaml")).unwrap();
+        let Json::Obj(mut kv) = doc else { panic!("a document") }; if learning { kv.push(("learning".into(), json::parse(DEMO_LEARNING).unwrap())); }
+        let doc = Json::Obj(kv); (persona::build(&doc).unwrap(), doc)
+    }
+    /// An adversary that wants jokes on failures, n turns 1 h apart against a new individual (seed 2): every third turn reports a
+    /// failure (loss); every turn judges the stance before it, praise for a joke (humour above none), criticism for none, the none a
+    /// failure forces included -> (the events as sent, the stances, the strand, the final state)
+    fn adversary(p: &Persona, doc: &Json, n: usize) -> (Vec<Json>, Vec<Json>, String, State) {
+        let (mut lv, header) = Live::start(p.clone(), doc, persona::init(p, Some(2), true, &run), Clock::Fixed, "probbit test");
+        let (mut evs, mut stances, mut text): (Vec<Json>, Vec<Json>, String) = (vec![], vec![], format!("{header}\n"));
+        for t in 0..n { let mut ev = vec![("elapsed_hours".to_string(), Json::Num(1.0))];
+            if t % 3 == 2 { ev.push(("loss".into(), Json::Bool(true))); }
+            if let Some(s) = stances.last() { ev.push((if level_of(s, "stance", "humour") != "none" { "praise" } else { "criticism" }.into(), Json::Bool(true))); }
+            let (s, line) = lv.event(&Json::Obj(ev.clone()), &run).unwrap(); text += &line; text.push('\n'); stances.push(s); evs.push(Json::Obj(ev)); }
+        (evs, stances, text, lv.st)
+    }
+    fn joke_p(s: &Json) -> f64 { 1.0 - s.get("stance").and_then(|x| x.get("humour")).and_then(|x| x.get("odds")).and_then(|o| o.get("none")).and_then(Json::as_f64).unwrap() }
+
+    /// 2,000 turns of the adversary on the tutor with the demo's learning block: no habit is ever broken, every failure turn keeps
+    /// humour none and emoji at most sparse, while the learned humour deltas reach their cap and the odds of a joke off the failure
+    /// turns end above the same individual's without learning on the identical events; the strand of the run verifies
+    #[test]
+    fn an_adversary_cannot_teach_jokes_on_failures() {
+        let ((p, doc), (q, _)) = (tutor(true), tutor(false)); let n = 2000;
+        let (evs, stances, text, st) = adversary(&p, &doc, n);
+        let cap = json::parse(DEMO_LEARNING).unwrap().get("total_cap").and_then(Json::as_f64).unwrap();
+        for (t, s) in stances.iter().enumerate() { assert_eq!(s.get("habits").and_then(|h| h.get("violations")), Some(&Json::Num(0.0)), "turn {t}");
+            if t % 3 == 2 { assert_eq!((level_of(s, "stance", "humour").as_str(), ["none", "sparse"].contains(&level_of(s, "stance", "emoji").as_str())), ("none", true), "failure turn {t}"); } }
+        let learned = st.to_json(&p).get("learned").and_then(|l| l.get("humour")).and_then(Json::as_arr).unwrap().iter().map(|x| x.as_f64().unwrap()).collect::<Vec<f64>>();
+        assert!(learned.iter().any(|x| (x.abs() - cap).abs() < 1e-9), "humour deltas at the cap: {learned:?}");
+        let mut twin = persona::init(&q, Some(2), true, &run); let mut twin_p = vec![];
+        for (t, e) in evs.iter().enumerate() { let (s, ns) = persona::turn(&q, &twin, e, false, &run, false).unwrap(); twin = ns; if t % 3 != 2 { twin_p.push(joke_p(&s)); } }
+        let off: Vec<f64> = stances.iter().enumerate().filter(|(t, _)| t % 3 != 2).map(|(_, s)| joke_p(s)).collect();
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64; let k = off.len() / 2;
+        eprintln!("adversary: learned humour {learned:?}; P(joke) off failures: learner turns 1-1000 {:.4}, 1001-2000 {:.4}; without learning {:.4}, {:.4}", mean(&off[..k]), mean(&off[k..]), mean(&twin_p[..k]), mean(&twin_p[k..]));
+        assert!(mean(&off[k..]) > mean(&twin_p[k..]) + 0.2, "learner {} vs no learning {}", mean(&off[k..]), mean(&twin_p[k..]));
+        let v = verify(&text, &run).unwrap(); assert_eq!((v.get("events"), v.get("final_state").and_then(Json::as_str)), (Some(&Json::Num(n as f64)), Some(st.digest.as_str())));
+    }
+
+    /// Learning moves an individual as far as its cap and no further: the tutor (seed 2) after 2,000 adversarial turns, taken at rest with its
+    /// learned deltas (its initial state plus them), against the 100 initial individuals of seeds 0-99, by the mean total-variation
+    /// distance of the stance odds (`persona::distance`) over a feedback-free probe script. With total_cap 0.25 the nearest of the 100
+    /// is still itself; with the demo's cap (1, four times the room) learning moves it further than some siblings differ from it, and
+    /// less than the median sibling does. The distance is the cap's: 200 turns move it as far as 2,000
+    #[test]
+    fn learning_moves_an_individual_as_far_as_its_cap() {
+        let probes = ["{}", r#"{"sentiment":"negative"}"#, r#"{"sentiment":"positive"}"#, r#"{"confused":true}"#, r#"{"error":true}"#, r#"{"loss":true}"#, r#"{"stakes":1}"#, r#"{"time_pressure":1}"#, r#"{"claim_done":true}"#];
+        let script: Vec<Json> = (0..3 * probes.len()).map(|i| json::parse(&probes[i % probes.len()].replacen('{', r#"{"elapsed_hours":1,"#, 1).replace(",}", "}")).unwrap()).collect();
+        let mut far = vec![];
+        for (cap, n) in [("0.25", 2000), ("1", 2000), ("1", 200)] {
+            let (_, doc) = tutor(false); let Json::Obj(mut kv) = doc else { unreachable!() };
+            kv.push(("learning".into(), json::parse(&DEMO_LEARNING.replace(r#""total_cap":1"#, &format!(r#""total_cap":{cap}"#))).unwrap()));
+            let doc = Json::Obj(kv); let p = persona::build(&doc).unwrap(); let (_, _, _, lived) = adversary(&p, &doc, n);
+            let at_rest = |seed: u64, learned: Option<&Json>| { let j = persona::init(&p, Some(seed), true, &run).to_json(&p);
+                let mut kv: Vec<(String, Json)> = j.as_obj().unwrap().iter().filter(|(k, _)| k != "digest").map(|(k, v)| (k.clone(), if k == "learned" { learned.unwrap_or(v).clone() } else { v.clone() })).collect();
+                let body = Json::Obj(kv.clone()); kv.push(("digest".into(), Json::Str(persona::sha(&body)))); State::read(&p, &Json::Obj(kv)).unwrap() };
+            let probe = |st: State| { let mut st = st; script.iter().map(|e| { let (s, ns) = persona::turn(&p, &st, e, false, &run, false).unwrap(); st = ns; s }).collect::<Vec<Json>>() };
+            let me = probe(at_rest(2, lived.to_json(&p).get("learned")));
+            let tv = |b: &[Json]| persona::distance(&me, b).get("tv").and_then(Json::as_f64).unwrap();
+            let own = tv(&probe(at_rest(2, None))); let mut sib: Vec<f64> = (0..100).filter(|s| *s != 2).map(|s| tv(&probe(at_rest(s, None)))).collect(); sib.sort_by(f64::total_cmp);
+            let nearer = sib.iter().filter(|x| **x <= own).count();
+            eprintln!("cap {cap}, {n} turns: own init {own:.4}; siblings min {:.4} median {:.4}; {nearer} of 99 siblings as near or nearer", sib[0], sib[49]);
+            if cap == "0.25" { assert_eq!(nearer, 0, "cap 0.25: own init {own} vs the nearest sibling {}", sib[0]); } else { assert!(nearer > 0 && own < sib[49], "cap 1: own init {own}, {nearer} nearer, median {}", sib[49]); far.push(own); }
+        }
+        assert!((far[0] - far[1]).abs() < 1e-3, "2,000 turns {} vs 200 turns {}", far[0], far[1]);
+    }
+
     /// With the real clock an event may not carry its own elapsed hours; with the fixed clock it may, and a bad one is refused
     #[test]
     fn the_clock_owns_time() {
