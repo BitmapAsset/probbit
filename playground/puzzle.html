@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find the event · probbit playground</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='59 40 394 394'%3E%3Crect x='59' y='40' width='394' height='394' fill='%230b0e14'/%3E%3Cg fill='%23ffffff'%3E%3Cpath d='M178 270 155 76 176 52 202 52 219 69 238 265Z'/%3E%3Cpath d='M274 265 293 69 310 52 319 52 301 114 316 114 305 178 339 98 322 98 332 52 336 52 357 76 334 270Z'/%3E%3Cpath fill-rule='evenodd' d='M112 308a144 114 0 1 0 288 0a144 114 0 1 0-288 0ZM124 278v52h264v-52Z'/%3E%3C/g%3E%3Cpath fill='%2300F0FF' d='M136 288h240v32H136Z'/%3E%3C/svg%3E">
+<style>
+  :root { color-scheme: dark; --ink: #0b0e14; --panel: #121722; --card: #182030; --line: #263247; --text: #e6edf5; --dim: #8b9bb0; --cyan: #00F0FF; --warn: #ffb454; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; padding: 20px clamp(12px, 4vw, 44px) 84px; background: var(--ink); color: var(--text); font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--cyan); }
+  header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header svg { width: 44px; height: 56px; flex: none; }
+  h1 { margin: 0; font-size: clamp(22px, 5vw, 30px); line-height: 1.15; }
+  h1 small { display: block; font-size: 14px; font-weight: 400; color: var(--dim); letter-spacing: 0.02em; }
+  h2 { margin: 30px 0 8px; font-size: 18px; }
+  p { max-width: 860px; }
+  .sub { color: var(--dim); margin: 10px 0 16px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  button, select, input { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font: inherit; }
+  button { cursor: pointer; } button:disabled { opacity: 0.5; cursor: wait; }
+  button.go { border-color: var(--cyan); color: var(--cyan); font-weight: 600; }
+  input[type=number] { width: 6.5em; }
+  label { color: var(--dim); font-size: 14px; }
+  .tag { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; font-size: 13px; color: var(--dim); }
+  .tag.sel { border-color: var(--cyan); color: var(--cyan); }
+  .board { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(8px, 2vw, 18px); max-width: 1100px; }
+  .branch { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: clamp(8px, 2vw, 14px); min-width: 0; }
+  .branch h3 { margin: 0 0 8px; font-size: 15px; color: var(--dim); font-weight: 600; }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 4px; min-height: 76px; text-align: center; font-size: 13px; line-height: 1.25;
+    display: flex; flex-direction: column; justify-content: center; gap: 3px; color: var(--text); width: 100%; }
+  .card .n { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .card .ev { font-weight: 700; font-size: 14px; word-break: break-word; }
+  .card.back .ev { font-size: 24px; color: var(--dim); }
+  button.card.back:hover, button.card.back:focus-visible { border-color: var(--cyan); outline: none; }
+  .card.same { border-style: dashed; }
+  .card.changed { border: 2px solid var(--cyan); }
+  .card.changed .ev { color: var(--cyan); }
+  .card.guess { box-shadow: 0 0 0 2px var(--warn); }
+  .line { margin: 12px 0 8px; padding: 10px; background: var(--ink); border-radius: 8px; font-size: 14px; min-height: 5.2em; }
+  .lv { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; font-size: 13.5px; }
+  .lv span:nth-child(odd) { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  .lv .d { color: var(--cyan); font-weight: 700; }
+  .ask { font-size: 16px; margin: 14px 0 6px; max-width: 860px; }
+  .verdict { font-size: 18px; font-weight: 700; margin: 14px 0 6px; }
+  .verdict b { color: var(--cyan); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; max-width: 1100px; margin: 10px 0; }
+  .odds { display: grid; grid-template-columns: 7.5em 1fr; gap: 3px 10px; align-items: center; font-size: 12.5px; }
+  .odds .name { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .odds .name.d { color: var(--cyan); font-weight: 700; }
+  .pair { display: grid; gap: 2px; padding: 3px 0; }
+  .ob { display: flex; height: 18px; border-radius: 3px; overflow: hidden; background: var(--ink); position: relative; }
+  .ob i { display: block; height: 100%; font-style: normal; font-size: 10.5px; line-height: 18px; color: var(--ink); white-space: nowrap; overflow: hidden; text-align: center; border-right: 1px solid var(--ink); }
+  .ob i.s0 { background: #5d6b80; } .ob i.s1 { background: #8695aa; } .ob i.s2 { background: #b3bfcf; } .ob i.s3 { background: #d4dce6; } .ob i.s4 { background: #eef2f6; }
+  .ob i.pick { background: var(--cyan); font-weight: 700; }
+  .ob em { position: absolute; left: -2.4em; font-style: normal; color: var(--dim); font-size: 10.5px; line-height: 18px; }
+  .pair { padding-left: 2.4em; }
+  .legend { color: var(--dim); font-size: 12.5px; margin: 6px 0 10px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; background: var(--cyan); vertical-align: -1px; margin: 0 4px 0 0; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; }
+  td, th { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; }
+  code, pre, textarea { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  td code { word-break: break-all; }
+  pre { white-space: pre-wrap; word-break: break-all; background: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 6px 0; }
+  textarea { width: 100%; height: 160px; background: var(--ink); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 10px; resize: vertical; }
+  .ok { color: var(--cyan); font-weight: 700; } .bad { color: var(--warn); font-weight: 700; }
+  .grid50 { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 4px; max-width: 520px; margin: 8px 0; }
+  .grid50 button { padding: 6px 0; font-size: 12px; border-radius: 4px; background: var(--card); color: var(--dim); }
+  .grid50 button.hit { background: var(--cyan); color: var(--ink); font-weight: 700; border-color: var(--cyan); }
+  .grid50 button.cur { box-shadow: 0 0 0 2px var(--warn); }
+  .big { font-size: 22px; font-weight: 700; margin: 8px 0 2px; }
+  .big b { color: var(--cyan); }
+  .muted { color: var(--dim); font-size: 13.5px; }
+  .hidden { display: none !important; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; max-width: 900px; margin: 10px 0; }
+  .edit label { display: grid; gap: 3px; }
+  .caption { position: fixed; left: 0; right: 0; bottom: 0; background: var(--ink); border-top: 1px solid var(--line); padding: 10px clamp(12px, 4vw, 44px);
+    font-size: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; z-index: 5; }
+  .caption strong { color: var(--text); } .caption span { color: var(--dim); }
+  @media (max-width: 560px) {
+    body { font-size: 14px; }
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .card { min-height: 60px; }
+    .lv { font-size: 12.5px; }
+    .odds { grid-template-columns: 1fr; }
+    .odds .name { margin-top: 6px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <svg viewBox="100 40 312 394" role="img" aria-label="probbit: a white rabbit with a cyan visor and a lightning cut in its right ear"><g fill="#ffffff"><path d="M178 270 155 76 176 52 202 52 219 69 238 265Z"/><path d="M274 265 293 69 310 52 319 52 301 114 316 114 305 178 339 98 322 98 332 52 336 52 357 76 334 270Z"/><path fill-rule="evenodd" d="M112 308a144 114 0 1 0 288 0a144 114 0 1 0-288 0ZM124 278v52h264v-52Z"/></g><path fill="#00F0FF" d="M136 288h240v32H136Z"/></svg>
+  <h1>Find the event <small>probbit playground · a decision puzzle</small></h1>
+</header>
+<p class="sub">Same persona. Same seed. Same final message. One earlier event is different, and the final stance came out different.
+Which card changed? Everything below is computed in this tab by the probbit engine (WebAssembly); you can replay it on the command line.</p>
+
+<div class="bar">
+  <label for="persona">persona</label> <select id="persona"></select>
+  <label for="seed">seed</label> <input id="seed" type="number" min="0" step="1" value="0">
+  <button id="go">Load seed</button>
+  <button id="shuffle" title="a seed and card where the stance changes (from the sweep)">New puzzle</button>
+  <span id="exampleTag" class="tag"></span>
+</div>
+
+<p class="ask" id="ask"></p>
+<div class="board">
+  <div class="branch"><h3>Branch A</h3><div class="cards" id="cardsA"></div><div class="line" id="lineA"></div><div class="lv" id="lvA"></div></div>
+  <div class="branch"><h3>Branch B</h3><div class="cards" id="cardsB"></div><div class="line" id="lineB"></div><div class="lv" id="lvB"></div></div>
+</div>
+<div class="bar"><button id="reveal">Reveal</button></div>
+
+<section id="after" class="hidden">
+  <p class="verdict" id="verdict"></p>
+  <p id="changeText"></p>
+
+  <h2>Odds per trait, both branches</h2>
+  <p class="legend">Each row: branch A on top, branch B below, on a fixed 0 to 1 scale. <i></i>the level the stance took (the most likely stance that keeps every habit).
+  Traits whose level differs are named in cyan. The odds are marginals of the persona's own score model, not predictions about people.</p>
+  <div class="panel"><div class="odds" id="odds"></div></div>
+
+  <h2>Disable inertia: do the stances still differ?</h2>
+  <p class="muted">Moods carry part of the last turn into the next (each mood's <code>inertia</code>). Rerun both branches with <code>--no-inertia</code>: the earlier events still happen, but no mood is carried.</p>
+  <div class="bar"><button id="ablate" class="go">Disable inertia and rerun</button></div>
+  <div id="ablation" class="panel hidden"></div>
+
+  <h2>Replay both branches</h2>
+  <p class="muted">Each branch is a 4-turn <code>probbit persona replay</code>. Run each again and compare the sha256 of the whole trace (every stance, byte for byte).
+  A matching digest shows the run repeats; it does not explain the decision.</p>
+  <div class="bar"><button id="replay" class="go">Replay both branches</button></div>
+  <div id="replayOut" class="panel hidden"></div>
+</section>
+
+<h2>How often does this edit change the stance?</h2>
+<p class="muted">Run the same single-event edit for seeds 0 to 49 of this persona (50 individuals) and count the ones whose final stance changes.</p>
+<div class="bar"><button id="sweep" class="go">Run the sweep (seeds 0-49)</button> <span id="sweepProg" class="muted"></span></div>
+<div id="sweepOut" class="hidden">
+  <p class="big" id="sweepBig"></p>
+  <p class="muted" id="sweepSub"></p>
+  <div class="grid50" id="grid50"></div>
+  <p class="muted">Cyan: the final stance changes. Click a seed to load it.</p>
+</div>
+
+<h2>Make your own</h2>
+<details id="makeBox">
+  <summary>Choose the three earlier events and the one to change</summary>
+  <div class="edit" id="edit"></div>
+  <div class="bar"><button id="build" class="go">Build this puzzle</button> <span id="buildMsg" class="muted"></span></div>
+</details>
+
+<h2>Recipe</h2>
+<p class="muted">Everything needed to reproduce this puzzle: persona digest, seed, the two scripts and the expected digests. Paste a recipe to load it.</p>
+<div class="bar"><button id="export">Download recipe</button> <button id="import">Load the pasted recipe</button> <input id="importFile" type="file" accept=".json,application/json" aria-label="recipe file"></div>
+<textarea id="recipe" spellcheck="false" aria-label="recipe JSON"></textarea>
+<p id="importMsg" class="muted"></p>
+<p class="muted">Check it with the command line (from a clone of the repository; trace sha256 and final state digest are printed on stderr):</p>
+<pre id="cli"></pre>
+
+<p class="muted" id="engineInfo"></p>
+<p class="muted"><a href="index.html">The playground</a> · <a href="../docs/persona.md">the persona format</a></p>
+
+<div class="caption"><strong>Persona engine. No language model in this view.</strong> <span id="captionExample"></span></div>
+
+<script src="probbit-wasm.js"></script>
+<script src="puzzle-personas.js"></script>
+<script src="puzzle-core.js"></script>
+<script src="puzzle.js"></script>
+</body>
+</html>

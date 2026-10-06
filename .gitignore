@@ -9,3 +9,4 @@ __pycache__/
 *.pyc
 playground/probbit.wasm
 playground/probbit-wasm.js
+playground/puzzle-personas.js
