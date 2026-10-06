@@ -26,6 +26,9 @@ Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and 
 One binary under 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
 `probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
 
+<p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
+<p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
+
 ## Try it in 30 seconds
 
 ```sh
@@ -171,6 +174,10 @@ chain 281.3 ms -> 0.390 ms; the external review's one-group routers ~0.09 ms exa
 (sampling only the residual component is open).
 
 ### Three tiers: exact, then sample, then gate
+
+<p align="center"><img src="docs/art/held-by-construction.jpg" alt="a rabbit mark inside a crystalline lattice while streams of possibilities bend around it" width="100%"></p>
+<p align="center"><sub><i>Held by construction: the engine only considers plans and stances that keep every rule in force.</i></sub></p>
+
 - **Exact tiers** run first: enumeration (up to 2M feasible plans), a frontier dynamic program for programs whose groups
   share few resources, minimum-remaining-values enumeration for puzzles, and a components tier: independent parts
   solved separately, trees by sum-/max-product (a 1,000-variable chain: 0.39 ms exact vs 281 ms sampled), two-value groups
@@ -354,6 +361,10 @@ lists every flag of a command with its default, and the exit codes.
 
 ## The individuality layer: `probbit persona`
 
+<p align="center"><img src="docs/art/one-file-a-hundred-individuals.jpg" alt="a field of a hundred small white agent-rabbit marks, one lit cyan" width="100%"></p>
+<p align="center"><sub><i>One persona file, a hundred individuals: same file, different seeds, every one keeps the habits.</i></sub></p>
+
+
 Give an agent a temperament that lives outside the model. A **persona** is a small file (YAML subset or JSON): traits with
 priors, moods with inertia, soft couplings, per-turn evidence, and habits that are hard rules. A seed makes an individual. Every
 turn compiles persona + the individual's state + the turn's inputs into ONE probbit-ir program, answered exactly in process; the
@@ -401,6 +412,10 @@ a user will like the reply; and it cannot make a model follow the line: whether 
 to be measured per model (no such measurement has been made here).
 
 ### Test a character
+
+<p align="center"><img src="docs/art/the-fuzz-finds-the-flaw.jpg" alt="a corridor of glass event cards; one card cracks cyan beside a rabbit mark; a replay trace runs under the floor" width="100%"></p>
+<p align="center"><sub><i>The fuzz finds the flaw: the shortest event script that pushes an individual out of character, shrunk and replayable.</i></sub></p>
+
 
 A character property is a rule in habit syntax the stance must never break. `fuzz` searches event scripts for each
 individual's shortest counterexample; `prove` says `held by construction`, `proved for every event sequence` or `unknown`. The
