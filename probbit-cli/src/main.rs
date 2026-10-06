@@ -19,6 +19,7 @@
 mod evaluate;
 mod fuzz;
 mod json;
+mod live;
 mod mcp;
 mod persona;
 mod router;
@@ -216,6 +217,7 @@ fn help(cmd: &str) -> Option<String> {
         "stats" => ("The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.", "probbit stats [flags]"),
         "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools probbit_decide,\n  probbit_run, probbit_stats, probbit_demo, probbit_evaluate: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "probbit mcp"),
         "persona" => (PERSONA_HELP, "probbit persona <init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe> PERSONA [flags]"),
+        "live" => (LIVE_HELP, "probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE] [--clock real|fixed] | probbit live verify STRAND"),
         "version" => ("Print the version.", "probbit version"), _ => return None };
     let (vals, sw) = flags_of(cmd); let mut h = format!("usage: {usage}\n  {what}\n");
     if !vals.is_empty() || !sw.is_empty() { h.push_str("flags:\n"); }
@@ -224,6 +226,7 @@ fn help(cmd: &str) -> Option<String> {
             else { FLAG_HELP.iter().find(|(k, _)| k == f).unwrap_or_else(|| panic!("no help line for {f}")).1 };
         h.push_str(&format!("  {f} {d}\n")); }
     if ["decide", "run", "evaluate", "stats"].contains(&cmd) { h.push_str("controls: flag > PROBBIT_* environment > probbit.json > default.\n"); }
+    if cmd == "live" { h.push_str("exit: 0 done (live: every event answered; verify: every line replays), 1 verify: a line differs (its number and what),\n  2 a bad persona, state, event (one {\"error\"} object on stdout per bad event; the run goes on) or flag.\n"); }
     if cmd == "persona" { h.push_str("exit: 0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule\n  held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule\n  unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"}\n  object on stdout, code \"persona\") or bad flag (stderr).\n"); }
     if ["decide", "run", "evaluate"].contains(&cmd) { h.push_str("exit: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object\n  on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.\n"); }
     Some(h)
@@ -539,6 +542,47 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
     err_line(&format!("fuzz: {turns} turns in {secs:.2} s ({:.0} turns/s, {} search thread{})", turns as f64 / secs.max(1e-9), s.threads.min(s.seeds.len().max(1)), if s.threads.min(s.seeds.len().max(1)) == 1 { "" } else { "s" }));
     if res.iter().any(|per| per.iter().any(Option::is_some)) { std::process::exit(1) }
 }
+const LIVE_HELP: &str = "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin,\n  one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods\n  decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n  --strand FILE (a new file) logs the life: a header (persona document, initial state, engine version), then per event the\n  inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.\nflags:\n  --seed N            a new individual (default: the persona's seed)\n  --state FILE        a stored individual instead; rewritten after every event\n  --strand FILE       log the life to FILE (refused if it exists)\n  --events FILE       read events from FILE (default stdin)\n  --clock real|fixed  real (default): elapsed hours from a monotonic clock started with the run; fixed: each event carries\n                      its own elapsed_hours (default 0), so the run is a pure function of its events";
+/// `probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE] [--clock real|fixed]`; `probbit live verify STRAND`
+fn live_cmd(args: &[String]) {
+    let engine = persona_engine(); let eng: persona::Engine = &engine;
+    if args.get(1).map(String::as_str) == Some("verify") {
+        let mut a = vec!["live verify".to_string()]; a.extend(args.iter().skip(3).cloned()); check_flags(&a, &[], &[]);
+        let Some(path) = args.get(2).filter(|a| !a.starts_with("--")) else { fail("live verify: the strand file: probbit live verify STRAND") };
+        let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("live verify: cannot read {path}: {e}")));
+        match live::verify(&text, eng) {
+            Ok(doc) => emit(&persona::canon(&doc)),
+            Err((line, why)) => { emit(&persona::canon(&obj(vec![("ok", Json::Bool(false)), ("line", num(line as f64)), ("diverges", jstr(&why))]))); std::process::exit(1) } }
+        return;
+    }
+    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else { fail("live: the persona file goes before the flags: probbit live PERSONA [flags] (or probbit live verify STRAND)") };
+    let mut a = vec!["live".to_string()]; a.extend(args.iter().skip(2).cloned()); check_flags(&a, &["--seed", "--state", "--strand", "--events", "--clock"], &[]);
+    let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
+    let (p, doc) = persona::load(path).unwrap_or_else(|e| bad_input("live: ", e));
+    let state_file = opt("--state"); if state_file.is_some() && opt("--seed").is_some() { fail("live: give --seed N (a new individual) or --state FILE (a stored one), not both") }
+    let st = match &state_file {
+        Some(f) => { let t = std::fs::read_to_string(f).unwrap_or_else(|e| bad_input("live: ", persona::perr("state", format!("cannot read {f}: {e} (make one with `probbit persona init`)"))));
+            let j = json::parse(t.strip_prefix('\u{feff}').unwrap_or(&t)).unwrap_or_else(|e| bad_input("live: ", persona::perr("state", format!("not JSON: {}", e.msg))));
+            persona::State::read(&p, &j).unwrap_or_else(|e| bad_input("live: ", e)) }
+        None => persona::init(&p, seed_arg(args, "--seed"), true, eng) };
+    let clock = match opt("--clock").as_deref() { None | Some("real") => live::Clock::Real(std::time::Instant::now()), Some("fixed") => live::Clock::Fixed, Some(c) => fail(&format!("live: --clock real|fixed, not {c:?}")) };
+    let mut strand = opt("--strand").map(|f| { if std::path::Path::new(&f).exists() { fail(&format!("live: {f} exists (a strand is never overwritten)")) }
+        std::fs::File::create(&f).unwrap_or_else(|e| fail(&format!("live: cannot create {f}: {e}"))) });
+    let (mut lv, header) = live::Live::start(p, &doc, st, clock, &format!("probbit {VERSION}"));
+    let mut log = |line: &str| if let Some(f) = strand.as_mut() { if let Err(e) = writeln!(f, "{line}").and_then(|_| f.flush()) { fail(&format!("live: cannot write the strand: {e}")) } };
+    log(&header);
+    let input: Box<dyn std::io::BufRead> = match opt("--events") { Some(f) => Box::new(std::io::BufReader::new(std::fs::File::open(&f).unwrap_or_else(|e| fail(&format!("live: cannot read {f}: {e}"))))),
+        None => Box::new(std::io::BufReader::new(std::io::stdin())) };
+    let mut bad = 0;
+    for (i, l) in std::io::BufRead::lines(input).enumerate() {
+        let l = l.unwrap_or_else(|e| fail(&format!("live: cannot read the events: {e}"))); let t = l.trim(); if t.is_empty() { continue; }
+        let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| lv.event(&ev, eng));
+        match res {
+            Ok((stance, line)) => { log(&line); if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
+            Err(e) => { bad += 1; let e = persona::perr(&format!("events[{i}].{}", e.path), e.msg); err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); emit(&json::write(&e.to_json(), false)); } } }
+    err_line(&format!("live: {} events, strand head {}, final state {}", lv.n, lv.head(), lv.st.digest));
+    if bad > 0 { std::process::exit(2) }
+}
 /// `probbit persona <sub> PERSONA [flags]` (docs/persona.md)
 fn persona_cmd(args: &[String]) {
     let sub = args.get(1).map_or("", String::as_str);
@@ -623,6 +667,7 @@ fn main() {
         Some("evaluate") => evaluate_cmd(&args),
         Some("stats") => stats_cmd(&args),
         Some("persona") => persona_cmd(&args),
+        Some("live") => live_cmd(&args),
         Some("mcp") => { check_flags(&args, &[], &[]); mcp::serve() }
         Some("version") | Some("--version") | Some("-V") => { check_flags(&args, &[], &[]); emit(&format!("probbit {VERSION}")) }
         // `probbit --help` / `-h` asked for the usage: stdout, exit 0 (it went to stderr with exit 2, as for a missing command)
@@ -630,4 +675,4 @@ fn main() {
         _ => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
     }
 }
-const USAGE: &str = "usage: probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       probbit demo [--tasks N] [--seed N] [--hard] [--live]\n       probbit ir [--max-input-mb N] < problem.json\n       probbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (probbit-ir JSON v1)\n       probbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       probbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]   (the individuality layer; probbit persona --help)\n       probbit mcp   (Model Context Protocol server on stdio)\n       probbit version\n       probbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";
+const USAGE: &str = "usage: probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       probbit demo [--tasks N] [--seed N] [--hard] [--live]\n       probbit ir [--max-input-mb N] < problem.json\n       probbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (probbit-ir JSON v1)\n       probbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       probbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]   (the individuality layer; probbit persona --help)\n       probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE] [--clock real|fixed]   (a resident individual: JSONL events in, stances out)\n       probbit live verify STRAND   (replay a strand; the earliest line that differs)\n       probbit mcp   (Model Context Protocol server on stdio)\n       probbit version\n       probbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";

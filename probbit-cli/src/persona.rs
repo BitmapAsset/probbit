@@ -94,7 +94,7 @@ pub fn sha(j: &Json) -> String { digest_of(&canon(j)) }
 /// the same way; equal on 300,015 test doubles)
 fn round_to(x: f64, n: usize) -> f64 { format!("{x:.n$}").parse().unwrap_or(x) }
 /// Weights and odds: rounded to 6 decimals, -0 -> 0
-fn r6(x: f64) -> f64 { let v = round_to(x, 6); if v == 0.0 { 0.0 } else { v } }
+pub(crate) fn r6(x: f64) -> f64 { let v = round_to(x, 6); if v == 0.0 { 0.0 } else { v } }
 /// A number as Python's `%s` prints it in a message (bounds are whole numbers or Python floats)
 fn pyn(x: f64) -> String { let mut s = String::new(); canon_num(x, &mut s); s }
 /// A standard normal number that is a pure function of its parts: Box-Muller on the first 16 bytes of
