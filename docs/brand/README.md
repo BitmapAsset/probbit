@@ -42,7 +42,7 @@ Elsewhere in `docs/`: `probbit-hero-1600x900.jpg` (README header, rendered from 
 ## Clear space and minimum sizes
 
 - Clear space: keep at least the mark's ear width (about a sixth of the mark's height) empty on every side of the mark or the lockup.
-- Minimum sizes: mark 24 px tall on screen, word 22 px; below that use the mark alone. The favicons are the only use below 24 px.
+- Minimum sizes: mark 24 px tall on screen, word 22 px; below that use the mark alone. Under 24 px, use the favicon files, which are drawn for it.
 
 ## Do and don't
 
