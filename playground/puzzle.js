@@ -64,7 +64,7 @@ function render() {
     ? "One of the earlier events differs between branch A and branch B. Click the card you think changed."
     : "These two branches end in the same stance: no selected stance change for this seed. That is a valid result; the sweep below counts how often it happens.";
   for (const [side, script, r] of [["A", a, solved.a], ["B", b, solved.b]]) {
-    const box = $("cards" + side); box.textContent = ""; box.style.gridTemplateColumns = "repeat(" + Math.min(script.length, 4) + ", 1fr)";
+    const box = $("cards" + side); box.textContent = ""; box.style.setProperty("--n", Math.min(script.length, 4));
     script.forEach((inputs, i) => {
       const last = i === script.length - 1, open = last || cur.revealed, [lab, say] = eventLabel(name, inputs);
       const card = el(open ? "div" : "button", "card" + (open ? "" : " back") + (last ? " same" : "") + (cur.revealed && changed.includes(i) ? " changed" : "") + (cur.guess === i ? " guess" : ""));
@@ -110,12 +110,12 @@ function drawAfter() {
     box.appendChild(el("span", "name" + (d.traits.includes(id) || d.moods.includes(id) ? " d" : ""), id));
     const pair = el("div", "pair");
     for (const [side, r] of [["A", solved.a], ["B", solved.b]]) {
-      const o = odds(r.final, id), bar = el("div", "ob"); bar.appendChild(el("em", "", side));
+      const o = odds(r.final, id), row = el("div", "row"), bar = el("div", "ob"); row.append(el("em", "", side), bar);
       lvls.forEach((l, k) => {
         const p = o.odds[l], seg = el("i", "s" + k + (l === o.level ? " pick" : ""), p >= 0.14 ? l : "");
         seg.style.width = (p * 100) + "%"; seg.title = side + ": " + id + " = " + l + ", p " + p; bar.appendChild(seg);
       });
-      pair.appendChild(bar);
+      pair.appendChild(row);
     }
     box.appendChild(pair);
   }
@@ -136,8 +136,8 @@ function ablate() {
 
 // The digests to compare a replay against: the native CLI's pinned values (shipped examples) or an imported recipe's.
 function expected() {
-  if (isDefault(cur)) { const e = C.DEFAULTS[cur.name].expect; return { from: "native CLI, pinned", a: e.a, b: e.b }; }
-  if (cur.recipeExpect) return { from: "the recipe", a: cur.recipeExpect.a, b: cur.recipeExpect.b };
+  if (isDefault(cur)) { const e = C.DEFAULTS[cur.name].expect; return { from: "native CLI, pinned", says: "the native CLI's pinned values", a: e.a, b: e.b }; }
+  if (cur.recipeExpect) return { from: "the recipe", says: "the recipe's values", a: cur.recipeExpect.a, b: cur.recipeExpect.b };
   return null;
 }
 function replayBoth() {
@@ -155,7 +155,7 @@ function replayBoth() {
   }
   box.appendChild(t);
   box.appendChild(el("p", "muted", "Final state digests: A " + cur.solved.a.digests.state + ", B " + cur.solved.b.digests.state + ". " +
-    (ex ? (all ? "Both branches repeat byte for byte and equal " + ex.from + "." : "A value differs from " + ex.from + ".") : "Both branches repeat byte for byte" + (all ? "." : ": no.") + " Download the recipe to pin these values.")));
+    (ex ? (all ? "Both branches repeat byte for byte and equal " + ex.says + "." : "A value differs from " + ex.says + ".") : "Both branches repeat byte for byte" + (all ? "." : ": no.") + " Download the recipe to pin these values.")));
 }
 
 const tick = () => new Promise(r => setTimeout(r, 0));
