@@ -121,7 +121,7 @@ Which card changed? Everything below is computed in this tab by the probbit engi
 
   <h2>Odds per trait, both branches</h2>
   <p class="legend">Each row: branch A on top, branch B below, on a fixed 0 to 1 scale. <i></i>the level the stance took (the most likely stance that keeps every habit).
-  Traits whose level differs are named in cyan. The odds are marginals of the persona's own score model, not predictions about people.</p>
+  Traits and moods whose level differs are named in cyan. The odds are marginals of the persona's own score model, not predictions about people.</p>
   <div class="panel"><div class="odds" id="odds"></div></div>
 
   <h2>Disable inertia: do the stances still differ?</h2>
@@ -137,7 +137,7 @@ Which card changed? Everything below is computed in this tab by the probbit engi
 </section>
 
 <h2>How often does this edit change the stance?</h2>
-<p class="muted">Run the same single-event edit for seeds 0 to 49 of this persona (50 individuals) and count the ones whose final stance changes.</p>
+<p class="muted">Run the same single-event edit for seeds 0 to 49 of this persona (50 individuals) and count the ones whose final stance changes (a trait's selected level or the stance line; moods are carried state and are not counted).</p>
 <div class="bar"><button id="sweep" class="go">Run the sweep (seeds 0-49)</button> <span id="sweepProg" class="muted"></span></div>
 <div id="sweepOut" class="hidden">
   <p class="big" id="sweepBig"></p>

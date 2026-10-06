@@ -1,9 +1,14 @@
 // node playground/check.mjs [path/to/probbit_wasm.wasm] [--print]: load the module as the playground does (no dependencies, Node >= 18), run
 // the 300-task demo at 3,200 sweeps, the 12-question evaluate example and the three example personas through the 20-turn workday
 // (persona ops 4 / 5: every stance and the final state must equal examples/persona/golden/, the `probbit persona` documents; the
-// playground's embedded personas must equal examples/persona/*.json); print one JSON line per call; exit 1 if an answer is off.
+// playground's embedded personas must equal examples/persona/*.json), then puzzle.html's shipped puzzles with the page's own
+// puzzle-core.js (each default recipe's two branches, with and without inertia, must give the native CLI's pinned trace, final
+// stance and final state digests; its seeds 0-49 sweep must give the pinned denominator); print one JSON line per call; exit 1 if
+// an answer is off.
 import { deepStrictEqual } from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import vm from 'node:vm';
 const path = process.argv.slice(2).find(a => !a.startsWith('--')) || new URL('../target/wasm32-unknown-unknown/release/probbit_wasm.wasm', import.meta.url);
 const bytes = readFileSync(path);
 const { instance } = await WebAssembly.instantiate(bytes, { probbit: { now_ms: () => performance.now() } });
@@ -41,5 +46,23 @@ for (const name of ['ops-engineer', 'tutor', 'trader-assistant']) {
   try { deepStrictEqual(state, JSON.parse(ex_('golden/' + name + '/final-state.json'))); } catch (err) { personaOk = false; }
   console.log(JSON.stringify({ call: 'persona ' + name + ', 20 workday turns', stances_equal_to_golden: same + '/' + n, wall_ms: Math.round(pwall * 10) / 10 }));
 }
+// puzzle.html: the default recipe per persona, replayed by the page's code on this module, against the native CLI's digests.
+const core = vm.runInNewContext(readFileSync(new URL('./puzzle-core.js', import.meta.url), 'utf8') + ';PuzzleCore', { TextEncoder });
+const pcall = (op, text) => { const r = call(op, text); return { code: r.code, text: r.out }; };
+let puzzleOk = readFileSync(new URL('./puzzle.html', import.meta.url), 'utf8').includes('Persona engine. No language model in this view.');
+for (const name of ['tutor', 'ops-engineer', 'trader-assistant']) {
+  const d = core.DEFAULTS[name], text = JSON.stringify(JSON.parse(ex_(name + '.json')));
+  t = performance.now(); const s = core.solve(pcall, text, d.seed, d.a, d.b); let same = 0;
+  for (const [k, r] of [['a', s.a], ['b', s.b], ['a_no_inertia', s.a0], ['b_no_inertia', s.b0]]) {
+    const e = d.expect[k], ok = r.digests.trace === e.trace && r.digests.stance === e.stance && r.digests.state === e.state &&
+      createHash('sha256').update(r.trace).digest('hex') === e.trace && r.trace.split('\n').length === d[k[0]].length + 1;
+    if (ok) same++; else puzzleOk = false;
+  }
+  const sw = core.sweep(pcall, text, d.a, d.b, core.SWEEP_SEEDS), rec = core.recipe('0', name, JSON.parse(text), d.seed, d.a, d.b, s);
+  const swOk = JSON.stringify(sw.changed) === JSON.stringify(d.sweep) && sw.changed.includes(d.seed);
+  if (!swOk || !s.diff.any || s.diff0.any || core.checkRecipe(rec, { [name]: rec.persona.digest }).problems.length) puzzleOk = false;
+  console.log(JSON.stringify({ call: 'puzzle ' + name + ' seed ' + d.seed + ', cards ' + rec.changed_turns.join(','), branches_equal_to_native: same + '/4',
+    final_stance_differs: s.diff.any, with_no_inertia: s.diff0.any, sweep: sw.changed.length + '/' + sw.n, sweep_seeds: sw.changed, wall_ms: Math.round(performance.now() - t) }));
+}
 if (process.argv.includes('--print')) console.log(d.out);
-if (!personaOk || d.code !== 0 || doc.violations !== 0 || doc.verdict !== 'diagnostics_passed' || e.code !== 0 || edoc.verdict !== 'exact' || edoc.answers.team.probbit.value !== 'technical') process.exit(1);
+if (!personaOk || !puzzleOk || d.code !== 0 || doc.violations !== 0 || doc.verdict !== 'diagnostics_passed' || e.code !== 0 || edoc.verdict !== 'exact' || edoc.answers.team.probbit.value !== 'technical') process.exit(1);

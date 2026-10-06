@@ -2,7 +2,8 @@
 // `call(op, text)` that runs one probbit-wasm op and returns its output text. No dependencies; a classic script (no modules), so
 // the page also works opened from disk.
 //
-// A puzzle is two 4-turn persona replays (docs/persona.md section 7, `probbit persona replay`) of one individual (persona + seed)
+// "The final stance changes" means a trait's selected level or the stance line differs at the last turn (moods are shown, not
+// counted). A puzzle is two 4-turn persona replays (docs/persona.md section 7, `probbit persona replay`) of one individual (persona + seed)
 // whose scripts differ in exactly one earlier event. A branch's trace is the CLI's stdout: one canonical stance per line, each
 // ending in "\n"; its sha256 is the one `probbit persona replay` prints on stderr, next to the final state digest.
 var PuzzleCore = (function () {
@@ -81,17 +82,20 @@ var PuzzleCore = (function () {
     return { stances: stances, final: last, trace: trace, digests: { trace: sha256(trace), stance: sha256(stances[stances.length - 1]), state: JSON.parse(state).digest } };
   }
 
-  // What the viewer compares: every selected level (traits and moods) and the line.
+  // The selected levels: traits (the stance) and moods (the carried state), each by id.
   function levels(stance) {
     var o = {}, k;
     for (k in stance.stance) o[k] = stance.stance[k].level;
     for (k in stance.mood) o[k] = stance.mood[k].level;
     return o;
   }
+  // Two final turns compared. The stance changes when a trait's selected level or the line differs (moods are reported, not
+  // counted: they are the state carried into the stance).
   function differs(sa, sb) {
-    var la = levels(sa), lb = levels(sb), out = [];
-    for (var k in la) if (la[k] !== lb[k]) out.push(k);
-    return { traits: out, line: sa.line !== sb.line, any: out.length > 0 || sa.line !== sb.line };
+    var traits = [], moods = [], k;
+    for (k in sa.stance) if (sa.stance[k].level !== sb.stance[k].level) traits.push(k);
+    for (k in sa.mood) if (sa.mood[k].level !== sb.mood[k].level) moods.push(k);
+    return { traits: traits, moods: moods, line: sa.line !== sb.line, any: traits.length > 0 || sa.line !== sb.line };
   }
   // The script positions (0-based) where the two scripts differ.
   function changedTurns(a, b) {

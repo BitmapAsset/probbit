@@ -76,7 +76,7 @@ function render() {
     });
     $("line" + side).textContent = r.final.line + (r.final.status !== "ok" ? "  (status: " + r.final.status + ")" : "");
     const lv = $("lv" + side); lv.textContent = "";
-    for (const [id] of vars(name)) { lv.appendChild(el("span", d.traits.includes(id) ? "d" : "", id)); lv.appendChild(el("span", d.traits.includes(id) ? "d" : "", odds(r.final, id).level)); }
+    for (const [id] of vars(name)) { const c = d.traits.includes(id) || d.moods.includes(id) ? "d" : ""; lv.appendChild(el("span", c, id)); lv.appendChild(el("span", c, odds(r.final, id).level)); }
   }
   $("after").classList.toggle("hidden", !cur.revealed);
   $("reveal").classList.toggle("hidden", cur.revealed);
@@ -101,12 +101,13 @@ function drawAfter() {
   }
   const lv = id => [odds(solved.a.final, id).level, odds(solved.b.final, id).level];
   $("changeText").textContent = what + " " + (d.any
-    ? "At the identical final message: " + d.traits.map(id => id + " " + lv(id)[0] + " → " + lv(id)[1]).join(", ") + (d.line ? "; the stance line changed." : ".")
-    : "The final stances are the same.") +
+    ? "At the identical final message: " + d.traits.map(id => id + " " + lv(id)[0] + " → " + lv(id)[1]).join(", ") + (d.line ? (d.traits.length ? "; " : "") + "the stance line changed." : ".")
+    : "The final stances are the same (every trait level and the line).") +
+    (d.moods.length ? " Mood (carried state): " + d.moods.map(id => id + " " + lv(id)[0] + " → " + lv(id)[1]).join(", ") + "." : "") +
     " Largest odds shift: P(" + shift[0] + " = " + shift[1] + ") " + fmt(shift[2]) + " → " + fmt(shift[3]) + ".";
   const box = $("odds"); box.textContent = "";
   for (const [id, lvls] of vars(name)) {
-    box.appendChild(el("span", "name" + (d.traits.includes(id) ? " d" : ""), id));
+    box.appendChild(el("span", "name" + (d.traits.includes(id) || d.moods.includes(id) ? " d" : ""), id));
     const pair = el("div", "pair");
     for (const [side, r] of [["A", solved.a], ["B", solved.b]]) {
       const o = odds(r.final, id), bar = el("div", "ob"); bar.appendChild(el("em", "", side));
@@ -124,7 +125,7 @@ function ablate() {
   const { solved } = cur, d0 = solved.diff0, box = $("ablation"); box.textContent = ""; box.classList.remove("hidden");
   box.appendChild(el("p", d0.any ? "bad" : "ok", d0.any
     ? "With inertia off the final stances still differ (" + (d0.traits.join(", ") || "the line") + "): here the difference does not come from the carried mood alone."
-    : "With inertia off the final stances match: every level and the line. In this example the difference came from the mood carried from turn to turn."));
+    : "With inertia off the final stances match: every trait level and the line. In this example the difference came from the mood carried from turn to turn."));
   const t = el("table"); t.innerHTML = "<tr><th></th><th>with inertia</th><th>inertia off</th></tr>";
   for (const [side, r, r0] of [["A", solved.a, solved.a0], ["B", solved.b, solved.b0]]) {
     const tr = el("tr"); tr.append(el("th", "", side), el("td", "", r.final.line), el("td", "", r0.final.line)); t.appendChild(tr);
@@ -173,7 +174,7 @@ function drawSweep() {
   $("sweepOut").classList.toggle("hidden", !sw); if (!sw) return;
   const big = $("sweepBig"); big.textContent = ""; big.append(el("b", "", sw.changed.length + " of " + sw.n), " individuals change their final stance");
   const cards = C.changedTurns(cur.a, cur.b).map(i => "card " + (i + 1) + ": " + eventLabel(cur.name, cur.a[i])[0] + " → " + eventLabel(cur.name, cur.b[i])[0]).join(", ");
-  $("sweepSub").textContent = "Persona " + cur.name + ", seeds 0-49, the edit " + cards + ". " + (sw.n - sw.changed.length) + " of " + sw.n + " end in the same stance. " +
+  $("sweepSub").textContent = "Persona " + cur.name + ", seeds 0-49, the edit " + cards + ". " + (sw.n - sw.changed.length) + " of " + sw.n + " end in the same stance (every trait level and the line). " +
     "With inertia off, " + sw.survives.length + " of the " + sw.changed.length + " still differ.";
   const g = $("grid50"); g.textContent = "";
   for (let s = 0; s < sw.n; s++) {

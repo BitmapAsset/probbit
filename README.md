@@ -619,6 +619,7 @@ or Windows.
 - [python/](python/): `probbit.py`, a zero-dependency subprocess wrapper (with `evaluate`, the persona functions and a stdlib mock
   judge), its tests and three examples.
 - [playground/](playground/): one static page that runs probbit in a browser (`probbit-wasm`, built by `playground/build.sh`).
+  Try the puzzle: find the event that changed the decision ([playground/puzzle.html](playground/puzzle.html)).
 - [bench/](bench/): the scripts behind BENCHMARKS §2 and §5 (Python 3; the ILP baselines need `numpy` and `scipy >= 1.9`).
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md).
 
