@@ -75,5 +75,22 @@ class Persona(unittest.TestCase):
         self.assertEqual(probbit.persona_turn(doc, st, {"error": True})["stance"]["turn"], 0)
 
 
+    def test_fuzz_and_prove_on_the_0_5_0_tutor(self):
+        # the tutor as it shipped in 0.5.0: one upset message can make an individual playful; its loss habit holds by construction
+        tutor = os.path.join(EX, "..", "..", "probbit-cli", "tests", "fixtures", "persona", "tutor-0.5.0.yaml")
+        upset = {"when": {"sentiment": "negative"}, "then": {"humour": {"at_most": "light"}}}
+        f = probbit.persona_fuzz(tutor, never=upset, seeds="0-4", scripts=10, grid=[0, 1])
+        self.assertEqual(f["probbit_persona_fuzz"], 1)
+        self.assertTrue(f["found"])
+        self.assertEqual(f["properties"][0]["shortest"]["script"], [{"sentiment": "negative"}])
+        p = probbit.persona_prove(tutor, props=[dict(upset, id="not_playful"), {"id": "loss", "when": {"loss": True}, "then": {"humour": ["none"]}}], seeds=[0, 1])
+        self.assertEqual(p["probbit_persona_prove"], 1)
+        self.assertEqual([x["verdict"] for x in p["properties"]], ["unknown", "held_by_construction"])
+        with self.assertRaises(probbit.ProbbitInputError) as e:
+            probbit.persona_prove(tutor, never={"when": {"sentimentx": "negative"}, "then": {"humour": ["none"]}})
+        self.assertEqual(e.exception.code, "persona")
+        with self.assertRaises(TypeError):
+            probbit.persona_fuzz(tutor)
+
 if __name__ == "__main__":
     unittest.main()

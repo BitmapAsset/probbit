@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.6.0 - 2026-10-06
+
+### Added
+- **`probbit persona fuzz`, character testing** (docs/persona.md): a rule in habit syntax (`--never '{when: {...}, then:
+  {...}}'`, or several in `--props FILE`) and a population of individuals (`--seeds 0-99`). It searches event scripts built from
+  the persona's declared inputs (flags, levels, numbers on `--grid`, idle hours on `--hours`): random scripts, then a beam guided
+  by the exact odds (the next events that put the most odds on a level the rule forbids). It shrinks each individual's shortest
+  counterexample by delta debugging and prints it with the breaking turn's levels, odds, why and stance line and the exact
+  `probbit persona replay` / `explain` commands that reproduce it. Human report or `--json` (`probbit_persona_fuzz: 1`).
+  Deterministic: Philox (probbit-core) keyed by `--fuzz-seed`; byte-identical output for the same inputs on any number of
+  threads (timing on stderr). Exit 0 nothing found, 1 a counterexample, 2 bad input. It tests the stance a host gets, not the
+  words a model writes; "none found" is evidence, not a proof.
+- **`probbit persona prove`**: the same rules, decided for every event sequence where it can be. One verdict per rule over the
+  population: `held by construction` (the habits in force whenever the rule applies imply it; under `on_conflict: yield` a habit
+  counts when no conflict on such a turn ever drops it), `proved for every event sequence` (a sound bound per individual: the mood accumulators
+  stay in a box, inputs, history values and previous levels fall into finitely many cells, and in every cell the best allowed
+  stance beats the best forbidden one by more than the box can move them), or `unknown` (the earliest cell the bound cannot
+  decide, with the `fuzz` command to search it). Human report or `--json` (`probbit_persona_prove: 1`). Exit 0 every rule held
+  or proved, 1 some unknown, 2 bad input. Soundness tests: every event sequence of tiny random personas, the fuzzer on random
+  personas, and mutations of the bound that the tests catch. It covers the stance, not the model's words.
+- `probbit persona lint --props FILE` (or `--never RULE`): the contradictions as before, then every rule proved, and the ones
+  the bound leaves unknown fuzzed; the lint document gets `props` and `broken`; exit 1 when a rule breaks (CI-friendly).
+- MCP tool `probbit_persona_fuzz` (the eighth tool of `probbit mcp`): `probbit persona fuzz --json`'s document for a persona
+  (inline or a path) and `never` / `props`, byte for byte, in the server's process. Python: `probbit.persona_fuzz(...)` and
+  `probbit.persona_prove(...)` return the `--json` documents (a counterexample or an unknown rule is an answer).
+- docs/persona.md §5.6 "Testing a character": what a property is, both commands, the verdicts and the bound, the limits.
+- `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`: the tutor as it shipped in 0.5.0, byte for byte, with the pinned
+  fuzz report on it (one upset message, `{"sentiment":"negative"}`, gives seed 1 a playful stance).
+- `probbit persona lint` warnings: a trait whose planned level differs from its own most likely level (its marginal mode) on a
+  probe turn (each individual of `--seeds` at rest, a quiet turn, then every declared input alone) is listed under `warnings`
+  with the count and the earliest case. A warning leaves the exit code alone, and decoding is unchanged (the stance is still the
+  joint plan); docs/persona.md §5.5 gives the options (a habit, a `vouch` floor with a `hold`, or the trait's `odds`).
+- README "Test a character": the fuzz counterexample on the 0.5.0 tutor and `held by construction` on the tutor as it ships now.
+
+### Changed
+- Version 0.6.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
+  `stdout_matches_the_0_6_0_goldens` (the documents are unchanged).
+- **The tutor example** (examples/persona/tutor.yaml, persona version 1.1.0) has one habit more, `no_play_when_upset` (`when:
+  {sentiment: negative}`, `then: {humour: {at_most: light}}`). In 0.5.0 `persona fuzz` found 67 of seeds 0-99 playful with an
+  upset learner (37 of them after the single message `{"sentiment": "negative"}`), and the shipped workday golden itself had
+  seed 1 playful on turn 11 ("still upset"); that turn is now light, and `persona prove` says the rule is held by construction.
+  The tutor's digest and goldens change; its genes (individuals) do not. The habit fixes the stance the host gets, not the words
+  a model writes.
+- `why` names an input's push by its direction (`learner upset -> valence down, humour down`) where it named the trait's
+  lowest or highest level ("humour none" printed next to a playful stance read as a contradiction). In the ops engineer's and
+  the trader assistant's goldens nothing but `why` changes.
+- docs/persona.md §5.3: the byte-for-byte parity with the reference implementation is stated for the 0.5.0 documents; the 0.6.0
+  goldens are regenerated from this implementation.
+
 ## 0.5.0 - 2026-10-05
 
 ### Added

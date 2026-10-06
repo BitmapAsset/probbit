@@ -140,6 +140,8 @@ impl Persona {
     fn input(&self, id: &str) -> Option<&Input> { self.inputs.iter().find(|x| x.id == id) }
     fn habit(&self, id: &str) -> &Habit { self.habits.iter().find(|h| h.id == id).expect("habit id") }
     fn habit_index(&self, id: &str) -> usize { self.habits.iter().position(|h| h.id == id).unwrap_or(0) }
+    /// `on_conflict: yield` (else fallback)
+    pub fn yields(&self) -> bool { self.eng.yields }
 }
 
 fn get<'a>(kv: &'a [(String, Json)], k: &str) -> Option<&'a Json> { kv.iter().find(|(x, _)| x == k).map(|(_, v)| v) }
@@ -334,23 +336,7 @@ pub fn build(doc: &Json) -> R<Persona> {
         history.push(Hist { id, of, streak, window, cap, say, effects }); }
     // habits
     let mut habits: Vec<Habit> = vec![];
-    for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { let path = ix("habits", i);
-        let hkv = keys(hb, &path, &["id", "when", "then", "rules", "say", "priority", "comment"], &["id"])?;
-        let id = ident(get(hkv, "id"), &at(&path, "id"), "id")?;
-        need(get(hkv, "then").is_some() || get(hkv, "rules").is_some(), &path, "a habit needs then and/or rules")?;
-        let wp = at(&path, "when"); let when: Vec<(String, Json)> = match get_t(hkv, "when") { None => vec![], Some(w) => w.as_obj().ok_or_else(|| perr(&wp, "a mapping input -> condition"))?.to_vec() };
-        for (k, c) in &when { check_cond(k, c, &at(&wp, k), &inputs, &history)?; }
-        let tp = at(&path, "then"); let then: Vec<(String, Json)> = match get_t(hkv, "then") { None => vec![], Some(t) => t.as_obj().ok_or_else(|| perr(&tp, "a mapping trait -> allowed levels"))?.to_vec() };
-        for (k, r) in &then { let lv = vlev(k).ok_or_else(|| perr(&at(&tp, k), "unknown trait or mood"))?; check_restr(r, &at(&tp, k), &lv)?; }
-        let rp = at(&path, "rules"); let mut rules: Vec<(String, Vec<Json>)> = vec![];
-        if let Some(r) = get_t(hkv, "rules") { for (k, lst) in r.as_obj().ok_or_else(|| perr(&rp, "a mapping of IR rule lists"))? {
-            need(RULE_KEYS.contains(&k.as_str()), &at(&rp, k), &format!("one of {}", RULE_KEYS.join(", ")))?;
-            let l = lst.as_arr().filter(|l| !l.is_empty()).ok_or_else(|| perr(&at(&rp, k), "a non-empty list"))?;
-            for (j, r) in l.iter().enumerate() { check_rule(k, r, &ix(&at(&rp, k), j), &vars, &steps)?; }
-            rules.push((k.clone(), l.to_vec())); } }
-        let say = match get(hkv, "say") { None => String::new(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr(&at(&path, "say"), "a string")) };
-        let priority = num_or(hkv, "priority", 0.0, &path, Some(-100.0), Some(100.0), true)?;
-        habits.push(Habit { id, when, then, rules, say, priority }); }
+    for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { habits.push(habit_spec(hb, &ix("habits", i), &inputs, &history, &vars, &steps)?); }
     need((1..habits.len()).all(|i| habits[..i].iter().all(|h| h.id != habits[i].id)), "habits", "habit ids must be distinct")?;
     // engine
     let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false };
@@ -385,6 +371,26 @@ pub fn build(doc: &Json) -> R<Persona> {
     Ok(p)
 }
 
+/// One habit, checked against the persona's inputs, history features, traits, moods and agenda steps. A character property
+/// (`persona fuzz` / `prove`, §5.6) has the same shape and is read by the same function.
+fn habit_spec(hb: &Json, path: &str, inputs: &[Input], history: &[Hist], vars: &[Var], steps: &[String]) -> R<Habit> {
+    let hkv = keys(hb, path, &["id", "when", "then", "rules", "say", "priority", "comment"], &["id"])?;
+    let id = ident(get(hkv, "id"), &at(path, "id"), "id")?;
+    need(get(hkv, "then").is_some() || get(hkv, "rules").is_some(), path, "a habit needs then and/or rules")?;
+    let wp = at(path, "when"); let when: Vec<(String, Json)> = match get_t(hkv, "when") { None => vec![], Some(w) => w.as_obj().ok_or_else(|| perr(&wp, "a mapping input -> condition"))?.to_vec() };
+    for (k, c) in &when { check_cond(k, c, &at(&wp, k), inputs, history)?; }
+    let tp = at(path, "then"); let then: Vec<(String, Json)> = match get_t(hkv, "then") { None => vec![], Some(t) => t.as_obj().ok_or_else(|| perr(&tp, "a mapping trait -> allowed levels"))?.to_vec() };
+    for (k, r) in &then { let lv = vars.iter().find(|v| v.id == *k).ok_or_else(|| perr(&at(&tp, k), "unknown trait or mood"))?; check_restr(r, &at(&tp, k), &lv.levels)?; }
+    let rp = at(path, "rules"); let mut rules: Vec<(String, Vec<Json>)> = vec![];
+    if let Some(r) = get_t(hkv, "rules") { for (k, lst) in r.as_obj().ok_or_else(|| perr(&rp, "a mapping of IR rule lists"))? {
+        need(RULE_KEYS.contains(&k.as_str()), &at(&rp, k), &format!("one of {}", RULE_KEYS.join(", ")))?;
+        let l = lst.as_arr().filter(|l| !l.is_empty()).ok_or_else(|| perr(&at(&rp, k), "a non-empty list"))?;
+        for (j, r) in l.iter().enumerate() { check_rule(k, r, &ix(&at(&rp, k), j), vars, steps)?; }
+        rules.push((k.clone(), l.to_vec())); } }
+    let say = match get(hkv, "say") { None => String::new(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr(&at(path, "say"), "a string")) };
+    let priority = num_or(hkv, "priority", 0.0, path, Some(-100.0), Some(100.0), true)?;
+    Ok(Habit { id, when, then, rules, say, priority })
+}
 fn check_cond(k: &str, c: &Json, path: &str, inputs: &[Input], history: &[Hist]) -> R<()> {
     let range = |c: &Json| -> R<()> { if let Json::Num(_) = c { return Ok(()); }
         let kv = c.as_obj().filter(|kv| !kv.is_empty() && kv.iter().all(|(k, _)| k == "at_least" || k == "at_most")).ok_or_else(|| perr(path, "a number (at least) or {at_least, at_most}"))?;
@@ -481,19 +487,23 @@ fn resolve_level(spec: &str, levels: &[String], prev: &str) -> usize {
     let i = levels.iter().position(|l| l == prev).unwrap_or(0) as i64;
     (i + match spec { "prev-1" => -1, "prev+1" => 1, _ => 0 }).clamp(0, levels.len() as i64 - 1) as usize
 }
+/// The levels a `then` restriction allows; `prev`, `prev-1` and `prev+1` read `pl`, the previous turn's level
+fn allowed<'a>(levels: &'a [String], r: &Json, pl: &str) -> Vec<&'a String> {
+    match r {
+        Json::Arr(a) => levels.iter().filter(|l| a.iter().any(|x| x.as_str() == Some(l.as_str()))).collect(),
+        _ => { let (rk, x) = &r.as_obj().unwrap()[0];
+            match rk.as_str() {
+                "not" => levels.iter().filter(|l| !x.as_arr().unwrap().iter().any(|y| y.as_str() == Some(l.as_str()))).collect(),
+                "at_most" => levels[..=resolve_level(x.as_str().unwrap(), levels, pl)].iter().collect(),
+                _ => levels[resolve_level(x.as_str().unwrap(), levels, pl)..].iter().collect() } } }
+}
 /// Habit h's IR rules (semantic level names) appended to `out` (lists in RULE_KEYS order) and its id to `owners` once per rule.
 /// `prev` = the previous turn's levels (`prev`, `prev-1`, `prev+1` restrictions read them; a missing one = the fallback level).
 fn habit_rules(p: &Persona, h: &Habit, prev: &HashMap<String, String>, out: &mut [Vec<Json>], owners: &mut Vec<(String, usize)>) {
     let ti = RULE_KEYS.iter().position(|k| *k == "tables").unwrap();
     for (k, r) in &h.then {
-        let v = p.var(k).expect("then target"); let levels = &v.levels; let pl = prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone());
-        let keep: Vec<&String> = match r {
-            Json::Arr(a) => levels.iter().filter(|l| a.iter().any(|x| x.as_str() == Some(l.as_str()))).collect(),
-            _ => { let (rk, x) = &r.as_obj().unwrap()[0];
-                match rk.as_str() {
-                    "not" => levels.iter().filter(|l| !x.as_arr().unwrap().iter().any(|y| y.as_str() == Some(l.as_str()))).collect(),
-                    "at_most" => levels[..=resolve_level(x.as_str().unwrap(), levels, &pl)].iter().collect(),
-                    _ => levels[resolve_level(x.as_str().unwrap(), levels, &pl)..].iter().collect() } } };
+        let v = p.var(k).expect("then target"); let pl = prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone());
+        let keep = allowed(&v.levels, r, &pl);
         out[ti].push(Json::Obj(vec![("vars".into(), Json::Arr(vec![Json::Str(k.clone())])), ("allow".into(), Json::Arr(keep.into_iter().map(|l| Json::Arr(vec![Json::Str(l.clone())])).collect()))]));
         owners.push((h.id.clone(), ti));
     }
@@ -602,10 +612,11 @@ fn flags(p: &Persona, st: &State) -> Flags {
 }
 
 // --------------------------------------------------------------------------------------------------------- compile
+#[derive(Clone)]
 struct Meta { vals: Vec<(String, Json)>, hist: Vec<(String, f64)>, ignored: Vec<String>, active: Vec<String>, conditional: Vec<String>, active_inputs: Vec<String>,
     rules: Vec<Vec<Json>>, owners: Vec<String>, new_mood: Vec<(String, Vec<f64>)>, contrib: Vec<Vec<(String, Vec<f64>)>>, field: Vec<Vec<f64>>, values: Vec<String>, twin: bool }
-#[derive(Default)]
-struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool>, exclude: Vec<String> }
+#[derive(Default, Clone)]
+struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool>, exclude: Vec<String>, hist: Option<Vec<(String, f64)>> }
 
 /// Inputs -> (values per declared input, history features, elapsed hours, ignored ids); a bad value is a persona error
 #[allow(clippy::type_complexity)]
@@ -637,7 +648,8 @@ fn jstrs(v: &[String]) -> Json { Json::Arr(v.iter().map(|s| Json::Str(s.clone())
 
 /// persona + state + inputs -> (the turn's probbit-ir program, meta). A pure function; every weight rounded to 6 decimals.
 fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json, Meta)> {
-    let (vals, hist, elapsed, ignored) = resolve_inputs(p, st, raw)?;
+    let (vals, mut hist, elapsed, ignored) = resolve_inputs(p, st, raw)?;
+    if let Some(h) = &o.hist { hist = h.clone(); } // `prove`: history feature values given, not derived from the state
     let (nv, ns) = (p.vars.len(), p.steps.len());
     let tix = |t: &str| -> usize { match t.strip_prefix("step.") { Some(s) => nv + p.steps.iter().position(|x| x == s).unwrap(), None => p.vars.iter().position(|v| v.id == t).unwrap() } };
     let mut contrib: Vec<Vec<(String, Vec<f64>)>> = vec![vec![]; nv + ns];
@@ -789,9 +801,11 @@ fn line(p: &Persona, stance: &HashMap<String, String>, active: &[String], bound:
     loop { let text = format!("{}{}", p.prefix, if keep.is_empty() { "neutral.".to_string() } else { format!("{}.", keep.join("; ")) });
         if est_tokens(&text) <= p.max_tokens || keep.is_empty() { return text; } keep.pop(); }
 }
+/// An input's push on one variable in words: the direction ("humour down"), not a level name (the push can point at a level the
+/// stance does not take)
 fn direction_word(p: &Persona, var: &str, vec: &[f64]) -> Option<(String, f64)> {
-    let v = p.var(var)?; let d = vec.iter().zip(centered(vec.len())).fold(0.0, |a, (x, c)| a + x * c);
-    (d.abs() >= 0.15).then(|| (format!("{var} {}", if d > 0.0 { v.levels.last().unwrap() } else { &v.levels[0] }), d.abs()))
+    p.var(var)?; let d = vec.iter().zip(centered(vec.len())).fold(0.0, |a, (x, c)| a + x * c);
+    (d.abs() >= 0.15).then(|| (format!("{var} {}", if d > 0.0 { "up" } else { "down" }), d.abs()))
 }
 fn why(p: &Persona, meta: &Meta, bound: &[String], status: &str) -> String {
     let mut parts: Vec<String> = p.habits.iter().filter(|h| bound.contains(&h.id)).map(|h| format!("{} (habit)", if h.say.is_empty() { h.id.replace('_', " ") } else { h.say.clone() })).collect();
@@ -890,7 +904,7 @@ fn ms(t: Instant) -> f64 { t.elapsed().as_secs_f64() * 1e3 }
 /// A minimal set of active habits that cannot hold together (deletion filter: drop each habit in turn, keep it only if the rest
 /// becomes feasible without it); [] when the rules without any habit are already infeasible
 fn habit_conflict(p: &Persona, st: &State, raw: &[(String, Json)], active: &[String], o: &Opts, eng: Engine, calls: &mut usize) -> R<Vec<String>> {
-    let mut feasible = |ex: &[String]| -> R<bool> { let mut oo = Opts { no_inertia: o.no_inertia, twin: Some(false), ..Default::default() }; oo.exclude = o.exclude.iter().chain(ex).cloned().collect();
+    let mut feasible = |ex: &[String]| -> R<bool> { let mut oo = Opts { no_inertia: o.no_inertia, twin: Some(false), hist: o.hist.clone(), ..Default::default() }; oo.exclude = o.exclude.iter().chain(ex).cloned().collect();
         let (prog, _) = compile(p, st, raw, &oo)?; Ok(solve(p, st, &prog, eng, calls).get("verdict").and_then(Json::as_str) != Some("infeasible")) };
     if !feasible(active)? { return Ok(vec![]); }
     let mut core: Vec<String> = active.to_vec();
@@ -1030,6 +1044,31 @@ pub fn lint(p: &Persona, eng: Engine) -> Vec<Json> {
         Json::Obj(vec![("habits".into(), jstrs(&hs)), ("when_prev".into(), Json::Arr(when)), ("resolution".into(), Json::Str(res))]) }).collect()
 }
 
+/// `lint`'s decoding check (a warning, not an error): the stance is the joint plan, the most likely stance as a whole, so on
+/// coupled traits a trait's planned level can differ from its own most likely level (its marginal mode). Probes: each seed's
+/// individual at rest, then a quiet turn and every declared input alone (numbers at their maximum). -> per trait where that
+/// happens on a vouched, not unsure, turn: how many probe turns, out of how many, and the earliest one.
+pub fn plan_warnings(p: &Persona, seeds: &[u64], eng: Engine) -> Vec<Json> {
+    let mut probes: Vec<Vec<(String, Json)>> = vec![vec![]];
+    for (id, _, vals) in alphabet(p, &[1.0], &[]) { for v in vals { probes.push(vec![(id.clone(), v)]); } }
+    let traits: Vec<&Var> = p.vars.iter().filter(|v| !v.mood).collect();
+    let (mut found, mut total): (Vec<(usize, Option<Json>)>, usize) = (vec![(0, None); traits.len()], 0);
+    for &seed in seeds { let st = init(p, Some(seed), true, eng);
+        for e in &probes { let Ok((doc, _)) = turn(p, &st, &Json::Obj(e.clone()), false, eng, false) else { continue }; total += 1;
+            let unsure = doc.get("unsure").and_then(Json::as_arr).unwrap_or(&[]).to_vec();
+            for (i, v) in traits.iter().enumerate() { let Some(x) = doc.get("stance").and_then(|s| s.get(&v.id)) else { continue };
+                if x.get("released") != Some(&Json::Bool(true)) || unsure.contains(&Json::Str(v.id.clone())) { continue; }
+                let plan = x.get("level").and_then(Json::as_str).unwrap_or(""); let odds = x.get("odds").and_then(Json::as_obj).unwrap_or(&[]);
+                let pp = odds.iter().find(|(l, _)| l == plan).and_then(|(_, q)| q.as_f64()).unwrap_or(0.0);
+                let (mut mode, mut pm) = (plan, pp); for (l, q) in odds { if q.as_f64().unwrap_or(0.0) > pm { (mode, pm) = (l.as_str(), q.as_f64().unwrap_or(0.0)); } }
+                if pm <= pp + 1e-9 { continue; } found[i].0 += 1;
+                if found[i].1.is_none() { found[i].1 = Some(Json::Obj(vec![("seed".into(), Json::Num(seed as f64)), ("inputs".into(), Json::Obj(e.clone())),
+                    ("plan".into(), Json::Str(plan.into())), ("p_plan".into(), Json::Num(pp)), ("mode".into(), Json::Str(mode.into())), ("p_mode".into(), Json::Num(pm))])); } } } }
+    traits.iter().zip(found).filter(|(_, f)| f.0 > 0).map(|(v, (n, example))| Json::Obj(vec![("trait".into(), Json::Str(v.id.clone())), ("turns".into(), Json::Num(n as f64)),
+        ("of".into(), Json::Num(total as f64)), ("example".into(), example.unwrap_or(Json::Null)),
+        ("note".into(), Json::Str("planned level differs from the trait's own most likely level (the stance is the most likely stance as a whole); a habit pins the level, a `vouch` floor with a `hold` holds it when the odds are low".into()))])).collect()
+}
+
 /// Total-variation distance between two odds objects over the same levels (None if their levels differ)
 fn tv(oa: &[(String, Json)], ob: &[(String, Json)]) -> Option<f64> {
     let mut ka: Vec<&String> = oa.iter().map(|(k, _)| k).collect(); let mut kb: Vec<&String> = ob.iter().map(|(k, _)| k).collect(); ka.sort(); kb.sort();
@@ -1110,4 +1149,315 @@ pub fn explain(p: &Persona, st: &State, raw: &Json, eng: Engine) -> R<String> {
     l.push(format!("program: {} vars, {} values, {}; {}", prog.get("vars").and_then(Json::as_arr).map_or(0, <[Json]>::len), prog.get("values").and_then(Json::as_arr).map_or(0, <[Json]>::len), cnt.join(", "), &pd[..pd.len().min(23)]));
     l.push(format!("line ({} tokens est.): {}", g("line_tokens").as_f64().unwrap_or(0.0) as i64, s(&g("line")))); l.push(format!("why: {}", s(&g("why"))));
     Ok(l.join("\n"))
+}
+
+// ------------------------------------------------------------------------------------------- character properties (§5.6)
+/// A character property: a habit-shaped rule (`when` / `then` / `rules`) an individual's stance must never break. `persona fuzz`
+/// searches event scripts for a turn that breaks it; `persona prove` decides it for every event sequence where it can.
+#[derive(Clone)]
+pub struct Prop { pub id: String, pub rule: Json, habit: Habit }
+/// A broken `then` entry: the trait (or mood), the level the stance has, the levels the property allows. Raw `rules` that break
+/// are one entry with `var` = "rules".
+pub struct Broken { pub var: String, pub level: String, pub allowed: Vec<String> }
+/// A property document: one rule, a list of rules, or {"props": [...]}. A rule's `id` is optional: `one` names a single rule,
+/// list entries default to prop1, prop2, ...; ids must be distinct.
+pub fn props(p: &Persona, doc: &Json, path: &str, one: &str) -> R<Vec<Prop>> {
+    let (list, single) = match doc { Json::Arr(a) => (a.to_vec(), false), Json::Obj(kv) if get(kv, "props").is_some() => {
+            need(kv.len() == 1, path, "{\"props\": [...]} takes no other field")?;
+            (get(kv, "props").and_then(Json::as_arr).ok_or_else(|| perr(&at(path, "props"), "a list of rules"))?.to_vec(), false) }
+        Json::Obj(_) => (vec![doc.clone()], true), _ => return Err(perr(path, "a rule {when, then}, a list of rules or {\"props\": [...]}")) };
+    need(!list.is_empty(), path, "at least one rule")?;
+    let mut out: Vec<Prop> = vec![];
+    for (i, r) in list.iter().enumerate() {
+        let rp = if single { path.to_string() } else { ix(path, i) };
+        let Json::Obj(kv) = r else { return Err(perr(&rp, "a rule is a mapping {when, then} (habit syntax)")) };
+        let id = if get(kv, "id").is_some() { None } else if single { Some(one.to_string()) } else { Some(format!("prop{}", i + 1)) };
+        let mut full = kv.clone(); if let Some(id) = &id { full.insert(0, ("id".into(), Json::Str(id.clone()))); }
+        let habit = habit_spec(&Json::Obj(full), &rp, &p.inputs, &p.history, &p.vars, &p.steps)?;
+        need(!out.iter().any(|q| q.id == habit.id), &at(&rp, "id"), "property ids must be distinct")?;
+        let rule = Json::Obj(kv.iter().filter(|(k, _)| k != "id" && k != "comment" && k != "say" && k != "priority").cloned().collect());
+        out.push(Prop { id: habit.id.clone(), rule, habit });
+    }
+    Ok(out)
+}
+/// Does this turn's stance break the property? `before` is the state the turn ran on (its `prev` levels resolve `prev`
+/// restrictions), `doc` the turn's stance document. None: it holds, it is not in force, or the turn has no vouched stance (status
+/// refused or fallback: the host then uses the habits-only line; unreleased traits of a partial turn are not checked).
+pub fn breaks(p: &Persona, pr: &Prop, before: &State, doc: &Json) -> Option<Vec<Broken>> {
+    let status = doc.get("status").and_then(Json::as_str)?; if status != "ok" && status != "partial" { return None; }
+    let inputs = doc.get("inputs").and_then(Json::as_obj)?;
+    if !pr.habit.when.iter().all(|(k, c)| cond_true(p, k, c, inputs, &[])) { return None; }
+    let entry = |id: &str| doc.get("stance").and_then(|s| s.get(id)).or_else(|| doc.get("mood").and_then(|m| m.get(id)));
+    let mut out = vec![];
+    for (k, r) in &pr.habit.then {
+        let v = p.var(k)?; let e = entry(k)?; if e.get("released") != Some(&Json::Bool(true)) { continue; }
+        let lvl = e.get("level").and_then(Json::as_str)?; let pl = before.prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone());
+        let ok = allowed(&v.levels, r, &pl);
+        if !ok.iter().any(|l| l.as_str() == lvl) { out.push(Broken { var: k.clone(), level: lvl.to_string(), allowed: ok.into_iter().cloned().collect() }); } }
+    if !pr.habit.rules.is_empty() && status == "ok" {
+        let mut flat: HashMap<String, String> = p.vars.iter().filter_map(|v| entry(&v.id).and_then(|e| e.get("level")).and_then(Json::as_str).map(|l| (v.id.clone(), l.to_string()))).collect();
+        if let Some(a) = doc.get("agenda").and_then(Json::as_arr) { for (i, s) in a.iter().enumerate() { if let (Some(s), Some(slot)) = (s.as_str(), p.slots.get(i)) { flat.insert(format!("step.{s}"), slot.clone()); } } }
+        let (mut rules, mut owners) = (empty_rules(), vec![]);
+        habit_rules(p, &Habit { then: vec![], ..pr.habit.clone() }, &before.prev, &mut rules, &mut owners);
+        if !violations(&flat, &rules, &values_of(p)).is_empty() { out.push(Broken { var: "rules".into(), level: String::new(), allowed: vec![] }); } }
+    (!out.is_empty()).then_some(out)
+}
+/// The odds mass the stance puts on levels the property's `then` entries forbid (the largest over its entries; 0 for raw rules):
+/// what the fuzzer's beam climbs
+pub fn pressure(p: &Persona, pr: &Prop, before: &State, doc: &Json) -> f64 {
+    let entry = |id: &str| doc.get("stance").and_then(|s| s.get(id)).or_else(|| doc.get("mood").and_then(|m| m.get(id)));
+    pr.habit.then.iter().filter_map(|(k, r)| { let v = p.var(k)?; let odds = entry(k)?.get("odds")?;
+        let pl = before.prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone()); let ok = allowed(&v.levels, r, &pl);
+        Some(v.levels.iter().filter(|l| !ok.contains(l)).map(|l| odds.get(l).and_then(Json::as_f64).unwrap_or(0.0)).fold(0.0, |a, b| a + b)) })
+        .fold(0.0, f64::max)
+}
+/// The event alphabet: per declared input its non-default values (a flag: true; a level input: its other levels; a number: `grid`
+/// x its max, without its default), then `elapsed_hours` (`hours`) when a mood has a half-life. -> (id, kind, values)
+pub fn alphabet(p: &Persona, grid: &[f64], hours: &[f64]) -> Vec<(String, &'static str, Vec<Json>)> {
+    let mut out: Vec<(String, &'static str, Vec<Json>)> = p.inputs.iter().map(|x| match x.kind {
+        Kind::Flag => (x.id.clone(), "flag", vec![Json::Bool(true)]),
+        Kind::Level => (x.id.clone(), "level", x.levels.iter().filter(|l| Some(l.as_str()) != x.default.as_str()).map(|l| Json::Str(l.clone())).collect()),
+        Kind::Number => { let mut v: Vec<f64> = vec![]; for g in grid { let n = r6(g * x.max); if Some(n) != x.default.as_f64() && !v.contains(&n) { v.push(n); } }
+            (x.id.clone(), "number", v.into_iter().map(Json::Num).collect()) } }).filter(|e| !e.2.is_empty()).collect();
+    if p.vars.iter().any(|v| v.mood && v.half_life.is_some()) && hours.iter().any(|h| *h > 0.0) {
+        let mut h: Vec<Json> = vec![]; for x in hours.iter().filter(|h| **h > 0.0) { if !h.contains(&Json::Num(*x)) { h.push(Json::Num(*x)); } }
+        out.push(("elapsed_hours".into(), "hours", h)); }
+    out
+}
+/// The input assignments that put the property in force: one per combination of its input conditions (a level list gives one
+/// per level; a number the smallest grid value in range). History conditions are left to the search. [] = no input can.
+pub fn forcing(p: &Persona, pr: &Prop, grid: &[f64]) -> Vec<Vec<(String, Json)>> {
+    let mut bases: Vec<Vec<(String, Json)>> = vec![vec![]];
+    for (k, c) in &pr.habit.when {
+        let Some(x) = p.input(k) else { continue };
+        let opts: Vec<Json> = match x.kind {
+            Kind::Flag => vec![c.clone()],
+            Kind::Level => match c { Json::Arr(a) => a.to_vec(), _ => vec![c.clone()] },
+            Kind::Number => { let (lo, hi) = match c { Json::Num(t) => (*t, f64::INFINITY), _ => (c.get("at_least").and_then(Json::as_f64).unwrap_or(f64::NEG_INFINITY), c.get("at_most").and_then(Json::as_f64).unwrap_or(f64::INFINITY)) };
+                let mut v: Vec<f64> = grid.iter().map(|g| r6(g * x.max)).filter(|v| *v >= lo && *v <= hi).collect(); v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                if v.is_empty() { let b = lo.max(0.0).min(x.max); if b >= lo && b <= hi { v.push(b); } }
+                v.into_iter().take(1).map(Json::Num).collect() } };
+        bases = bases.iter().flat_map(|b| opts.iter().map(move |o| { let mut nb = b.clone(); nb.push((k.clone(), o.clone())); nb })).collect();
+    }
+    bases
+}
+
+// ---------------------------------------------------------------------------------------------- persona prove (§5.6)
+/// Is the property's condition `cp` inside a habit's condition `ch` on the same input or history feature?
+fn within(p: &Persona, k: &str, cp: &Json, ch: &Json) -> bool {
+    let iv = |c: &Json| match c { Json::Num(t) => (*t, f64::INFINITY), _ => (c.get("at_least").and_then(Json::as_f64).unwrap_or(f64::NEG_INFINITY), c.get("at_most").and_then(Json::as_f64).unwrap_or(f64::INFINITY)) };
+    let set = |c: &Json| -> Vec<String> { match c { Json::Str(s) => vec![s.clone()], _ => strs(c).unwrap_or_default() } };
+    match p.input(k).map(|x| x.kind) {
+        Some(Kind::Flag) => cp == ch,
+        Some(Kind::Level) => set(cp).iter().all(|l| set(ch).contains(l)),
+        _ => { let ((a1, b1), (a2, b2)) = (iv(cp), iv(ch)); a1 >= a2 && b1 <= b2 } }
+}
+/// The habits that imply the property by their text, among those `usable` allows: in force whenever it is (their conditions follow
+/// from its own), and their `then` restrictions allow no level it forbids, for every previous level (per restricted trait one habit
+/// that does it alone if there is one, else all of them together). None when they do not.
+fn implying(p: &Persona, pr: &Prop, usable: &dyn Fn(&Habit) -> bool) -> Option<Vec<String>> {
+    if pr.habit.then.is_empty() || !pr.habit.rules.is_empty() { return None; }
+    let sure: Vec<&Habit> = p.habits.iter().filter(|h| usable(h) && h.when.iter().all(|(k, ch)| pr.habit.when.iter().any(|(k2, cp)| k2 == k && within(p, k, cp, ch)))).collect();
+    let mut used: Vec<String> = vec![];
+    for (k, r) in &pr.habit.then {
+        let v = p.var(k)?; let hs: Vec<&Habit> = sure.iter().copied().filter(|h| h.then.iter().any(|(t, _)| t == k)).collect();
+        let implies = |hs: &[&Habit]| v.levels.iter().all(|pl| { let mut inter: Vec<&String> = v.levels.iter().collect();
+            for h in hs { let a = allowed(&v.levels, &h.then.iter().find(|(t, _)| t == k).unwrap().1, pl); inter.retain(|l| a.contains(l)); }
+            let ap = allowed(&v.levels, r, pl); inter.iter().all(|l| ap.contains(l)) });
+        let pick: Vec<&Habit> = match hs.iter().find(|h| implies(&[**h])) { Some(h) => vec![*h], None if !hs.is_empty() && implies(&hs) => hs.clone(), None => return None };
+        for h in pick { if !used.contains(&h.id) { used.push(h.id.clone()); } } }
+    Some(used)
+}
+/// Held by construction -> the habits it follows from. Under `on_conflict: fallback` a turn whose habits conflict has no stance, so
+/// implying habits are enough. Under `yield` a habit counts when no turn where the property is in force ever drops it: whether a
+/// turn's rules conflict, and which habit yields, is a function of the habits in force and the previous levels (not of genes or
+/// moods), so one scan of every cell decides it.
+pub fn by_construction(p: &Persona, pr: &Prop, eng: Engine) -> Option<Vec<String>> {
+    let hs = implying(p, pr, &|_| true)?;
+    if !p.yields() { return Some(hs); }
+    let st0 = init(p, Some(p.seed), false, eng); let mut seen: std::collections::HashSet<String> = Default::default();
+    let (mut dropped, mut calls, mut bad): (Vec<String>, usize, bool) = (vec![], 0, false);
+    cells(p, pr, &mut |raw, _, hist, prev, _| {
+        let mut st = st0.clone(); st.prev = prev.clone(); let base = Opts { twin: Some(false), hist: Some(hist.to_vec()), ..Default::default() };
+        let Ok((_, meta)) = compile(p, &st, raw, &base) else { bad = true; return false };
+        // the yields are a function of the rules in force and their owners
+        if !seen.insert(format!("{}|{}", canon(&Json::Arr(meta.rules.iter().map(|l| Json::Arr(l.clone())).collect())), meta.owners.join(","))) { return true; }
+        match first_answer(p, &st, raw, &base, eng, &mut calls) { Ok((_, _, _, ex)) => { for h in ex { if !dropped.contains(&h) { dropped.push(h); } } true } Err(_) => { bad = true; false } } });
+    if bad { return None; }
+    implying(p, pr, &|h| !dropped.contains(&h.id))
+}
+/// The turn's answer before holds, as `turn` reaches it: the solve with every habit in force and, under `on_conflict: yield`, the re-solves
+/// that drop the lowest-ranked habit of each conflict -> (program, answer, meta, the habits dropped)
+fn first_answer(p: &Persona, st: &State, raw: &[(String, Json)], base: &Opts, eng: Engine, calls: &mut usize) -> R<(Json, Json, Meta, Vec<String>)> {
+    let (mut prog, mut meta) = compile(p, st, raw, base)?; let mut doc = solve(p, st, &prog, eng, calls); let mut ex: Vec<String> = vec![];
+    let infeasible = |d: &Json| d.get("verdict").and_then(Json::as_str) == Some("infeasible");
+    if infeasible(&doc) && !meta.active.is_empty() && p.eng.yields {
+        let mut cf = habit_conflict(p, st, raw, &meta.active, base, eng, calls)?;
+        while !cf.is_empty() {
+            let mut rank = cf.clone(); rank.sort_by(|a, b| { let (ha, hb) = (p.habit(a), p.habit(b)); ha.priority.partial_cmp(&hb.priority).unwrap().then(p.habit_index(b).cmp(&p.habit_index(a))) });
+            ex.push(rank[0].clone()); let o = Opts { exclude: ex.clone(), ..base.clone() }; (prog, meta) = compile(p, st, raw, &o)?; doc = solve(p, st, &prog, eng, calls);
+            if !infeasible(&doc) { break; }
+            cf = habit_conflict(p, st, raw, &meta.active, &o, eng, calls)?; } }
+    Ok((prog, doc, meta, ex))
+}
+/// The variables a habit's raw rule links (they must sit in one component of the program)
+fn rule_vars(key: &str, r: &Json) -> Vec<String> {
+    let s = |x: Option<&Json>| x.and_then(Json::as_str).map(str::to_string);
+    match key {
+        "caps" => r.get("members").and_then(Json::as_arr).map_or(vec![], |m| m.iter().filter_map(|m| s(m.as_arr().and_then(|a| a.first()))).collect()),
+        "implies" => [s(r.get("if").and_then(|i| i.get("var"))), s(r.get("then").and_then(|t| t.get("var")))].into_iter().flatten().collect(),
+        "linear" => r.get("terms").and_then(Json::as_arr).map_or(vec![], |t| t.iter().filter_map(|t| s(t.as_arr().and_then(|a| a.first()))).collect()),
+        "precedes" => [s(r.get("before")), s(r.get("after"))].into_iter().flatten().collect(),
+        _ => r.get("vars").and_then(Json::as_arr).map_or(vec![], |a| a.iter().filter_map(|x| s(Some(x))).collect()) }
+}
+/// The ids in `k`'s component of every turn's program: linked by a coupling, by any habit's raw rule, or (agenda steps) by the
+/// agenda's all_different. The joint plan is the best plan of each component on its own, so nothing outside this component (no mood
+/// outside it either) can move `k`'s level.
+fn component(p: &Persona, k: &str) -> Vec<String> {
+    let mut links: Vec<(String, String)> = p.couplings.iter().map(|(a, b, _)| (a.clone(), b.clone())).collect();
+    for h in &p.habits { for (key, lst) in &h.rules { for r in lst { let ids = rule_vars(key, r); for w in ids.windows(2) { links.push((w[0].clone(), w[1].clone())); } } } }
+    let steps: Vec<String> = p.steps.iter().map(|s| format!("step.{s}")).collect(); for w in steps.windows(2) { links.push((w[0].clone(), w[1].clone())); }
+    let mut comp = vec![k.to_string()]; let mut grew = true;
+    while grew { grew = false; for (a, b) in &links { let (ia, ib) = (comp.contains(a), comp.contains(b)); if ia != ib { comp.push(if ia { b.clone() } else { a.clone() }); grew = true; } } }
+    comp
+}
+/// A plan's score in a program: the sum of its unaries and pair log-weights over the program's own variables (the habit-free
+/// twin's `free.` copies left out). The engine's plan on the exact tier is the highest-scoring one that obeys the rules.
+fn score(prog: &Json, plan: &Json) -> f64 {
+    let vals: Vec<&str> = prog.get("values").and_then(Json::as_arr).map_or(vec![], |a| a.iter().filter_map(Json::as_str).collect());
+    let val = |var: &str| if var.starts_with("free.") { None } else { plan.get(var).and_then(Json::as_str) };
+    let mut s = 0.0;
+    for v in prog.get("vars").and_then(Json::as_arr).unwrap_or(&[]) { if let Some(x) = v.get("id").and_then(Json::as_str).and_then(val) { s += v.get("h").and_then(|h| h.get(x)).and_then(Json::as_f64).unwrap_or(0.0); } }
+    for q in prog.get("pairs").and_then(Json::as_arr).unwrap_or(&[]) {
+        let (Some(a), Some(b)) = (q.get("i").and_then(Json::as_str).and_then(val), q.get("j").and_then(Json::as_str).and_then(val)) else { continue };
+        let (Some(ia), Some(ib)) = (vals.iter().position(|x| *x == a), vals.iter().position(|x| *x == b)) else { continue };
+        s += q.get("table").and_then(|t| t.as_arr()).and_then(|t| t.get(ia)).and_then(|r| r.as_arr()).and_then(|r| r.get(ib)).and_then(Json::as_f64).unwrap_or(0.0); }
+    s
+}
+/// Every cell of the turns where the property is in force: the inputs (flags, levels; a number at each threshold a habit or the
+/// property reads and at the midpoint of each open interval between them, with its half-width), the history values that fit the
+/// turn's own flags, and the previous levels of the traits a prev-relative restriction in force reads (the rest at their fallback).
+/// f(inputs, half-widths, history, prev, prev-relative traits) returns false to stop.
+#[allow(clippy::type_complexity)]
+fn cells(p: &Persona, pr: &Prop, f: &mut dyn FnMut(&[(String, Json)], &[(String, f64)], &[(String, f64)], &HashMap<String, String>, &[String]) -> bool) {
+    let thresholds = |id: &str| -> Vec<f64> { let mut t = vec![];
+        for w in p.habits.iter().map(|h| &h.when).chain(std::iter::once(&pr.habit.when)) { for (_, c) in w.iter().filter(|(k, _)| k == id) {
+            match c { Json::Num(x) => t.push(*x), _ => for b in ["at_least", "at_most"] { if let Some(x) = c.get(b).and_then(Json::as_f64) { t.push(x); } } } } }
+        t };
+    let in_force = |k: &str, v: &Json| pr.habit.when.iter().filter(|(x, _)| x == k).all(|(_, c)| cond_true(p, k, c, &[(k.to_string(), v.clone())], &[(k.to_string(), v.as_f64().unwrap_or(0.0))]));
+    let sort = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v.dedup(); };
+    let mut axes: Vec<(String, Vec<(Json, f64)>)> = vec![];
+    for x in &p.inputs { let vals: Vec<(Json, f64)> = match x.kind {
+            Kind::Flag => vec![(Json::Bool(false), 0.0), (Json::Bool(true), 0.0)],
+            Kind::Level => x.levels.iter().map(|l| (Json::Str(l.clone()), 0.0)).collect(),
+            // a condition flips at a threshold or nowhere: each threshold in range is a point, each interval between them (0 and the
+            // maximum close the ends) its midpoint with its half-width
+            Kind::Number => { let mut th: Vec<f64> = thresholds(&x.id).into_iter().filter(|t| *t >= 0.0 && *t <= x.max).collect(); sort(&mut th);
+                let mut pts = th.clone(); pts.push(0.0); pts.push(x.max); sort(&mut pts); let mut v = vec![];
+                for (i, t) in pts.iter().enumerate() { if th.contains(t) { v.push((Json::Num(*t), 0.0)); }
+                    if let Some(u) = pts.get(i + 1) { v.push((Json::Num((t + u) / 2.0), (u - t) / 2.0)); } }
+                v } };
+        axes.push((x.id.clone(), vals.into_iter().filter(|(v, _)| in_force(&x.id, v)).collect())); }
+    let fallback: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
+    let prevrel = |h: &Habit| -> Vec<String> { h.then.iter().filter(|(_, r)| r.as_obj().is_some_and(|o| o.iter().any(|(_, x)| x.as_str().is_some_and(|s| s.starts_with("prev"))))).map(|(k, _)| k.clone()).collect() };
+    let pick = |dims: &[usize], c: usize| -> Vec<usize> { let mut idx = vec![0; dims.len()]; let mut r = c; for d in (0..dims.len()).rev() { idx[d] = r % dims[d]; r /= dims[d]; } idx };
+    let dims: Vec<usize> = axes.iter().map(|a| a.1.len()).collect();
+    for c in 0..dims.iter().product::<usize>() {
+        let idx = pick(&dims, c);
+        let raw: Vec<(String, Json)> = axes.iter().zip(&idx).map(|((k, v), &i)| (k.clone(), v[i].0.clone())).collect();
+        let hw: Vec<(String, f64)> = axes.iter().zip(&idx).map(|((k, v), &i)| (k.clone(), v[i].1)).collect();
+        // history values that fit the turn's own flag (streak: the flag on <=> at least 1; recent: the flag on -> at least 1)
+        let hax: Vec<(String, Vec<f64>)> = p.history.iter().map(|h| { let on = get(&raw, &h.of) == Some(&Json::Bool(true));
+            let top = if h.streak { h.cap } else { h.cap.min(h.window) };
+            let vals: Vec<f64> = if on { (1..=top).map(|x| x as f64).collect() } else if h.streak { vec![0.0] } else { (0..=top.min(h.window - 1)).map(|x| x as f64).collect() };
+            (h.id.clone(), vals.into_iter().filter(|x| in_force(&h.id, &Json::Num(*x))).collect()) }).collect();
+        let hdims: Vec<usize> = hax.iter().map(|a| a.1.len()).collect();
+        for hc in 0..hdims.iter().product::<usize>() {
+            let hi = pick(&hdims, hc);
+            let hist: Vec<(String, f64)> = hax.iter().zip(&hi).map(|((k, v), &i)| (k.clone(), v[i])).collect();
+            let mut rel: Vec<String> = p.habits.iter().filter(|h| h.when.iter().all(|(k, c)| cond_true(p, k, c, &raw, &hist))).flat_map(prevrel).chain(prevrel(&pr.habit)).collect();
+            rel.sort(); rel.dedup();
+            let pdims: Vec<usize> = rel.iter().map(|k| p.var(k).unwrap().levels.len()).collect();
+            for pc in 0..pdims.iter().product::<usize>() {
+                let mut prev = fallback.clone(); for (k, i) in rel.iter().zip(pick(&pdims, pc)) { prev.insert(k.clone(), p.var(k).unwrap().levels[i].clone()); }
+                if !f(&raw, &hw, &hist, &prev, &rel) { return; } } } }
+}
+/// `prove` for one individual: Ok((cells, engine calls)) when the property holds on every turn of every event sequence; Err((the
+/// cell that failed, why)) when the bound cannot decide it (an unknown, not a counterexample).
+///
+/// The bound. A turn's program is fixed by the turn's inputs, its history feature values, the previous levels and the mood
+/// accumulators. The accumulators a_t = k d a_(t-1) + (1 - k) e_t (a_0 = 0, 0 < d <= 1) stay in a box: each component between
+/// min(0, smallest e) and max(0, largest e) over every input and history value, widened for the 6-decimal rounding. Inputs,
+/// history values and previous levels take finitely many cells (`cells`). Per cell, with the accumulators at the cell's own reference,
+/// the best plan whose level the property allows must beat the best plan it forbids by more than the most the box (moods in the
+/// property trait's component) and the number intervals can move the two scores apart, plus the rounding. Each held trait
+/// (`vouch` + `hold`) adds the turn's re-solve with it clamped; a conflict is resolved as the turn resolves it (yield, or fallback:
+/// a fallback turn has no stance to check). The engine runs the turn's own program (with its habit-free twin, as the turn does), and
+/// every answer the bound reads must be exact.
+pub fn prove_seed(p: &Persona, pr: &Prop, seed: u64, eng: Engine) -> Result<(usize, usize), (Json, String)> {
+    if !pr.habit.rules.is_empty() { return Err((Json::Null, "raw rules are not covered by the bound".into())); }
+    let st0 = init(p, Some(seed), false, eng); let gain = |id: &str| st0.react(id).unwrap_or(1.0);
+    let eff_of = |e: &Eff, t: &str| e.iter().find(|(x, _)| x == t).map(|(_, v)| v.clone());
+    let mut boxes: Vec<(String, Vec<f64>, Vec<f64>)> = vec![];
+    for v in p.vars.iter().filter(|v| v.mood) { let n = v.levels.len(); let (mut lo, mut hi) = (vec![0.0; n], vec![0.0; n]);
+        let mut add = |opts: Vec<Vec<f64>>| { for l in 0..n { lo[l] += opts.iter().map(|w| w[l]).fold(f64::INFINITY, f64::min); hi[l] += opts.iter().map(|w| w[l]).fold(f64::NEG_INFINITY, f64::max); } };
+        for x in &p.inputs { let g = gain(&x.id);
+            match x.kind {
+                Kind::Flag => if let Some(e) = eff_of(&x.effects, &v.id) { add(vec![vec![0.0; n], e.iter().map(|w| g * w).collect()]); },
+                Kind::Number => if let Some(e) = eff_of(&x.effects, &v.id) { add(vec![vec![0.0; n], e.iter().map(|w| g * x.max * w).collect()]); },
+                Kind::Level => add(x.levels.iter().map(|l| x.by_level.iter().find(|(b, _)| b == l).and_then(|(_, e)| eff_of(e, &v.id)).map_or(vec![0.0; n], |e| e.iter().map(|w| g * w).collect())).collect()) } }
+        for h in &p.history { if let Some(e) = eff_of(&h.effects, &v.id) { add(vec![vec![0.0; n], e.iter().map(|w| h.cap as f64 * w).collect()]); } }
+        let m = 5e-7 / (1.0 - v.inertia) + 1e-9;
+        boxes.push((v.id.clone(), lo.iter().map(|x| x.min(0.0) - m).collect(), hi.iter().map(|x| x.max(0.0) + m).collect())); }
+    let holdable: Vec<(String, String)> = p.vars.iter().filter(|v| !v.mood && v.vouch > 0.0).filter_map(|v| v.hold.clone().map(|h| (v.id.clone(), h))).collect();
+    let comps: Vec<Vec<String>> = pr.habit.then.iter().map(|(k, _)| component(p, k)).collect();
+    let nv = p.vars.len() + p.steps.len(); let eps = 2e-6 * nv as f64 + 1e-9;
+    let verdict = |d: &Json| d.get("verdict").and_then(Json::as_str).unwrap_or("").to_string();
+    let (mut n, mut calls) = (0usize, 0usize); let mut res = Ok(());
+    cells(p, pr, &mut |raw, hw, hist, prev, rel| {
+        n += 1;
+        let mut st = st0.clone(); st.prev = prev.clone();
+        let cell = || Json::Obj(vec![("inputs".into(), Json::Obj(raw.to_vec())), ("history".into(), Json::Obj(hist.iter().map(|(k, x)| (k.clone(), Json::Num(*x))).collect())),
+            ("prev".into(), Json::Obj(rel.iter().map(|k| (k.clone(), Json::Str(prev[k].clone()))).collect())),
+            ("number_halfwidth".into(), Json::Obj(hw.iter().filter(|(_, w)| *w > 0.0).map(|(k, w)| (k.clone(), Json::Num(*w))).collect()))]);
+        let fail = |why: String| (cell(), why);
+        let mut check = || -> Result<(), (Json, String)> {
+            let base = Opts { hist: Some(hist.to_vec()), ..Default::default() };
+            let (prog0, doc0, meta0, excl) = first_answer(p, &st, raw, &base, eng, &mut calls).map_err(|e| fail(e.msg))?;
+            if verdict(&doc0) == "infeasible" { return Ok(()); } // a fallback turn: no stance to check
+            if verdict(&doc0) != "exact" { return Err(fail(format!("the engine answered {}, not exact", verdict(&doc0)))); }
+            for q in 0..1usize << holdable.len() {
+                let clamps: Vec<(String, String)> = holdable.iter().enumerate().filter(|(i, _)| q >> i & 1 == 1).map(|(_, x)| x.clone()).collect();
+                // the turn's re-solve of held traits compiles every habit in force (no yield) with the clamps; the turn uses it when the
+                // engine vouches for it
+                let (prog, doc, meta) = if q == 0 { (prog0.clone(), doc0.clone(), meta0.clone()) } else {
+                    let (pg, me) = compile(p, &st, raw, &Opts { clamps: clamps.clone(), ..base.clone() }).map_err(|e| fail(e.msg))?; calls += 1; let dc = eng(&pg, &flags(p, &st)); let v = verdict(&dc);
+                    match v.as_str() { "exact" => (pg, dc, me), "diagnostics_passed" => return Err(fail("a held re-solve answered diagnostics_passed, not exact".into())), _ => continue } };
+                let ex = if q == 0 { excl.clone() } else { vec![] };
+                let plan = doc.get("plan").cloned().unwrap_or(Json::Null);
+                let level = |id: &str| plan.get(id).and_then(Json::as_str).map(|x| back(p, id, x)).unwrap_or_default();
+                for ((k, rr), comp) in pr.habit.then.iter().zip(&comps) {
+                    let v = p.var(k).unwrap(); let pl = st.prev.get(k).cloned().unwrap_or_else(|| v.fallback.clone()); let ok = allowed(&v.levels, rr, &pl);
+                    if let Some((_, h)) = clamps.iter().find(|(t, _)| t == k) { if !ok.contains(&h) { return Err(fail(format!("{k} held at {h}"))); } continue; }
+                    let lv = level(k); if !ok.iter().any(|l| **l == lv) { return Err(fail(format!("{k} {lv} with the moods at the cell's reference"))); }
+                    let s_a = score(&prog, &plan); let mut s_not = f64::NEG_INFINITY;
+                    for l in v.levels.iter().filter(|l| !ok.contains(l)) {
+                        let mut cl = clamps.clone(); cl.push((k.clone(), l.clone()));
+                        let (pg, _) = compile(p, &st, raw, &Opts { clamps: cl, exclude: ex.clone(), twin: Some(false), ..base.clone() }).map_err(|e| fail(e.msg))?; calls += 1;
+                        let dc = eng(&pg, &flags(p, &st)); let vd = verdict(&dc);
+                        match vd.as_str() { "infeasible" => continue, "exact" => {} _ => return Err(fail(format!("a clamped solve answered {vd}, not exact"))) }
+                        s_not = s_not.max(score(&pg, dc.get("plan").unwrap_or(&Json::Null))); }
+                    if s_not == f64::NEG_INFINITY { continue; } // no stance with a forbidden level obeys the rules
+                    let mut bound = eps;
+                    for (m, lo, hi) in boxes.iter().filter(|b| comp.contains(&b.0)) { let r = &meta.new_mood.iter().find(|(id, _)| id == m).unwrap().1; let zl = p.var(m).unwrap().levels.iter().position(|x| *x == level(m)).unwrap_or(0);
+                        bound += hi.iter().zip(r).map(|(u, a)| u - a).fold(f64::NEG_INFINITY, f64::max) + r[zl] - lo[zl]; }
+                    for x in p.inputs.iter().filter(|x| x.kind == Kind::Number) { let w = hw.iter().find(|(k, _)| *k == x.id).map_or(0.0, |h| h.1); if w == 0.0 { continue; }
+                        for (t, e) in &x.effects { if p.var(t).is_some_and(|v| v.mood) || !comp.contains(t) { continue; }
+                            let zl = match t.strip_prefix("step.") { Some(_) => p.slots.iter().position(|s| Some(s.as_str()) == plan.get(t).and_then(Json::as_str)), None => p.var(t).and_then(|v| v.levels.iter().position(|x| *x == level(t))) }.unwrap_or(0);
+                            bound += w * gain(&x.id) * e.iter().map(|y| (e[zl] - y).abs()).fold(0.0, f64::max); } }
+                    if s_a - s_not <= bound { return Err(fail(format!("{k}: the score gap {:.4} is within the bound {:.4}", s_a - s_not, bound))); } }
+            }
+            Ok(()) };
+        match check() { Ok(()) => true, Err(e) => { res = Err(e); false } } });
+    res.map(|_| (n, calls))
 }

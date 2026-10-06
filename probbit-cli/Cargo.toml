@@ -15,6 +15,6 @@ name = "probbit"
 path = "src/main.rs"
 
 [dependencies]
-probbit-core = { path = "../probbit-core", version = "0.5.0" }
-probbit-decide = { path = "../probbit-decide", version = "0.5.0" }
-probbit-ir = { path = "../probbit-ir", version = "0.5.0" }
+probbit-core = { path = "../probbit-core", version = "0.6.0" }
+probbit-decide = { path = "../probbit-decide", version = "0.6.0" }
+probbit-ir = { path = "../probbit-ir", version = "0.6.0" }

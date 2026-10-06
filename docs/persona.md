@@ -283,7 +283,7 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "inputs": {"error": true, "stakes": 0.8, "errors_in_row": 2, "...": "..."}, "ignored": [],
  "line": "Stance: shorter than last time, check more; 1-2 sentences; verify before claiming anything; no jokes.",
  "line_tokens": 24,
- "why": "shorter than last time, check more (habit); last action failed -> caution careful, verbosity terse",
+ "why": "shorter than last time, check more (habit); last action failed -> caution up, verbosity down",
  "state_digest": "sha256:..."}
 ```
 
@@ -305,7 +305,8 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
 - `line`: phrases by priority — (1) bound habits, (2) other conditional habits in force, (3) unsure notes, (4) traits off
   this individual's resting level, (5) traits at rest, (6) agenda order — cut from the lowest priority until it fits
   `max_tokens`. Unconditional habits that did not bind are not repeated (the trait phrases already carry them).
-- `why`: the bound habits, then the two strongest live inputs with the two traits each pushes hardest.
+- `why`: the bound habits, then the two strongest live inputs with the two traits each pushes hardest, by direction
+  (`learner upset -> valence down, humour down`): a push is evidence, not the level the stance took.
 - `held`: the unsure traits held at their `hold` level; such a trait also carries `odds_unheld`, its odds before the hold.
 - Timing is never part of the stance: `--timing` adds a separate, non-canonical `timing` object (compile, engine and decode ms,
   engine calls, the 1-minute load average).
@@ -351,10 +352,12 @@ state with another JSON library (Python writes `0.0` where probbit wrote `0`) st
 - The engine runs at fixed work, so this holds on the sampled tier too (the engine's documented fixed-work determinism).
 - Genes use the platform's `ln`, `sqrt` and `cos` and are rounded to 4 decimals; weights to 6. A last-place difference in a
   maths library could, in principle, flip a rounding boundary on another platform (not observed; not proven impossible).
-- The documents equal an independent reference implementation's (Python, written first, from this document) byte for byte on
-  the example personas: their state0, all 20 workday stances and the final state (the goldens in examples/persona/golden/), and on
-  5,400 further turns of random inputs over every input each persona declares, three seeds each, as written, with
-  `values: semantic` and forced onto the sampler, held, yielded, refused and fallback turns included (measured on 2026-10-02).
+- The 0.5.0 documents equalled an independent reference implementation's (Python, written before this one, from this document) byte
+  for byte on the example personas: their state0, all 20 workday stances and the final state (the 0.5.0 goldens), and on 5,400
+  further turns of random inputs over every input each persona declares, three seeds each, as written, with `values: semantic`
+  and forced onto the sampler, held, yielded, refused and fallback turns included (measured on 2026-10-02). 0.6.0 changed two
+  things that check did not cover: `why` names a direction (`humour down`) where it named a level, and the tutor has one habit
+  more. Its goldens in examples/persona/golden/ are regenerated from this implementation; the parity claim is for 0.5.0.
 
 ### 5.4 Individuality and distance
 
@@ -377,6 +380,66 @@ tie, the later-declared one), the turn is re-solved, and `habits.yielded` and `e
 **Lint.** `lint` searches every single conditional habit and every pair of them (with all unconditional ones and every
 previous level their `prev` restrictions read) for an empty stance, and reports each contradiction with its resolution.
 Run it before shipping a persona.
+
+**Plan and mode.** A stance level is the joint plan's, so on coupled traits it can differ from the trait's own most likely level
+(section 4): the 0.5.0 tutor's seed 1, told the learner is upset, planned humour `playful` (odds 0.411) while `light` had 0.425,
+and valence `up` (0.386) while `even` had 0.457; the two are coupled (`align: 1.0`) and the plan took their high levels
+together. `lint` also probes every individual of `--seeds` (default 0-99): at rest, a quiet turn, then every declared input
+alone (numbers at their maximum). `warnings` lists each trait whose planned level differs from its marginal mode on a released,
+not unsure, probe turn, with the count and the earliest case (`example`). A warning is advice and leaves the exit code alone.
+The options, none of which changes decoding: a habit pins the level where it matters (what the tutor does now); a `vouch` floor
+with a `hold` holds the trait when its top odds are low; a host that wants each trait's own most likely level can read it from
+`odds`.
+
+### 5.6 Testing a character
+
+A **character property** is a rule in habit syntax that a stance must never break, for example "never playful when the
+learner is upset": `{when: {sentiment: negative}, then: {humour: {at_most: light}}}`. It is checked on the stance a host gets
+(status `ok` or `partial`, released traits; `prev` restrictions read the previous turn's levels), never on the words a model
+writes. Two commands test it over a population of individuals (`--seeds 0-99`); `--never RULE` gives one rule (JSON or one
+line of YAML), `--props FILE` several (`{"props": [...]}`, each with an optional `id`).
+
+**`fuzz`** searches event scripts built from the persona's declared inputs (flags, levels, numbers on `--grid` x their max,
+idle hours on `--hours`): random scripts, then a beam guided by the exact odds (the next events that put the most odds on a
+level the rule forbids). Each individual's shortest counterexample is shrunk (drop events, then single inputs) and printed with
+the breaking turn's levels, odds, why and line, and the `replay` / `explain` commands that reproduce it. The search is Philox
+keyed by `--fuzz-seed` and the seed: the same inputs give the same report, byte for byte, on any number of threads. "None
+found" is evidence over the scripts searched, not a proof.
+
+**`prove`** gives each rule one verdict over the population:
+
+- `held by construction`: habits that are in force whenever the rule applies (their conditions follow from its own) imply it,
+  for every previous level. With `on_conflict: yield` a habit counts here when no turn where the rule applies ever drops it
+  (a scan of every cell replays the conflicts; which habit yields depends on the habits in force and the previous levels, not on
+  genes or moods).
+- `proved for every event sequence`: for each individual, a bound covers every turn of every script and decides all of them.
+  The mood accumulators stay in a box (per level, between the most negative and the most positive evidence one turn's inputs
+  and history can add, 0 included), whatever the inputs, idle hours or `--no-inertia`. The rest of a turn falls into finitely
+  many cells: flags and levels, each number at every threshold a habit or the rule reads and on each interval between them,
+  history values that fit the turn's own flags, and the previous levels the restrictions in force read. In every cell the best
+  stance the rule allows must beat the best one it forbids by more than the box, the number intervals and the 6-decimal
+  rounding can move their scores. Moods linked to the rule's trait by no coupling or rule cannot move it and are left out.
+  Held traits and habit conflicts are replayed as the turn resolves them.
+- `unknown`: the bound could not decide some individual. The report names the earliest such cell (inputs, history, previous
+  levels) and the `fuzz` command that searches it. Unknown is not broken: run `fuzz`.
+
+Example: the tutor as it shipped in 0.5.0 (kept byte for byte as `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`) breaks
+"never playful when the learner is upset" for 67 of seeds 0-99: 37 on the single message `{"sentiment": "negative"}`, 27 when
+that message also carries praise, 3 on two messages; `prove` says unknown. 0.6.0's tutor adds one habit, `no_play_when_upset` (`when: {sentiment: negative}`, `then: {humour: {at_most:
+light}}`): `prove` says held by construction and `fuzz` finds nothing. The habit fixes the stance the host gets; whether a model
+writes jokes anyway is the model's (section 6).
+
+Limits. Both commands cover the stance, not the model's words (section 6). `prove` reads exact engine answers: a cell whose
+program leaves the exact tiers is `unknown`. `held by construction` relies on every plan the engine returns keeping
+every rule in force. A rule with raw `rules` (not `then`) is fuzzed but not proved. The bound is per cell with the moods at
+the edges of their box, so a soft rule whose margin is small stays `unknown` even when no script breaks it.
+
+**`lint --props FILE`** (or `--never RULE`) runs both for CI: `prove` on every rule, then `fuzz` (the default search) on the
+ones it leaves unknown; the lint document gets `props` (each rule's `prove` entry, with a `fuzz` entry when it was unknown) and
+`broken`; exit 1 when a contradiction is unresolved or a rule breaks.
+
+Exit codes: `fuzz` 0 nothing found, 1 a counterexample; `prove` 0 every rule held or proved, 1 some rule unknown; both 2 bad
+input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); timing goes to stderr.
 
 ## 6. What a persona can NOT do
 
@@ -404,23 +467,30 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona replay PERSONA [--seed N] --script JSON\|FILE [--out TRACE] [--no-inertia] [--timing]` | `init`, then every turn of a script: one stance per line; stderr: the trace's sha256 and the final state digest |
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
-| `probbit persona lint PERSONA` | contradicting habits (section 5.5); exit 1 if one is unresolved |
+| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); exit 1 if a contradiction is unresolved or a rule breaks |
+| `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
+| `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 
 A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes:
-0 done (every turn status is an answer), 1 `lint` found an unresolved contradiction, 2 a bad persona, state, input or script
+0 done (every turn status is an answer), 1 `lint` found an unresolved contradiction, `fuzz` a counterexample or `prove` an
+unknown rule, 2 a bad persona, state, input, script or rule
 (ONE `{"error": {"code": "persona", "path", "message"}}` object on stdout) or a bad flag (stderr). The engine's resource controls
 are `probbit run`'s (`PROBBIT_THREADS`, `PROBBIT_CPU_LIMIT`, `PROBBIT_MEM_LIMIT_MB`, `PROBBIT_PRIORITY`, the config file); they
 never change a document. The persona's own `engine.chains` is used whatever `PROBBIT_CHAINS` says (it is part of the answer).
 
 - **MCP** (`probbit mcp`): `probbit_persona_init {persona | persona_path, seed}` -> the state; `probbit_persona_turn {persona |
-  persona_path, state, inputs, flags: {timing, no_inertia}}` -> `{stance, state}`. Stateless; the documents are the CLI's. A
-  refusal or a fallback is an answer; a bad persona, state or input is a tool error carrying the error object.
+  persona_path, state, inputs, flags: {timing, no_inertia}}` -> `{stance, state}`; `probbit_persona_fuzz {persona | persona_path,
+  never | props, seeds, fuzz_seed, scripts, depth, beam, grid, hours, threads}` -> the `fuzz --json` document (section 5.6).
+  Stateless; the documents are the CLI's. A refusal, a fallback or a counterexample is an answer; a bad persona, state, input
+  or rule is a tool error carrying the error object.
 - **Python** (python/probbit.py, standard library only): `probbit.persona_init(persona, seed=None)` -> the state;
   `probbit.persona_turn(persona, state, inputs, timing=False, no_inertia=False)` -> `{"stance", "state"}`;
-  `probbit.persona_replay(persona, script, seed=None)` -> the stances. `persona` is a file path or the document as a dict; bad
-  input raises `ProbbitInputError` (`.code == "persona"`, `.path`, `.message`).
+  `probbit.persona_replay(persona, script, seed=None)` -> the stances; `probbit.persona_fuzz(persona, never=None, props=None,
+  seeds="0-99", **flags)` and `probbit.persona_prove(...)` -> the `--json` documents of section 5.6 (a counterexample or an
+  unknown rule is an answer). `persona` is a file path or the document as a dict; bad input raises `ProbbitInputError`
+  (`.code == "persona"`, `.path`, `.message`).
 - **Browser** (probbit-wasm, no threads): `probbit_call` op 4 = persona init, op 5 = persona turn, with the MCP tools' arguments
   (the persona inline). The playground's "meet three individuals from one persona" runs three seeds of one persona side by side.
 

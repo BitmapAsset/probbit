@@ -80,7 +80,7 @@ mark with `[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)` a
 ## MCP: one line per agent
 
 `probbit mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (JSON-RPC 2.0, one message per
-line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its seven tools take the
+line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its eight tools take the
 commands' own documents and return the commands' own JSON, byte for byte:
 
 | tool | arguments | returns |
@@ -92,8 +92,9 @@ commands' own documents and return the commands' own JSON, byte for byte:
 | `probbit_evaluate` | a System One request plus the optional `probbit` block ([probbit-ir-json.md](probbit-ir-json.md#decision-api-probbit-evaluate)) plus optional `flags` | `probbit evaluate` |
 | `probbit_persona_init` | `persona` (the document) or `persona_path`, optional `seed` | `probbit persona init` (the state) |
 | `probbit_persona_turn` | `persona` or `persona_path`, `state`, `inputs`, optional `flags` (`timing`, `no_inertia`) | `{stance, state}`: `probbit persona turn`'s stance and the state it writes ([persona.md](persona.md)) |
+| `probbit_persona_fuzz` | `persona` or `persona_path`, `never` (a rule in habit syntax) or `props` (a list of rules), optional `seeds` (`"0-99"` or a list), `fuzz_seed`, `scripts`, `depth`, `beam`, `grid`, `hours`, `threads` | `probbit persona fuzz --json`: per rule each individual's shortest counterexample ([persona.md](persona.md) §5.6); a counterexample is an answer |
 
-The two persona tools run in the server's process and keep nothing between calls: pass the returned state back on the next turn and
+The persona tools run in the server's process and keep nothing between calls: pass the returned state back on the next turn and
 put `stance.line` into the model's prompt (after any cached prefix). A refused or fallback stance is an answer; a bad persona,
 state or input is a tool error with the `{"error": {"code": "persona", ...}}` object.
 
@@ -194,3 +195,6 @@ Practical notes for agent use:
 - `probbit stats` prints the machine, the effective controls and a measured self-test; `--threads`, `--cpu-limit` and
   (on Linux and macOS) `--priority low` keep it from crowding the agent's own process.
 - `--top`, `demo --live` and the hero screen draw only on a terminal; an agent's pipes never see them.
+- A persona's character rules in CI: `probbit persona lint PERSONA --props rules.json` proves each rule or, when the bound
+  cannot decide it, fuzzes it (exit 1 when one breaks); `probbit persona fuzz` / `prove` with `--json` give the documents
+  (docs/persona.md §5.6). They test the stance a host gets, not the words a model writes.
