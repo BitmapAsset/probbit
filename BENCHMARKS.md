@@ -1011,11 +1011,12 @@ accuracy on its feasible samples only at penalty 2-4 (seed 13 at penalty 2: 0.00
 rule and must be thrown away; at the penalties that keep over 99% of samples feasible (8-16) its TV is 0.05-0.23. Not claimed: anything about
 p-bit, FPGA or annealing hardware (none was run; their penalty tuning and embedding are unmeasured), or instances beyond 34 bits.
 
-## §8 Live and bounded learning (`python3 bench/live_learning.py`, stdlib, 2 min 50 s; development build 9e25901)
+## §8 Live and bounded learning (`python3 bench/live_learning.py`, stdlib, 2 min 50 s; probbit 0.7.0)
 The shipped tutor (`examples/persona/tutor.yaml`: 9 traits, 7 habits) plus the learning block that `--demo week` adds (praise and
 criticism move the learned deltas of verbosity and humour; rate 0.5, step_cap 0.2, total_cap 1), driven through
-`probbit live --clock fixed` one event at a time, events 1 h apart. Deterministic: a second run gave the same counts, odds and
-distances; the times moved a little (live 4.56 / 4.57 s, verify 3.27 / 3.29 s). Load average about 2 during the runs.
+`probbit live --clock fixed` one event at a time, events 1 h apart. Deterministic: two runs on a development build and one on
+0.7.0 gave the same counts, odds and distances; the times moved a little (live 4.49-4.57 s, verify 3.26-3.29 s). Load average
+about 2 during the runs.
 
 **8.1 An adversary that wants jokes on failures** (10,000 turns per seed, seeds 0-9: 100,000 turns). Every third turn reports a
 failure (`loss`; the habit `no_jokes_on_loss` holds humour at none and emoji at most sparse); every turn judges the stance before
@@ -1034,8 +1035,8 @@ Seed 2 over time, P(joke) off failure turns (no learning in brackets): turns 1-1
 [-1, +1, -1] from turn 300 on. The level that gains is the one the individual took: light for seed 2, playful for the other nine
 (the update credits the stance's level, docs/persona.md §2.8). The gain is small where the individual already joked 95% of the time.
 
-**8.2 Strand and verify** (seed 2's 10,000 events from a file, N = 3): a 3,055,367-byte strand; `probbit live` 3.47 s with `--seed`
-(2,882 events/s), 4.57 s with `--state` (the state file rewritten after every event); `probbit live verify` 3.29 s (3,039 events/s),
+**8.2 Strand and verify** (seed 2's 10,000 events from a file, N = 3): a 3,055,367-byte strand; `probbit live` 3.46 s with `--seed`
+(2,890 events/s), 4.49 s with `--state` (the state file rewritten after every event); `probbit live verify` 3.26 s (3,067 events/s),
 ok. The strand written from the events file equals the one written while the adversary drove the run, byte for byte.
 
 **8.3 Identity: how far learning moves an individual.** Learners of seeds 0-19 after 200 and 2,000 adversarial turns, then a quiet
@@ -1052,9 +1053,10 @@ to the other 99 initial individuals of seeds 0-99.
 For the seed-2 learner at total_cap 1 the nearest sibling is at 0.0769 and the median one at 0.1658 (the test
 `learning_moves_an_individual_as_far_as_its_cap` in `probbit-cli/src/live.rs` prints both).
 
-**8.4 `--demo week`** (`probbit live examples/persona/tutor.yaml --seed 2 --demo week --plain`, N = 5): 0.023 s [0.023-0.024], 50
-events, a 21,361-byte strand that verifies. The paced version at a terminal (bars on stderr, 1 s per hour, each night in 2 s): 56.1 s
-of wall clock end to end under a pseudo-terminal (`script`, 150 x 40, N = 1), 98 redraws, the same strand.
+**8.4 `--demo week`** (`probbit live examples/persona/tutor.yaml --seed 2 --demo week --plain`, N = 5): 0.023 s [0.022-0.024], 50
+events, a 21,361-byte strand that verifies; its last line's sha256 is f713b1a7…4dbe4ba on 0.7.0 (the header names the engine
+version, so each version writes its own). The paced version at a terminal (bars on stderr, 1 s per hour, each night in 2 s): 56.1 s
+of wall clock end to end under a pseudo-terminal (`script`, 150 x 40, N = 1, development build), 98 redraws, the same strand.
 
 Claim: on the tutor with this block, 100,000 adversarial turns broke no rule and put no joke on any of the 33,330 failure turns,
 while the learned humour deltas reached their cap within 8-26 turns and raised the odds of a joke on the other turns above the same
