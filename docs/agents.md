@@ -80,7 +80,7 @@ mark with `[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)` a
 ## MCP: one line per agent
 
 `probbit mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio (JSON-RPC 2.0, one message per
-line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its eight tools take the
+line; stdout carries only protocol messages, logs go to stderr; it exits when stdin closes). Its ten tools take the
 commands' own documents and return the commands' own JSON, byte for byte:
 
 | tool | arguments | returns |
@@ -93,10 +93,12 @@ commands' own documents and return the commands' own JSON, byte for byte:
 | `probbit_persona_init` | `persona` (the document) or `persona_path`, optional `seed` | `probbit persona init` (the state) |
 | `probbit_persona_turn` | `persona` or `persona_path`, `state`, `inputs`, optional `flags` (`timing`, `no_inertia`) | `{stance, state}`: `probbit persona turn`'s stance and the state it writes ([persona.md](persona.md)) |
 | `probbit_persona_fuzz` | `persona` or `persona_path`, `never` (a rule in habit syntax) or `props` (a list of rules), optional `seeds` (`"0-99"` or a list), `fuzz_seed`, `scripts`, `depth`, `beam`, `grid`, `hours`, `threads` | `probbit persona fuzz --json`: per rule each individual's shortest counterexample ([persona.md](persona.md) §5.6); a counterexample is an answer |
+| `probbit_live_event` | `persona` or `persona_path`, `state` (a stored individual) or `seed` (a new one), `event` (its inputs, with `elapsed_hours` = hours since the previous event by the host's clock), optional `strand_path` | `{stance, state}`: one event of `probbit live` ([persona.md](persona.md) §5.7): moods decay over the hours, feedback moves the learned weights of a persona with a learning block; with `strand_path` the event is appended to that strand on the server's disk (a new file gets the header; an existing one needs the state after its last line) and the answer gets `strand: {path, events, head}` |
+| `probbit_live_verify` | `strand` (the strand's text) or `strand_path` | `probbit live verify`: `{"ok": true, events, persona, seed, engine, final_state, last_line}`, or `{"ok": false, line, diverges}` for the earliest line that does not replay (an answer, not an error) |
 
-The persona tools run in the server's process and keep nothing between calls: pass the returned state back on the next turn and
-put `stance.line` into the model's prompt (after any cached prefix). A refused or fallback stance is an answer; a bad persona,
-state or input is a tool error with the `{"error": {"code": "persona", ...}}` object.
+The persona and live tools run in the server's process and keep nothing between calls: pass the returned state back on the next
+turn and put `stance.line` into the model's prompt (after any cached prefix). A refused or fallback stance is an answer; a bad
+persona, state, input or event is a tool error with the `{"error": {"code": "persona", ...}}` object.
 
 `flags` are the command's flags without the dashes: `{"budget_ms": 200, "seed": 3, "summary": true}`; `summary: true`
 returns the compact answer (README, "First five minutes"). `infeasible` and `refused` / `declined` are answers; bad input

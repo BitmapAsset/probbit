@@ -16,7 +16,8 @@ and a short **stance line** (at most 40 tokens by default) that the host puts in
 This document is normative for the file format, the compilation, the stance document and the state. It is implemented by
 `probbit persona` (probbit-cli/src/persona.rs and yaml.rs, no dependency) and served on every surface with the same documents: the
 CLI, `probbit mcp` (tools `probbit_persona_init`, `probbit_persona_turn`), the Python wrapper (`probbit.persona_init`,
-`persona_turn`, `persona_replay`) and the browser module (probbit-wasm ops 4 and 5). The example personas and their goldens are in
+`persona_turn`, `persona_replay`) and the browser module (probbit-wasm ops 4 and 5). `probbit live` (section 5.7, live.rs) keeps an
+individual running on a clock, with learning (section 2.8) and a replayable log. The example personas and their goldens are in
 [examples/persona/](../examples/persona/). An independent reference implementation of this format (Python) gives the same
 documents byte for byte on every example turn (section 5.3).
 
@@ -25,8 +26,8 @@ probbit persona init examples/persona/tutor.yaml --seed 2 --out pip.json        
 probbit persona turn examples/persona/tutor.yaml --state pip.json --inputs '{"loss": true}'    # this turn's stance; pip.json moves on
 ```
 
-Contents: 1 Files · 2 Schema · 3 Compilation · 4 The stance document · 5 State, canonical JSON, replay · 6 What a persona can NOT
-do · 7 Commands and surfaces · 8 A model-proposed stance (the `evaluate` bridge) · 9 Versioning
+Contents: 1 Files · 2 Schema · 3 Compilation · 4 The stance document · 5 State, canonical JSON, replay, testing, live · 6 What a
+persona can NOT do · 7 Commands and surfaces · 8 A model-proposed stance (the `evaluate` bridge) · 9 Versioning
 
 ## 1. Files
 
@@ -64,6 +65,7 @@ habits: [...]                       # optional hard rules
 agenda: {...}                       # optional ordered beats of a reply
 engine: {...}                       # optional engine settings
 line: {...}                         # optional stance-line settings
+learning: {...}                     # optional bounded learning from feedback (section 2.8)
 comment: any text                   # ignored
 ```
 
@@ -228,6 +230,40 @@ line:
   prefix: "Stance: "
 ```
 
+### 2.8 Learning (optional)
+
+```yaml
+learning:
+  from: [praise, criticism]   # flag inputs: the reward, then (optional) the correction
+  traits: [verbosity, humour] # the traits that learn (moods do not)
+  rate: 0.5                   # step size (natural-log weight per unit of credit)
+  step_cap: 0.2               # the most one feedback turn moves a level's weight, before recentring
+  total_cap: 1.0              # no learned weight ever leaves [-total_cap, +total_cap]
+```
+
+All five fields are required; 0 < step_cap <= total_cap <= 50 and 0 < rate <= 50. With this block the state keeps, per learned
+trait, one **learned weight** Δ per level (`learned`, all 0 at `init`) and the **credit** of the previous stance (`credit`):
+onehot(level) − odds for each learned trait that stance released, 0 for one it did not (status refused or fallback, an
+unreleased trait of a partial turn). A level that a habit or a hold forced has odds 1, so its credit is 0 as well.
+
+Feedback is about the previous reply. On a turn whose reward flag is on (sign +1) or whose correction flag is on (sign −1; both
+on: 0), each learned trait's weights move, before the turn is compiled:
+
+    step(l) = clip(sign x rate x credit(l), -step_cap, +step_cap)
+    step(l) = step(l) - mean over levels of step                    (recentred: the step moves weight between levels)
+    Δ(l)    = round(clip(Δ(l) + step(l), -total_cap, +total_cap), 6)
+
+A turn with no feedback, or feedback on a stance with zero credit, moves nothing. Δ is added to the trait's field (section 3,
+step 2), so the feedback turn's own stance already uses it. What learning can and cannot change:
+
+- It changes the learned traits' unary weights and nothing else, within ±total_cap per level. Genes, priors, couplings, moods, inputs and
+  history effects are untouched.
+- It never changes a habit or a trait's allowed levels: habits are rules of the program (section 3, step 6), the learner's whole
+  output is the Δ table, and every stance the engine returns obeys every habit in force whatever Δ is. Rule immunity is
+  therefore by construction, not measured.
+- A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
+  as before the block existed.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -236,9 +272,10 @@ For turn t of an individual (seed s), with inputs x_t:
    `semantic`: every level name in order of first appearance, then the slots. Both give the same distribution and stance
    (checked on every example).
 2. **Trait variable** v, level l (allowed: its own levels):
-   `h(v,l) = ln prior(l) + gene_v x c(l) + sum over inputs i of gain_i x scale_i(x_t) x effect_i(v,l)
+   `h(v,l) = ln prior(l) + gene_v x c(l) + Δ_v(l) + sum over inputs i of gain_i x scale_i(x_t) x effect_i(v,l)
               + sum over history features f of min(value_f, cap_f) x effect_f(v,l)`,
-   with `scale` = 1 for a true flag or the matching level, the value for a number input, 0 otherwise.
+   with `scale` = 1 for a true flag or the matching level, the value for a number input, 0 otherwise, and Δ_v the learned
+   weights after this turn's feedback (section 2.8; 0 for a trait that does not learn).
 3. **Mood variable** m: `h(m,l) = ln prior(l) + gene_m x c(l) + a_t(m,l)`, where the **mood accumulator**
    `a_t = k x d x a_(t-1) + (1 - k) x e_t`, e_t = the turn's input and history effects on m (with gains), k = `inertia`,
    d = 0.5 ^ (elapsed_hours / half_life_hours) (1 without them). An event's total impact over time is e_t whatever k is;
@@ -323,11 +360,14 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "history": {"error": [false, true, true]},                         # recent flag values (as long as the longest window / cap)
  "prev": {"verbosity": "short", "...": "...", "agenda": ["..."]},  # last turn's levels (for prev-relative habits)
  "rest": {"warmth": "cool", "...": "..."},                          # the individual's resting stance (no evidence), set at init
+ "learned": {"verbosity": [-0.12, -0.31, 0.43]},                    # with a learning block (section 2.8): Δ per level
+ "credit": {"verbosity": [-0.08, -0.36, 0.44]},                     # with a learning block: the last stance's onehot - odds
  "digest": "sha256:..."}
 ```
 
 The state is plain JSON the host stores between turns (a file, a database row, a session field). A turn refuses a state
-whose persona digest differs from the persona file, whose own digest does not match, or whose genes do not match its seed.
+whose persona digest differs from the persona file, whose own digest does not match, or whose genes do not match its seed, and
+(with a learning block) learned weights outside ±total_cap or credits outside ±1, even with a recomputed digest.
 
 ### 5.2 Canonical JSON and the number rule
 
@@ -414,7 +454,8 @@ found" is evidence over the scripts searched, not a proof.
   genes or moods).
 - `proved for every event sequence`: for each individual, a bound covers every turn of every script and decides all of them.
   The mood accumulators stay in a box (per level, between the most negative and the most positive evidence one turn's inputs
-  and history can add, 0 included), whatever the inputs, idle hours or `--no-inertia`. The rest of a turn falls into finitely
+  and history can add, 0 included), whatever the inputs, idle hours or `--no-inertia`. Learned weights (section 2.8) of traits
+  linked to the rule's trait stay in their own box, ±total_cap per level, whatever the feedback. The rest of a turn falls into finitely
   many cells: flags and levels, each number at every threshold a habit or the rule reads and on each interval between them,
   history values that fit the turn's own flags, and the previous levels the restrictions in force read. In every cell the best
   stance the rule allows must beat the best one it forbids by more than the box, the number intervals and the 6-decimal
@@ -440,6 +481,90 @@ ones it leaves unknown; the lint document gets `props` (each rule's `prove` entr
 
 Exit codes: `fuzz` 0 nothing found, 1 a counterexample; `prove` 0 every rule held or proved, 1 some rule unknown; both 2 bad
 input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); timing goes to stderr.
+
+### 5.7 Live: a resident individual
+
+`probbit live` keeps one individual running: JSONL events in (one object of inputs per line, from `--events FILE` or stdin),
+one stance per event out (canonical JSON, the document of section 4). It adds three things to `persona turn`: a clock, learning
+from feedback between events (with a learning block, section 2.8), and a **strand**, a log the whole life replays from.
+
+```sh
+probbit live examples/persona/tutor.yaml --seed 2 --strand pip.strand < events.jsonl    # one stance per event; pip.strand logs it
+probbit live verify pip.strand                                                         # ok, or the earliest line that differs
+probbit live examples/persona/tutor.yaml --seed 2 --demo week --plain                 # a scripted week (below)
+```
+
+**Time.** With `--clock real` (the default) a monotonic clock starts with the run and stamps each event's `elapsed_hours`, the
+time since the previous event (for the opening event, since the start), quantised to 1e-6 h (3.6 ms): the value the turn uses
+is the value the strand logs. Under the real clock an event that carries its own `elapsed_hours` is refused. With `--clock fixed`
+each event carries its own `elapsed_hours` (default 0), so a run is a pure function of its events (tests, demos, replays).
+
+**What decays.** Moods, and nothing else. Between two events each mood accumulator is multiplied by 0.5 ^ (elapsed_hours /
+half_life_hours) (section 3, step 3), so quiet hours bring a mood back to the individual's resting level. A test holds it to the
+closed form: an event, then quiet events after gaps g_1..g_n, leaves k^n x 0.5^((g_1 + ... + g_n) / half_life_hours) x a_1, to
+the 6 decimals the state keeps.
+
+**What learns.** With a learning block, a turn whose reward or correction flag is on moves the learned weights Δ of the levels
+the previous stance took (section 2.8), never past ±total_cap per level. Without a block nothing learns, and every stance and
+state is the one `persona turn` gives.
+
+**What never changes.** Genes, priors, couplings, input effects, history features, habits and every trait's allowed levels. The
+learner's whole output is the Δ table, and habits are rules of every compiled program (section 3, step 6), so every stance obeys
+every habit in force whatever Δ is: rule immunity is architectural, not trained or measured into it, and `prove` (section 5.6)
+includes the learned box in its bound. Measured all the same (BENCHMARKS.md §8): an adversary that praises every joke and
+criticises every joke-free stance, the ones a failure forced included, over 10,000 turns of the tutor on each of seeds 0-9,
+broke no rule; on all 33,330 failure turns humour was `none`, while the learned humour weights sat at their cap from turn 8-26 on.
+
+**How far.** Learning saturates at its box: 200 and 2,000 feedback turns leave an individual at the same distance from its initial
+self, so `total_cap`, not the time in use, sets how far use can move an individual. On the tutor (learners seeds 0-19, compared
+with the 100 initial individuals of seeds 0-99 by the distance of section 5.4), total_cap 0.25 left every learner nearer its own
+initial self than any sibling; total_cap 1, more than the genes' spread on those traits (0.5-0.6), left 9 of 20 with a sibling as
+near or nearer. Keep total_cap well under the learned traits' spread when an individual must stay recognisably itself. Feedback
+credits every learned trait with the level it took, so a reward aimed at one trait also pushes the levels the others took (in the
+demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
+
+**The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
+`{"probbit_strand":1,"engine":"probbit 0.7.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
+the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
+Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
+"state":"sha256:..."}`, that is the inputs as the turn used them (the stamped hours included), the sha256 of the line before (the
+header, for event 1), the sha256 of the stance's canonical JSON and the new state's digest. Lines end in `\n`. A strand is never
+rewritten, just appended to: `--strand` on an existing strand continues it from `--state`, which must be the state after its last
+line (that line carries its digest) of a persona with the header's digest, and the run uses the header's document. A life
+continued over several runs is the strand of one run, byte for byte.
+
+**Verify.** `probbit live verify STRAND` reads nothing but the strand. It rebuilds the persona from the header's document (its
+digest must match), checks the initial state as any state is checked (section 5.1), rebuilds the header, replays every event on
+the fixed clock with its logged hours and compares, line by line, `prev`, `n`, the stance digest, the state digest and the bytes.
+It prints `{"ok":true,"events","persona","seed","engine","final_state","last_line"}` and exits 0, or prints
+`{"ok":false,"line":n,"diverges":"..."}` for the earliest line that differs and exits 1: a changed input diverges at its own line
+(its stance or state no longer replays), a removed or reordered line at the next line's `prev`, a changed header at line 1. A copy
+with `\r\n` line endings (Windows text mode, an editor) verifies and can be continued: the hashes cover each line's text without
+its line ending, and a canonical JSON line never ends in `\r`. Verify replays with the binary that runs it; the header's `engine`
+names the version that wrote the strand. Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,055,367
+bytes and verifies in 3.3 s, about 3,000 events per second.
+
+**Following a file.** `--events FILE --watch` follows the file as lines are appended (as `tail -f`): a line counts once its
+newline is written, and the run stops when the file is removed (tested on Linux and macOS).
+
+**The demo.** `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` runs one individual through a scripted week
+on the fixed clock, events 1 h apart from 09:00 to 15:00 and quiet nights until 09:00. Campaign 1 praises every answer shorter
+than the longest level and criticises the longest until the learned verbosity weights reach their cap (day 3 at the latest); an
+hour later comes an upset (a failure, with a negative sentiment when the persona has one), then the night and a morning without
+feedback; campaign 2 praises every joke to the end of day 7, with a failure every third hour. A persona without a learning block
+gets the demo's, `{"from":["praise","criticism"],"traits":["verbosity","humour"],"rate":0.5,"step_cap":0.2,"total_cap":1}` (its
+opening line says so, and the strand records the document used). The script reads nothing but the stances, so a run is a pure
+function of persona, seed and version. On a colour terminal it draws bars on stderr, 1 s per hour with each night fast-forwarded
+in 2 s (about 55 s in all); otherwise, or with `--plain`, it prints one line per event on stdout without waiting. The tutor, seed 2,
+0.7.0: 50 events over 150 h of clock; the learned verbosity bar at its cap on day 1 at 15:00 (event 7); valence `down` at the
+upset and `up`, this individual's resting level, after 17 quiet hours; P(joke) on the turns without a failure, mean per day,
+0.57 on day 1, 0.78 on day 2 and 0.89 on each of days 3-7, with humour's learned weights ending at [-1, +1, -0.46] for none /
+light / playful; 13 failure turns, a joke on none of them; 0 rule breaks; a 21,361-byte strand that `live verify` replays.
+
+Exit codes: `live` 0 when every event got its stance; 2 for a bad persona, state or flag, and after a bad event (each bad event
+prints one `{"error"}` object on stdout, changes nothing and the run goes on). `verify` 0 when every line replays, 1 at a line
+that differs, 2 for a bad flag or an unreadable file.
 
 ## 6. What a persona can NOT do
 
@@ -472,8 +597,12 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
+| `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
+| `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
+| `probbit live verify STRAND` | replay a strand from its header alone: ok, or the earliest line that differs (exit 1) |
 
-A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes:
+A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes
+(`live`'s are in section 5.7):
 0 done (every turn status is an answer), 1 `lint` found an unresolved contradiction, `fuzz` a counterexample or `prove` an
 unknown rule, 2 a bad persona, state, input, script or rule
 (ONE `{"error": {"code": "persona", "path", "message"}}` object on stdout) or a bad flag (stderr). The engine's resource controls
@@ -482,15 +611,21 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
 
 - **MCP** (`probbit mcp`): `probbit_persona_init {persona | persona_path, seed}` -> the state; `probbit_persona_turn {persona |
   persona_path, state, inputs, flags: {timing, no_inertia}}` -> `{stance, state}`; `probbit_persona_fuzz {persona | persona_path,
-  never | props, seeds, fuzz_seed, scripts, depth, beam, grid, hours, threads}` -> the `fuzz --json` document (section 5.6).
-  Stateless; the documents are the CLI's. A refusal, a fallback or a counterexample is an answer; a bad persona, state, input
-  or rule is a tool error carrying the error object.
+  never | props, seeds, fuzz_seed, scripts, depth, beam, grid, hours, threads}` -> the `fuzz --json` document (section 5.6);
+  `probbit_live_event {persona | persona_path, state | seed, event, strand_path}` -> `{stance, state}`, one event of a resident
+  individual (`event` is its inputs, `elapsed_hours` from the host's clock, quantised to 1e-6 h; with `strand_path` the event is
+  logged to that strand on the server's disk, a new file getting the header, and the answer gets `strand: {path, events, head}`);
+  `probbit_live_verify {strand | strand_path}` -> `live verify`'s document (section 5.7; a divergence is an answer).
+  Stateless; the documents are the CLI's. A refusal, a fallback, a counterexample or a divergent strand is an answer; a bad
+  persona, state, input, event or rule is a tool error carrying the error object.
 - **Python** (python/probbit.py, standard library only): `probbit.persona_init(persona, seed=None)` -> the state;
   `probbit.persona_turn(persona, state, inputs, timing=False, no_inertia=False)` -> `{"stance", "state"}`;
   `probbit.persona_replay(persona, script, seed=None)` -> the stances; `probbit.persona_fuzz(persona, never=None, props=None,
   seeds="0-99", **flags)` and `probbit.persona_prove(...)` -> the `--json` documents of section 5.6 (a counterexample or an
-  unknown rule is an answer). `persona` is a file path or the document as a dict; bad input raises `ProbbitInputError`
-  (`.code == "persona"`, `.path`, `.message`).
+  unknown rule is an answer); `probbit.live_event(persona, state=None, event=None, seed=None, strand=None)` -> `{"stance",
+  "state"}` (+ `"strand"` with a strand path), the MCP tool's shape; `probbit.live_verify(strand)` -> `live verify`'s document.
+  `persona` is a file path or the document as a dict; bad input raises `ProbbitInputError` (`.code == "persona"`, `.path`,
+  `.message`).
 - **Browser** (probbit-wasm, no threads): `probbit_call` op 4 = persona init, op 5 = persona turn, with the MCP tools' arguments
   (the persona inline). The playground's "meet three individuals from one persona" runs three seeds of one persona side by side.
 
@@ -507,4 +642,6 @@ turn (tests/persona.rs).
 ## 9. Versioning
 
 `probbit_persona: 1` is this document. Additive fields keep the number; a change of meaning of an existing field increments
-it. The stance document (`probbit_persona_turn`) and the state (`probbit_persona_state`) carry their own format numbers.
+it. The stance document (`probbit_persona_turn`), the state (`probbit_persona_state`) and the strand header (`probbit_strand`)
+carry their own format numbers. The learning block (section 2.8) is additive: `probbit_persona` stays 1, and a persona without it
+gives the documents it gave before the block existed.

@@ -26,7 +26,7 @@ fn width(s: &str) -> usize {
     for c in s.chars() { if esc { if c.is_ascii_alphabetic() { esc = false; } } else if c == '\x1b' { esc = true; } else { n += 1; } } n
 }
 /// `s` cut to `w` visible columns (escapes kept; a reset closes a cut line).
-fn clip(s: &str, w: usize) -> String {
+pub(crate) fn clip(s: &str, w: usize) -> String {
     if width(s) <= w { return s.to_string(); }
     let (mut o, mut n, mut esc) = (String::new(), 0, false);
     for c in s.chars() { if esc { o.push(c); if c.is_ascii_alphabetic() { esc = false; } continue; }
@@ -36,7 +36,7 @@ fn clip(s: &str, w: usize) -> String {
 }
 fn pad(s: &str, w: usize) -> String { let s = clip(s, w); let n = width(&s); format!("{s}{}", " ".repeat(w - n)) }
 /// stderr, unbuffered; a reader that went away is ignored (as `err_line` in main.rs)
-fn err_write(s: &str) { let mut e = std::io::stderr().lock(); let _ = e.write_all(s.as_bytes()); let _ = e.flush(); }
+pub(crate) fn err_write(s: &str) { let mut e = std::io::stderr().lock(); let _ = e.write_all(s.as_bytes()); let _ = e.flush(); }
 fn paint(th: Option<Theme>, c: Col, s: &str) -> String { th.map_or_else(|| s.to_string(), |t| t.paint(c, s)) }
 fn bold(th: Option<Theme>, c: Col, s: &str) -> String { th.map_or_else(|| s.to_string(), |t| t.bold(c, s)) }
 /// UTC calendar date of a Unix time
@@ -138,7 +138,7 @@ pub fn top_stop() {
     let t = TOP.lock().ok().and_then(|mut g| g.take());
     if let Some((tx, h)) = t { drop(tx); let _ = h.join(); }
 }
-fn bar(frac: f64, w: usize) -> String { let k = (frac.clamp(0.0, 1.0) * w as f64).round() as usize; format!("{}{}", "█".repeat(k), "░".repeat(w - k)) }
+pub(crate) fn bar(frac: f64, w: usize) -> String { let k = (frac.clamp(0.0, 1.0) * w as f64).round() as usize; format!("{}{}", "█".repeat(k), "░".repeat(w - k)) }
 fn top_lines(th: Theme, sp: &TopSpec, t: f64, sweeps: u64, rate: f64, cpu: Option<f64>, rss: Option<f64>) -> Vec<String> {
     let w = theme::size(2).0.saturating_sub(1).clamp(44, 100); let inner = w - 4;
     let tier = TIER.lock().map(|g| *g).unwrap_or(""); let gate = GATE_LINE.lock().map(|g| g.clone()).unwrap_or_default();

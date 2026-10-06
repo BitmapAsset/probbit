@@ -94,7 +94,7 @@ pub fn sha(j: &Json) -> String { digest_of(&canon(j)) }
 /// the same way; equal on 300,015 test doubles)
 fn round_to(x: f64, n: usize) -> f64 { format!("{x:.n$}").parse().unwrap_or(x) }
 /// Weights and odds: rounded to 6 decimals, -0 -> 0
-fn r6(x: f64) -> f64 { let v = round_to(x, 6); if v == 0.0 { 0.0 } else { v } }
+pub(crate) fn r6(x: f64) -> f64 { let v = round_to(x, 6); if v == 0.0 { 0.0 } else { v } }
 /// A number as Python's `%s` prints it in a message (bounds are whole numbers or Python floats)
 fn pyn(x: f64) -> String { let mut s = String::new(); canon_num(x, &mut s); s }
 /// A standard normal number that is a pure function of its parts: Box-Muller on the first 16 bytes of
@@ -132,9 +132,16 @@ struct Habit { id: String, when: Vec<(String, Json)>, then: Vec<(String, Json)>,
 /// engine settings (docs/persona.md §2.7)
 #[derive(Clone)]
 struct Eng { op: String, sweeps: usize, polish_sweeps: usize, exact_limit: u64, chains: usize, twin: bool, positional: bool, yields: bool }
+/// bounded learning (docs/persona.md §2.8): `from` = the reward flag, then (optional) the correction flag; the traits whose learned
+/// deltas move; the step and total caps (natural-log weights)
+#[derive(Clone)]
+struct Learning { from: Vec<String>, traits: Vec<String>, rate: f64, step_cap: f64, total_cap: f64 }
+/// Learned deltas or credits: per learned trait, one number per level (in `learning.traits` order)
+type Table = Vec<(String, Vec<f64>)>;
 #[derive(Clone)]
 pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub digest: String, vars: Vec<Var>, steps: Vec<String>, slots: Vec<String>, say_order: bool,
-    prefer: Eff, couplings: Vec<(String, String, Vec<Vec<f64>>)>, inputs: Vec<Input>, history: Vec<Hist>, habits: Vec<Habit>, eng: Eng, max_tokens: usize, order: Vec<String>, prefix: String }
+    prefer: Eff, couplings: Vec<(String, String, Vec<Vec<f64>>)>, inputs: Vec<Input>, history: Vec<Hist>, habits: Vec<Habit>, eng: Eng, max_tokens: usize, order: Vec<String>, prefix: String,
+    learning: Option<Learning> }
 impl Persona {
     fn var(&self, id: &str) -> Option<&Var> { self.vars.iter().find(|v| v.id == id) }
     fn input(&self, id: &str) -> Option<&Input> { self.inputs.iter().find(|x| x.id == id) }
@@ -239,7 +246,7 @@ pub fn parse_doc(t: &str, is_json: bool) -> Result<Json, String> {
 
 /// The strict validator: document -> persona (every field type-checked, unknown fields refused at their path).
 pub fn build(doc: &Json) -> R<Persona> {
-    const TOP: [&str; 12] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "comment"];
+    const TOP: [&str; 13] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "learning", "comment"];
     let kv = keys(doc, "", &TOP, &["probbit_persona", "identity", "traits"])?;
     need(matches!(get(kv, "probbit_persona"), Some(Json::Num(x)) if *x == 1.0), "probbit_persona", "must be 1")?;
     let idn = keys(get(kv, "identity").unwrap(), "identity", &["name", "version", "seed", "summary"], &["name", "version"])?;
@@ -359,7 +366,8 @@ pub fn build(doc: &Json) -> R<Persona> {
     for k in &order { need(vars.iter().any(|v| v.id == *k), "line.order", &format!("unknown trait or mood {k:?}"))?; }
     let max_tokens = num_or(lkv, "max_tokens", 40.0, "line", Some(8.0), Some(400.0), true)? as usize;
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
-    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix };
+    let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
+    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning };
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -390,6 +398,20 @@ fn habit_spec(hb: &Json, path: &str, inputs: &[Input], history: &[Hist], vars: &
     let say = match get(hkv, "say") { None => String::new(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr(&at(path, "say"), "a string")) };
     let priority = num_or(hkv, "priority", 0.0, path, Some(-100.0), Some(100.0), true)?;
     Ok(Habit { id, when, then, rules, say, priority })
+}
+/// The `learning` block (docs/persona.md §2.8): `from` = 1-2 distinct flag inputs (the reward, then the correction), `traits` =
+/// distinct trait ids (moods do not learn), `rate`, `step_cap` and `total_cap` positive, with step_cap <= total_cap <= 50
+fn learning_spec(l: &Json, vars: &[Var], inputs: &[Input]) -> R<Learning> {
+    let kv = keys(l, "learning", &["from", "traits", "rate", "step_cap", "total_cap", "comment"], &["from", "traits", "rate", "step_cap", "total_cap"])?;
+    let ids = |k: &str, max: usize, ok: &dyn Fn(&str) -> bool, what: &str| -> R<Vec<String>> { let p = at("learning", k);
+        let v = strs(get(kv, k).unwrap()).filter(|v| !v.is_empty() && v.len() <= max).ok_or_else(|| perr(&p, format!("a list of 1 to {max} ids")))?;
+        for (i, x) in v.iter().enumerate() { need(ok(x), &ix(&p, i), what)?; need(!v[..i].contains(x), &ix(&p, i), "listed twice")?; }
+        Ok(v) };
+    let from = ids("from", 2, &|x| inputs.iter().any(|i| i.id == x && i.kind == Kind::Flag), "not a flag input of this persona")?;
+    let traits = ids("traits", vars.len(), &|x| vars.iter().any(|v| v.id == x && !v.mood), "not a trait of this persona (moods do not learn)")?;
+    let pos = |k: &str, hi: f64| -> R<f64> { let p = at("learning", k); let x = num(get(kv, k), &p, Some(0.0), Some(hi), false)?; need(x > 0.0, &p, "must be > 0")?; Ok(x) };
+    let (rate, total_cap) = (pos("rate", 50.0)?, pos("total_cap", 50.0)?); let step_cap = pos("step_cap", total_cap)?;
+    Ok(Learning { from, traits, rate, step_cap, total_cap })
 }
 fn check_cond(k: &str, c: &Json, path: &str, inputs: &[Input], history: &[Hist]) -> R<()> {
     let range = |c: &Json| -> R<()> { if let Json::Num(_) = c { return Ok(()); }
@@ -527,7 +549,22 @@ fn values_of(p: &Persona) -> Vec<String> {
 /// The state between turns (docs/persona.md §5.1): plain JSON a host stores.
 #[derive(Clone)]
 pub struct State { pub seed: u64, pub turn: u64, persona: [String; 3], genes: Json, mood: Vec<(String, Vec<f64>)>, history: Vec<(String, Vec<bool>)>, prev: HashMap<String, String>,
-    agenda: Option<Vec<String>>, rest: Option<Vec<(String, String)>>, pub digest: String }
+    agenda: Option<Vec<String>>, rest: Option<Vec<(String, String)>>, learned: Table, credit: Table, pub digest: String }
+fn table(t: &Table) -> Json { Json::Obj(t.iter().map(|(k, v)| (k.clone(), Json::Arr(v.iter().map(|x| Json::Num(*x)).collect()))).collect()) }
+/// A zero table over the learned traits (none without a learning block)
+fn zeros(p: &Persona) -> Table { p.learning.as_ref().map_or(vec![], |l| l.traits.iter().map(|t| (t.clone(), vec![0.0; p.var(t).unwrap().levels.len()])).collect()) }
+/// The learner (docs/persona.md §2.8). `sign` is this turn's feedback (+1 reward, -1 correction, 0 none: nothing moves); `credit`
+/// is the previous stance's onehot(level) - odds per learned trait. The step sign · rate · credit is clipped to ±step_cap per
+/// level and recentred to sum 0 (it moves weight between levels; zero credit moves nothing), added, and every delta is clipped to
+/// ±total_cap. It returns nothing but the delta table, which compile adds to trait unaries: habits and allowed levels are not
+/// reachable from here, so learning can never remove a rule.
+fn learn(l: &Learning, credit: &Table, sign: f64, delta: &Table) -> Table {
+    if sign == 0.0 { return delta.clone(); }
+    delta.iter().zip(credit).map(|((t, d), (_, g))| {
+        let step: Vec<f64> = g.iter().map(|x| (sign * l.rate * x).clamp(-l.step_cap, l.step_cap)).collect();
+        let mean = step.iter().fold(0.0, |a, b| a + b) / step.len() as f64;
+        (t.clone(), d.iter().zip(&step).map(|(a, x)| r6((a + (x - mean)).clamp(-l.total_cap, l.total_cap))).collect()) }).collect()
+}
 fn genes(p: &Persona, seed: u64) -> Json {
     let s = seed.to_string();
     let shift = p.vars.iter().filter(|v| v.spread > 0.0).map(|v| (v.id.clone(), Json::Num(r6(round_to(v.spread * normal(&[&p.name, &s, "shift", &v.id]), 4))))).collect();
@@ -548,6 +585,7 @@ impl State {
             ("mood".into(), Json::Obj(self.mood.iter().map(|(k, m)| (k.clone(), Json::Arr(m.iter().map(|x| Json::Num(*x)).collect()))).collect())),
             ("history".into(), Json::Obj(self.history.iter().map(|(k, h)| (k.clone(), Json::Arr(h.iter().map(|b| Json::Bool(*b)).collect()))).collect())), ("prev".into(), Json::Obj(prev))];
         if let Some(r) = &self.rest { v.push(("rest".into(), Json::Obj(r.iter().map(|(k, l)| (k.clone(), Json::Str(l.clone()))).collect()))); }
+        if p.learning.is_some() { v.push(("learned".into(), table(&self.learned))); v.push(("credit".into(), table(&self.credit))); }
         Json::Obj(v)
     }
     pub fn to_json(&self, p: &Persona) -> Json { let mut b = self.body(p); if let Json::Obj(v) = &mut b { v.push(("digest".into(), Json::Str(self.digest.clone()))); } b }
@@ -561,7 +599,9 @@ impl State {
         if pd != p.digest { return Err(perr("state.persona.digest", format!("the persona file changed since this state was made ({} != {}); re-init", &pd[..pd.len().min(19)], &p.digest[..19]))); }
         let body = Json::Obj(kv.iter().filter(|(k, _)| k != "digest").cloned().collect());
         need(get(kv, "digest").and_then(Json::as_str) == Some(sha(&body).as_str()), "state.digest", "state was edited or corrupted")?;
-        keys(j, "state", &["probbit_persona_state", "persona", "seed", "turn", "genes", "mood", "history", "prev", "rest", "digest"], &["persona", "seed", "turn", "genes", "mood", "history", "prev", "digest"])?;
+        const SK: [&str; 12] = ["probbit_persona_state", "persona", "seed", "turn", "genes", "mood", "history", "prev", "rest", "digest", "learned", "credit"];
+        keys(j, "state", if p.learning.is_some() { &SK } else { &SK[..10] }, &["persona", "seed", "turn", "genes", "mood", "history", "prev", "digest"])
+            .map_err(|e| if e.msg.starts_with("unknown field") && (e.path == "state.learned" || e.path == "state.credit") { perr(&e.path, "this persona has no learning block") } else { e })?;
         let whole = |k: &str| num(get(kv, k), &at("state", k), Some(0.0), Some(9_007_199_254_740_992.0), true).map(|x| x as u64);
         let (seed, turn) = (whole("seed")?, whole("turn")?);
         let g = get(kv, "genes").unwrap(); need(canon(g) == canon(&genes(p, seed)), "state.genes", "genes do not match the seed")?;
@@ -584,7 +624,15 @@ impl State {
         let pv = get(kv, "prev").unwrap(); let prev: HashMap<String, String> = level_map(pv, "state.prev")?.into_iter().collect();
         let agenda = match pv.get("agenda") { None => None, Some(a) => { let a = strs(a).filter(|a| { let mut s = a.clone(); s.sort(); let mut t = p.steps.clone(); t.sort(); s == t }).ok_or_else(|| perr("state.prev.agenda", "the persona's agenda steps"))?; Some(a) } };
         let rest = match get(kv, "rest") { None => None, Some(r) => Some(level_map(r, "state.rest")?) };
-        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, digest: get(kv, "digest").and_then(Json::as_str).unwrap_or("").to_string() })
+        // learned deltas within ±total_cap and credits within ±1, one number per level of each learned trait: the box `prove` covers
+        let tab = |k: &str, cap: f64| -> R<Table> { let Some(l) = &p.learning else { return Ok(vec![]) }; let path = at("state", k);
+            let o = get(kv, k).and_then(Json::as_obj).ok_or_else(|| perr(&path, "required: an object of learned traits"))?;
+            need(o.len() == l.traits.len(), &path, "one entry per learned trait")?;
+            l.traits.iter().map(|t| { let n = p.var(t).unwrap().levels.len(); let tp = at(&path, t);
+                let a = get(o, t).and_then(Json::as_arr).filter(|a| a.len() == n && a.iter().all(|x| x.as_f64().is_some_and(|x| x.abs() <= cap))).ok_or_else(|| perr(&tp, format!("one number per level, each within ±{}", pyn(cap))))?;
+                Ok((t.clone(), a.iter().map(|x| x.as_f64().unwrap()).collect())) }).collect() };
+        let (learned, credit) = (tab("learned", p.learning.as_ref().map_or(0.0, |l| l.total_cap))?, tab("credit", 1.0)?);
+        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, digest: get(kv, "digest").and_then(Json::as_str).unwrap_or("").to_string() })
     }
 }
 
@@ -614,7 +662,7 @@ fn flags(p: &Persona, st: &State) -> Flags {
 // --------------------------------------------------------------------------------------------------------- compile
 #[derive(Clone)]
 struct Meta { vals: Vec<(String, Json)>, hist: Vec<(String, f64)>, ignored: Vec<String>, active: Vec<String>, conditional: Vec<String>, active_inputs: Vec<String>,
-    rules: Vec<Vec<Json>>, owners: Vec<String>, new_mood: Vec<(String, Vec<f64>)>, contrib: Vec<Vec<(String, Vec<f64>)>>, field: Vec<Vec<f64>>, values: Vec<String>, twin: bool }
+    rules: Vec<Vec<Json>>, owners: Vec<String>, new_mood: Vec<(String, Vec<f64>)>, new_learned: Table, contrib: Vec<Vec<(String, Vec<f64>)>>, field: Vec<Vec<f64>>, values: Vec<String>, twin: bool }
 #[derive(Default, Clone)]
 struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool>, exclude: Vec<String>, hist: Option<Vec<(String, f64)>> }
 
@@ -654,8 +702,13 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let tix = |t: &str| -> usize { match t.strip_prefix("step.") { Some(s) => nv + p.steps.iter().position(|x| x == s).unwrap(), None => p.vars.iter().position(|v| v.id == t).unwrap() } };
     let mut contrib: Vec<Vec<(String, Vec<f64>)>> = vec![vec![]; nv + ns];
     let mut mood_ev: Vec<Option<Vec<f64>>> = p.vars.iter().map(|v| v.mood.then(|| vec![0.0; v.levels.len()])).collect();
+    // the learned deltas after this turn's feedback (the reward flag +1, the correction flag -1) on the previous stance's credit
+    let new_learned = match &p.learning { None => vec![], Some(l) => {
+        let sign = l.from.iter().enumerate().fold(0.0, |s, (i, id)| if matches!(get(&vals, id), Some(Json::Bool(true))) { s + if i == 0 { 1.0 } else { -1.0 } } else { s });
+        learn(l, &st.credit, sign, &st.learned) } };
     for (i, v) in p.vars.iter().enumerate() { contrib[i].push(("prior".into(), v.base.clone()));
-        if let Some(g) = st.shift(&v.id) { contrib[i].push(("genes".into(), centered(v.levels.len()).iter().map(|c| g * c).collect())); } }
+        if let Some(g) = st.shift(&v.id) { contrib[i].push(("genes".into(), centered(v.levels.len()).iter().map(|c| g * c).collect())); }
+        if let Some((_, d)) = new_learned.iter().find(|(t, d)| *t == v.id && d.iter().any(|x| *x != 0.0)) { contrib[i].push(("learned".into(), d.clone())); } }
     for (j, s) in p.steps.iter().enumerate() { contrib[nv + j].push(("prior".into(), vec![0.0; ns]));
         if let Some((_, pf)) = p.prefer.iter().find(|(t, _)| *t == format!("step.{s}")) { contrib[nv + j].push(("prefer".into(), pf.clone())); } }
     let mut active_inputs = vec![];
@@ -728,7 +781,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
         if *key == "all_different" && ns > 0 && use_twin { lst.push(Json::Obj(vec![("vars".into(), Json::Arr(p.steps.iter().map(|s| Json::Str(format!("free.step.{s}"))).collect()))])); }
         if !lst.is_empty() { prog.push((key.to_string(), Json::Arr(lst))); } }
     let conditional = active.iter().filter(|h| !h.when.is_empty()).map(|h| h.id.clone()).collect();
-    let meta = Meta { vals, hist, ignored, active: active.iter().map(|h| h.id.clone()).collect(), conditional, active_inputs, rules, owners, new_mood, contrib, field, values: sem, twin: use_twin };
+    let meta = Meta { vals, hist, ignored, active: active.iter().map(|h| h.id.clone()).collect(), conditional, active_inputs, rules, owners, new_mood, new_learned, contrib, field, values: sem, twin: use_twin };
     Ok((Json::Obj(prog), meta))
 }
 /// A habit rule with its level names renamed to the program's values (positional: l<i>)
@@ -883,7 +936,10 @@ fn decode(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, confl
     let ln = line(p, &levels, &line_active, &bound, &unsure, if steps_vouched { &order_steps } else { &[] }, &vouched, &meta.conditional, &baseline(p, st));
     let w = why(p, meta, &bound, &status);
     // the new state
-    let mut ns = st.clone(); ns.turn = st.turn + 1; ns.mood = meta.new_mood.clone();
+    let mut ns = st.clone(); ns.turn = st.turn + 1; ns.mood = meta.new_mood.clone(); ns.learned = meta.new_learned.clone();
+    // the credit the next turn's feedback reads: onehot(level) - odds of each learned trait this stance released (else 0)
+    ns.credit = meta.new_learned.iter().map(|(t, d)| (t.clone(), match stance.iter().find(|(k, _)| k == t) { Some((_, e)) if e.released =>
+        e.odds.iter().map(|(l, x)| r6(if *l == e.level { 1.0 } else { 0.0 } - x)).collect(), _ => vec![0.0; d.len()] })).collect();
     let mut seen: Vec<&str> = vec![];
     for h in &p.history { if seen.contains(&h.of.as_str()) { continue; } seen.push(&h.of); // one entry per flag and turn, however many features read it
         let keep = p.history.iter().filter(|x| x.of == h.of).map(|x| x.window.max(x.cap)).max().unwrap_or(1).max(1);
@@ -964,7 +1020,8 @@ pub fn init(p: &Persona, seed: Option<u64>, rest: bool, eng: Engine) -> State {
     let mut st = State { seed, turn: 0, persona: [p.name.clone(), p.version.clone(), p.digest.clone()], genes: genes(p, seed),
         mood: p.vars.iter().filter(|v| v.mood).map(|v| (v.id.clone(), vec![0.0; v.levels.len()])).collect(),
         history: { let mut h: Vec<(String, Vec<bool>)> = vec![]; for x in &p.history { if !h.iter().any(|(k, _)| *k == x.of) { h.push((x.of.clone(), vec![])); } } h },
-        prev: p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect(), agenda: (!p.steps.is_empty()).then(|| p.steps.clone()), rest: None, digest: String::new() };
+        prev: p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect(), agenda: (!p.steps.is_empty()).then(|| p.steps.clone()), rest: None,
+        learned: zeros(p), credit: zeros(p), digest: String::new() };
     if rest { if let Ok((prog, _)) = compile(p, &st, &[], &Opts { twin: Some(false), ..Default::default() }) {
         let doc = eng(&prog, &flags(p, &st));
         if let Some(plan) = doc.get("plan").and_then(Json::as_obj) {
@@ -1103,12 +1160,16 @@ pub fn diff(p: &Persona, sa: u64, q: &Persona, sb: u64, turns: &[Json], eng: Eng
 /// `describe`: the persona's traits, moods, inputs, habits and agenda
 pub fn describe(p: &Persona) -> Json {
     let s = |x: &str| Json::Str(x.to_string());
-    Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(p.seed as f64)),
+    let mut d = Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(p.seed as f64)),
         ("traits".into(), Json::Obj(p.vars.iter().filter(|v| !v.mood).map(|v| (v.id.clone(), Json::Obj(vec![("levels".into(), jstrs(&v.levels)), ("say".into(), jstrs(&v.say))]))).collect())),
         ("moods".into(), Json::Obj(p.vars.iter().filter(|v| v.mood).map(|v| (v.id.clone(), jstrs(&v.levels))).collect())),
         ("inputs".into(), Json::Obj(p.inputs.iter().map(|x| (x.id.clone(), Json::Obj(match x.kind { Kind::Level => vec![("kind".into(), s("level")), ("levels".into(), jstrs(&x.levels))],
             Kind::Flag => vec![("kind".into(), s("flag"))], Kind::Number => vec![("kind".into(), s("number"))] }))).collect())),
-        ("habits".into(), Json::Arr(p.habits.iter().map(|h| s(&h.id)).collect())), ("agenda".into(), jstrs(&p.steps))])
+        ("habits".into(), Json::Arr(p.habits.iter().map(|h| s(&h.id)).collect())), ("agenda".into(), jstrs(&p.steps))]);
+    // the learning block (§2.8), when there is one: what moves the learned deltas, which traits, and the caps
+    if let (Json::Obj(v), Some(l)) = (&mut d, &p.learning) { v.push(("learning".into(), Json::Obj(vec![("from".into(), jstrs(&l.from)), ("traits".into(), jstrs(&l.traits)),
+        ("rate".into(), Json::Num(l.rate)), ("step_cap".into(), Json::Num(l.step_cap)), ("total_cap".into(), Json::Num(l.total_cap))]))); }
+    d
 }
 /// `check`: valid, with its digest and sizes (one engine call: the resting stance)
 pub fn check(p: &Persona, eng: Engine) -> R<Json> {
@@ -1451,6 +1512,9 @@ pub fn prove_seed(p: &Persona, pr: &Prop, seed: u64, eng: Engine) -> Result<(usi
                     let mut bound = eps;
                     for (m, lo, hi) in boxes.iter().filter(|b| comp.contains(&b.0)) { let r = &meta.new_mood.iter().find(|(id, _)| id == m).unwrap().1; let zl = p.var(m).unwrap().levels.iter().position(|x| *x == level(m)).unwrap_or(0);
                         bound += hi.iter().zip(r).map(|(u, a)| u - a).fold(f64::NEG_INFINITY, f64::max) + r[zl] - lo[zl]; }
+                    // learned deltas (§2.8) of traits in the component: anywhere in ±total_cap per level, whatever the feedback was
+                    if let Some(lr) = &p.learning { for (t, r) in meta.new_learned.iter().filter(|(t, _)| comp.contains(t)) { let zl = p.var(t).unwrap().levels.iter().position(|x| *x == level(t)).unwrap_or(0);
+                        bound += r.iter().map(|a| lr.total_cap - a).fold(f64::NEG_INFINITY, f64::max) + r[zl] + lr.total_cap; } }
                     for x in p.inputs.iter().filter(|x| x.kind == Kind::Number) { let w = hw.iter().find(|(k, _)| *k == x.id).map_or(0.0, |h| h.1); if w == 0.0 { continue; }
                         for (t, e) in &x.effects { if p.var(t).is_some_and(|v| v.mood) || !comp.contains(t) { continue; }
                             let zl = match t.strip_prefix("step.") { Some(_) => p.slots.iter().position(|s| Some(s.as_str()) == plan.get(t).and_then(Json::as_str)), None => p.var(t).and_then(|v| v.levels.iter().position(|x| *x == level(t))) }.unwrap_or(0);
@@ -1460,4 +1524,104 @@ pub fn prove_seed(p: &Persona, pr: &Prop, seed: u64, eng: Engine) -> Result<(usi
             Ok(()) };
         match check() { Ok(()) => true, Err(e) => { res = Err(e); false } } });
     res.map(|_| (n, calls))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Bounded learning (docs/persona.md §2.8): the update rule against the stance documents, the caps, rules that feedback cannot
+    //! remove, and the strict reading of the block and of the state fields
+    use super::*;
+    use probbit_core::Philox4x32;
+
+    fn run(prog: &Json, f: &Flags) -> Json { run_program(prog, f, 1, 100, 0) }
+    /// `j` at a path of keys (null when missing)
+    fn g<'a>(j: &'a Json, ks: &[&str]) -> &'a Json { static NULL: Json = Json::Null; ks.iter().try_fold(j, |x, k| x.get(k)).unwrap_or(&NULL) }
+    const DOC: &str = r#"{"probbit_persona":1,"identity":{"name":"L","version":"1","seed":3},
+        "traits":[{"id":"verbosity","levels":["terse","short","full"],"logw":[0.2,0.5,0.1],"spread":0.4},{"id":"humour","levels":["none","light","playful"],"logw":[0,0.3,0.1]}],
+        "moods":[{"id":"valence","levels":["down","even","up"],"inertia":0.5,"half_life_hours":6}],"couplings":[{"vars":["valence","humour"],"align":0.8}],
+        "inputs":[{"id":"praise","kind":"flag","effects":{"valence":0.6}},{"id":"criticism","kind":"flag","effects":{"valence":-0.6}},{"id":"loss","kind":"flag","effects":{"valence":-1.0}}],
+        "habits":[{"id":"no_jokes_on_loss","when":{"loss":true},"then":{"humour":["none"]}}]LEARN}"#;
+    const LEARN: &str = r#","learning":{"from":["praise","criticism"],"traits":["verbosity","humour"],"rate":0.5,"step_cap":0.2,"total_cap":0.6}"#;
+    fn persona(learning: &str) -> R<Persona> { build(&json::parse(&DOC.replace("LEARN", learning)).unwrap()) }
+    fn inputs(pr: bool, cr: bool, loss: bool) -> Json { json::parse(&format!(r#"{{"praise":{pr},"criticism":{cr},"loss":{loss}}}"#)).unwrap() }
+    fn err<T>(r: R<T>) -> String { r.err().map(|e| format!("{}: {}", e.path, e.msg)).unwrap_or_default() }
+
+    /// Every turn's learned deltas equal the rule applied to the previous stance document's levels and odds (released traits; others 0):
+    /// Δ += clip(sign · rate · (onehot − odds), ±step_cap), recentred to sum 0, clipped to ±total_cap, 6 decimals; no feedback
+    /// (or reward and correction together) moves nothing; the deltas sum to 0 until a cap clips; a habit-forced level gives no credit
+    #[test]
+    fn learning_follows_the_update_rule_on_the_stance_documents() {
+        let p = persona(LEARN).unwrap(); let l = p.learning.clone().unwrap(); let mut st = init(&p, None, true, &run);
+        let mut r = Philox4x32::new(45, 1); let (mut delta, mut credit) = (zeros(&p), zeros(&p)); let (mut moved, mut forced, mut capped) = (0, 0, [false; 2]);
+        for t in 0..400 { let (pr, cr, loss) = (r.below(3) == 0, r.below(5) == 0, r.below(6) == 0);
+            let sign = if pr { 1.0 } else { 0.0 } - if cr { 1.0 } else { 0.0 };
+            if sign != 0.0 { for (((_, d), (_, c)), cap) in delta.iter_mut().zip(&credit).zip(capped.iter_mut()) {
+                let step: Vec<f64> = c.iter().map(|x| (sign * l.rate * x).max(-l.step_cap).min(l.step_cap)).collect(); let mean = step.iter().sum::<f64>() / step.len() as f64;
+                let raw: Vec<f64> = d.iter().zip(&step).map(|(a, x)| a + (x - mean)).collect(); *cap |= raw.iter().any(|x| x.abs() > l.total_cap);
+                *d = raw.iter().map(|x| r6(x.max(-l.total_cap).min(l.total_cap))).collect(); } }
+            let (doc, ns) = turn(&p, &st, &inputs(pr, cr, loss), false, &run, false).unwrap();
+            assert_eq!(canon(&table(&ns.learned)), canon(&table(&delta)), "turn {t}");
+            if ns.learned != st.learned { moved += 1; }
+            for ((k, d), cap) in ns.learned.iter().zip(capped) { assert!(d.iter().all(|x| x.abs() <= l.total_cap));
+                if !cap { assert!(d.iter().sum::<f64>().abs() < 1e-5, "turn {t} {k}: {d:?}"); } }
+            if sign == 0.0 || st.credit.iter().all(|(_, c)| c.iter().all(|x| *x == 0.0)) { assert_eq!(ns.learned, st.learned, "turn {t}: no feedback or no credit moves nothing"); }
+            credit = l.traits.iter().map(|k| { let e = g(&doc, &["stance", k]); let lv = g(e, &["level"]).as_str().unwrap();
+                (k.clone(), if *g(e, &["released"]) == Json::Bool(true) { g(e, &["odds"]).as_obj().unwrap().iter().map(|(x, q)| r6(if x == lv { 1.0 } else { 0.0 } - q.as_f64().unwrap())).collect() }
+                    else { vec![0.0; 3] }) }).collect();
+            assert_eq!(canon(&table(&ns.credit)), canon(&table(&credit)), "turn {t}");
+            if loss { forced += 1; assert_eq!(ns.credit[1].1, vec![0.0; 3], "a habit-forced humour level carries no credit"); }
+            st = ns; }
+        assert!(moved > 100 && forced > 30 && capped.iter().any(|c| *c), "moved {moved}, forced {forced}, capped {capped:?}");
+        assert!(st.learned.iter().any(|(_, d)| d.iter().any(|x| x.abs() > 0.3)), "the deltas moved: {:?}", st.learned);
+    }
+
+    /// Feedback that rewards humour every time it is light or playful and corrects it when it is none, on a script where every
+    /// third turn reports a loss: the learned humour deltas reach the cap, humour rises on the other turns, and no loss turn is
+    /// ever anything but humour none (the habit is a rule of the program; the deltas are unaries). The rule credits the level the
+    /// stance took, so the joke level taken most (light) gains
+    #[test]
+    fn feedback_cannot_learn_a_rule_away() {
+        let p = persona(LEARN).unwrap(); let tc = p.learning.as_ref().unwrap().total_cap; let mut st = init(&p, Some(5), true, &run);
+        let (mut prev_humour, mut script, mut joke_odds) = (String::from("none"), vec![], vec![]);
+        for t in 0..1500 { let loss = t % 3 == 2; let joke = prev_humour != "none"; script.push(inputs(joke, !joke, loss));
+            let (doc, ns) = turn(&p, &st, &script[t], false, &run, false).unwrap(); let h = g(&doc, &["stance", "humour"]);
+            assert_eq!(*g(&doc, &["habits", "violations"]), Json::Num(0.0));
+            if loss { assert_eq!(g(h, &["level"]).as_str(), Some("none"), "turn {t}"); } else { joke_odds.push(1.0 - g(h, &["odds", "none"]).as_f64().unwrap()); }
+            prev_humour = g(h, &["level"]).as_str().unwrap().to_string(); st = ns; }
+        let d = &st.learned[1].1; assert!(d.iter().any(|x| (x.abs() - tc).abs() < 1e-9), "humour deltas at the cap: {d:?}");
+        // the same individual (same name and seed: same genes) without the learning block, on the identical inputs
+        let (twin, _) = replay(&persona("").unwrap(), Some(5), &script, false, &run, false).unwrap();
+        let twin_odds: Vec<f64> = twin.iter().enumerate().filter(|(t, _)| t % 3 != 2).map(|(_, d)| 1.0 - g(d, &["stance", "humour", "odds", "none"]).as_f64().unwrap()).collect();
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        assert!(mean(&joke_odds) > mean(&twin_odds) + 0.1, "the odds of a joke off loss turns: learner {} vs no learning {}", mean(&joke_odds), mean(&twin_odds));
+    }
+
+    /// The block is read strictly; a persona without it keeps 0.6.0's documents (no learned / credit fields, refused if present);
+    /// a state's deltas outside ±total_cap are refused
+    #[test]
+    fn the_learning_block_and_state_fields_are_strict() {
+        let bad = |l: &str| err(persona(&format!(r#","learning":{{{l}}}"#)));
+        let base = r#""from":["praise","criticism"],"traits":["verbosity"],"rate":0.5,"step_cap":0.2,"total_cap":0.6"#;
+        assert_eq!(bad(&format!(r#"{base},"spread":1"#)), "learning.spread: unknown field (allowed: comment, from, rate, step_cap, total_cap, traits)");
+        assert_eq!(bad(r#""from":["praise"],"traits":["verbosity"],"rate":0.5,"step_cap":0.2"#), "learning.total_cap: required");
+        assert_eq!(bad(&base.replace(r#"["praise","criticism"]"#, r#"["praise","valence"]"#)), "learning.from[1]: not a flag input of this persona");
+        assert_eq!(bad(&base.replace(r#"["verbosity"]"#, r#"["valence"]"#)), "learning.traits[0]: not a trait of this persona (moods do not learn)");
+        assert_eq!(bad(&base.replace(r#"["verbosity"]"#, r#"["humour","humour"]"#)), "learning.traits[1]: listed twice");
+        assert_eq!(bad(&base.replace(r#"["praise","criticism"]"#, r#"["praise","criticism","loss"]"#)), "learning.from: a list of 1 to 2 ids");
+        assert_eq!(bad(&base.replace(r#""step_cap":0.2"#, r#""step_cap":0.7"#)), "learning.step_cap: must be <= 0.6");
+        assert_eq!(bad(&base.replace(r#""rate":0.5"#, r#""rate":0"#)), "learning.rate: must be > 0");
+        // no block: the state has no learned / credit fields and refuses them
+        let p = persona("").unwrap(); let j = init(&p, None, true, &run).to_json(&p);
+        assert!(j.get("learned").is_none() && j.get("credit").is_none());
+        let mut kv: Vec<(String, Json)> = j.as_obj().unwrap().iter().filter(|(k, _)| k != "digest").cloned().collect(); kv.push(("learned".into(), Json::Obj(vec![])));
+        let body = Json::Obj(kv.clone()); kv.push(("digest".into(), Json::Str(sha(&body))));
+        assert_eq!(err(State::read(&p, &Json::Obj(kv))), "state.learned: this persona has no learning block");
+        assert!(describe(&p).get("learning").is_none(), "describe without a block is 0.6.0's");
+        // with the block: zero tables at init; a delta beyond the cap is refused even with a recomputed digest
+        let q = persona(LEARN).unwrap(); let st = init(&q, None, true, &run); let j = st.to_json(&q);
+        assert_eq!(canon(describe(&q).get("learning").unwrap()), r#"{"from":["praise","criticism"],"rate":0.5,"step_cap":0.2,"total_cap":0.6,"traits":["verbosity","humour"]}"#);
+        assert_eq!(canon(j.get("learned").unwrap()), r#"{"humour":[0,0,0],"verbosity":[0,0,0]}"#); assert!(State::read(&q, &j).is_ok());
+        let mut s2 = st.clone(); s2.learned[0].1 = vec![0.7, -0.35, -0.35]; s2.seal(&q);
+        assert_eq!(err(State::read(&q, &s2.to_json(&q))), "state.learned.verbosity: one number per level, each within ±0.6");
+    }
 }

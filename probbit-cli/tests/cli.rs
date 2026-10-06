@@ -1312,9 +1312,9 @@ fn fnv(s: &str) -> u64 { s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b 
 /// sampled and exact decisions and programs (fixed work, so every byte but the timings is a function of input + seed). They are
 /// the 0.2.1 documents (the digests this test held through 0.4.0) with only the product name and the version renamed: the 0.5.0
 /// rename was proven byte for byte against the 0.4.0 binary on these inputs and every example before the digests were replaced.
-/// 0.6.0 gives them unchanged (the test's name carries the current version).
+/// 0.7.0 gives them unchanged (the test's name carries the current version).
 #[test]
-fn stdout_matches_the_0_6_0_goldens() {
+fn stdout_matches_the_0_7_0_goldens() {
     let dir = env!("CARGO_MANIFEST_DIR");
     let (_, d300, _) = probbit(&["demo", "--tasks", "300"], ""); let (_, d12, _) = probbit(&["demo", "--tasks", "12"], ""); let (_, d60h, _) = probbit(&["demo", "--tasks", "60", "--seed", "5", "--hard"], "");
     let ks = std::fs::read_to_string(format!("{dir}/../examples/knapsack-20.json")).unwrap(); let ap = std::fs::read_to_string(format!("{dir}/../examples/agent-plan-6.json")).unwrap();

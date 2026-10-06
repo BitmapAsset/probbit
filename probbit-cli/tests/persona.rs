@@ -535,3 +535,55 @@ fn the_fixed_tutor_holds_and_lint_warns_when_the_plan_is_not_the_mode() {
         (Some("humour"), r#"{"sentiment":"negative"}"#.to_string(), Some("playful"), Some("light")));
     assert_eq!((s(&w[0], &["example", "p_plan"]).as_f64(), s(&w[0], &["example", "p_mode"]).as_f64()), (Some(0.410818), Some(0.424967)));
 }
+
+// ---------------- 0.7.0: probbit live (docs/persona.md §5.7)
+/// `probbit live PERSONA --demo week --plain` (the shipped command, seed 2): two runs print the same lines and write the same strand,
+/// byte for byte, and `probbit live verify` replays the strand to the last-line sha256 the demo printed
+#[test]
+fn live_demo_week_is_deterministic_and_verifies() {
+    let (a, b) = (tmp("week-a.strand"), tmp("week-b.strand")); let _ = std::fs::remove_file(&a); let _ = std::fs::remove_file(&b);
+    let (c1, o1, _) = probbit(&["live", &ex("tutor.yaml"), "--seed", "2", "--demo", "week", "--plain", "--strand", &a], "");
+    let (c2, o2, _) = probbit(&["live", &ex("tutor.yaml"), "--seed", "2", "--demo", "week", "--plain", "--strand", &b], "");
+    assert_eq!((c1, c2), (0, 0), "{o1}"); assert_eq!(o1.replace(&a, "S"), o2.replace(&b, "S")); assert_eq!(read(&a), read(&b));
+    assert!(o1.lines().count() > 40 && !o1.contains('\x1b'), "one plain line per event");
+    let (c, v, _) = probbit(&["live", "verify", &a], ""); assert_eq!(c, 0, "{v}");
+    let head = s(&parse(&v), &["last_line"]).as_str().unwrap().to_string(); assert!(o1.contains(&format!("last line {head};")), "the demo prints the head verify finds");
+    let (c, _, e) = probbit(&["live", &ex("tutor.yaml"), "--demo", "week", "--plain", "--strand", &a], ""); assert_eq!(c, 2, "a strand is never overwritten: {e}");
+    let (c, _, e) = probbit(&["live", &ex("tutor.yaml"), "--demo", "week", "--clock", "fixed"], ""); assert_eq!(c, 2); assert!(e.contains("does not apply"), "{e}");
+    let _ = std::fs::remove_file(&a); let _ = std::fs::remove_file(&b);
+}
+
+/// `--strand FILE` on an existing strand continues it from `--state` (the state after its last line): two runs of 3 and 4 events
+/// write the strand one run of 7 writes; a new individual (`--seed`) cannot continue it
+#[test]
+fn live_continues_a_strand_across_runs() {
+    let evs: Vec<String> = (0..7).map(|t| format!(r#"{{"praise":{},"loss":{},"elapsed_hours":{}}}"#, t % 2 == 1, t % 3 == 2, 0.5 + t as f64)).collect();
+    let (one, two, st1, st) = (tmp("cont-one.strand"), tmp("cont-two.strand"), tmp("cont-state1.json"), tmp("cont-state.json")); for f in [&one, &two, &st1, &st] { let _ = std::fs::remove_file(f); }
+    let (_, s0, _) = probbit(&["persona", "init", &ex("tutor.yaml"), "--seed", "3"], ""); std::fs::write(&st, &s0).unwrap(); std::fs::write(&st1, &s0).unwrap();
+    let (c, _, e) = probbit(&["live", &ex("tutor.yaml"), "--state", &st1, "--clock", "fixed", "--strand", &one], &(evs.join("\n") + "\n")); assert_eq!(c, 0, "{e}");
+    let (c, _, e) = probbit(&["live", &ex("tutor.yaml"), "--state", &st, "--clock", "fixed", "--strand", &two], &(evs[..3].join("\n") + "\n")); assert_eq!(c, 0, "{e}");
+    let (c, _, e) = probbit(&["live", &ex("tutor.yaml"), "--state", &st, "--clock", "fixed", "--strand", &two], &(evs[3..].join("\n") + "\n")); assert_eq!(c, 0, "{e}");
+    assert_eq!(read(&one), read(&two));
+    let (c, _, e) = probbit(&["live", &ex("tutor.yaml"), "--seed", "3", "--clock", "fixed", "--strand", &two], "{}\n"); assert_eq!(c, 2); assert!(e.contains("continue it with --state"), "{e}");
+    for f in [&one, &two, &st1, &st] { let _ = std::fs::remove_file(f); }
+}
+
+/// `--watch` follows the events file as lines are appended (a half-written line waits for its newline) and stops when the file is
+/// removed; the stances are the ones the same events give read at once
+#[cfg(unix)]
+#[test]
+fn live_watch_follows_an_events_file() {
+    let (f, s1, s2) = (tmp("watch-events.jsonl"), tmp("watch-1.strand"), tmp("watch-2.strand")); for x in [&f, &s1, &s2] { let _ = std::fs::remove_file(x); }
+    let evs = [r#"{"praise":true,"elapsed_hours":1}"#, r#"{"loss":true,"elapsed_hours":2}"#, r#"{"sentiment":"negative","elapsed_hours":0.25}"#];
+    std::fs::write(&f, format!("{}\n", evs[0])).unwrap();
+    let c = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["live", &ex("tutor.yaml"), "--seed", "4", "--clock", "fixed", "--events", &f, "--watch", "--strand", &s1])
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(300));
+    pause(); { let w = &mut std::fs::OpenOptions::new().append(true).open(&f).unwrap(); w.write_all(&evs[1].as_bytes()[..10]).unwrap(); w.flush().unwrap(); pause();
+        w.write_all(format!("{}\n{}\n", &evs[1][10..], evs[2]).as_bytes()).unwrap(); w.flush().unwrap(); }
+    pause(); std::fs::remove_file(&f).unwrap();
+    let o = c.wait_with_output().unwrap(); assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let (_, at_once, _) = probbit(&["live", &ex("tutor.yaml"), "--seed", "4", "--clock", "fixed", "--strand", &s2], &(evs.join("\n") + "\n"));
+    assert_eq!(String::from_utf8_lossy(&o.stdout), at_once); assert_eq!(read(&s1), read(&s2)); assert_eq!(at_once.lines().count(), 3);
+    for x in [&s1, &s2] { let _ = std::fs::remove_file(x); }
+}

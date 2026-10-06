@@ -1,7 +1,7 @@
 """Tests for `probbit mcp`, the Model Context Protocol server, over pipes with a dependency-free client (stdlib unittest; run:
 python3 python/test_mcp.py). Both eras: a legacy client opens with `initialize`; a 2026-07-28 client puts the protocol version
 and its capabilities in every request's `_meta`. Every tool answer is compared with the CLI's own output for the same input."""
-import json, os, subprocess, unittest
+import json, os, subprocess, tempfile, unittest
 import probbit
 
 EX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples")
@@ -76,7 +76,7 @@ class Mcp(unittest.TestCase):
         self.assertEqual(init["protocolVersion"], "2025-06-18"); self.assertEqual(init["serverInfo"]["name"], "probbit")
         self.assertIn("tools", init["capabilities"]); self.assertNotIn("resultType", init)
         tools = self.c.request("tools/list")["result"]["tools"]
-        self.assertEqual([t["name"] for t in tools], ["probbit_decide", "probbit_run", "probbit_stats", "probbit_demo", "probbit_evaluate", "probbit_persona_init", "probbit_persona_turn", "probbit_persona_fuzz"])
+        self.assertEqual([t["name"] for t in tools], ["probbit_decide", "probbit_run", "probbit_stats", "probbit_demo", "probbit_evaluate", "probbit_persona_init", "probbit_persona_turn", "probbit_persona_fuzz", "probbit_live_event", "probbit_live_verify"])
         for t in tools:
             self.assertEqual(t["inputSchema"]["type"], "object"); self.assertTrue(t["description"])
         self.assertIn("flags", tools[0]["inputSchema"]["properties"]); self.assertIn("vars", tools[1]["inputSchema"]["properties"])
@@ -185,6 +185,29 @@ class Mcp(unittest.TestCase):
             e = self.call("probbit_persona_fuzz", args)
             self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
 
+    def test_live_event_logs_a_strand_the_cli_verifies(self):
+        self.legacy("2025-11-25")
+        path = os.path.join(EX, "persona", "tutor.yaml")
+        with tempfile.TemporaryDirectory() as d:
+            strand = os.path.join(d, "pip.strand")
+            r = self.call("probbit_live_event", {"persona_path": path, "seed": 2, "event": {"loss": True}, "strand_path": strand})
+            self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["stance"]["stance"]["humour"]["level"], "none")
+            state = r["structuredContent"]["state"]
+            r = self.call("probbit_live_event", {"persona_path": path, "state": state, "event": {"praise": True, "elapsed_hours": 6.5}, "strand_path": strand})
+            self.assertEqual(r["structuredContent"]["strand"]["events"], 2)
+            code, out = cli(["live", "verify", strand])
+            self.assertEqual(code, 0); self.assertEqual(json.loads(out)["last_line"], r["structuredContent"]["strand"]["head"])  # MCP writes, the CLI replays
+            v = self.call("probbit_live_verify", {"strand_path": strand})
+            self.assertFalse(v["isError"]); self.assertEqual(v["content"][0]["text"], out.rstrip("\n"))
+            with open(strand, encoding="utf-8") as f:
+                text = f.read()
+            bad = self.call("probbit_live_verify", {"strand": text.replace('"elapsed_hours":6.5', '"elapsed_hours":7')})
+            self.assertFalse(bad["isError"]); self.assertEqual(bad["structuredContent"], {"ok": False, "line": 3, "diverges": "the stance differs"})  # an answer
+            for args, where in (({"persona_path": path, "seed": 2, "strand_path": strand}, "state"), ({"persona_path": path, "extra": 1}, "arguments.extra"),
+                                ({"persona_path": path, "event": {"elapsed_hours": -1}}, "arguments.event.elapsed_hours")):
+                e = self.call("probbit_live_event", args)
+                self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
+
     def test_structured_content_from_2025_06_18_on(self):
         self.legacy("2024-11-05")
         r = self.call("probbit_demo", {"tasks": 3})
@@ -195,7 +218,7 @@ class Mcp(unittest.TestCase):
         self.assertEqual(d["resultType"], "complete"); self.assertIn("2026-07-28", d["supportedVersions"])
         self.assertEqual(d["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "probbit"); self.assertIn("tools", d["capabilities"])
         t = self.c.request("tools/list", meta=MODERN)["result"]
-        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 8)
+        self.assertEqual(t["resultType"], "complete"); self.assertEqual(len(t["tools"]), 10)
         r = self.call("probbit_demo", {"tasks": 4, "seed": 2}, MODERN)
         self.assertEqual(r["resultType"], "complete"); self.assertEqual(len(r["structuredContent"]["tasks"]), 4)
         e = self.c.request("tools/list", meta={"io.modelcontextprotocol/protocolVersion": "1999-01-01", "io.modelcontextprotocol/clientCapabilities": {}})["error"]

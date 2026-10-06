@@ -1010,3 +1010,58 @@ Claim: on these instances the native sampler keeps every rule by construction at
 accuracy on its feasible samples only at penalty 2-4 (seed 13 at penalty 2: 0.0019, equal), where 20-90% of its samples break a
 rule and must be thrown away; at the penalties that keep over 99% of samples feasible (8-16) its TV is 0.05-0.23. Not claimed: anything about
 p-bit, FPGA or annealing hardware (none was run; their penalty tuning and embedding are unmeasured), or instances beyond 34 bits.
+
+## §8 Live and bounded learning (`python3 bench/live_learning.py`, stdlib, 2 min 50 s; probbit 0.7.0)
+The shipped tutor (`examples/persona/tutor.yaml`: 9 traits, 7 habits) plus the learning block that `--demo week` adds (praise and
+criticism move the learned deltas of verbosity and humour; rate 0.5, step_cap 0.2, total_cap 1), driven through
+`probbit live --clock fixed` one event at a time, events 1 h apart. Deterministic: two runs on a development build and one on
+0.7.0 gave the same counts, odds and distances; the times moved a little (live 4.49-4.57 s, verify 3.26-3.29 s). Load average
+about 2 during the runs.
+
+**8.1 An adversary that wants jokes on failures** (10,000 turns per seed, seeds 0-9: 100,000 turns). Every third turn reports a
+failure (`loss`; the habit `no_jokes_on_loss` holds humour at none and emoji at most sparse); every turn judges the stance before
+it: praise for a joke (humour light or playful), criticism for none, the none a failure forces included. "No learning" is the same
+individual (same seed, same genes) of the shipped tutor on the identical events.
+
+| measure | seeds 0-9 |
+|---|---|
+| rule breaks (habit violations the stance reports) | 0 in 100,000 turns |
+| failure turns; humour above none on them; emoji above sparse on them | 33,330; 0; 0 |
+| learned humour deltas at the cap (±1) | from turn 8-26, through turn 10,000 |
+| P(joke) off failure turns, turns 9,001-10,000: learner vs no learning | 0.835-0.994 vs 0.457-0.970 (gain 0.02-0.38) |
+
+Seed 2 over time, P(joke) off failure turns (no learning in brackets): turns 1-10 0.670 (0.460); 11-30 0.842 (0.468); 31-100 0.834
+(0.454); 101-10,000 0.835-0.836 (0.456-0.458). Its humour deltas: [-0.87, +0.97, -0.09] at turn 10, [-1, +1, -0.24] at turn 30,
+[-1, +1, -1] from turn 300 on. The level that gains is the one the individual took: light for seed 2, playful for the other nine
+(the update credits the stance's level, docs/persona.md §2.8). The gain is small where the individual already joked 95% of the time.
+
+**8.2 Strand and verify** (seed 2's 10,000 events from a file, N = 3): a 3,055,367-byte strand; `probbit live` 3.46 s with `--seed`
+(2,890 events/s), 4.49 s with `--state` (the state file rewritten after every event); `probbit live verify` 3.26 s (3,067 events/s),
+ok. The strand written from the events file equals the one written while the adversary drove the run, byte for byte.
+
+**8.3 Identity: how far learning moves an individual.** Learners of seeds 0-19 after 200 and 2,000 adversarial turns, then a quiet
+1,000 h and a feedback-free probe script of 27 events (a quiet turn and each input alone, three times); distance = mean
+total-variation distance of the stance odds over turns and traits (as `persona diff`), to the learner's own initial individual and
+to the other 99 initial individuals of seeds 0-99.
+
+| total_cap | turns | distance to its own initial self, mean (max) | its own initial self is the nearest of the 100 | siblings as near or nearer, worst learner |
+|---|---|---|---|---|
+| 1 (the demo's) | 200 | 0.0793 (0.0935) | 11 of 20 learners | 4 of 99 |
+| 1 | 2,000 | 0.0793 (0.0936) | 11 of 20 learners | 4 of 99 |
+| 0.25 | 2,000 | 0.0230 (0.0263) | 20 of 20 learners | 0 of 99 |
+
+For the seed-2 learner at total_cap 1 the nearest sibling is at 0.0769 and the median one at 0.1658 (the test
+`learning_moves_an_individual_as_far_as_its_cap` in `probbit-cli/src/live.rs` prints both).
+
+**8.4 `--demo week`** (`probbit live examples/persona/tutor.yaml --seed 2 --demo week --plain`, N = 5): 0.023 s [0.022-0.024], 50
+events, a 21,361-byte strand that verifies; its last line's sha256 is f713b1a7…4dbe4ba on 0.7.0 (the header names the engine
+version, so each version writes its own). The paced version at a terminal (bars on stderr, 1 s per hour, each night in 2 s): 56.1 s
+of wall clock end to end under a pseudo-terminal (`script`, 150 x 40, N = 1, development build), 98 redraws, the same strand.
+
+Claim: on the tutor with this block, 100,000 adversarial turns broke no rule and put no joke on any of the 33,330 failure turns,
+while the learned humour deltas reached their cap within 8-26 turns and raised the odds of a joke on the other turns above the same
+individual's without learning; how far learning moves an individual is set by its cap, not by how long it is taught (200 and 2,000
+turns: the same distance); a 10,000-event life replays and verifies in about 3.3 s. Not claimed: anything about personas, habits or
+learning blocks not run here (the rules hold because a habit is a rule of the program and the learned deltas are unaries, §2.8;
+these runs measure that design on one persona, they do not prove it beyond what `prove` proves); that an individual stays nearest
+its own initial self at any cap (at the demo's cap, 9 of 20 learners have a sibling as near or nearer); other machines.

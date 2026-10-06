@@ -439,6 +439,44 @@ Python `probbit.persona_fuzz` / `persona_prove` give the same documents. Both co
 words a model writes; "none found" from `fuzz` is evidence over the scripts it searched, not a proof
 ([docs/persona.md](docs/persona.md) §5.6 has the bound and its limits).
 
+### Live: an individual on a clock, learning inside caps
+
+`probbit live` keeps one individual running: JSONL events in, one stance per event out. A clock stamps the hours between events,
+so moods decay by their half-lives while nobody talks to it. With a `learning:` block, praise and criticism nudge learned weights
+on the traits it names, each within ±`total_cap`; habits and allowed levels are outside what learning can write, so every stance
+still obeys every habit in force, and `prove` covers the learned box. Every event is chained into a **strand** (a seed, the
+persona and a hash-chained log of the inputs) that `probbit live verify` replays byte for byte, learning included. So the
+stance changes with use, cannot learn its rules away, and the whole week replays byte for byte (the stance and the state, not a
+model's words). No keys, no model:
+
+```sh
+probbit live examples/persona/tutor.yaml --seed 2 --demo week --plain
+#   day 1 11:00 #03 praise: that answer was short   verbosity short  humour light  valence up   | learned verbosity [-0.01 +0.40 -0.39] ...
+#   ... 50 events: campaign 1 praises short answers, an upset, a quiet night, campaign 2 praises every joke and reports failures
+#   verbosity: the learned bar reached its cap (1) on day 1 at 15:00 (event 7); now terse/short/full = [-0.99 +1.00 -1.00]
+#   night: valence down at the upset, up after 17 quiet hours; this individual rests at up
+#   jokes: P(joke) off failure turns, mean per day: 0.57 | 0.78 0.89 0.89 0.89 0.89 0.89; ... failure turns 13, jokes on them 0; rule breaks 0
+printf '{"loss":true}\n{"praise":true}\n' | probbit live examples/persona/tutor.yaml --seed 2 --strand pip.strand   # the real clock
+probbit live verify pip.strand      # {"ok":true,"events":2,...}, or {"ok":false,"line":n,"diverges":...} (exit 1)
+```
+
+The shipped personas have no learning block (their documents are unchanged): with them `live` decays moods and logs, and learns
+nothing; the demo adds a block and says so. MCP `probbit_live_event` / `probbit_live_verify` and Python `probbit.live_event` /
+`live_verify` give the same documents ([docs/persona.md](docs/persona.md) §2.8 learning, §5.7 live). Measured (Apple M4;
+BENCHMARKS.md §8):
+- the demo above: 0.02 s with `--plain` (about 55 s paced at a colour terminal); its 21,361-byte strand verifies, and two runs
+  write the same bytes;
+- an adversary that praises every joke and criticises every joke-free stance, failures included: 10,000 turns of the tutor on each
+  of seeds 0-9, 0 rule breaks, and humour `none` on all 33,330 failure turns while the learned humour weights sat at their cap;
+- `live verify`: a 10,000-event strand (3.06 MB) in 3.3 s;
+- how far learning moves an individual is set by `total_cap`, not by time in use (200 and 2,000 feedback turns land at the same
+  distance): at 0.25 every one of 20 learners stayed nearer its own initial self than any of 99 siblings; at the demo's 1, 9 of 20
+  had a sibling as near or nearer.
+
+Learning here is a capped nudge to a few weights per trait, credited to the level each learned trait took (so a reward for one
+trait also pushes the others' levels); rule immunity is architectural, not trained. The proofs and counts cover the stance; whether
+a model writes in it is measured per model.
+
 ## After any judge: `probbit evaluate`
 
 Decision models (TypeSafe's Jev, Cloudflare's Clef and Clef-flash, local System One servers) are judges: content in, a
@@ -630,12 +668,13 @@ or Windows.
 - [docs/agents.md](docs/agents.md): calling probbit from a shell, Python, Node, PowerShell, MCP agents and a browser, and
   `probbit evaluate` after a decision model.
 - [docs/persona.md](docs/persona.md): `probbit persona`, the individuality layer: the persona file, the compilation, the stance and
-  state documents, the canonical JSON, what a persona can not do; [examples/persona/](examples/persona/): three personas + goldens.
+  state documents, the canonical JSON, testing a character, bounded learning and `probbit live` (§2.8, §5.7), what a persona can
+  not do; [examples/persona/](examples/persona/): three personas + goldens.
 - [python/](python/): `probbit.py`, a zero-dependency subprocess wrapper (with `evaluate`, the persona functions and a stdlib mock
   judge), its tests and three examples.
 - [playground/](playground/): one static page that runs probbit in a browser (`probbit-wasm`, built by `playground/build.sh`).
   [Try the puzzle: find the event that changed the decision.](playground/puzzle.html)
-- [bench/](bench/): the scripts behind BENCHMARKS §2 and §5 (Python 3; the ILP baselines need `numpy` and `scipy >= 1.9`).
+- [bench/](bench/): the scripts behind BENCHMARKS §2, §5 and §8 (Python 3; the ILP baselines need `numpy` and `scipy >= 1.9`).
 - [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md).
 
 ## License
