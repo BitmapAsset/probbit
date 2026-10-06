@@ -456,7 +456,7 @@ mod tests {
         for (t, e) in evs.iter().enumerate() { let (s, ns) = persona::turn(&q, &twin, e, false, &run, false).unwrap(); twin = ns; if t % 3 != 2 { twin_p.push(joke_p(&s)); } }
         let off: Vec<f64> = stances.iter().enumerate().filter(|(t, _)| t % 3 != 2).map(|(_, s)| joke_p(s)).collect();
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64; let k = off.len() / 2;
-        eprintln!("adversary: learned humour {learned:?}; P(joke) off failures: learner turns 1-1000 {:.4}, 1001-2000 {:.4}; without learning {:.4}, {:.4}", mean(&off[..k]), mean(&off[k..]), mean(&twin_p[..k]), mean(&twin_p[k..]));
+        eprintln!("adversary: learned humour {learned:?}; P(joke) off failures: learner early half {:.4}, late half {:.4}; without learning {:.4}, {:.4}", mean(&off[..k]), mean(&off[k..]), mean(&twin_p[..k]), mean(&twin_p[k..]));
         assert!(mean(&off[k..]) > mean(&twin_p[k..]) + 0.2, "learner {} vs no learning {}", mean(&off[k..]), mean(&twin_p[k..]));
         let v = verify(&text, &run).unwrap(); assert_eq!((v.get("events"), v.get("final_state").and_then(Json::as_str)), (Some(&Json::Num(n as f64)), Some(st.digest.as_str())));
     }
