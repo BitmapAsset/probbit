@@ -382,6 +382,9 @@ mod tests {
         let (a, sa, ha) = go("a"); let (b, sb, hb) = go("b");
         assert_eq!(a[..a.len() - 1], b[..b.len() - 1], "the lines (all but the one naming the strand file)"); assert_eq!((&sa, &ha), (&sb, &hb));
         let v = verify(&sa, &run).unwrap(); assert_eq!(v.get("last_line").and_then(Json::as_str), Some(ha.as_str()));
+        // the week's final state names no engine version, so one digest on every platform this test runs on (decay powers, odds,
+        // credit and learned deltas included), and the same since 0.6.0's development builds
+        assert_eq!(v.get("final_state").and_then(Json::as_str), Some("sha256:719c1d2641bc278e503906cc65b3501cc2d0693f160ea339993be1f44fa90e23"));
         let find = |k: &str| a.iter().find(|l| l.starts_with(k)).unwrap_or_else(|| panic!("no {k} line")).clone();
         assert!(find("verbosity:").contains("reached its cap"), "{}", find("verbosity:"));
         let night = find("night:"); let rest = night.rsplit("rests at ").next().unwrap(); assert!(night.contains(&format!(", {rest} after ")), "{night}");
