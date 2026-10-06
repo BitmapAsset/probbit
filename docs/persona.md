@@ -64,6 +64,7 @@ habits: [...]                       # optional hard rules
 agenda: {...}                       # optional ordered beats of a reply
 engine: {...}                       # optional engine settings
 line: {...}                         # optional stance-line settings
+learning: {...}                     # optional bounded learning from feedback (section 2.8)
 comment: any text                   # ignored
 ```
 
@@ -228,6 +229,40 @@ line:
   prefix: "Stance: "
 ```
 
+### 2.8 Learning (optional)
+
+```yaml
+learning:
+  from: [praise, criticism]   # flag inputs: the reward, then (optional) the correction
+  traits: [verbosity, humour] # the traits that learn (moods do not)
+  rate: 0.5                   # step size (natural-log weight per unit of credit)
+  step_cap: 0.2               # the most one feedback turn moves a level's weight, before recentring
+  total_cap: 1.0              # no learned weight ever leaves [-total_cap, +total_cap]
+```
+
+All five fields are required; 0 < step_cap <= total_cap <= 50 and 0 < rate <= 50. With this block the state keeps, per learned
+trait, one **learned weight** Δ per level (`learned`, all 0 at `init`) and the **credit** of the previous stance (`credit`):
+onehot(level) − odds for each learned trait that stance released, 0 for one it did not (status refused or fallback, an
+unreleased trait of a partial turn). A level that a habit or a hold forced has odds 1, so its credit is 0 as well.
+
+Feedback is about the previous reply. On a turn whose reward flag is on (sign +1) or whose correction flag is on (sign −1; both
+on: 0), each learned trait's weights move, before the turn is compiled:
+
+    step(l) = clip(sign x rate x credit(l), -step_cap, +step_cap)
+    step(l) = step(l) - mean over levels of step                    (recentred: the step moves weight between levels)
+    Δ(l)    = round(clip(Δ(l) + step(l), -total_cap, +total_cap), 6)
+
+A turn with no feedback, or feedback on a stance with zero credit, moves nothing. Δ is added to the trait's field (section 3,
+step 2), so the feedback turn's own stance already uses it. What learning can and cannot change:
+
+- It changes the learned traits' unary weights and nothing else, within ±total_cap per level. Genes, priors, couplings, moods, inputs and
+  history effects are untouched.
+- It never changes a habit or a trait's allowed levels: habits are rules of the program (section 3, step 6), the learner's whole
+  output is the Δ table, and every stance the engine returns obeys every habit in force whatever Δ is. Rule immunity is
+  therefore by construction, not measured.
+- A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
+  as before the block existed.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -236,9 +271,10 @@ For turn t of an individual (seed s), with inputs x_t:
    `semantic`: every level name in order of first appearance, then the slots. Both give the same distribution and stance
    (checked on every example).
 2. **Trait variable** v, level l (allowed: its own levels):
-   `h(v,l) = ln prior(l) + gene_v x c(l) + sum over inputs i of gain_i x scale_i(x_t) x effect_i(v,l)
+   `h(v,l) = ln prior(l) + gene_v x c(l) + Δ_v(l) + sum over inputs i of gain_i x scale_i(x_t) x effect_i(v,l)
               + sum over history features f of min(value_f, cap_f) x effect_f(v,l)`,
-   with `scale` = 1 for a true flag or the matching level, the value for a number input, 0 otherwise.
+   with `scale` = 1 for a true flag or the matching level, the value for a number input, 0 otherwise, and Δ_v the learned
+   weights after this turn's feedback (section 2.8; 0 for a trait that does not learn).
 3. **Mood variable** m: `h(m,l) = ln prior(l) + gene_m x c(l) + a_t(m,l)`, where the **mood accumulator**
    `a_t = k x d x a_(t-1) + (1 - k) x e_t`, e_t = the turn's input and history effects on m (with gains), k = `inertia`,
    d = 0.5 ^ (elapsed_hours / half_life_hours) (1 without them). An event's total impact over time is e_t whatever k is;
@@ -323,11 +359,14 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "history": {"error": [false, true, true]},                         # recent flag values (as long as the longest window / cap)
  "prev": {"verbosity": "short", "...": "...", "agenda": ["..."]},  # last turn's levels (for prev-relative habits)
  "rest": {"warmth": "cool", "...": "..."},                          # the individual's resting stance (no evidence), set at init
+ "learned": {"verbosity": [-0.12, -0.31, 0.43]},                    # with a learning block (section 2.8): Δ per level
+ "credit": {"verbosity": [-0.08, -0.36, 0.44]},                     # with a learning block: the last stance's onehot - odds
  "digest": "sha256:..."}
 ```
 
 The state is plain JSON the host stores between turns (a file, a database row, a session field). A turn refuses a state
-whose persona digest differs from the persona file, whose own digest does not match, or whose genes do not match its seed.
+whose persona digest differs from the persona file, whose own digest does not match, or whose genes do not match its seed, and
+(with a learning block) learned weights outside ±total_cap or credits outside ±1, even with a recomputed digest.
 
 ### 5.2 Canonical JSON and the number rule
 
@@ -414,7 +453,8 @@ found" is evidence over the scripts searched, not a proof.
   genes or moods).
 - `proved for every event sequence`: for each individual, a bound covers every turn of every script and decides all of them.
   The mood accumulators stay in a box (per level, between the most negative and the most positive evidence one turn's inputs
-  and history can add, 0 included), whatever the inputs, idle hours or `--no-inertia`. The rest of a turn falls into finitely
+  and history can add, 0 included), whatever the inputs, idle hours or `--no-inertia`. Learned weights (section 2.8) of traits
+  linked to the rule's trait stay in their own box, ±total_cap per level, whatever the feedback. The rest of a turn falls into finitely
   many cells: flags and levels, each number at every threshold a habit or the rule reads and on each interval between them,
   history values that fit the turn's own flags, and the previous levels the restrictions in force read. In every cell the best
   stance the rule allows must beat the best one it forbids by more than the box, the number intervals and the 6-decimal
