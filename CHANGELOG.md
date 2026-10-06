@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.6.0 - unreleased
+## 0.6.0 - 2026-10-06
 
 ### Added
 - **`probbit persona fuzz`, character testing** (docs/persona.md): a rule in habit syntax (`--never '{when: {...}, then:
