@@ -51,6 +51,8 @@ All notable changes to this project are documented here. The format follows
   the trader assistant's goldens nothing but `why` changes.
 - docs/persona.md §5.3: the byte-for-byte parity with the reference implementation is stated for the 0.5.0 documents; the 0.6.0
   goldens are regenerated from this implementation.
+- brand: the agent rabbit mark (visor + lightning ear) replaces the 0.5.0 mark (docs/brand/, the hero, the social card, the
+  playground's favicon).
 
 ## 0.5.0 - 2026-10-05
 
