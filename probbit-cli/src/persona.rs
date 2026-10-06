@@ -1160,12 +1160,16 @@ pub fn diff(p: &Persona, sa: u64, q: &Persona, sb: u64, turns: &[Json], eng: Eng
 /// `describe`: the persona's traits, moods, inputs, habits and agenda
 pub fn describe(p: &Persona) -> Json {
     let s = |x: &str| Json::Str(x.to_string());
-    Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(p.seed as f64)),
+    let mut d = Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(p.seed as f64)),
         ("traits".into(), Json::Obj(p.vars.iter().filter(|v| !v.mood).map(|v| (v.id.clone(), Json::Obj(vec![("levels".into(), jstrs(&v.levels)), ("say".into(), jstrs(&v.say))]))).collect())),
         ("moods".into(), Json::Obj(p.vars.iter().filter(|v| v.mood).map(|v| (v.id.clone(), jstrs(&v.levels))).collect())),
         ("inputs".into(), Json::Obj(p.inputs.iter().map(|x| (x.id.clone(), Json::Obj(match x.kind { Kind::Level => vec![("kind".into(), s("level")), ("levels".into(), jstrs(&x.levels))],
             Kind::Flag => vec![("kind".into(), s("flag"))], Kind::Number => vec![("kind".into(), s("number"))] }))).collect())),
-        ("habits".into(), Json::Arr(p.habits.iter().map(|h| s(&h.id)).collect())), ("agenda".into(), jstrs(&p.steps))])
+        ("habits".into(), Json::Arr(p.habits.iter().map(|h| s(&h.id)).collect())), ("agenda".into(), jstrs(&p.steps))]);
+    // the learning block (§2.8), when there is one: what moves the learned deltas, which traits, and the caps
+    if let (Json::Obj(v), Some(l)) = (&mut d, &p.learning) { v.push(("learning".into(), Json::Obj(vec![("from".into(), jstrs(&l.from)), ("traits".into(), jstrs(&l.traits)),
+        ("rate".into(), Json::Num(l.rate)), ("step_cap".into(), Json::Num(l.step_cap)), ("total_cap".into(), Json::Num(l.total_cap))]))); }
+    d
 }
 /// `check`: valid, with its digest and sizes (one engine call: the resting stance)
 pub fn check(p: &Persona, eng: Engine) -> R<Json> {
@@ -1612,8 +1616,10 @@ mod tests {
         let mut kv: Vec<(String, Json)> = j.as_obj().unwrap().iter().filter(|(k, _)| k != "digest").cloned().collect(); kv.push(("learned".into(), Json::Obj(vec![])));
         let body = Json::Obj(kv.clone()); kv.push(("digest".into(), Json::Str(sha(&body))));
         assert_eq!(err(State::read(&p, &Json::Obj(kv))), "state.learned: this persona has no learning block");
+        assert!(describe(&p).get("learning").is_none(), "describe without a block is 0.6.0's");
         // with the block: zero tables at init; a delta beyond the cap is refused even with a recomputed digest
         let q = persona(LEARN).unwrap(); let st = init(&q, None, true, &run); let j = st.to_json(&q);
+        assert_eq!(canon(describe(&q).get("learning").unwrap()), r#"{"from":["praise","criticism"],"rate":0.5,"step_cap":0.2,"total_cap":0.6,"traits":["verbosity","humour"]}"#);
         assert_eq!(canon(j.get("learned").unwrap()), r#"{"humour":[0,0,0],"verbosity":[0,0,0]}"#); assert!(State::read(&q, &j).is_ok());
         let mut s2 = st.clone(); s2.learned[0].1 = vec![0.7, -0.35, -0.35]; s2.seal(&q);
         assert_eq!(err(State::read(&q, &s2.to_json(&q))), "state.learned.verbosity: one number per level, each within ±0.6");
