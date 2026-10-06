@@ -13,6 +13,8 @@
     trace = probbit.persona_replay(persona, script, seed=2)                      # init + every turn of a script -> the stances
     report = probbit.persona_fuzz(persona, never={"when": {"sentiment": "negative"}, "then": {"humour": {"at_most": "light"}}})
     verdicts = probbit.persona_prove(persona, props=[rule1, rule2], seeds="0-9")  # held_by_construction | proved | unknown per rule
+    r = probbit.live_event(persona, state, {"praise": True, "elapsed_hours": 2.5}, strand="pip.strand")   # one event of a resident individual
+    report = probbit.live_verify("pip.strand")                                   # {"ok": True, ...} or {"ok": False, "line": n, "diverges": ...}
 
 Answers: `probbit run` reports per-variable odds under "marginals", `probbit decide` under "odds" (docs/probbit-ir-json.md, README).
 Every call returns the decoded JSON answer for exit 0 (exact / diagnostics_passed / partial), exit 1 (`infeasible`, a proof)
@@ -27,9 +29,9 @@ Keyword flags map to CLI flags: budget_ms=200 -> --budget-ms 200; collective=Fal
 cycles take on / off); any other boolean is a switch: summary=True -> --summary, pretty=True -> --pretty, False leaves it out.
 The binary: `binary=` argument, else $PROBBIT_BIN, else `probbit` on PATH, else ../target/release/probbit next to this file.
 """
-import json, os, shutil, subprocess, tempfile, urllib.error, urllib.parse, urllib.request
+import hashlib, json, os, shutil, subprocess, tempfile, urllib.error, urllib.parse, urllib.request
 
-__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "persona_fuzz", "persona_prove", "find_binary", "ProbbitError",
+__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "persona_fuzz", "persona_prove", "live_event", "live_verify", "find_binary", "ProbbitError",
            "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout", "ProbbitJudgeError"]
 
 
@@ -324,3 +326,57 @@ def persona_prove(persona, never=None, props=None, seeds="0-99", *, timeout_s=No
     could not decide; fuzz them). Arguments as persona_fuzz; flag: threads. An unknown rule is an answer, not an error."""
     with tempfile.TemporaryDirectory() as d:
         return _persona_call(["prove", _persona_path(persona, d), *_rules(d, never, props, seeds, flags)], timeout_s, binary, answers=(0, 1))
+
+
+# ---------------------------------------------------------------- live: a resident individual (docs/persona.md §5.7)
+def _live_call(args, timeout_s, binary, answers=(0,)):
+    try:
+        p = subprocess.run([find_binary(binary), "live", *args], capture_output=True, encoding="utf-8", timeout=timeout_s)
+    except subprocess.TimeoutExpired as e:
+        raise ProbbitTimeout(f"probbit live passed timeout_s={timeout_s}") from e
+    try:
+        out = json.loads(p.stdout) if p.stdout.strip() else None
+    except ValueError:
+        raise ProbbitError(f"unparseable output (exit {p.returncode})", p.returncode, p.stdout, p.stderr)
+    err = out.get("error") if isinstance(out, dict) else None
+    if p.returncode == 2:
+        if err:
+            raise ProbbitInputError(err.get("code"), err.get("path"), err.get("message"), 2, p.stdout, p.stderr)
+        raise ProbbitInputError("flag", None, p.stderr.strip().removeprefix("probbit: "), 2, p.stdout, p.stderr)
+    if p.returncode in answers and isinstance(out, dict) and not err:
+        return out
+    raise ProbbitError(f"probbit live exited {p.returncode}: {p.stderr.strip()[:300]}", p.returncode, p.stdout, p.stderr)
+
+
+def live_event(persona, state=None, event=None, *, seed=None, strand=None, timeout_s=None, binary=None):
+    """`probbit live`, one event (docs/persona.md §5.7): the persona (a file path or a dict), the individual's state (None: a new
+    individual at seed) and one event (a dict of inputs; elapsed_hours = hours since the previous event from the host's clock,
+    quantised to 1e-6 h; default 0) -> {"stance": ..., "state": ...}, the shape of the MCP tool probbit_live_event. Moods decay over
+    the elapsed hours; with a learning block the reward / correction flags move the learned deltas within their caps.
+    strand: a strand file path; a new file gets the header, an existing one is continued (state must be the state after its last
+    line), and the result gets "strand": {"path", "events", "head"}. A bad persona, state or event raises ProbbitInputError."""
+    if state is not None and seed is not None:
+        raise TypeError("give state (a stored individual) or seed (a new one), not both")
+    with tempfile.TemporaryDirectory() as d:
+        path = _persona_path(persona, d)
+        if state is None:
+            state = _persona_call(["init", path] + (["--seed", str(seed)] if seed is not None else []), timeout_s, binary)
+        sf, ev = _json_file(d, "state.json", state), os.path.join(d, "event.jsonl")
+        with open(ev, "w", encoding="utf-8") as f:
+            f.write(json.dumps(event or {}, ensure_ascii=False) + "\n")
+        args = [path, "--state", sf, "--clock", "fixed", "--events", ev] + (["--strand", os.fspath(strand)] if strand is not None else [])
+        stance = _live_call(args, timeout_s, binary)
+        with open(sf, encoding="utf-8") as f:
+            out = {"stance": stance, "state": json.load(f)}
+    if strand is not None:
+        with open(strand, encoding="utf-8") as f:
+            last = f.read().splitlines()[-1]
+        out["strand"] = {"path": os.fspath(strand), "events": json.loads(last).get("n", 0), "head": "sha256:" + hashlib.sha256(last.encode("utf-8")).hexdigest()}
+    return out
+
+
+def live_verify(strand, *, timeout_s=None, binary=None):
+    """`probbit live verify` (docs/persona.md §5.7): replay a strand file from its header alone -> {"ok": True, "events", "persona",
+    "seed", "engine", "final_state", "last_line"} when every line replays byte for byte, else {"ok": False, "line": n, "diverges":
+    what} at the earliest line that differs (an answer, not an error)."""
+    return _live_call(["verify", os.fspath(strand)], timeout_s, binary, answers=(0, 1))

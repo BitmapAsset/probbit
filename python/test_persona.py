@@ -92,5 +92,31 @@ class Persona(unittest.TestCase):
         with self.assertRaises(TypeError):
             probbit.persona_fuzz(tutor)
 
+
+
+class Live(unittest.TestCase):
+    def test_live_event_logs_a_strand_that_verifies(self):
+        import tempfile
+        tutor = os.path.join(EX, "tutor.yaml")
+        with tempfile.TemporaryDirectory() as d:
+            strand = os.path.join(d, "pip.strand")
+            r = probbit.live_event(tutor, None, {"loss": True}, seed=2, strand=strand)
+            self.assertEqual(r["stance"]["stance"]["humour"]["level"], "none")
+            self.assertEqual((r["strand"]["events"], r["stance"]["inputs"]["loss"]), (1, True))
+            for ev in ({"praise": True, "elapsed_hours": 2.5}, {"sentiment": "negative", "elapsed_hours": 12}):
+                r = probbit.live_event(tutor, r["state"], ev, strand=strand)
+            self.assertEqual(r["strand"]["events"], 3)
+            v = probbit.live_verify(strand)
+            self.assertEqual((v["ok"], v["events"], v["last_line"], v["final_state"]), (True, 3, r["strand"]["head"], r["state"]["digest"]))
+            with open(strand, encoding="utf-8") as f:
+                text = f.read()
+            with open(strand, "w", encoding="utf-8") as f:
+                f.write(text.replace('"elapsed_hours":2.5', '"elapsed_hours":2.6'))
+            self.assertEqual(probbit.live_verify(strand), {"ok": False, "line": 3, "diverges": "the stance differs"})
+            with self.assertRaises(probbit.ProbbitInputError) as e:
+                probbit.live_event(tutor, r["state"], {"elapsed_hours": -1})
+            self.assertEqual(e.exception.path, "events[0].event.elapsed_hours")
+
+
 if __name__ == "__main__":
     unittest.main()
