@@ -24,8 +24,8 @@
   #scan{position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,0) 0 2px,rgba(0,0,0,0.28) 2px 3px);pointer-events:none}
   #vig{position:absolute;inset:0;background:radial-gradient(ellipse 70% 70% at 50% 50%, transparent 55%, rgba(0,0,0,0.75) 100%)}
   #grain{position:absolute;inset:0;opacity:.14;mix-blend-mode:overlay}
-  #word{position:absolute;left:72px;bottom:60px;display:flex;align-items:center;gap:14px;color:#fff;filter:drop-shadow(0 0 10px rgba(0,229,255,.45))}
-  #word svg{position:static;display:block;flex:0 0 auto;width:58px;height:58px}
+  #word{position:absolute;left:72px;bottom:60px;display:flex;align-items:center;gap:24px;color:#fff;filter:drop-shadow(0 0 10px rgba(0,229,255,.45))}
+  #word svg{position:static;display:block;flex:0 0 auto;width:37px;height:46px}
   #word b{font:700 54px/1 "Avenir Next","Helvetica Neue",sans-serif;letter-spacing:-0.025em;margin-top:-3px}
   #word b span{color:#00F0FF}
   .tear{position:absolute;left:0;width:1600px;height:8px;overflow:hidden}
@@ -39,7 +39,7 @@
  <div class="tear" style="top:611px;height:5px"><div style="transform:translateX(-26px)"></div></div>
  <svg id="grain" width="1600" height="900"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 0.6 0 0 0 0 0.7 0 0 0 0 0.8 0 0 0 1 0"/></filter><rect width="1600" height="900" filter="url(#n)"/></svg>
  <div id="scan"></div><div id="vig"></div>
- <div id="word"><svg width="58" height="58" viewBox="0 0 512 512" aria-hidden="true"><defs><clipPath id="earR"><rect x="270" y="40" width="68" height="236" rx="34" transform="rotate(7 304 276)"/></clipPath></defs><g transform="rotate(-7 208 276)" fill="#fff"><rect x="174" y="40" width="68" height="236" rx="34"/></g><g clip-path="url(#earR)" fill="#fff"><rect x="250" y="177.25" width="110" height="98.75"/><rect x="250" y="131.5" width="110" height="36.75" fill-opacity="0.62"/><rect x="250" y="85.75" width="110" height="36.75" fill-opacity="0.36"/><rect x="250" y="40" width="110" height="36.75" fill-opacity="0.16"/></g><ellipse cx="256" cy="318" rx="134" ry="112" fill="#fff"/><path fill="#00F0FF" d="M157.6,463 h196.8 v14 h-196.8 Z M132,470 L164,450.16 L164,489.84 Z M380,470 L348,489.84 L348,450.16 Z"/></svg><b>probb<span>i</span>t</b></div>
+ <div id="word"><svg width="37" height="46" viewBox="100 40 312 394" aria-hidden="true"><g fill="#fff"><path d="M178 270 155 76 176 52 202 52 219 69 238 265Z"/><path d="M274 265 293 69 310 52 319 52 301 114 316 114 305 178 339 98 322 98 332 52 336 52 357 76 334 270Z"/><path fill-rule="evenodd" d="M112 308a144 114 0 1 0 288 0a144 114 0 1 0-288 0ZM124 278v52h264v-52Z"/></g><path fill="#00F0FF" d="M136 288h240v32H136Z"/></svg><b>probb<span>i</span>t</b></div>
 </div>
 <script>
  // seeded RNG (mulberry32) so renders are reproducible
