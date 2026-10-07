@@ -1412,6 +1412,17 @@ pub fn lint(p: &Persona, eng: Engine) -> Vec<Json> {
         Json::Obj(vec![("habits".into(), jstrs(&hs)), ("when_prev".into(), Json::Arr(when)), ("resolution".into(), Json::Str(res))]) }).collect()
 }
 
+/// `lint` for a drives block (§2.9): every habit that can exclude a floor goal. A habit outranks a floor: on a turn it is in force
+/// and excludes the goal (for some previous level, with `prev` restrictions), the goal's odds are 0. None without a block.
+pub fn floor_notes(p: &Persona) -> Option<Vec<Json>> {
+    let (d, v) = (p.drives.as_ref()?, p.var("pursue")?); let mut out = vec![];
+    for (gi, g) in d.goals.iter().enumerate().filter(|(_, g)| g.floor > 0.0) { for h in &p.habits {
+        let by_then = h.then.iter().filter(|(k, _)| k == "pursue").any(|(_, r)| v.levels.iter().any(|pl| !allowed(&v.levels, r, pl).iter().any(|l| **l == g.id)));
+        let by_rule = h.rules.iter().filter(|(k, _)| k == "tables").flat_map(|(_, l)| l).any(|r| !pursue_allowed(&v.levels, std::slice::from_ref(r))[gi]);
+        if by_then || by_rule { out.push(Json::Obj(vec![("goal".into(), Json::Str(g.id.clone())), ("floor".into(), Json::Num(g.floor)), ("habit".into(), Json::Str(h.id.clone())),
+            ("note".into(), Json::Str("a habit outranks a floor: on turns this habit is in force the goal's odds are 0".into()))])); } } }
+    Some(out)
+}
 /// `lint`'s decoding check (a warning, not an error): the stance is the joint plan, the most likely stance as a whole, so on
 /// coupled traits a trait's planned level can differ from its own most likely level (its marginal mode). Probes: each seed's
 /// individual at rest, then a quiet turn and every declared input alone (numbers at their maximum). -> per trait where that
@@ -2027,6 +2038,16 @@ mod tests {
         assert_eq!(canon(d.get("habits").unwrap()), r#"["security_careful","no_jokes_on_failure","chores_due","starve_chores","starve_safety"]"#);
         let c = check(&p, &run).unwrap(); assert_eq!((g(&c, &["traits"]), g(&c, &["inputs"]), g(&c, &["goals"])), (&Json::Num(4.0), &Json::Num(5.0), &Json::Num(4.0)));
         assert!(check(&persona("").unwrap(), &run).unwrap().get("goals").is_none(), "no block, no goals field");
+    }
+
+    /// `lint` lists every habit that can exclude a floor goal: here the two starvation habits (they force another goal) and the
+    /// must-do habit; none for a persona without a block
+    #[test]
+    fn lint_lists_the_habits_that_outrank_a_floor() {
+        let n = floor_notes(&adv()).unwrap(); let hs: Vec<&str> = n.iter().map(|x| x.get("habit").and_then(Json::as_str).unwrap()).collect();
+        assert_eq!(hs, ["chores_due", "starve_chores"], "{}", canon(&Json::Arr(n.clone())));
+        assert!(n.iter().all(|x| x.get("goal").and_then(Json::as_str) == Some("safety")));
+        assert!(floor_notes(&persona("").unwrap()).is_none());
     }
 
     /// Hard rules and floors at the extremes: after 40 turns that cue, praise and reward only fun, the learned pursue weight for fun
