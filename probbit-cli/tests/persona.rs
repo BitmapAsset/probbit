@@ -606,3 +606,14 @@ fn personas_without_drives_are_byte_identical_to_0_7_0() {
         assert!(!out.contains(r#""pursue""#) && !out.contains(r#""drives""#), "{n}: no drives fields without the block");
     }
 }
+
+/// drives (§2.9): the adversary fixture's replay (16 turns of random host inputs and goal signals, seed 4) equals its golden,
+/// which is the Python reference's (drives.py on the 0.7.0 engine) trace of the same script, byte for byte
+#[test]
+fn a_drives_replay_equals_the_reference_trace() {
+    let f = |n: &str| format!("{}/tests/fixtures/persona/{n}", env!("CARGO_MANIFEST_DIR"));
+    let (c, out, e) = probbit(&["persona", "replay", &f("drives-adversary.json"), "--seed", "4", "--script", &f("drives-adversary-script.json")], ""); assert_eq!(c, 0, "{e}");
+    assert_eq!(out, read(&f("drives-adversary-replay.jsonl")));
+    assert!(e.contains("final state sha256:27e92b4f21a52888b03c857a8132a25b58270aae613a77ce1edd2d74adcb3422"), "{e}");
+    assert_eq!(out.lines().filter(|l| l.contains(r#""goals":{"#)).count(), 9, "goal signals on 9 of the 16 turns");
+}

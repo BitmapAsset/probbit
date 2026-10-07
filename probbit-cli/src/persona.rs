@@ -565,7 +565,7 @@ fn cond_text(d: &Drives, c: &GoalCond) -> String {
     match (c.lo.is_finite(), c.hi.is_finite()) { (true, false) => format!("{key} >= {}", pyn(c.lo)), (false, true) => format!("{key} <= {}", pyn(c.hi)),
         (true, true) => format!("{key} in [{}, {}]", pyn(c.lo), pyn(c.hi)), _ => key }
 }
-/// A goal condition `key` with range `rng` -> the id of its flag input (one per distinct condition, created on first use)
+/// A goal condition `key` with range `rng` -> the id of its flag input (one per distinct goal, signal and range)
 fn goal_cond(key: &str, rng: &Json, path: &str, goals: &[Goal], conds: &mut Vec<GoalCond>, ins: &mut Vec<Json>, origins: &mut Vec<String>) -> R<String> {
     let (gi, sig, lo, hi) = parse_goal_cond(key, rng, path, goals)?;
     if let Some(c) = conds.iter().find(|c| c.goal == gi && c.sig == sig && c.lo == lo && c.hi == hi) { return Ok(c.id.clone()); }

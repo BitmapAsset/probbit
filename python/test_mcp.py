@@ -208,6 +208,31 @@ class Mcp(unittest.TestCase):
                 e = self.call("probbit_live_event", args)
                 self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
 
+    def test_persona_and_live_tools_pass_goal_signals(self):
+        # drives (docs/persona.md 2.9): `goals` passes through probbit_persona_turn and probbit_live_event unchanged
+        self.legacy("2025-11-25")
+        fx = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probbit-cli", "tests", "fixtures", "persona")
+        path = os.path.join(fx, "drives-adversary.json")
+        with open(os.path.join(fx, "drives-adversary-script.json"), encoding="utf-8") as f:
+            script = json.load(f)["turns"][:5]
+        with open(os.path.join(fx, "drives-adversary-replay.jsonl"), encoding="utf-8") as f:
+            gold = [json.loads(x) for x in f.read().splitlines()][:5]
+        state = self.call("probbit_persona_init", {"persona_path": path, "seed": 4})["structuredContent"]
+        for inputs, g in zip(script, gold):
+            r = self.call("probbit_persona_turn", {"persona_path": path, "state": state, "inputs": inputs})
+            self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["stance"], g)  # MCP answer == the CLI's replay
+            state = r["structuredContent"]["state"]
+        with tempfile.TemporaryDirectory() as d:
+            strand = os.path.join(d, "goals.strand")
+            r = self.call("probbit_live_event", {"persona_path": path, "seed": 4, "event": {"goals": {"chores": {"deadline_hours": 5}}, "security": True}, "strand_path": strand})
+            self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["stance"]["pursue"]["goal"], "chores")
+            r = self.call("probbit_live_event", {"persona_path": path, "state": r["structuredContent"]["state"], "event": {"goals": {"fun": {"win": 1.5, "cue": True}}, "elapsed_hours": 2}, "strand_path": strand})
+            self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["strand"]["events"], 2)
+            code, out = cli(["live", "verify", strand])
+            self.assertEqual(code, 0); self.assertEqual(json.loads(out)["last_line"], r["structuredContent"]["strand"]["head"])  # MCP writes, the CLI replays
+            with open(strand, encoding="utf-8") as f:
+                self.assertIn('"goals":{"fun":{"cue":true,"win":1.5}}', f.read())
+
     def test_structured_content_from_2025_06_18_on(self):
         self.legacy("2024-11-05")
         r = self.call("probbit_demo", {"tasks": 3})
