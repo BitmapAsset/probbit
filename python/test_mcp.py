@@ -83,6 +83,9 @@ class Mcp(unittest.TestCase):
         ev = tools[4]["inputSchema"]
         self.assertEqual(sorted(ev["properties"]["probbit"]["properties"]["rules"]["properties"]), sorted(["pairs", "caps", "all_different", "implies", "tables", "precedes", "linear"]))
         self.assertIn("cap", ev["$defs"]); self.assertIn("program", ev["properties"]["flags"]["properties"])
+        for t, key in ((tools[6], "inputs"), (tools[8], "event")):  # goal signals (drives) are an object, the other inputs scalars
+            g = t["inputSchema"]["properties"][key]["properties"]["goals"]
+            self.assertEqual(sorted(g["additionalProperties"]["properties"]), ["cue", "deadline_hours", "novelty", "progress", "setback", "win"])
         self.assertEqual(self.c.request("ping")["result"], {})
         self.assertEqual(self.legacy("1999-01-01")["protocolVersion"], "2025-11-25")  # unknown -> the newest handshake revision
 
