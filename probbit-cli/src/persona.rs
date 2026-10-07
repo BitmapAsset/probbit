@@ -531,7 +531,7 @@ impl DState {
     }
 }
 /// The drive genes: a standing interest offset per goal (`interest_spread`) and a gain on its wanting evidence and afterglow
-/// (`reactivity_spread`), from the persona hash family: name, seed and goal id only
+/// (`reactivity_spread`), from the persona hash family: a function of name, seed and goal id
 fn drive_genes(p: &Persona, d: &Drives, seed: u64) -> Json {
     let s = seed.to_string();
     let interest = d.goals.iter().filter(|g| g.interest_spread > 0.0).map(|g| (g.id.clone(), Json::Num(r6(round_to(g.interest_spread * normal(&[&p.name, &s, "interest", &g.id]), 4))))).collect();
@@ -1299,7 +1299,7 @@ fn habit_conflict(p: &Persona, st: &State, raw: &[(String, Json)], active: &[Str
 pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> {
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     for (n, (k, _)) in raw.iter().enumerate() { if raw[..n].iter().any(|(k2, _)| k2 == k) { return Err(perr(&format!("inputs.{k}"), "duplicate input")); } }
-    // a drives block steps the drives first; the turn then runs on the stepped state with the drive aggregates as inputs
+    // a drives block steps the drives before the turn, which runs on the stepped state with the drive aggregates as inputs
     let given = raw; let (st2, raw) = prep(p, st, &given)?; let st = &st2;
     let t0 = Instant::now(); let mut calls = 0;
     let o = Opts { no_inertia, ..Default::default() };
@@ -2198,7 +2198,7 @@ mod tests {
     }
 
     /// `diff` counts `pursue` as one more variable: two individuals of the drives persona differ on it, and a persona without the
-    /// block keeps its traits only
+    /// block keeps its traits and nothing else
     #[test]
     fn diff_counts_pursue() {
         let p = adv(); let s: Vec<Json> = (0..12).map(|i| json::parse(&format!(r#"{{"goals":{{"craft":{{"cue":true,"win":{}}}}},"elapsed_hours":1}}"#, i % 3)).unwrap()).collect();
@@ -2207,7 +2207,7 @@ mod tests {
         let q = persona("").unwrap(); let d = diff(&q, 1, &q, 2, &[Json::Null, Json::Null], &run).unwrap(); assert!(g(&d, &["distance", "per_trait"]).get("pursue").is_none());
     }
 
-    /// Hard rules and floors at the extremes: after 40 turns that cue, praise and reward only fun, the learned pursue weight for fun
+    /// Hard rules and floors at the extremes: after 40 turns that cue, praise and reward fun and no other goal, the learned pursue weight for fun
     /// is at its cap and fun's wanting near its cap, yet safety keeps at least its floor (the lift is active); with the chore due
     /// under security, pursue is chores with odds 1 and caution careful, no habit broken
     #[test]
