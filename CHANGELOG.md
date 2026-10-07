@@ -3,6 +3,35 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.0 - unreleased
+
+### Added
+- **Drives** (docs/persona.md §2.9): persona: optional `drives` block. Goals with wanting, afterglow and an expectation per
+  goal; a win moves an individual by its prediction error (magnitude minus expectation), so repeated equal wins stop moving it;
+  a new `pursue` output says which goal gets the next unit of effort, with exact odds, under habits; goal floors and
+  `starve_after` keep goals from being out-wanted or starved. A persona without the block gives byte-identical documents.
+  Read strictly (`probbit_persona` and `probbit_persona_state` stay 1): 2-7 goals (interest, gene spreads, floor, starve_after,
+  priority), wanting / afterglow / expectation / pursue weights, effects of the strongest wanting, the strongest afterglow and
+  the turn's prediction error, `learn_from_surprise`. Goal signals ride in the inputs under `goals` (progress, novelty, cue,
+  setback, win, deadline_hours). Each turn: decay by clock hours, the win's prediction error and Rescorla-Wagner update,
+  consumption, afterglow, wanting evidence, caps (6 decimals); `pursue` is one more variable whose field adds the drive terms;
+  a goal floor is a lift of that field, sound when no multi-variable rule names `pursue` (such a persona is refused); habits
+  read `goal.<id>.deadline_hours|want|glow|expect` and `since_pursued.<id>`, and `starve_after` adds a `starve_<goal>` habit;
+  with a learning block the prediction error joins the learning sign. The state gains `drives` (genes per seed, the values per
+  goal), checked on read. The stance gains `pursue` and `drives`, the line a `pursue: <goal>: <say>` clause.
+- Drives on every surface: `persona turn / replay / explain / describe / check / compile / diff`, `live` events with `goals`
+  (strands log them, `live verify` replays them), MCP, the Python wrapper and the browser module. `lint` lists the habits
+  that can exclude a floor goal and the floors whose lift can reach 50; `prove` reads the drives as boxes and reports goal
+  floors as held by construction; `fuzz` adds goal signals to its events.
+- `bench/drives_adversary.py` and BENCHMARKS.md §9: an adversary that wants one goal, over N individuals x 10,000 turns through
+  `probbit live`. On the drives fixture, 100 x 10,000 turns: 0 habit breaks, every must-do turn (6,743) pursued the due chore,
+  the safety floor of 0.1 held on every turn its habits allowed (least odds 0.141), and every individual ends in the state the
+  Python prototype of the design reaches on the same events (100 of 100 digests).
+
+### Changed
+- MCP: the input schemas of `probbit_persona_turn` (`inputs`) and `probbit_live_event` (`event`) declare `goals`, so a client
+  that checks arguments against them passes a drives persona's goal signals.
+
 ## 0.7.0 - 2026-10-06
 
 ### Added

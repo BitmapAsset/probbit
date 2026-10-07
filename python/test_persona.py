@@ -4,6 +4,7 @@ import json, os, unittest
 import probbit
 
 EX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples", "persona")
+FX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probbit-cli", "tests", "fixtures", "persona")
 
 
 def load(name):
@@ -39,6 +40,27 @@ class Persona(unittest.TestCase):
         r = probbit.persona_turn(doc, a, {"loss": True, "sentiment": "negative"}, timing=True)
         self.assertEqual(r["stance"]["stance"]["humour"]["level"], "none")  # the habit: no jokes on a loss
         self.assertEqual(r["stance"]["habits"]["violations"], 0); self.assertIn("timing", r["stance"]); self.assertLessEqual(r["stance"]["line_tokens"], 40)
+
+    def test_goal_signals_pass_through_unchanged(self):
+        # drives (docs/persona.md 2.9): the same signature; `goals` is one more input, handed to the engine as given
+        path = os.path.join(FX, "drives-adversary.json")
+        with open(os.path.join(FX, "drives-adversary-script.json"), encoding="utf-8") as f:
+            script = json.load(f)["turns"]
+        with open(os.path.join(FX, "drives-adversary-replay.jsonl"), encoding="utf-8") as f:
+            gold = [json.loads(x) for x in f.read().splitlines()]
+        st = probbit.persona_init(path, seed=4); self.assertIn("drives", st)
+        stances = []
+        for inputs in script:
+            r = probbit.persona_turn(path, st, inputs)
+            stances.append(r["stance"]); st = r["state"]
+        self.assertEqual(stances, gold)
+        self.assertEqual(probbit.persona_replay(path, {"turns": script}, seed=4), gold)
+        r = probbit.persona_turn(path, st, {"goals": {"chores": {"deadline_hours": 5}}, "security": True})
+        self.assertEqual(r["stance"]["pursue"]["goal"], "chores")  # the must-do habit
+        self.assertEqual(r["stance"]["inputs"]["goals"], {"chores": {"deadline_hours": 5}})  # logged as given
+        with self.assertRaises(probbit.ProbbitInputError) as e:
+            probbit.persona_turn(path, st, {"goals": {"sleep": {"cue": True}}})
+        self.assertEqual(e.exception.path, "inputs.goals.sleep")
 
     def test_errors_are_typed(self):
         doc = load("ops-engineer.json")

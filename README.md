@@ -498,6 +498,26 @@ Learning here is a capped nudge to a few weights per trait, credited to the leve
 trait also pushes the others' levels); rule immunity is architectural, not trained. The proofs and counts cover the stance; whether
 a model writes in it is measured per model.
 
+### Drives: which goal gets the next unit of effort
+
+A `drives:` block gives a persona 2-7 goals, each with wanting, afterglow and an expectation. A win moves the individual by its
+prediction error (the win's size minus what it expected), so repeated equal wins move it less and less; a new output, `pursue`,
+names the goal with exact odds under the habits; a goal `floor` keeps a goal's odds up and `starve_after` forces a goal that waited
+too long ([docs/persona.md](docs/persona.md) §2.9). The test persona below has four goals and a must-do habit for a due chore:
+
+```sh
+printf '%s\n' '{"goals":{"fun":{"cue":true,"win":1.5}}}' '{"goals":{"fun":{"win":1.5}}}' '{"goals":{"fun":{"win":1.5}}}' \
+  '{"goals":{"chores":{"deadline_hours":5}},"security":true}' | probbit live probbit-cli/tests/fixtures/persona/drives-adversary.json --seed 4 --clock fixed
+#   pursue fun 0.44, prediction error +1     "line":"Stance: pursue: fun: play; move fast."
+#   pursue fun 0.32, prediction error +0.75  the same win, now partly expected
+#   pursue fun 0.30, prediction error +0.375
+#   pursue chores 1 (habit chores_due)       "line":"Stance: the chore is due; careful under security; pursue: chores: do the chores; ..."
+```
+
+A persona without the block gives the same documents as before, byte for byte. Measured (BENCHMARKS.md §9): an adversary that
+cues, rewards and praises fun on this persona, 100 individuals x 10,000 turns: 0 habit breaks, all 6,743 must-do turns pursued
+the due chore, and the safety floor (0.1) held on every turn its habits allowed (least odds 0.141), while fun took 85 % of turns.
+
 ## After any judge: `probbit evaluate`
 
 Decision models (TypeSafe's Jev, Cloudflare's Clef and Clef-flash, local System One servers) are judges: content in, a

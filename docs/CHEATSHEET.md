@@ -1,4 +1,4 @@
-# probbit cheat sheet (0.7.0)
+# probbit cheat sheet (0.8.0)
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 
@@ -27,6 +27,8 @@ The exact tiers run before the sampler:
 - `habits.active`: habits in force this turn. `habits.bound`: the active habits the habit-free twin breaks, i.e. the ones
   that changed the stance. Empty = no habit had to change anything this turn.
 - `status`: `ok` (exact or diagnostics_passed), `partial`, `refused` (the line: just the habits), `fallback`.
+- `pursue` (a persona with a `drives:` block): the goal that gets the next unit of effort, with exact odds under the habits;
+  `drives`: per goal the wanting, afterglow, expectation, last prediction error, deadline and turns since it was pursued.
 
 ## Exit codes
 - `decide`, `run`, `evaluate`: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one

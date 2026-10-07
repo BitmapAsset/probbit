@@ -34,3 +34,16 @@ fn persona_ops_give_the_cli_documents() {
     assert_eq!(parse(&e).get("error").and_then(|x| x.get("path")).and_then(Json::as_str), Some("inputs.stakes"));
     let (e, c) = call(4, r#"{"persona_path": "tutor.yaml"}"#); assert_eq!(c, 2); assert!(e.contains("no files here"), "{e}");
 }
+
+/// drives (§2.9): goal signals pass through op 5 as one more input; the adversary fixture's turns equal its golden (the CLI's
+/// replay, which is the Python reference's trace)
+#[test]
+fn persona_ops_pass_goal_signals() {
+    let fx = |p: &str| std::fs::read_to_string(format!("{}/../probbit-cli/tests/fixtures/persona/{p}", env!("CARGO_MANIFEST_DIR"))).unwrap().replace("\r\n", "\n");
+    let doc = fx("drives-adversary.json"); let turns = parse(&fx("drives-adversary-script.json")).get("turns").unwrap().as_arr().unwrap().to_vec();
+    let (mut state, c) = probbit_wasm::persona_init(&format!(r#"{{"persona": {doc}, "seed": 4}}"#)); assert_eq!(c, 0, "{state}");
+    let gold = fx("drives-adversary-replay.jsonl"); assert_eq!(gold.lines().count(), turns.len());
+    for (i, (t, line)) in turns.iter().zip(gold.lines()).enumerate() {
+        let (out, c) = probbit_wasm::persona_turn(&format!(r#"{{"persona": {doc}, "state": {state}, "inputs": {}}}"#, json::write(t, false))); assert_eq!(c, 0, "{out}");
+        let o = parse(&out); assert_eq!(o.get("stance"), Some(&parse(line)), "turn {i}"); state = json::write(o.get("state").unwrap(), false); }
+}
