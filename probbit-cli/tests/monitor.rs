@@ -1,6 +1,8 @@
 //! `probbit monitor` (docs/persona.md §5.8) end to end: help, one frame pinned byte for byte (--once --plain), the exit codes,
-//! --follow picking up appended lines within a second and replaying a truncated strand from the start.
-use std::io::Read;
+//! --follow picking up appended lines within a second and replaying a truncated strand from the start, and --serve: the page,
+//! the event stream and the stance documents over HTTP on 127.0.0.1.
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -129,4 +131,78 @@ fn follow_picks_up_appended_lines() {
     std::fs::rename(&other, &f).unwrap();
     wait(&buf, at, "| seed 4 |", Duration::from_secs(5));
     let _ = child.kill(); let _ = child.wait(); let _ = std::fs::remove_file(&f);
+}
+
+/// GET `path` from the monitor on 127.0.0.1:`port`, addressed to `host` -> (status line, headers, body)
+fn get(port: u16, path: &str, host: &str) -> (String, String, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n").unwrap();
+    let mut r = vec![]; s.read_to_end(&mut r).unwrap();
+    let t = String::from_utf8_lossy(&r).into_owned();
+    let (head, body) = t.split_once("\r\n\r\n").unwrap_or((&t, ""));
+    let (status, headers) = head.split_once("\r\n").unwrap_or((head, ""));
+    (status.to_string(), headers.to_string(), body.to_string())
+}
+/// Read an event stream until it has carried `n` events in all -> (event, data) of each (comments, the heartbeats, aside)
+fn stream(s: &mut TcpStream, buf: &mut String, n: usize) -> Vec<(String, String)> {
+    let t = Instant::now();
+    loop {
+        let body = buf.split_once("\r\n\r\n").map_or("", |(_, b)| b);
+        let evs: Vec<(String, String)> = body.split("\n\n").filter(|b| b.contains("\ndata: ") && body.contains(&format!("{b}\n\n"))).map(|b| {
+            let f = |k: &str| b.lines().find_map(|l| l.strip_prefix(k)).unwrap_or("").to_string(); (f("event: "), f("data: ")) }).collect();
+        if evs.len() >= n { return evs; }
+        assert!(t.elapsed() < Duration::from_secs(20), "{n} events within 20 s: {buf}");
+        let mut chunk = [0u8; 8192]; let k = s.read(&mut chunk).unwrap(); assert!(k > 0, "the stream closed: {buf}"); buf.push_str(&String::from_utf8_lossy(&chunk[..k]));
+    }
+}
+
+/// --serve: the URL is the line on stdout; GET / is the page; /doc/K is event K's stance document as `probbit live` printed
+/// it, byte for byte; /events opens with the layout and the latest frame and pushes a frame for a line appended to the
+/// strand; a request addressed to another host is refused; --open with a browser that does not start fails nothing; a port
+/// in use, --once or a host flag exit 2
+#[test]
+fn serve_answers_the_page_the_events_and_the_documents() {
+    let full = tmp("serve-full"); let f = tmp("serve"); for x in [&full, &f] { let _ = std::fs::remove_file(x); }
+    let mut live = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["live", "../examples/persona/tutor.yaml", "--seed", "2", "--clock", "fixed", "--strand", &full])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    live.stdin.take().unwrap().write_all(b"{\"praise\":true,\"elapsed_hours\":1}\n{\"loss\":true,\"elapsed_hours\":2}\n{\"elapsed_hours\":13}\n{\"error\":true,\"elapsed_hours\":0.5}\n").unwrap();
+    let o = live.wait_with_output().unwrap(); assert!(o.status.success());
+    let out = String::from_utf8(o.stdout).unwrap(); let docs: Vec<&str> = out.lines().collect(); assert_eq!(docs.len(), 4);
+    let text = std::fs::read_to_string(&full).unwrap(); let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    std::fs::write(&f, lines[..4].concat()).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", &f, "--serve", "--port", "0", "--open"]).env("BROWSER", "probbit-test-no-such-browser")
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().unwrap()), &mut url).unwrap();
+    let port: u16 = url.trim_end().strip_prefix("http://127.0.0.1:").and_then(|p| p.strip_suffix('/')).unwrap_or_else(|| panic!("the URL line: {url:?}")).parse().unwrap();
+    let host = format!("127.0.0.1:{port}");
+    let (st, h, page) = get(port, "/", &host);
+    assert_eq!(st, "HTTP/1.1 200 OK"); assert!(h.contains("Content-Type: text/html") && h.contains("connect-src 'self'"), "{h}");
+    assert!(page.contains("<title>probbit monitor</title>") && page.contains("new EventSource('/events')") && page.len() < 40_000, "{} bytes", page.len());
+    // the page fetches nothing from anywhere else: no URL in it but the SVG namespace
+    assert!(page.match_indices("http").all(|(i, _)| page[i..].starts_with("http://www.w3.org/2000/svg")), "a URL in the page");
+    for k in 1..=3 { let (st, _, d) = get(port, &format!("/doc/{k}"), &host); assert_eq!((st.as_str(), d.as_str()), ("HTTP/1.1 200 OK", format!("{}\n", docs[k - 1]).as_str()), "doc {k}"); }
+    for p in ["/doc/0", "/doc/4", "/doc/x", "/nope"] { assert_eq!(get(port, p, &host).0, "HTTP/1.1 404 Not Found", "{p}"); }
+    assert_eq!(get(port, "/", &format!("localhost:{port}")).0, "HTTP/1.1 200 OK");
+    for other in ["evil.example", "evil.example:80", "127.0.0.1"] { assert_eq!(get(port, "/doc/1", other).0, "HTTP/1.1 403 Forbidden", "{other}"); }
+    // the stream: the layout, then the latest frame (event 3); a line appended is pushed as a frame (event 4)
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
+    assert!(buf.starts_with("HTTP/1.1 200 OK\r\n") && buf.contains("Content-Type: text/event-stream"), "{buf}");
+    assert_eq!((evs[0].0.as_str(), evs[1].0.as_str()), ("meta", "frame"));
+    assert!(evs[0].1.contains(r#""name":"Pip""#) && evs[0].1.contains(r#""id":"warmth""#), "{}", evs[0].1);
+    assert!(evs[1].1.contains(r#""n":3,"#) && evs[1].1.contains(&format!(r#""doc":{},"#, docs[2])) && evs[1].1.contains(r#""diverges":null"#), "{}", evs[1].1);
+    std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(lines[4].as_bytes()).unwrap();
+    let evs = stream(&mut s, &mut buf, 3);
+    assert_eq!(evs[2].0, "frame"); assert!(evs[2].1.contains(r#""n":4,"#) && evs[2].1.contains(&format!(r#""doc":{},"#, docs[3])), "{}", evs[2].1);
+    assert_eq!(get(port, "/doc/4", &host).2, format!("{}\n", docs[3]));
+    // the port is taken: exit 2
+    let (c, _, err) = probbit(&["monitor", &f, "--serve", "--port", &port.to_string()]); assert_eq!(c, 2); assert!(err.contains(&format!("cannot listen on 127.0.0.1:{port}")), "{err}");
+    let _ = child.kill(); let o = child.wait_with_output().unwrap();
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--open: no browser started"), "{}", String::from_utf8_lossy(&o.stderr));
+    for (args, msg) in [(vec!["monitor", &f, "--serve", "--once"], "give one of them"), (vec!["monitor", &f, "--port", "8080"], "--port goes with --serve"),
+        (vec!["monitor", &f, "--serve", "--host", "0.0.0.0"], "binds 127.0.0.1"), (vec!["monitor", &f, "--serve", "--plain"], "does not apply")] {
+        let (c, out, err) = probbit(&args); assert_eq!((c, out.as_str()), (2, ""), "{args:?}: {err}"); assert!(err.contains(msg), "{args:?}: {err}");
+    }
+    for x in [full, f] { let _ = std::fs::remove_file(x); }
 }

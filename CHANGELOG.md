@@ -15,6 +15,12 @@ All notable changes to this project are documented here. The format follows
   from the start, with a warning), `--once` prints one frame, `--plain` draws in plain ASCII. `probbit monitor --demo` plays the
   tutor's scripted week (the week `live --demo week` writes, seed 2) in memory, paced 1 s per hour and each night in 2 s. Exit 0, 1 at a line that differs (named
   in the frame), 2 for a bad flag or a file that is not a strand. It writes nothing and sends nothing; no dependencies.
+- **`probbit monitor STRAND --serve [--port N] [--open]`** (also with `--demo`): the same board as a page in the browser. A server
+  on 127.0.0.1 (std `TcpListener`; it binds no other address, and refuses requests addressed to another host) follows the strand
+  and serves one page embedded in the binary (styles and script inline; it fetches no fonts, styles or scripts), its server-sent
+  events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s) and `/doc/N`, event N's stance document
+  as `probbit live` printed it. The URL is the line on stdout; `--open` starts the default browser, best effort. `--demo --serve`
+  plays the week over and over.
 
 ## 0.7.0 - 2026-10-06
 
