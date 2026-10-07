@@ -574,7 +574,7 @@ fn build_drives(doc: &Json) -> R<Persona> {
     let kv = doc.as_obj().unwrap(); let drv = get(kv, "drives").unwrap();
     let dkv = keys(drv, "drives", &["goals", "wanting", "afterglow", "expectation", "pursue", "effects", "learn_from_surprise", "comment"], &[])?;
     let gl = match get(dkv, "goals") { Some(Json::Arr(a)) if (2..=7).contains(&a.len()) => a, _ => return Err(perr("drives.goals", "2 to 7 goals (pursue is one variable, 2-7 levels)")) };
-    let (mut goals, mut interest, mut starve): (Vec<Goal>, Vec<f64>, Vec<(Option<f64>, f64)>) = (vec![], vec![], vec![]);
+    let (mut goals, mut interest): (Vec<Goal>, Vec<f64>) = (vec![], vec![]); let mut starve: Vec<(Option<f64>, f64)> = vec![]; // (starve_after, priority)
     for (i, g) in gl.iter().enumerate() { let p = ix("drives.goals", i);
         let gk = keys(g, &p, &["id", "say", "interest", "interest_spread", "reactivity_spread", "floor", "starve_after", "priority", "comment"], &["id"])?;
         let id = ident(get(gk, "id"), &at(&p, "id"), "id")?;
@@ -882,7 +882,9 @@ impl State {
         need(get(kv, "digest").and_then(Json::as_str) == Some(sha(&body).as_str()), "state.digest", "state was edited or corrupted")?;
         need(p.drives.is_none() || get(kv, "drives").is_some(), "state.drives", "required with a drives block")?;
         const SK: [&str; 13] = ["probbit_persona_state", "persona", "seed", "turn", "genes", "mood", "history", "prev", "rest", "digest", "learned", "credit", "drives"];
-        let mut sk: Vec<&str> = SK[..10].to_vec(); if p.learning.is_some() { sk.extend(&SK[10..12]); } if p.drives.is_some() { sk.push(SK[12]); }
+        let mut sk: Vec<&str> = SK[..10].to_vec();
+        if p.learning.is_some() { sk.extend(&SK[10..12]); }
+        if p.drives.is_some() { sk.push(SK[12]); }
         keys(j, "state", &sk, &["persona", "seed", "turn", "genes", "mood", "history", "prev", "digest"])
             .map_err(|e| if e.msg.starts_with("unknown field") && (e.path == "state.learned" || e.path == "state.credit") { perr(&e.path, "this persona has no learning block") }
                 else if e.msg.starts_with("unknown field") && e.path == "state.drives" { perr(&e.path, "this persona has no drives block") } else { e })?;
@@ -1505,7 +1507,10 @@ pub fn explain(p: &Persona, st: &State, raw: &Json, eng: Engine) -> R<String> {
     let hb = g("habits"); let (a, b) = (names(hb.get("active").unwrap_or(&Json::Null)), names(hb.get("bound").unwrap_or(&Json::Null)));
     l.push(format!("habits active: {} | bound (changed the stance vs the habit-free twin): {}", if a.is_empty() { "-" } else { &a }, if b.is_empty() { "-" } else { &b }));
     for (i, v) in p.vars.iter().enumerate() {
-        let e = g(if v.mood { "mood" } else { "stance" }).get(&v.id).cloned().unwrap_or(Json::Null); let lvl = e.get("level").map_or(String::new(), s);
+        let e = if p.drives.is_some() && v.id == "pursue" { let pz = g("pursue"); let f = |k: &str| pz.get(k).cloned().unwrap_or(Json::Null); // its own object (§4)
+            Json::Obj(vec![("level".into(), f("goal")), ("p".into(), f("p")), ("odds".into(), f("odds"))]) }
+            else { g(if v.mood { "mood" } else { "stance" }).get(&v.id).cloned().unwrap_or(Json::Null) };
+        let lvl = e.get("level").map_or(String::new(), s);
         let twin = if meta.twin { plan.get(&format!("free.{}", v.id)).filter(|t| **t != lvl).map_or(String::new(), |t| format!("   habit-free twin: {t}")) } else { String::new() };
         l.push(format!("{} {} -> {} (p {:.3}){twin}", if v.mood { "mood" } else { "trait" }, v.id, lvl, e.get("p").and_then(Json::as_f64).unwrap_or(0.0)));
         let row = |vec: &[f64], fmt: &dyn Fn(f64) -> String| v.levels.iter().zip(vec).map(|(l, x)| format!("{l} {}", fmt(*x))).collect::<Vec<_>>().join("  ");
