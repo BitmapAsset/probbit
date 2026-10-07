@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "probbit-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "probbit-core",
  "probbit-decide",
@@ -13,11 +13,11 @@ dependencies = [
 
 [[package]]
 name = "probbit-core"
-version = "0.7.0"
+version = "0.8.0"
 
 [[package]]
 name = "probbit-decide"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "probbit-core",
  "probbit-ir",
@@ -25,14 +25,14 @@ dependencies = [
 
 [[package]]
 name = "probbit-ir"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "probbit-core",
 ]
 
 [[package]]
 name = "probbit-wasm"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "probbit-core",
  "probbit-decide",

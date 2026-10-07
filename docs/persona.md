@@ -645,7 +645,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.7.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.8.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
