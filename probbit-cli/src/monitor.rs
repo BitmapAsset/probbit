@@ -20,11 +20,13 @@ const RED: Col = Col(196, 91);
 const SHADE: [Col; 2] = [Col(244, 37), Col(239, 90)];
 /// Events a mood's sparkline covers
 const SPARK: usize = 50;
+/// The tutor persona `--demo` plays (a copy of examples/persona/tutor.yaml; a test keeps them equal)
+const TUTOR: &str = include_str!("demo-tutor.yaml");
 /// Cells of a level bar and of a number bar
 const BAR: usize = 20;
 const NBAR: usize = 8;
 
-const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. It writes nothing\n  and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, or a file that\n  cannot be read or is not a strand.\n";
+const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] | probbit monitor --demo [--once] [--plain]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. It writes nothing\n  and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\n  --demo      the tutor's scripted week (as `probbit live examples/persona/tutor.yaml --seed 2 --demo week`), replayed in\n              memory: at a terminal paced 1 s per hour, each night in 2 s (under a minute); otherwise, or with --once, its\n              last frame\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, or a file that\n  cannot be read or is not a strand.\n";
 
 fn strs(j: Option<&Json>) -> Vec<String> { j.and_then(Json::as_arr).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() }
 
@@ -153,7 +155,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let Some(w) = w else {
         out.push(format!("{} {dot} {badge}", s.bold(CYAN, "probbit monitor")));
         if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
-        out.push(s.paint(GREY, &format!("strand {path} {} replay: probbit live verify {path}", s.g("·", "|"))));
+        out.push(footer(path, "", s));
         return out;
     };
     let m = &w.meta;
@@ -164,7 +166,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
     let Some(f) = f else {
         out.push(s.paint(GREY, "no events yet: the strand holds its header and no event lines"));
-        out.push(s.paint(GREY, &format!("strand {path} {dot} written by {} {dot} replay: probbit live verify {path}", m.engine)));
+        out.push(footer(path, &m.engine, s));
         return out;
     };
     let doc = &f.doc;
@@ -235,8 +237,16 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     if let Some(l) = doc.get("line").and_then(Json::as_str) { out.push(format!("{}{}", lab("LINE"), s.bold(CYAN, l))); }
     if let Some(y) = doc.get("why").and_then(Json::as_str).filter(|y| !y.is_empty()) { out.push(format!("{}{}", lab(""), s.paint(GREY, &format!("why: {y}")))); }
     // 8. the footer
-    out.push(s.paint(GREY, &format!("strand {path} {} written by {} {} replay: probbit live verify {path}", s.g("·", "|"), m.engine, s.g("·", "|"))));
+    out.push(footer(path, &m.engine, s));
     out
+}
+/// The footer: the strand, the engine that wrote it and the command that replays it; the demo's week (path "") is in memory, so
+/// the command that writes the same week instead
+fn footer(path: &str, engine: &str, s: &Style) -> String {
+    let dot = s.g("·", "|");
+    let by = if engine.is_empty() { String::new() } else { format!(" {dot} written by {engine}") };
+    s.paint(GREY, &if path.is_empty() { format!("strand: the demo week, in memory{by} {dot} the same week: probbit live examples/persona/tutor.yaml --seed 2 --demo week") }
+        else { format!("strand {path}{by} {dot} replay: probbit live verify {path}") })
 }
 /// Per goal: a drive's values, from an object keyed by goal or a list in the goals' order
 fn per_goal(v: Option<&Json>, goals: &[String]) -> Vec<Option<f64>> {
@@ -313,14 +323,21 @@ fn ascii(args: &[String]) -> bool {
 /// `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]`
 pub fn cmd(args: &[String]) {
     if args.iter().any(|a| a == "--help" || a == "-h") { crate::emit_raw(HELP); return; }
-    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")).cloned() else { crate::fail("monitor: the strand file comes before the flags: probbit monitor STRAND [flags]") };
-    let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(2).cloned()); crate::check_flags(&a, &["--fps"], &["--follow", "--once", "--plain"]);
+    let path = args.get(1).filter(|a| !a.starts_with("--")).cloned();
+    let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(if path.is_some() { 2 } else { 1 }).cloned());
+    crate::check_flags(&a, &["--fps"], &["--follow", "--once", "--plain", "--demo"]);
     let has = |f: &str| args.iter().any(|a| a == f);
     if has("--follow") && has("--once") { crate::fail("monitor: --once draws one frame and --follow keeps drawing: give one of them") }
     let fps: u32 = crate::arg(args, "--fps", 10); if !(1..=60).contains(&fps) { crate::fail("monitor: --fps N, from 1 to 60") }
     let engine = crate::persona_engine(); let eng: Engine = &engine;
     let tty = theme::stdout_is_terminal();
     let s = Style { th: theme::stdout(args), ascii: ascii(args), cols: if tty { theme::size(1).0.max(20) } else { usize::MAX } };
+    if has("--demo") {
+        if path.is_some() { crate::fail("monitor --demo plays its own week: give no STRAND") }
+        if has("--follow") { crate::fail("monitor --demo: --follow does not apply (the demo is its own week)") }
+        return demo(&s, has("--once"), eng);
+    }
+    let Some(path) = path else { crate::fail("monitor: the strand file comes before the flags: probbit monitor STRAND [flags] (or probbit monitor --demo)") };
     let bytes = std::fs::read(&path).unwrap_or_else(|e| crate::fail(&format!("monitor: cannot read {path}: {e}")));
     let text = String::from_utf8_lossy(&bytes);
     // whole lines: a last line without its newline is still being written
@@ -338,6 +355,43 @@ pub fn cmd(args: &[String]) {
     let fr = frame(w.as_ref(), bad_head.as_ref(), &path, note.as_deref(), &s);
     out(&fr.iter().map(|l| crate::tui::clip(l, s.cols) + "\n").collect::<String>());
     if bad_head.is_some() || w.is_some_and(|w| w.bad.is_some()) { std::process::exit(1) }
+}
+
+/// Draw a frame in place at a terminal of `size` (columns, rows) -> false once the reader has gone. A frame taller than the
+/// terminal would scroll on every redraw: the rows that fit are kept.
+fn redraw(mut fr: Vec<String>, size: (usize, usize)) -> bool {
+    fr.truncate(size.1.saturating_sub(1).max(1));
+    out(&format!("\x1b[H{}\x1b[J", fr.iter().map(|l| crate::tui::clip(l, size.0.max(20)) + "\x1b[K\n").collect::<String>()))
+}
+
+/// `--demo`: the tutor's scripted week (`live::week`, seed 2) written to a temporary strand, read back and removed, then replayed:
+/// at a terminal paced 1 s per hour and each night in 2 s, otherwise (or with --once) straight to its last frame
+fn demo(s: &Style, once: bool, eng: Engine) {
+    let doc = persona::parse_doc(TUTOR, false).unwrap_or_else(|e| crate::fail(&format!("monitor --demo: the tutor: {e}")));
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+    let f = std::env::temp_dir().join(format!("probbit-monitor-demo-{}-{nanos}.strand", std::process::id()));
+    let fp = f.to_string_lossy().to_string();
+    let made = crate::live::week(&doc, Some(2), Some(&fp), None, &mut |_: &str| {}, eng);
+    let text = std::fs::read_to_string(&f); let _ = std::fs::remove_file(&f);
+    if let Err(e) = made { crate::fail(&format!("monitor --demo: {}: {}", e.path, e.msg)) }
+    let text = text.unwrap_or_else(|e| crate::fail(&format!("monitor --demo: cannot read the week back: {e}")));
+    let lines = crate::live::lines(&text);
+    let mut w = Watch::open(lines[0]).unwrap_or_else(|(n, why)| crate::fail(&format!("monitor --demo: line {n}: {why}")));
+    let tty = s.cols != usize::MAX && !once;
+    if !tty { for l in &lines[1..] { w.feed(l, eng); } out(&(frame(Some(&w), None, "", None, s).join("\n") + "\n")); return; }
+    theme::restore_cursor_on_interrupt();
+    let size = || theme::size(1);
+    if !out("\x1b[?25l\x1b[2J") || !redraw(frame(Some(&w), None, "", None, s), size()) { std::process::exit(0) }
+    for l in &lines[1..] {
+        let h = json::parse(l).ok().and_then(|j| j.get("inputs").and_then(|i| i.get("elapsed_hours")).and_then(Json::as_f64)).unwrap_or(0.0);
+        if h > 1.0 { let night = format!("night: {} quiet hours; moods decay by their half-lives", whole(h));
+            if !redraw(frame(Some(&w), None, "", Some(&night), &Style { cols: size().0, ..*s }), size()) { std::process::exit(0) }
+            std::thread::sleep(std::time::Duration::from_secs(2)); }
+        else { std::thread::sleep(std::time::Duration::from_secs_f64(h)); }
+        w.feed(l, eng);
+        if !redraw(frame(Some(&w), None, "", None, &Style { cols: size().0, ..*s }), size()) { std::process::exit(0) }
+    }
+    out("\x1b[?25h");
 }
 
 /// `--follow`: poll the strand every 100 ms, replay the lines appended, redraw (at most `fps` times a second; in place at a
@@ -360,11 +414,8 @@ fn follow(path: &str, s: &Style, fps: u32, eng: Engine) -> ! {
         if now != size { size = now; dirty = true; }
         if dirty && drawn.map_or(true, |t| t.elapsed() >= gap) {
             let cols = if tty { size.0.max(20) } else { usize::MAX };
-            let mut fr = frame(w.as_ref(), bad_head.as_ref(), path, note, &Style { cols, ..*s });
-            // a frame taller than the terminal would scroll on every redraw: keep the rows that fit
-            if tty { fr.truncate(size.1.saturating_sub(1).max(1)); }
-            let body: String = fr.iter().map(|l| crate::tui::clip(l, cols) + if tty { "\x1b[K\n" } else { "\n" }).collect();
-            if !out(&if tty { format!("\x1b[H{body}\x1b[J") } else { format!("{body}\n") }) { std::process::exit(0) }
+            let fr = frame(w.as_ref(), bad_head.as_ref(), path, note, &Style { cols, ..*s });
+            if !(if tty { redraw(fr, size) } else { out(&(fr.join("\n") + "\n\n")) }) { std::process::exit(0) }
             dirty = false; drawn = Some(std::time::Instant::now());
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -460,6 +511,13 @@ mod tests {
         kv.retain(|(k, _)| k != "drives"); kv.push(("drives".into(), json::parse(r#"{"want":[1,"x",null],"glow":"?","surprise":[-0.5]}"#).unwrap()));
         w.last.as_mut().unwrap().doc = Json::Obj(kv); let fr = frame(Some(&w), None, "x", None, &s);
         assert!(fr.iter().any(|l| l.contains("-0.50 below expectation")) || fr.iter().any(|l| l.contains("wanting")), "{fr:?}");
+    }
+
+    /// The tutor `--demo` embeds is examples/persona/tutor.yaml
+    #[test]
+    fn the_demo_plays_the_example_tutor() {
+        let ex = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/tutor.yaml")).unwrap();
+        assert_eq!(TUTOR.replace("\r\n", "\n"), ex.replace("\r\n", "\n"), "copy examples/persona/tutor.yaml to probbit-cli/src/demo-tutor.yaml");
     }
 
     #[test]

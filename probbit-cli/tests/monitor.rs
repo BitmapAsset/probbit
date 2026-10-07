@@ -23,7 +23,7 @@ fn monitor_has_help() {
     for h in ["--help", "-h"] {
         let (c, out, err) = probbit(&["monitor", h]); assert_eq!(c, 0, "{err}"); assert!(err.is_empty(), "{err}");
         assert!(out.starts_with("usage: probbit monitor STRAND"), "{out}");
-        for f in ["--follow", "--once", "--plain", "--fps N", "exit: 0", "live verify"] { assert!(out.contains(f), "monitor help lacks {f}: {out}"); }
+        for f in ["--follow", "--once", "--plain", "--fps N", "--demo", "exit: 0", "live verify"] { assert!(out.contains(f), "monitor help lacks {f}: {out}"); }
     }
     let (c, out, _) = probbit(&["--help"]); assert_eq!(c, 0); assert!(out.contains("probbit monitor STRAND"), "the usage lists monitor");
 }
@@ -42,6 +42,20 @@ fn one_plain_frame_is_pinned() {
     assert!(!uni.contains('\x1b') && uni.contains("replay verified ✓") && uni.contains('█'), "{uni}");
     assert_eq!(uni.lines().count(), out.lines().count());
     let _ = std::fs::remove_file(&f);
+}
+
+/// --demo --plain --once: the last frame of the tutor's week, the same as `live --demo week` writes it (the pinned frame of the
+/// fixture, all but the footer, which says the week is in memory), the same on every run
+#[test]
+fn the_demo_is_the_week_live_writes() {
+    let (c, a, err) = probbit(&["monitor", "--demo", "--plain", "--once"]); assert_eq!(c, 0, "{err}");
+    let (_, b, _) = probbit(&["monitor", "--demo", "--plain"]); assert_eq!(a, b, "deterministic; piped, the demo prints its last frame");
+    let week = pinned("tutor-week.once.txt", WEEK); let (wl, al): (Vec<&str>, Vec<&str>) = (week.lines().collect(), a.lines().collect());
+    assert_eq!(wl.len(), al.len()); assert_eq!(wl[..wl.len() - 1], al[..al.len() - 1]);
+    assert!(al[al.len() - 1].starts_with("strand: the demo week, in memory | written by probbit ") && al[al.len() - 1].ends_with("--seed 2 --demo week"), "{a}");
+    for (args, msg) in [(vec!["monitor", WEEK, "--demo"], "give no STRAND"), (vec!["monitor", "--demo", "--follow"], "--follow does not apply")] {
+        let (c, _, err) = probbit(&args); assert_eq!(c, 2, "{args:?}"); assert!(err.contains(msg), "{args:?}: {err}");
+    }
 }
 
 /// 0 every line replays (an incomplete last line is said, not replayed); 1 a line differs: the header names it and the frame shows

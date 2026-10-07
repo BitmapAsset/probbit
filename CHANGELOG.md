@@ -12,7 +12,8 @@ All notable changes to this project are documented here. The format follows
   highlighted, its phrase), the moods with a sparkline of the last 50 events, the event's inputs and history features, the habits
   in force (the bound ones marked, the violations counter), the learned deltas within their cap, the drives when a document
   carries them, and the stance line. `--follow` replays appended lines within a second (a truncated or rotated strand is replayed
-  from the start, with a warning), `--once` prints one frame, `--plain` draws in plain ASCII. Exit 0, 1 at a line that differs (named
+  from the start, with a warning), `--once` prints one frame, `--plain` draws in plain ASCII. `probbit monitor --demo` plays the
+  tutor's scripted week (the week `live --demo week` writes, seed 2) in memory, paced 1 s per hour and each night in 2 s. Exit 0, 1 at a line that differs (named
   in the frame), 2 for a bad flag or a file that is not a strand. It writes nothing and sends nothing; no dependencies.
 
 ## 0.7.0 - 2026-10-06
