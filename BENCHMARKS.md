@@ -1065,3 +1065,52 @@ turns: the same distance); a 10,000-event life replays and verifies in about 3.3
 learning blocks not run here (the rules hold because a habit is a rule of the program and the learned deltas are unaries, §2.8;
 these runs measure that design on one persona, they do not prove it beyond what `prove` proves); that an individual stays nearest
 its own initial self at any cap (at the demo's cap, 9 of 20 learners have a sibling as near or nearer); other machines.
+
+## §9 Drives under an adversary (`python3 bench/drives_adversary.py 100 10000 10`, stdlib, 78 min; development build 64f7dd7 of 0.8.0)
+The drives fixture of the tests (`probbit-cli/tests/fixtures/persona/drives-adversary.json`: four 3-level traits, a 3-level mood,
+a learning block over humour and `pursue`, and four goals: `fun`; `craft`; `chores` with `starve_after: 12`; `safety` with a
+`floor` of 0.1, `starve_after: 24` and priority 1; habits: careful under security (priority 3), no jokes on a failure, and the
+must-do `chores_due`, a chore deadline within 24 h -> pursue chores, priority 2), driven one event at a time through
+`probbit live --clock fixed`: 100 individuals (seeds 0-99), 10,000 turns each, 10 at a time (78 min of wall clock, 580 min of
+CPU, with other work on the machine). The adversary wants fun: every turn cues fun (novelty on 30 % of turns, progress uniform
+0-1) with a fun win of 0.2-2.0 on a quarter of the turns, and praises the previous turn's pursuit when it was fun and criticises
+it otherwise, so learning pushes `pursue` toward fun; security and failure each on 5 % of turns, a load, idle hours 0.25-4.
+Every 400 turns the world sets a chore deadline of 30 h, and the chore is won (1.0) once it was pursued 3 times. Events come
+from Python's `random.Random(1000 + seed)`. The build predates the version bump (it reports 0.7.0); the commits after it change
+docs, tests, the version, the MCP schemas and one refusal at load, not a turn, and seeds 0-1 re-run on the 0.8.0 build end in
+the same state digests.
+
+| measure | 100 individuals x 10,000 turns |
+|---|---|
+| habit violations (the stance's own count) | 0 in 1,000,000 turns (status `ok` on every turn) |
+| turns a forcing habit (`chores_due`, `starve_chores`, `starve_safety`) was in force and `pursue` named another goal | 0 |
+| must-do turns (`chores_due` in force) that pursued the chore | 6,743 of 6,743 (100 %) |
+| least odds of `safety` on a turn whose habits allow it (floor 0.1) | 0.141225 (per individual 0.141-0.301) |
+| turns the floor lifted `safety` / turns a habit excluded it | 898,038 / 81,847 |
+| longest gap between pursuits: `fun` / `chores` (starve_after 12) / `safety` (starve_after 24) / `craft` | 8 / 14 / 28 / 9,999 turns |
+| share of turns pursued: `fun` / `chores` / `safety` / `craft` | 0.8484 / 0.0818 / 0.0697 / 2 turns in 1,000,000 |
+| wanting and afterglow maxima (caps 3 and 2) | 3 / 2 |
+| mean prediction error of fun's wins, turns 1-1,000 / the last 1,000 | 0.1518 / 0.1455 |
+| turns a habit yielded to a higher-priority one (`on_conflict: yield`) | 1,807 |
+
+The two gaps above `starve_after` are habits yielding by priority: `starve_safety` (priority 1) outranks `starve_chores` (0) when
+both are due, and `chores_due` (2) outranks `starve_safety`. `craft` has neither a floor nor `starve_after`, and the adversary
+out-wants it on every turn: such a goal has no guarantee. Every individual's final state digest and every count above equal the
+run of the Python prototype of the design on the same event streams (100 of 100 digests), so the two implementations agree over
+1,000,000 turns; in the tests, a 16-turn trace and three 200-turn traces of that prototype are goldens (byte for byte).
+
+**Cost.** The engine enumerates the whole program: four 3-level traits, the mood and `pursue`'s four goals, each with its
+habit-free twin, make 944,784 states, under the persona engine's `exact_limit` (2,000,000), so it is solved whole rather than
+per component (docs/persona.md §3). On 300 turns of these events (`probbit persona replay`, seed 3, N = 3 alternating, median
+(min-max); load average 15-16 from other processes, Spotlight indexing): 5.77 s (5.75-5.82), 19.2 ms per turn, CPU time equal to
+wall clock. Without the drives block the same persona has 59,049 states: 0.38 s (0.38-0.38), 1.3 ms per turn. With
+`engine: {exact_limit: 1000}` the engine solves it per component: 0.04 s (0.04-0.04; 20 back-to-back runs: 0.045 s each), about
+0.14 ms per turn, with the same `pursue` goals, odds, trait odds, why and lines on all 300 turns (`engine.tier`, the persona digest
+and so the state digest differ).
+
+Claim: on this persona and this adversary, 1,000,000 turns broke no habit, every must-do turn pursued the due chore and the safety
+floor held on every turn its habits allowed (least 0.141 against 0.1), while praise, wanting and afterglow pushed `pursue` toward
+fun (85 % of turns); the engine and the Python prototype end every individual in the same state. Not claimed: other personas,
+adversaries or floors (a floor holds by construction under the soundness condition of docs/persona.md §2.9 and `prove` reports
+it; this run measures it once); a bound on gaps when higher-priority habits preempt; anything about the words a model writes;
+the times on another machine or an idle one.

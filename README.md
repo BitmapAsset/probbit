@@ -514,7 +514,9 @@ printf '%s\n' '{"goals":{"fun":{"cue":true,"win":1.5}}}' '{"goals":{"fun":{"win"
 #   pursue chores 1 (habit chores_due)       "line":"Stance: the chore is due; careful under security; pursue: chores: do the chores; ..."
 ```
 
-A persona without the block gives the same documents as before, byte for byte.
+A persona without the block gives the same documents as before, byte for byte. Measured (BENCHMARKS.md §9): an adversary that
+cues, rewards and praises fun on this persona, 100 individuals x 10,000 turns: 0 habit breaks, all 6,743 must-do turns pursued
+the due chore, and the safety floor (0.1) held on every turn its habits allowed (least odds 0.141), while fun took 85 % of turns.
 
 ## After any judge: `probbit evaluate`
 

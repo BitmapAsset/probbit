@@ -394,8 +394,8 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
 - The whole program is enumerated before its components when its raw space (the product of every variable's levels, the
   twin's included) is at most `exact_limit`. A drives block multiplies that space by G² (`pursue` and its twin, G goals), so a
   small persona can land there: the drives fixture of the tests (four 3-level traits, a 3-level mood, four goals) has 944,784
-  states and takes about 25 ms per turn, where without the block it has 59,049 (1.9 ms). Setting `engine.exact_limit` below the
-  raw space (`exact_limit: 1000`) has the engine solve it per component instead: the same odds, 0.13 ms per turn.
+  states and takes about 19 ms per turn, where without the block it has 59,049 (1.3 ms). Setting `engine.exact_limit` below the
+  raw space (`exact_limit: 1000`) has the engine solve it per component instead: the same odds, 0.14 ms per turn (BENCHMARKS.md §9).
 - Fixed work makes the answer a pure function of the program and the seed even when the sampler runs. `polish_sweeps: 0` means
   no plan polish (never the wall-clock one, which would make a sampled turn depend on the machine's speed).
 - The turn seed: `S = first 4 bytes of sha256("probbit-persona/1|turn|<name>|<seed>|<turn>")`, masked to 31 bits.

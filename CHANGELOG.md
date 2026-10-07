@@ -23,7 +23,10 @@ All notable changes to this project are documented here. The format follows
   (strands log them, `live verify` replays them), MCP, the Python wrapper and the browser module. `lint` lists the habits
   that can exclude a floor goal and the floors whose lift can reach 50; `prove` reads the drives as boxes and reports goal
   floors as held by construction; `fuzz` adds goal signals to its events.
-- `bench/drives_adversary.py`: an adversary that wants one goal, over N individuals x 10,000 turns through `probbit live`.
+- `bench/drives_adversary.py` and BENCHMARKS.md §9: an adversary that wants one goal, over N individuals x 10,000 turns through
+  `probbit live`. On the drives fixture, 100 x 10,000 turns: 0 habit breaks, every must-do turn (6,743) pursued the due chore,
+  the safety floor of 0.1 held on every turn its habits allowed (least odds 0.141), and every individual ends in the state the
+  Python prototype of the design reaches on the same events (100 of 100 digests).
 
 ### Changed
 - MCP: the input schemas of `probbit_persona_turn` (`inputs`) and `probbit_live_event` (`event`) declare `goals`, so a client
