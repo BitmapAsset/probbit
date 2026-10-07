@@ -498,6 +498,19 @@ Learning here is a capped nudge to a few weights per trait, credited to the leve
 trait also pushes the others' levels); rule immunity is architectural, not trained. The proofs and counts cover the stance; whether
 a model writes in it is measured per model.
 
+### Watch it live: `probbit monitor`
+
+`probbit monitor pip.strand` replays a strand with the rules of `live verify` and draws the individual's inner state as live bars:
+each trait's levels with their odds, the moods, the event's inputs, the habits that bound, the learned weights and the line, in the
+terminal (`--follow` redraws as the strand grows) or as a page on 127.0.0.1 (`--serve`). It reads the strand and sends nothing
+anywhere ([docs/persona.md](docs/persona.md) §5.8). No strand yet? The tutor's week, in under a minute:
+
+```sh
+probbit monitor --demo --serve --open
+```
+
+![probbit monitor: the tutor's week in the browser, the bars moving with every event](docs/probbit-monitor.gif)
+
 ## After any judge: `probbit evaluate`
 
 Decision models (TypeSafe's Jev, Cloudflare's Clef and Clef-flash, local System One servers) are judges: content in, a
@@ -681,7 +694,8 @@ or Windows.
 - Hardware backend through `probbit-ir` when a p-bit fabric is available.
 
 ## Documentation map
-- [docs/CHEATSHEET.md](docs/CHEATSHEET.md): one page: the verdicts, the tiers, `bound`, the exit codes, every persona and live command.
+- [docs/CHEATSHEET.md](docs/CHEATSHEET.md): one page: the verdicts, the tiers, `bound`, the exit codes, every persona, live and
+  monitor command.
 - [BENCHMARKS.md](BENCHMARKS.md): every number, with machine, load and `N`.
 - [USE-CASES.md](USE-CASES.md): what the measurements support, by problem shape and by industry.
 - [docs/probbit-ir-json.md](docs/probbit-ir-json.md): the `probbit-ir` JSON v1 wire format, instructions, resource controls, limits.
@@ -690,8 +704,8 @@ or Windows.
 - [docs/agents.md](docs/agents.md): calling probbit from a shell, Python, Node, PowerShell, MCP agents and a browser, and
   `probbit evaluate` after a decision model.
 - [docs/persona.md](docs/persona.md): `probbit persona`, the individuality layer: the persona file, the compilation, the stance and
-  state documents, the canonical JSON, testing a character, bounded learning and `probbit live` (§2.8, §5.7), what a persona can
-  not do; [examples/persona/](examples/persona/): three personas + goldens.
+  state documents, the canonical JSON, testing a character, bounded learning, `probbit live` and `probbit monitor` (§2.8, §5.7,
+  §5.8), what a persona can not do; [examples/persona/](examples/persona/): three personas + goldens.
 - [python/](python/): `probbit.py`, a zero-dependency subprocess wrapper (with `evaluate`, the persona functions and a stdlib mock
   judge), its tests and three examples.
 - [playground/](playground/): one static page that runs probbit in a browser (`probbit-wasm`, built by `playground/build.sh`).

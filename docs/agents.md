@@ -98,7 +98,9 @@ commands' own documents and return the commands' own JSON, byte for byte:
 
 The persona and live tools run in the server's process and keep nothing between calls: pass the returned state back on the next
 turn and put `stance.line` into the model's prompt (after any cached prefix). A refused or fallback stance is an answer; a bad
-persona, state, input or event is a tool error with the `{"error": {"code": "persona", ...}}` object.
+persona, state, input or event is a tool error with the `{"error": {"code": "persona", ...}}` object. A person can watch the
+individual behind a `strand_path` as it grows: `probbit monitor STRAND --serve --open` (a page on 127.0.0.1) or `--follow` in a
+terminal ([persona.md](persona.md) §5.8).
 
 `flags` are the command's flags without the dashes: `{"budget_ms": 200, "seed": 3, "summary": true}`; `summary: true`
 returns the compact answer (README, "First five minutes"). `infeasible` and `refused` / `declined` are answers; bad input
