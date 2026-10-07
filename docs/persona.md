@@ -609,11 +609,11 @@ documents:
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
 
 The page draws the terminal's board in a dark theme, the bars moving as the odds do (`prefers-reduced-motion` respected), from
-360 px wide up. Nothing is written, and nothing leaves the machine.
+360 px wide up. No file is changed, and nothing leaves the machine.
 
 **Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
-5.7) in memory, paced 1 s per hour and each night in 2 s, under a minute: at a terminal, or with `--serve`, over and over.
-`--demo --once`, or a pipe, prints its last frame.
+5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:
+at a terminal, or with `--serve`, over and over. `--demo --once`, or a pipe, prints its last frame.
 
 Exit codes: 0 when every line replays, 1 at a line that differs (the frame names it and shows the event before it), 2 for a bad
 flag, a port that cannot be had, or a file that cannot be read or is not a strand.

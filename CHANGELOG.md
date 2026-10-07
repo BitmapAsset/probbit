@@ -13,8 +13,9 @@ All notable changes to this project are documented here. The format follows
   in force (the bound ones marked, the violations counter), the learned deltas within their cap, the drives when a document
   carries them, and the stance line. `--follow` replays appended lines within a second (a truncated or rotated strand is replayed
   from the start, with a warning), `--once` prints one frame, `--plain` draws in plain ASCII. `probbit monitor --demo` plays the
-  tutor's scripted week (the week `live --demo week` writes, seed 2) in memory, paced 1 s per hour and each night in 2 s. Exit 0, 1 at a line that differs (named
-  in the frame), 2 for a bad flag or a file that is not a strand. It writes nothing and sends nothing; no dependencies.
+  tutor's scripted week (the week `live --demo week` writes, seed 2, through a temporary file it removes at once), paced 1 s per
+  hour and each night in 2 s. Exit 0, 1 at a line that differs (named in the frame), 2 for a bad flag or a file that is not a
+  strand. It changes no file and sends nothing; no dependencies.
 - **`probbit monitor STRAND --serve [--port N] [--open]`** (also with `--demo`): the same board as a page in the browser. A server
   on 127.0.0.1 (std `TcpListener`; it binds no other address, and refuses requests addressed to another host) follows the strand
   and serves one page embedded in the binary (styles and script inline; it fetches no fonts, styles or scripts), its server-sent
