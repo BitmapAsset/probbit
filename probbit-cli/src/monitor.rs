@@ -524,13 +524,20 @@ fn serve(port: u16, open: bool, feed: &mut dyn FnMut(&Hub)) -> ! {
 fn feed_strand(path: &str, hub: &Hub, eng: Engine) -> ! {
     let mut fl = Followed::new(path);
     let mut fresh = true;
-    loop {
-        let mut docs = vec![];
-        let got = fl.poll(eng, &mut |w| docs.push(doc_of(w)));
-        if got.is_some() || fresh { publish(hub, &meta_json(fl.w.as_ref(), path), &frame_json(fl.w.as_ref(), fl.bad_head.as_ref(), fl.note), docs, got == Some(true)); fresh = false; }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    loop { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP); std::thread::sleep(Duration::from_millis(100)); }
 }
+/// One poll of the strand for the page: what was appended is replayed and published. A long replay (a large strand read from
+/// its header) is also published every `every` on the way, with a note, so the page draws while it catches up.
+fn step(fl: &mut Followed, path: &str, hub: &Hub, eng: Engine, fresh: &mut bool, every: Duration) {
+    let (mut docs, mut tick) = (vec![], std::time::Instant::now());
+    let got = fl.poll(eng, &mut |w| { docs.push(doc_of(w));
+        if tick.elapsed() >= every { tick = std::time::Instant::now();
+            publish(hub, &meta_json(Some(w), path), &frame_json(Some(w), None, Some(CATCHING_UP)), std::mem::take(&mut docs), false); } });
+    if got.is_some() || *fresh { publish(hub, &meta_json(fl.w.as_ref(), path), &frame_json(fl.w.as_ref(), fl.bad_head.as_ref(), fl.note), docs, got == Some(true)); *fresh = false; }
+}
+/// How often a long replay shows where it is, and what it says meanwhile
+const CATCH_UP: Duration = Duration::from_millis(250);
+const CATCHING_UP: &str = "replaying the strand from its header: the board catches up";
 /// The demo week for the page, paced, over and over (5 s between the weeks; a week that starts over goes from its last event
 /// straight to event 1, without the empty board in between)
 fn feed_demo(hub: &Hub, eng: Engine) -> ! {
@@ -633,7 +640,11 @@ fn follow(path: &str, s: &Style, fps: u32, eng: Engine) -> ! {
     let (mut dirty, mut drawn, mut size) = (true, None::<std::time::Instant>, (0, 0));
     let gap = std::time::Duration::from_secs_f64(1.0 / fps as f64);
     loop {
-        if fl.poll(eng, &mut |_| {}).is_some() { dirty = true; }
+        // a long replay (a large strand read from its header) is drawn on the way at a terminal, with a note
+        let mut tick = std::time::Instant::now();
+        let mut catch_up = |w: &Watch| if tty && tick.elapsed() >= CATCH_UP { tick = std::time::Instant::now(); let size = theme::size(1);
+            redraw(frame(Some(w), None, path, Some(CATCHING_UP), &Style { cols: size.0.max(20), ..*s }), size); };
+        if fl.poll(eng, &mut catch_up).is_some() { dirty = true; }
         let now = if tty { theme::size(1) } else { (0, 0) };
         if now != size { size = now; dirty = true; }
         if dirty && drawn.map_or(true, |t| t.elapsed() >= gap) {
@@ -758,6 +769,23 @@ mod tests {
         let bad = frame_json(Some(&w), Some(&(3, "the stance differs".into())), Some("a note"));
         assert_eq!((bad.get("diverges").and_then(|d| d.get("line")), bad.get("note")), (Some(&Json::Num(3.0)), Some(&Json::Str("a note".into()))));
         assert!(meta_json(None, "x").get("persona").is_none() && frame_json(None, None, None).get("doc") == Some(&Json::Null));
+    }
+
+    /// A long replay is published on the way (every `every`, with a note), then at its end without the note; a short one once
+    #[test]
+    fn a_long_replay_is_published_on_the_way() {
+        let text = strand(&format!("{}/../examples/persona/tutor.yaml", env!("CARGO_MANIFEST_DIR")), 5);
+        let f = std::env::temp_dir().join(format!("probbit-monitor-step-{}.strand", std::process::id()));
+        std::fs::write(&f, &text).unwrap(); let path = f.to_string_lossy().to_string();
+        for (every, publishes) in [(Duration::ZERO, 6), (Duration::from_secs(3600), 1)] {
+            let hub: Hub = Arc::new((Mutex::new(Board::default()), Condvar::new()));
+            let (mut fl, mut fresh) = (Followed::new(&path), true);
+            step(&mut fl, &path, &hub, &run, &mut fresh, every);
+            let b = board(&hub);
+            assert_eq!((b.seq, b.docs.len(), b.last, b.layout), (publishes, 5, 5, 1), "{every:?}");
+            assert_eq!(json::parse(&b.frame).unwrap().get("note"), Some(&Json::Null), "{every:?}: the last frame has no note");
+        }
+        let _ = std::fs::remove_file(&f);
     }
 
     /// The tutor `--demo` embeds is examples/persona/tutor.yaml

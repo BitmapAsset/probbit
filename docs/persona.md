@@ -593,7 +593,8 @@ level as centred bars within ±total_cap (with a learning block, section 2.8). T
 
 **Terminal.** `--once` prints one frame and exits (the default without `--follow`). `--follow` polls the file every 100 ms and
 draws appended lines within a second (a line counts once its newline is written; a truncated, removed or rotated strand is
-replayed from the start, with a warning); `--fps N` caps the redraws. `--plain` draws plain ASCII; colour follows the rules of
+replayed from the start, with a warning); `--fps N` caps the redraws. While a long strand replays from its header (10,000
+events: about 3.5 s on an Apple M4), the board is drawn every 250 ms with a note, at a terminal and on the page. `--plain` draws plain ASCII; colour follows the rules of
 the other commands (`NO_COLOR`, `PROBBIT_THEME=plain`, `TERM=dumb`).
 
 **Browser.** `--serve` follows the strand and binds 127.0.0.1 (std `TcpListener`; port 0, a free one, unless `--port N`) and no
