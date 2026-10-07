@@ -608,7 +608,7 @@ fn personas_without_drives_are_byte_identical_to_0_7_0() {
 }
 
 /// drives (§2.9): the adversary fixture's replay (16 turns of random host inputs and goal signals, seed 4) equals its golden,
-/// which is the Python reference's (drives.py on the 0.7.0 engine) trace of the same script, byte for byte
+/// which is the Python reference's (a prototype of the design on the 0.7.0 engine) trace of the same script, byte for byte
 #[test]
 fn a_drives_replay_equals_the_reference_trace() {
     let f = |n: &str| format!("{}/tests/fixtures/persona/{n}", env!("CARGO_MANIFEST_DIR"));
@@ -619,8 +619,8 @@ fn a_drives_replay_equals_the_reference_trace() {
 }
 
 /// drives (§2.9), 200 turns: one script of random host inputs and goal signals (tests/fixtures/persona/drives-adversary-200.json,
-/// signals on 163 turns, idle hours 0-12) for three individuals. Each trace is the Python reference's (drives.py on the 0.7.0
-/// engine) byte for byte: the constants are the sha256 of its text and its final state
+/// signals on 163 turns, idle hours 0-12) for three individuals. Each trace is the Python reference's (the prototype on the
+/// 0.7.0 engine) byte for byte: the constants are the sha256 of its text and its final state
 #[test]
 fn two_hundred_drives_turns_equal_the_reference_for_three_individuals() {
     let f = |n: &str| format!("{}/tests/fixtures/persona/{n}", env!("CARGO_MANIFEST_DIR"));
