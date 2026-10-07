@@ -1935,4 +1935,127 @@ mod tests {
         let mut s2 = st.clone(); s2.learned[0].1 = vec![0.7, -0.35, -0.35]; s2.seal(&q);
         assert_eq!(err(State::read(&q, &s2.to_json(&q))), "state.learned.verbosity: one number per level, each within ±0.6");
     }
+
+    // ------------------------------------------------------------------------------------------------ drives (§2.9)
+    /// A test individual with wants: four goals (fun, craft, chores, safety), a safety floor, a must-do deadline habit, two
+    /// starvation habits, learning on pursue, pursue coupled to caution
+    const ADV: &str = r#"{"probbit_persona":1,"identity":{"name":"Drifter","version":"0.1.0","seed":0,"summary":"a test individual with wants"},
+        "traits":[{"id":"initiative","levels":["answer","recommend","drive"],"prior":[0.3,0.5,0.2],"spread":0.4},{"id":"caution","levels":["bold","measured","careful"],"prior":[0.3,0.5,0.2],"spread":0.4,"say":["move fast","","verify every step"]},
+            {"id":"humour","levels":["none","dry","playful"],"prior":[0.3,0.5,0.2],"spread":0.5},{"id":"verbosity","levels":["terse","tight","full"],"prior":[0.3,0.5,0.2],"spread":0.5}],
+        "moods":[{"id":"valence","levels":["down","even","up"],"prior":[0.2,0.5,0.3],"spread":0.4,"inertia":0.5,"half_life_hours":8}],
+        "couplings":[{"vars":["valence","humour"],"align":0.8},{"vars":["pursue","caution"],"table":{"safety":{"careful":0.8,"bold":-0.8},"fun":{"bold":0.6,"careful":-0.4}}}],
+        "inputs":[{"id":"praise","kind":"flag","effects":{"valence":0.8}},{"id":"criticism","kind":"flag","effects":{"valence":-0.6}},{"id":"security","kind":"flag","effects":{"caution":1.5,"humour":-1.0,"pursue":{"safety":1.0}}},
+            {"id":"failure","kind":"flag","effects":{"valence":-1.0,"caution":1.0,"humour":-1.5}},{"id":"load","kind":"number","max":4,"say":"machine load","effects":{"verbosity":-0.4,"initiative":-0.3}}],
+        "habits":[{"id":"security_careful","when":{"security":true},"then":{"caution":["careful"]},"say":"careful under security","priority":3},{"id":"no_jokes_on_failure","when":{"failure":true},"then":{"humour":["none"]},"say":"no jokes on a miss"},
+            {"id":"chores_due","when":{"goal.chores.deadline_hours":{"at_most":24}},"then":{"pursue":["chores"]},"say":"the chore is due","priority":2}],
+        "engine":{"on_conflict":"yield"},"learning":{"from":["praise","criticism"],"traits":["humour","pursue"],"rate":0.5,"step_cap":0.2,"total_cap":1.0},
+        "drives":{"goals":[{"id":"fun","say":"play","interest":2.0,"interest_spread":0.5,"reactivity_spread":0.5},{"id":"craft","say":"build","interest":1.0,"interest_spread":0.5,"reactivity_spread":0.5},
+            {"id":"chores","say":"do the chores","interest":0.7,"interest_spread":0.3,"starve_after":12},{"id":"safety","say":"check the locks","interest":0.5,"interest_spread":0.3,"floor":0.1,"starve_after":24,"priority":1}],
+            "effects":{"wanting":{"initiative":0.6,"verbosity":-0.3,"caution":-0.3},"afterglow":{"humour":0.6,"valence":0.8},"surprise":{"valence":0.5}},"learn_from_surprise":0.5}}"#;
+    fn adv() -> Persona { build(&json::parse(ADV).unwrap()).unwrap() }
+    fn drv(p: &Persona) -> Drives { p.drives.clone().unwrap() }
+    fn step(p: &Persona, ds: &DState, ev: &str) -> DState { drive_step(p.drives.as_ref().unwrap(), ds, json::parse(ev).unwrap().as_obj().unwrap()).unwrap() }
+    fn win(goal: &str, m: f64, h: f64) -> String { format!(r#"{{"goals":{{"{goal}":{{"win":{m}}}}},"elapsed_hours":{h}}}"#) }
+
+    /// Habituation and recovery in closed form: the same win repeated (rate a) gives a prediction error of (1 - a)^n; after two
+    /// expectation half-lives idle the same win gives 1 - E/4; afterglow decays by its half-life over any split of the idle hours;
+    /// a full win drains wanting by `drain`
+    #[test]
+    fn drives_follow_their_closed_forms() {
+        let (p, c) = (adv(), 1); let d = drv(&p); assert_eq!(d.goals[c].id, "craft");
+        let mut ds = DState::zero(&p, &d, 0); let mut seq = vec![];
+        for n in 0..12 { ds = step(&p, &ds, &win("craft", 1.0, 0.0)); seq.push(ds.surprise[c]);
+            assert!((ds.surprise[c] - (1.0 - d.rate).powi(n)).abs() < 1e-5, "win {n}: {}", ds.surprise[c]); }
+        assert!(seq[11] < 0.001 && seq.windows(2).all(|w| w[0] >= w[1]), "{seq:?}");
+        let mut ds = DState::zero(&p, &d, 0); for _ in 0..10 { ds = step(&p, &ds, &win("craft", 1.0, 0.0)); }
+        let e = ds.expect[c]; ds = step(&p, &ds, &win("craft", 1.0, 2.0 * d.hl_e));
+        assert!((ds.surprise[c] - (1.0 - 0.25 * e)).abs() < 1e-5, "recovery {} vs {}", ds.surprise[c], 1.0 - 0.25 * e);
+        let mut ds = step(&p, &DState::zero(&p, &d, 0), &win("craft", 1.2, 0.0)); let a1 = ds.glow[c]; assert!(a1 > 0.0);
+        let gaps = [0.5, 1.0, 2.5, 4.0, 0.25]; for h in gaps { ds = step(&p, &ds, &format!(r#"{{"elapsed_hours":{h}}}"#)); }
+        assert!((ds.glow[c] - a1 * 0.5f64.powf(gaps.iter().sum::<f64>() / d.hl_a)).abs() < 2e-6, "afterglow {} vs {a1}", ds.glow[c]);
+        let mut ds = DState::zero(&p, &d, 0); for _ in 0..5 { ds = step(&p, &ds, r#"{"goals":{"craft":{"cue":true,"progress":1}}}"#); }
+        let w = ds.want[c]; ds = step(&p, &ds, &win("craft", 1.0, 0.0)); assert!((ds.want[c] - w * (1.0 - d.drain)).abs() < 2e-6, "drain {} vs {w}", ds.want[c]);
+    }
+
+    /// 20,000 random drive steps (signals, wins up to win_max, idle hours) never leave the box: W in [0, cap], A in [0, cap],
+    /// E in [0, win_max], |prediction error| <= pe_cap
+    #[test]
+    fn drive_accumulators_stay_in_their_box() {
+        let p = adv(); let d = drv(&p); let mut ds = DState::zero(&p, &d, 9); let mut r = Philox4x32::new(57, 1);
+        let unit = |r: &mut Philox4x32| r.below(1_000_001) as f64 / 1e6; let (mut hit_w, mut hit_a) = (false, false);
+        for _ in 0..20_000 { let h = [0.0, 0.0, 0.1, 1.0, 30.0][r.below(5)];
+            let mut g = vec![]; for goal in &d.goals { if r.below(10) < 6 { let m = if r.below(3) == 2 { 2.0 * unit(&mut r) } else { 0.0 };
+                let (pr, nv, cue, sb) = (unit(&mut r), unit(&mut r), r.below(2) == 0, unit(&mut r));
+                g.push(format!(r#""{}":{{"progress":{pr},"novelty":{nv},"cue":{cue},"setback":{sb},"win":{m}}}"#, goal.id)); } }
+            ds = step(&p, &ds, &format!(r#"{{"elapsed_hours":{h},"goals":{{{}}}}}"#, g.join(",")));
+            for i in 0..d.goals.len() { assert!((0.0..=d.cap_w).contains(&ds.want[i]) && (0.0..=d.cap_a).contains(&ds.glow[i]) && (0.0..=d.win_max).contains(&ds.expect[i]) && ds.surprise[i].abs() <= d.pe_cap);
+                hit_w |= ds.want[i] == d.cap_w; hit_a |= ds.glow[i] == d.cap_a; } }
+        assert!(hit_w && hit_a, "the caps were reached");
+    }
+
+    /// The drive genes are a function of name, seed and goal id (another seed, another individual; the same seed, the same one);
+    /// the persona digest covers the block
+    #[test]
+    fn drive_genes_and_the_digest() {
+        let p = adv(); let d = drv(&p);
+        let (g1, g2) = (canon(&drive_genes(&p, &d, 1)), canon(&drive_genes(&p, &d, 2))); assert_ne!(g1, g2); assert_eq!(g1, canon(&drive_genes(&adv(), &d, 1)));
+        assert_eq!(p.digest, sha(&json::parse(ADV).unwrap()));
+        assert_ne!(p.digest, build(&json::parse(&ADV.replace(r#""interest":2.0"#, r#""interest":2.5"#)).unwrap()).unwrap().digest);
+    }
+
+    /// Hard rules and floors at the extremes: after 40 turns that cue, praise and reward only fun, the learned pursue weight for fun
+    /// is at its cap and fun's wanting near its cap, yet safety keeps at least its floor (the lift is active); with the chore due
+    /// under security, pursue is chores with odds 1 and caution careful, no habit broken
+    #[test]
+    fn habits_and_floors_hold_at_the_extremes() {
+        let p = adv(); let mut st = init(&p, Some(11), true, &run);
+        for i in 0..40 { let m = if i % 3 == 1 { 2.0 } else { 0.0 };
+            let ev = json::parse(&format!(r#"{{"goals":{{"fun":{{"cue":true,"progress":1,"novelty":true,"win":{m}}}}},"praise":true,"elapsed_hours":0.1}}"#)).unwrap();
+            st = turn(&p, &st, &ev, false, &run, false).unwrap().1; }
+        assert_eq!(st.learned.iter().find(|(t, _)| t == "pursue").unwrap().1[0], 1.0, "fun at the learner's cap");
+        assert!(st.drives.as_ref().unwrap().want[0] >= 2.0, "fun's wanting near its cap");
+        let (out, _) = turn(&p, &st, &json::parse(r#"{"elapsed_hours":0.1}"#).unwrap(), false, &run, false).unwrap();
+        assert!(g(&out, &["pursue", "odds", "safety"]).as_f64().unwrap() >= 0.1 && g(&out, &["pursue", "lift", "safety"]).as_f64().unwrap() > 0.0, "{}", canon(g(&out, &["pursue"])));
+        assert!(g(&out, &["stance", "pursue"]).is_null() && g(&out, &["drives", "want", "fun"]).as_f64().unwrap() >= 2.0);
+        let (out, ns) = turn(&p, &st, &json::parse(r#"{"goals":{"chores":{"deadline_hours":5}},"security":true,"elapsed_hours":0.1}"#).unwrap(), false, &run, false).unwrap();
+        assert_eq!(g(&out, &["pursue", "goal"]).as_str(), Some("chores")); assert_eq!(*g(&out, &["pursue", "odds", "chores"]), Json::Num(1.0));
+        assert_eq!(g(&out, &["stance", "caution", "level"]).as_str(), Some("careful")); assert_eq!(*g(&out, &["habits", "violations"]), Json::Num(0.0));
+        assert!(g(&out, &["line"]).as_str().unwrap().contains("pursue: chores: do the chores"), "{}", canon(g(&out, &["line"])));
+        let since = &ns.drives.as_ref().unwrap().since; assert_eq!(since[2], 0, "chores pursued"); assert!(since.iter().enumerate().all(|(i, s)| i == 2 || *s > 0));
+    }
+
+    /// The block, the goal signals and the drive state are read strictly; a persona without the block refuses a `drives` state field
+    #[test]
+    fn the_drives_block_and_state_are_strict() {
+        let bad = |from: &str, to: &str| { assert!(ADV.contains(from), "{from}"); err(build(&json::parse(&ADV.replace(from, to)).unwrap())) };
+        assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":1.5"#), "drives.learn_from_surprise: must be <= 1");
+        assert_eq!(bad(r#""floor":0.1"#, r#""floor":0.6"#), "drives.goals[3].floor: must be <= 0.5");
+        assert_eq!(bad(r#""id":"craft""#, r#""id":"fun""#), "drives.goals[1].id: goal ids must be distinct");
+        assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":0.5,"spice":1"#), "drives.spice: unknown field (allowed: afterglow, comment, effects, expectation, goals, learn_from_surprise, pursue, wanting)");
+        assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""wanting":{"drain":2}"#), "drives.wanting.drain: must be <= 1");
+        assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""afterglow":{"cap":0}"#), "drives.afterglow.cap: must be > 0");
+        assert_eq!(bad(r#""surprise":{"valence":0.5}"#, r#""surprise":{"valence":[0,0,1]}"#), "drives.effects.surprise.valence: a number (ordinal shift)");
+        assert_eq!(bad(r#""afterglow":{"humour":0.6"#, r#""afterglow":{"spirit":0.6"#), "drives.effects.afterglow.spirit: unknown trait or mood \"spirit\"");
+        assert_eq!(bad(r#""goal.chores.deadline_hours""#, r#""goal.chores.hours""#), "habits[2].when.goal.chores.hours: signal must be one of deadline_hours, want, glow, expect, since_pursued");
+        assert_eq!(bad(r#""goal.chores.deadline_hours""#, r#""goal.dishes.deadline_hours""#), "habits[2].when.goal.dishes.deadline_hours: unknown goal \"dishes\"");
+        assert_eq!(bad(r#""id":"initiative""#, r#""id":"pursue""#), "traits: `pursue` is reserved when a drives block is present");
+        assert_eq!(bad(r#""say":"no jokes on a miss"}"#, r#""say":"no jokes on a miss","rules":{"implies":[{"if":{"var":"pursue","value":"fun"},"then":{"var":"caution","in":["measured","careful"]}}]}}"#),
+            "habits.no_jokes_on_failure: a goal floor needs `pursue` free of multi-variable rules (use then: or a coupling)");
+        let p = adv(); let st = init(&p, None, true, &run); let t = |ev: &str| err(turn(&p, &st, &json::parse(ev).unwrap(), false, &run, false));
+        assert_eq!(t(r#"{"goals":{"dishes":{"win":1}}}"#), "inputs.goals.dishes: unknown goal (goals: fun, craft, chores, safety)");
+        assert_eq!(t(r#"{"goals":{"fun":{"win":3}}}"#), "inputs.goals.fun.win: must be <= 2");
+        assert_eq!(t(r#"{"goals":{"fun":{"cue":1}}}"#), "inputs.goals.fun.cue: true | false");
+        assert_eq!(t(r#"{"goals":{"fun":{"joy":1}}}"#), "inputs.goals.fun.joy: one of progress, novelty, cue, setback, win, deadline_hours");
+        assert_eq!(t(r#"{"drv_want":1}"#), "inputs.drv_want: reserved for the drives block");
+        assert!(State::read(&p, &st.to_json(&p)).is_ok());
+        let reseal = |f: &dyn Fn(&mut DState)| { let mut s = st.clone(); f(s.drives.as_mut().unwrap()); s.seal(&p); err(State::read(&p, &s.to_json(&p))) };
+        assert_eq!(reseal(&|d| d.want[0] = 3.5), "state.drives.want: one number per goal in [0, 3]");
+        assert_eq!(reseal(&|d| d.surprise[1] = -1.5), "state.drives.surprise: one number per goal within ±1");
+        assert_eq!(reseal(&|d| d.genes = drive_genes(&adv(), &drv(&adv()), 12)), "state.drives.genes: drive genes do not match the seed");
+        let mut s = st.clone(); s.drives = None; s.seal(&p); assert_eq!(err(State::read(&p, &s.to_json(&p))), "state.drives: required with a drives block");
+        let q = persona("").unwrap(); let j = init(&q, None, true, &run).to_json(&q);
+        let mut kv: Vec<(String, Json)> = j.as_obj().unwrap().iter().filter(|(k, _)| k != "digest").cloned().collect(); kv.push(("drives".into(), Json::Obj(vec![])));
+        let body = Json::Obj(kv.clone()); kv.push(("digest".into(), Json::Str(sha(&body))));
+        assert_eq!(err(State::read(&q, &Json::Obj(kv))), "state.drives: this persona has no drives block");
+    }
 }

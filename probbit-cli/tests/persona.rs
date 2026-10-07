@@ -587,3 +587,22 @@ fn live_watch_follows_an_events_file() {
     assert_eq!(String::from_utf8_lossy(&o.stdout), at_once); assert_eq!(read(&s1), read(&s2)); assert_eq!(at_once.lines().count(), 3);
     for x in [&s1, &s2] { let _ = std::fs::remove_file(x); }
 }
+
+/// The `drives` block (0.8.0) is additive: a persona without it gives 0.7.0's documents byte for byte, with `goals` in the inputs
+/// too (an ignored input there, as it was in 0.7.0). The digests below are 0.7.0's own `persona replay` output on the same scripts
+/// (tests/fixtures/persona/drives-noblock.json: 40 random turns per example persona, with goal signals and idle hours).
+#[test]
+fn personas_without_drives_are_byte_identical_to_0_7_0() {
+    let f = parse(&read(&format!("{}/tests/fixtures/persona/drives-noblock.json", env!("CARGO_MANIFEST_DIR"))));
+    for (n, trace, fin) in [
+        ("ops-engineer", "095d2a2fe9101d65158176e1a9dd3c72e8cff0c92d1e77da95e7fbd226e353e3", "314cd4885b0097c59021a38a3470d6ab91896bad3a8f3802a7c6c29ceffa8835"),
+        ("tutor", "781acf63e0cf143a7d0ae5f29630b5106ce264e39d2e4c7d91a3c6fdbf71f25d", "2374f248c5fcc701082acff586cacd74cf8f82240d7cd2f6b67a9a8a13ae8521"),
+        ("trader-assistant", "ef8abbd4f939ab9b49d08072db52d4cc8fbbd406c5a139d0dc1e26c963cc82c6", "a9cf897d2006994688ee3014e7ff5cf00582ae25c83b8146510aa5e6a08212f6")] {
+        let v = s(&f, &[n]); let script = tmp(&format!("noblock-{n}.json")); std::fs::write(&script, jw(s(v, &["turns"]))).unwrap();
+        let seed = format!("{}", s(v, &["seed"]).as_f64().unwrap() as u64);
+        let (c, out, e) = probbit(&["persona", "replay", &ex(&format!("{n}.yaml")), "--seed", &seed, "--script", &script], ""); assert_eq!(c, 0, "{e}");
+        assert_eq!(e.trim(), format!("replay: 40 turns, trace sha256 {trace}, final state sha256:{fin}"), "{n}");
+        assert!(out.lines().filter(|l| l.contains(r#""ignored":["goals"]"#)).count() > 10, "{n}: goals given and ignored");
+        assert!(!out.contains(r#""pursue""#) && !out.contains(r#""drives""#), "{n}: no drives fields without the block");
+    }
+}
