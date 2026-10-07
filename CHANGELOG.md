@@ -28,6 +28,22 @@ All notable changes to this project are documented here. The format follows
   the safety floor of 0.1 held on every turn its habits allowed (least odds 0.141), and every individual ends in the state the
   Python prototype of the design reaches on the same events (100 of 100 digests).
 
+- **`probbit monitor STRAND`** (docs/persona.md §5.8, probbit-cli/src/monitor.rs): watch an individual's inner state as live
+  horizontal bars. It replays the strand with the rules of `live verify` (`live::Replay`, now shared by both), recomputing every
+  stance document from the strand alone, and draws the latest event: each trait's levels with their odds (the level taken
+  highlighted, its phrase), the moods with a sparkline of the last 50 events, the event's inputs and history features, the habits
+  in force (the bound ones marked, the violations counter), the learned deltas within their cap, the drives when a document
+  carries them, and the stance line. `--follow` replays appended lines within a second (a truncated or rotated strand is replayed
+  from the start, with a warning), `--once` prints one frame, `--plain` draws in plain ASCII. `probbit monitor --demo` plays the
+  tutor's scripted week (the week `live --demo week` writes, seed 2, through a temporary file it removes at once), paced 1 s per
+  hour and each night in 2 s. Exit 0, 1 at a line that differs (named in the frame), 2 for a bad flag or a file that is not a
+  strand. It changes no file and sends nothing; no dependencies.
+- **`probbit monitor STRAND --serve [--port N] [--open]`** (also with `--demo`): the same board as a page in the browser. A server
+  on 127.0.0.1 (std `TcpListener`; it binds no other address, and refuses requests addressed to another host) follows the strand
+  and serves one page embedded in the binary (styles and script inline; it fetches no fonts, styles or scripts), its server-sent
+  events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s) and `/doc/N`, event N's stance document
+  as `probbit live` printed it. The URL is the line on stdout; `--open` serves the same and starts the default browser, best
+  effort. `probbit monitor --demo --open` plays the week over and over in the browser.
 ### Changed
 - MCP: the input schemas of `probbit_persona_turn` (`inputs`) and `probbit_live_event` (`event`) declare `goals`, so a client
   that checks arguments against them passes a drives persona's goal signals.

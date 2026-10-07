@@ -1,0 +1,21 @@
+probbit monitor Pip 1.1.0 | seed 2 | individual 0231de28 | event 18 | +1.00 h since the event before | replay verified [ok]
+STANCE  warmth      --##################   cool 0.00   neutral 0.08  [warm 0.92]  warm and encouraging
+        directness  =========#########==   gentle 0.42  [balanced 0.46]  blunt 0.11
+        verbosity   =################===   terse 0.06  [short 0.82]  full 0.12   a short explanation
+        humour      ####################  [none 1.00]  light 0.00   playful 0.00   no jokes
+        formality   ##############------  [casual 0.69]  neutral 0.30   formal 0.01   casual
+        initiative  ===##########=======   follow 0.18  [suggest 0.49]  lead 0.33   suggest what to try next
+        caution     =======##########===   bold 0.35  [measured 0.52]  careful 0.13
+        curiosity   ==-------###########   focused 0.09   open 0.35  [exploring 0.56]  ask what they think first
+        emoji       ======##############   none 0.30  [sparse 0.70]  rich 0.00   one emoji at most
+MOODS   valence     =======##########===   down 0.35  [even 0.52]  up 0.13   =-++***.=+-=+-++*-
+        arousal     =====########=======   calm 0.25  [steady 0.39]  keyed 0.36   ==================
+SENSES  sentiment neutral  ( ) confused  ( ) error  (x) loss  (x) praise  ( ) criticism  ( ) claim_done
+        stakes [........] 0.00  time_pressure [........] 0.00  clock +1.00 h
+        history errors_in_row 0/3  confused_recently 0/3
+HABITS  [no_jokes_on_loss]  flourish_budget  no_formal_emoji  check_last | violations 0
+LEARNED verbosity   terse    --|      -0.46  short      |+++++ +1.00  full -----|      -1.00  (cap +/-1)
+        humour      none -----|      -0.98  light      |+++++ +1.00  playful     -|      -0.20
+LINE    Stance: no jokes, be kind; a short explanation; one emoji at most; warm and encouraging; suggest what to try next; ask what they think first; casual.
+        why: no jokes, be kind (habit); learner reports a failure -> humour down, valence down; praise -> valence up, humour up
+strand STRAND | written by probbit 0.7.0 | replay: probbit live verify STRAND

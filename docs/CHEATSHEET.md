@@ -36,6 +36,7 @@ The exact tiers run before the sampler:
 - `persona`: 0 done; 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or
   prove left a rule unknown; 2 bad persona / state / inputs / script / rule, or bad flag.
 - `live`: 0 done; 1 verify: a line differs; 2 a bad persona, state, event or flag.
+- `monitor`: 0 every line replays; 1 a line differs; 2 a bad flag, a port that cannot be had, or a file that is not a strand.
 
 ## `probbit persona <sub> PERSONA`
 | sub | does |
@@ -52,12 +53,14 @@ The exact tiers run before the sampler:
 | `compile --state STATE [--inputs ...]` | the turn's probbit-ir program |
 | `describe` | traits, moods, inputs, habits, agenda |
 
-## `probbit live`
+## `probbit live`, `probbit monitor`
 | command | does |
 |---|---|
 | `live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE]` | JSONL events in, one stance per event out |
 | `live PERSONA --demo week [--seed N] [--plain]` | a scripted week: learning to a cap, a night, rules that hold |
 | `live verify STRAND` | replay a strand; the earliest line that differs |
+| `monitor STRAND [--follow] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars: the terminal, or a page on 127.0.0.1 |
+| `monitor --demo [--open]` | the tutor's week, paced, in under a minute |
 
 ## Testing a character
 - `lint`: contradicting habits; with `--props`, every rule proved or fuzzed;

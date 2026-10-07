@@ -19,7 +19,8 @@ This document is normative for the file format, the compilation, the stance docu
 `probbit persona` (probbit-cli/src/persona.rs and yaml.rs, no dependency) and served on every surface with the same documents: the
 CLI, `probbit mcp` (tools `probbit_persona_init`, `probbit_persona_turn`), the Python wrapper (`probbit.persona_init`,
 `persona_turn`, `persona_replay`) and the browser module (probbit-wasm ops 4 and 5). `probbit live` (section 5.7, live.rs) keeps an
-individual running on a clock, with learning (section 2.8) and a replayable log. The example personas and their goldens are in
+individual running on a clock, with learning (section 2.8) and a replayable log; `probbit monitor` (section 5.8, monitor.rs)
+draws its inner state live from that log. The example personas and their goldens are in
 [examples/persona/](../examples/persona/). An independent reference implementation of this format (Python) gives the same
 documents byte for byte on every example turn (section 5.3).
 
@@ -687,6 +688,55 @@ Exit codes: `live` 0 when every event got its stance; 2 for a bad persona, state
 prints one `{"error"}` object on stdout, changes nothing and the run goes on). `verify` 0 when every line replays, 1 at a line
 that differs, 2 for a bad flag or an unreadable file.
 
+### 5.8 Monitor: watch an individual's inner state
+
+`probbit monitor STRAND` draws an individual's inner state as live horizontal bars, in the terminal or as a page in the browser.
+It replays the strand with the rules of `live verify` (the two share one replay), recomputing every stance document from the
+strand alone: it needs no other log, works for any strand on any machine, and says "replay verified" while every line checks,
+or names the line that differs.
+
+```sh
+probbit monitor pip.strand --follow              # bars in the terminal, redrawn as the strand grows
+probbit monitor pip.strand --open                # the same board as a page at http://127.0.0.1:PORT/, in the browser
+probbit monitor --demo --open                    # the tutor's week, paced, for someone without a strand yet
+```
+
+**What it shows.** The latest event. A header: persona and version, seed, the individual's digest, the event number, the hours
+since the event before, the replay badge. The stance: one row per trait, its levels as segments sized by their odds, the level
+taken in colour and the phrase it says. The moods, with a sparkline of the last 50 events. The senses: the event's inputs as the
+turn used them (flags lit, numbers as bars, levels by name, the clock) and the history features against their caps. The habits
+in force, the ones that bound in colour, and the violations counter (0 by construction, section 2.5). The learned deltas per
+level as centred bars within ±total_cap (with a learning block, section 2.8). The drives, when a document carries `pursue` or
+`drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
+
+**Terminal.** `--once` prints one frame and exits (the default without `--follow`). `--follow` polls the file every 100 ms and
+draws appended lines within a second (a line counts once its newline is written; a truncated, removed or rotated strand is
+replayed from the start, with a warning); `--fps N` caps the redraws. While a long strand replays from its header (10,000
+events: about 3.5 s on an Apple M4), the board is drawn every 250 ms with a note, at a terminal and on the page. `--plain`
+draws plain ASCII; colour follows the rules of the other commands (`NO_COLOR`, `PROBBIT_THEME=plain`, `TERM=dumb`).
+
+**Browser.** `--serve` follows the strand and binds 127.0.0.1 (std `TcpListener`; port 0, a free one, unless `--port N`) and no
+other address: there is no host flag. The URL is the line it prints on stdout; `--open` serves the same and starts the default
+browser (`BROWSER` if set, else `open`, `cmd /c start` or `xdg-open`), best effort. It answers GET requests addressed to
+`127.0.0.1:PORT` or `localhost:PORT`, and refuses others (403), so a page of another site whose name resolves to 127.0.0.1
+cannot read the documents:
+
+| route | answer |
+|---|---|
+| `/` | the page: one file embedded in the binary (about 21 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
+| `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}`, that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
+| `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
+
+The page draws the terminal's board in a dark theme, the bars moving as the odds do (`prefers-reduced-motion` respected), from
+360 px wide up. No file is changed, and nothing leaves the machine.
+
+**Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
+5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:
+at a terminal, or with `--serve`, over and over. `--demo --once`, or a pipe, prints its last frame.
+
+Exit codes: 0 when every line replays, 1 at a line that differs (the frame names it and shows the event before it), 2 for a bad
+flag, a port that cannot be had, or a file that cannot be read or is not a strand.
+
 ## 6. What a persona can NOT do
 
 - It does not write, read or check text. Text-level rules (banned phrases, exact formats, facts) stay in the prompt or in
@@ -725,9 +775,10 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
 | `probbit live verify STRAND` | replay a strand from its header alone: ok, or the earliest line that differs (exit 1) |
+| `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N]`, `probbit monitor --demo [...]` | watch an individual's inner state: the strand replayed as live bars in the terminal, or as a page on 127.0.0.1 (section 5.8) |
 
 A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes
-(`live`'s are in section 5.7):
+(`live`'s are in section 5.7, `monitor`'s in section 5.8):
 0 done (every turn status is an answer), 1 `lint` found an unresolved contradiction, `fuzz` a counterexample or `prove` an
 unknown rule, 2 a bad persona, state, input, script or rule
 (ONE `{"error": {"code": "persona", "path", "message"}}` object on stdout) or a bad flag (stderr). The engine's resource controls
