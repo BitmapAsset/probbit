@@ -61,34 +61,59 @@ impl Live {
     pub fn head(&self) -> &str { &self.prev }
 }
 
+/// A strand replayed line by line: `verify` and `probbit monitor` (§5.8) share it, so both read a strand with one set of
+/// rules. `open` checks the header and rebuilds the individual; each `step` replays one event line on the fixed clock and
+/// checks it (`prev`, `n`, the stance and state digests, the bytes). After an error the replay is spent: the chain past the
+/// line that differs cannot be checked.
+pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize }
+impl Replay {
+    /// The header line (without its line ending) -> the replay, ready for event lines; Err((1, what differs))
+    pub fn open(head: &str) -> Result<Replay, (usize, String)> {
+        let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
+        if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
+        let doc = h.get("document").cloned().ok_or((1, "the header has no persona document".to_string()))?;
+        let p = persona::build(&doc).map_err(|e| (1, format!("the persona document: {}: {}", e.path, e.msg)))?;
+        if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
+        let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, format!("the initial state: {}: {}", e.path, e.msg)))?;
+        let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
+        if header != head { return Err((1, "the header is not as written".into())); }
+        Ok(Replay { live, header: h, doc, line: 1 })
+    }
+    /// One event line (without its line ending) -> the stance document it replays to; Err((its 1-based line number, what differs))
+    pub fn step(&mut self, l: &str, eng: Engine) -> Result<Json, (usize, String)> {
+        let (i, live) = (self.line + 1, &mut self.live);
+        let j = json::parse(l).map_err(|e| (i, format!("not JSON: {}", e.msg)))?;
+        if persona::canon(&j) != l { return Err((i, "not canonical JSON".into())); }
+        if j.get("prev").and_then(Json::as_str) != Some(live.head()) { return Err((i, "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)".into())); }
+        if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i, format!("n is not {}", live.n + 1))); }
+        let ev = j.get("inputs").ok_or((i, "no inputs".to_string()))?;
+        let (stance, line) = live.event(ev, eng).map_err(|e| (i, format!("{}: {}", e.path, e.msg)))?;
+        if j.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
+        if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
+        if line != l { return Err((i, "the line differs".into())); }
+        self.line = i;
+        Ok(stance)
+    }
+    /// `verify`'s summary of the lines replayed so far
+    pub fn summary(&self) -> Json {
+        let (s, live) = (|x: &str| Json::Str(x.to_string()), &self.live);
+        Json::Obj(vec![("ok".into(), Json::Bool(true)), ("events".into(), Json::Num(live.n as f64)), ("persona".into(), s(&live.p.name)), ("seed".into(), Json::Num(live.st.seed as f64)),
+            ("engine".into(), self.header.get("engine").cloned().unwrap_or(Json::Null)), ("final_state".into(), s(&live.st.digest)), ("last_line".into(), s(live.head()))])
+    }
+}
+/// A strand's text -> its lines without their line endings (a final newline ends the last line; it does not start another)
+pub fn lines(text: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = text.split('\n').map(bare).collect();
+    if lines.last() == Some(&"") { lines.pop(); }
+    lines
+}
 /// `probbit live verify`: replay a strand from its header -> Ok(summary) when every line is as recorded; Err((1-based line
 /// number, what differs)) at the earliest line that is not. Lines end in `\n` or `\r\n`; the chain hashes the line text alone.
 pub fn verify(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
-    let lines: Vec<&str> = text.split('\n').map(bare).collect();
-    let lines = if lines.last() == Some(&"") { &lines[..lines.len() - 1] } else { &lines[..] };
-    let head = lines.first().copied().unwrap_or("");
-    let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
-    if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
-    let doc = h.get("document").ok_or((1, "the header has no persona document".to_string()))?;
-    let p = persona::build(doc).map_err(|e| (1, format!("the persona document: {}: {}", e.path, e.msg)))?;
-    if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
-    let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, format!("the initial state: {}: {}", e.path, e.msg)))?;
-    let (mut live, header) = Live::start(p, doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
-    if header != head { return Err((1, "the header is not as written".into())); }
-    for (i, l) in lines.iter().enumerate().skip(1) {
-        let j = json::parse(l).map_err(|e| (i + 1, format!("not JSON: {}", e.msg)))?;
-        if persona::canon(&j) != *l { return Err((i + 1, "not canonical JSON".into())); }
-        if j.get("prev").and_then(Json::as_str) != Some(live.head()) { return Err((i + 1, "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)".into())); }
-        if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i + 1, format!("n is not {}", live.n + 1))); }
-        let ev = j.get("inputs").ok_or((i + 1, "no inputs".to_string()))?;
-        let (stance, line) = live.event(ev, eng).map_err(|e| (i + 1, format!("{}: {}", e.path, e.msg)))?;
-        if j.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((i + 1, "the stance differs".into())); }
-        if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i + 1, "the state differs".into())); }
-        if line != *l { return Err((i + 1, "the line differs".into())); }
-    }
-    let s = |x: &str| Json::Str(x.to_string());
-    Ok(Json::Obj(vec![("ok".into(), Json::Bool(true)), ("events".into(), Json::Num(live.n as f64)), ("persona".into(), s(&live.p.name)), ("seed".into(), Json::Num(live.st.seed as f64)),
-        ("engine".into(), h.get("engine").cloned().unwrap_or(Json::Null)), ("final_state".into(), s(&live.st.digest)), ("last_line".into(), s(live.head()))]))
+    let lines = lines(text);
+    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+    for l in lines.iter().skip(1) { r.step(l, eng)?; }
+    Ok(r.summary())
 }
 /// `verify` as one document: the summary, or {ok: false, line, diverges}
 pub fn verify_doc(text: &str, eng: Engine) -> Json {
