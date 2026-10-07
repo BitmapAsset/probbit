@@ -84,6 +84,9 @@ fn exit_codes() {
     for f in [bent, part, bare, not] { let _ = std::fs::remove_file(f); }
 }
 
+/// A running child, killed when the test ends, passing or not (a failed assert must not leave a server or a follower running)
+struct Reap(std::process::Child);
+impl Drop for Reap { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }
 /// stdout of a running child, collected as it comes
 fn collect(child: &mut std::process::Child) -> Arc<Mutex<String>> {
     let buf = Arc::new(Mutex::new(String::new())); let b = buf.clone(); let mut out = child.stdout.take().unwrap();
@@ -102,8 +105,8 @@ fn wait(buf: &Arc<Mutex<String>>, from: usize, what: &str, limit: Duration) -> D
 #[test]
 fn follow_picks_up_appended_lines() {
     let f = tmp("follow"); std::fs::write(&f, lead(4)).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", &f, "--follow", "--plain"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
-    let buf = collect(&mut child);
+    let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", &f, "--follow", "--plain"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap());
+    let buf = collect(&mut child.0);
     wait(&buf, 0, "| event 3 |", Duration::from_secs(20));
     for k in 5..=7 {
         let at = buf.lock().unwrap().len();
@@ -130,7 +133,7 @@ fn follow_picks_up_appended_lines() {
     let at = buf.lock().unwrap().len();
     std::fs::rename(&other, &f).unwrap();
     wait(&buf, at, "| seed 4 |", Duration::from_secs(5));
-    let _ = child.kill(); let _ = child.wait(); let _ = std::fs::remove_file(&f);
+    drop(child); let _ = std::fs::remove_file(&f);
 }
 
 /// GET `path` from the monitor on 127.0.0.1:`port`, addressed to `host` -> (status line, headers, body)
@@ -170,9 +173,9 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     let out = String::from_utf8(o.stdout).unwrap(); let docs: Vec<&str> = out.lines().collect(); assert_eq!(docs.len(), 4);
     let text = std::fs::read_to_string(&full).unwrap(); let lines: Vec<&str> = text.split_inclusive('\n').collect();
     std::fs::write(&f, lines[..4].concat()).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", &f, "--serve", "--port", "0", "--open"]).env("BROWSER", "probbit-test-no-such-browser")
-        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.stdout.take().unwrap()), &mut url).unwrap();
+    let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", &f, "--serve", "--port", "0", "--open"]).env("BROWSER", "probbit-test-no-such-browser")
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap());
+    let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.0.stdout.take().unwrap()), &mut url).unwrap();
     let port: u16 = url.trim_end().strip_prefix("http://127.0.0.1:").and_then(|p| p.strip_suffix('/')).unwrap_or_else(|| panic!("the URL line: {url:?}")).parse().unwrap();
     let host = format!("127.0.0.1:{port}");
     let (st, h, page) = get(port, "/", &host);
@@ -198,8 +201,8 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     assert_eq!(get(port, "/doc/4", &host).2, format!("{}\n", docs[3]));
     // the port is taken: exit 2
     let (c, _, err) = probbit(&["monitor", &f, "--serve", "--port", &port.to_string()]); assert_eq!(c, 2); assert!(err.contains(&format!("cannot listen on 127.0.0.1:{port}")), "{err}");
-    let _ = child.kill(); let o = child.wait_with_output().unwrap();
-    assert!(String::from_utf8_lossy(&o.stderr).contains("--open: no browser started"), "{}", String::from_utf8_lossy(&o.stderr));
+    let _ = child.0.kill(); let mut err = String::new(); child.0.stderr.take().unwrap().read_to_string(&mut err).unwrap(); drop(child);
+    assert!(err.contains("--open: no browser started"), "{err}");
     for (args, msg) in [(vec!["monitor", &f, "--serve", "--once"], "give one of them"), (vec!["monitor", &f, "--port", "8080"], "--port goes with --serve"),
         (vec!["monitor", &f, "--serve", "--host", "0.0.0.0"], "binds 127.0.0.1"), (vec!["monitor", &f, "--serve", "--plain"], "does not apply")] {
         let (c, out, err) = probbit(&args); assert_eq!((c, out.as_str()), (2, ""), "{args:?}: {err}"); assert!(err.contains(msg), "{args:?}: {err}");
