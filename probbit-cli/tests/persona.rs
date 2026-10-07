@@ -617,3 +617,20 @@ fn a_drives_replay_equals_the_reference_trace() {
     assert!(e.contains("final state sha256:27e92b4f21a52888b03c857a8132a25b58270aae613a77ce1edd2d74adcb3422"), "{e}");
     assert_eq!(out.lines().filter(|l| l.contains(r#""goals":{"#)).count(), 9, "goal signals on 9 of the 16 turns");
 }
+
+/// drives (§2.9), 200 turns: one script of random host inputs and goal signals (tests/fixtures/persona/drives-adversary-200.json,
+/// signals on 163 turns, idle hours 0-12) for three individuals. Each trace is the Python reference's (drives.py on the 0.7.0
+/// engine) byte for byte: the constants are the sha256 of its text and its final state
+#[test]
+fn two_hundred_drives_turns_equal_the_reference_for_three_individuals() {
+    let f = |n: &str| format!("{}/tests/fixtures/persona/{n}", env!("CARGO_MANIFEST_DIR"));
+    for (seed, trace, fin) in [
+        ("2", "fa9fc8019b33d7a12c09af11d3a7b3adbf7988e9600479141dbd4ba2157e5d02", "57bc4e515330f3ec7a9e3ae3024751bbfa3826fd1008829a962bcdc5335ceec6"),
+        ("5", "6f535a6256a24bad911a499e4bf12501581d4b9934d68e5466bce330f9e6c2ae", "08d10ad478746ec2d16b6b8d6a37b5540c791d803917afd194f7e96c9fbb7853"),
+        ("9", "16c8d13dc3f6e6f2478be92dbc68ed1f503c06fc02109c4d64ab1ba4dabdf36d", "9d91e77fe18b390d3925a643294ac240b40107042c9bf63624e939aecc5f8882")] {
+        let (c, out, e) = probbit(&["persona", "replay", &f("drives-adversary.json"), "--seed", seed, "--script", &f("drives-adversary-200.json")], ""); assert_eq!(c, 0, "{e}");
+        assert_eq!(e.trim(), format!("replay: 200 turns, trace sha256 {trace}, final state sha256:{fin}"), "seed {seed}");
+        let goals: std::collections::BTreeSet<String> = out.lines().map(|l| s(&parse(l), &["pursue", "goal"]).as_str().unwrap().to_string()).collect();
+        assert_eq!(goals.len(), 4, "seed {seed}: every goal pursued on some turn");
+    }
+}
