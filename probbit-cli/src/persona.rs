@@ -651,6 +651,8 @@ fn build_drives(doc: &Json) -> R<Persona> {
         habits.push(Json::Obj(vec![("id".into(), Json::Str(format!("starve_{}", g.id))), ("when".into(), Json::Obj(vec![(f, Json::Bool(true))])),
             ("then".into(), Json::Obj(vec![("pursue".into(), Json::Arr(vec![s(&g.id)]))])), ("say".into(), Json::Str(format!("pursue {} now (overdue)", g.id))), ("priority".into(), Json::Num(*pri))])); }
     if !habits.is_empty() { let hi = slot(&mut d2, "habits"); d2[hi].1 = Json::Arr(habits); }
+    if let Some(Json::Arr(f)) = get(&d2, "learning").and_then(|l| l.get("from")) { for (i, x) in f.iter().enumerate() { let Some(k) = x.as_str() else { continue };
+        need(!is_drv(k) || ins[..n_decl].iter().any(|y| y.get("id").and_then(Json::as_str) == Some(k)), &format!("learning.from[{i}]"), "reserved for the drives block")?; } }
     let synthetic: Vec<String> = ins[n_decl..].iter().map(|x| x.get("id").and_then(Json::as_str).unwrap_or("").to_string()).collect();
     let ii = slot(&mut d2, "inputs"); d2[ii].1 = Json::Arr(ins);
     // an error in a synthetic input is reported at the drives path it comes from
@@ -2243,6 +2245,7 @@ mod tests {
     fn the_drives_block_and_state_are_strict() {
         let bad = |from: &str, to: &str| { assert!(ADV.contains(from), "{from}"); err(build(&json::parse(&ADV.replace(from, to)).unwrap())) };
         assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":1.5"#), "drives.learn_from_surprise: must be <= 1");
+        assert_eq!(bad(r#""from":["praise","criticism"]"#, r#""from":["praise","drv_c0"]"#), "learning.from[1]: reserved for the drives block");
         assert_eq!(bad(r#""floor":0.1"#, r#""floor":0.6"#), "drives.goals[3].floor: must be <= 0.5");
         assert_eq!(bad(r#""id":"craft""#, r#""id":"fun""#), "drives.goals[1].id: goal ids must be distinct");
         assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":0.5,"spice":1"#), "drives.spice: unknown field (allowed: afterglow, comment, effects, expectation, goals, learn_from_surprise, pursue, wanting)");
