@@ -531,12 +531,15 @@ fn feed_strand(path: &str, hub: &Hub, eng: Engine) -> ! {
         std::thread::sleep(Duration::from_millis(100));
     }
 }
-/// The demo week for the page, paced, over and over (5 s between the weeks)
+/// The demo week for the page, paced, over and over (5 s between the weeks; a week that starts over goes from its last event
+/// straight to event 1, without the empty board in between)
 fn feed_demo(hub: &Hub, eng: Engine) -> ! {
     let lines = week(eng);
+    let mut start = true;
     loop {
         let mut over = true;
-        play(&lines, eng, &mut |w, note| { let docs = if w.last.is_some() && note.is_none() { vec![doc_of(w)] } else { vec![] };
+        play(&lines, eng, &mut |w, note| { if w.last.is_none() && !std::mem::take(&mut start) { return true; }
+            let docs = if w.last.is_some() && note.is_none() { vec![doc_of(w)] } else { vec![] };
             publish(hub, &meta_json(Some(w), ""), &frame_json(Some(w), None, note), docs, std::mem::take(&mut over)); true });
         std::thread::sleep(Duration::from_secs(5));
     }

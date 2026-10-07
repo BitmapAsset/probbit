@@ -23,7 +23,7 @@ header{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-botto
 .badge{margin-left:auto;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--edge);color:var(--muted);background:var(--card);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;transition:color .3s,border-color .3s,background-color .3s}
 .badge.ok{color:var(--green);border-color:#1d5a46;background:#0d211b}
 .badge.bad{color:var(--red);border-color:#6a2a2a;background:#241212;white-space:normal}
-.note{color:#e7c46a;font-size:13px;margin:-6px 0 14px;min-height:0}
+.note{color:#e7c46a;font-size:13px}
 .empty{color:var(--muted);padding:28px 0;text-align:center}
 section{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:10px 16px 8px;margin-bottom:12px}
 #said{background:linear-gradient(180deg,#0f1b23,var(--card));border-color:#1b2b35}
@@ -105,9 +105,9 @@ footer a:hover{color:var(--cyan)}
 <span class="brand">probbit monitor</span>
 <span class="who" id="who"></span>
 <span class="facts"><span id="seed"></span><span id="ev"></span><span id="clk"></span></span>
+<span class="note" id="note" hidden></span>
 <span class="badge" id="badge">connecting</span>
 </header>
-<div class="note" id="note" hidden></div>
 <noscript><p class="empty">This page draws with JavaScript. In a terminal, <code>probbit monitor STRAND</code> draws the same bars.</p></noscript>
 <p class="empty" id="empty">waiting for the strand</p>
 <div class="cols"><div>
