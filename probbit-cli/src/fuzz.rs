@@ -24,7 +24,7 @@ pub struct Found { pub script: Vec<Event>, pub doc: Json, pub broken: Vec<Broken
 
 fn step(p: &Persona, st: &State, e: &Event, eng: persona::Engine, turns: &AtomicUsize) -> (Json, State) {
     turns.fetch_add(1, Ordering::Relaxed);
-    persona::turn(p, st, &Json::Obj(e.clone()), false, eng, false).expect("the fuzzer's inputs are valid")
+    persona::turn(p, st, &persona::event_json(e), false, eng, false).expect("the fuzzer's inputs are valid")
 }
 /// The earliest turn of `script` (run from `st0`) whose stance breaks the property
 fn breaking_turn(p: &Persona, pr: &Prop, st0: &State, script: &[Event], eng: persona::Engine, turns: &AtomicUsize) -> Option<(usize, Json, Vec<Broken>)> {
@@ -34,10 +34,10 @@ fn breaking_turn(p: &Persona, pr: &Prop, st0: &State, script: &[Event], eng: per
     None
 }
 /// A random event: each input takes one of its non-default values with a fixed chance (flag 1/4, level 1/2, number 2/5, idle
-/// hours 3/10), else stays at its default (left out of the event)
+/// hours 3/10, a goal signal 3/20), else stays at its default (left out of the event)
 fn random_event(r: &mut Philox4x32, alpha: &[(String, &'static str, Vec<Json>)]) -> Event {
     let mut e = vec![];
-    for (id, kind, vals) in alpha { let chance = match *kind { "flag" => 0.25, "level" => 0.5, "number" => 0.4, _ => 0.3 };
+    for (id, kind, vals) in alpha { let chance = match *kind { "flag" => 0.25, "level" => 0.5, "number" => 0.4, "goal" => 0.15, _ => 0.3 };
         if r.f64() < chance { e.push((id.clone(), vals[r.below(vals.len())].clone())); } }
     e
 }
@@ -179,7 +179,7 @@ pub fn ranges(seeds: &[u64]) -> String {
         out.push(if j > i { format!("{}-{}", seeds[i], seeds[j]) } else { seeds[i].to_string() }); i = j + 1; }
     out.join(",")
 }
-fn script_json(sc: &[Event]) -> Json { Json::Arr(sc.iter().map(|e| Json::Obj(e.clone())).collect()) }
+fn script_json(sc: &[Event]) -> Json { Json::Arr(sc.iter().map(|e| persona::event_json(e)).collect()) }
 fn commands(path: &str, seed: u64, f: &Found) -> (String, String) {
     let sc = word(&persona::canon(&script_json(&f.script)));
     (format!("probbit persona replay {} --seed {seed} --script {sc}", word(path)), format!("probbit persona explain {} --seed {seed} --script {sc} --turn {}", word(path), f.script.len() - 1))
@@ -214,9 +214,8 @@ pub fn doc(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Optio
             ("grid".into(), Json::Arr(s.grid.iter().map(|x| n(*x)).collect())), ("hours".into(), Json::Arr(s.hours.iter().map(|x| n(*x)).collect()))])),
         ("turns".into(), n(turns as f64)), ("found".into(), Json::Bool(res.iter().any(|per| per.iter().any(Option::is_some)))), ("properties".into(), Json::Arr(props_j))])
 }
-fn odds_text(doc: &Json, var: &str) -> String {
-    let e = doc.get("stance").and_then(|s| s.get(var)).or_else(|| doc.get("mood").and_then(|m| m.get(var)));
-    e.and_then(|e| e.get("odds")).and_then(Json::as_obj).map_or(String::new(), |o| o.iter().map(|(l, x)| format!("{l} {:.3}", x.as_f64().unwrap_or(0.0))).collect::<Vec<_>>().join(", "))
+fn odds_text(p: &Persona, doc: &Json, var: &str) -> String {
+    persona::doc_entry(p, doc, var).and_then(|e| e.get("odds").and_then(Json::as_obj).map(|o| o.iter().map(|(l, x)| format!("{l} {:.3}", x.as_f64().unwrap_or(0.0))).collect::<Vec<_>>().join(", "))).unwrap_or_default()
 }
 /// The human report (stdout; deterministic: the timing goes to stderr)
 pub fn human(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Option<Found>>], turns: usize) -> String {
@@ -237,7 +236,7 @@ pub fn human(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Opt
                 o.push(format!("  seed {sd}, {} event{}: {}", f.script.len(), if f.script.len() == 1 { "" } else { "s" }, persona::canon(&script_json(&f.script))));
                 for b in &f.broken {
                     if b.var == "rules" { o.push(format!("  turn {}: the stance breaks the rule's raw rules", f.script.len() - 1)); }
-                    else { o.push(format!("  turn {}: {} {} (odds {}); the rule allows {}", f.script.len() - 1, b.var, b.level, odds_text(&f.doc, &b.var), b.allowed.join(", "))); } }
+                    else { o.push(format!("  turn {}: {} {} (odds {}); the rule allows {}", f.script.len() - 1, b.var, b.level, odds_text(p, &f.doc, &b.var), b.allowed.join(", "))); } }
                 let g = |k: &str| f.doc.get(k).and_then(Json::as_str).unwrap_or("").to_string();
                 o.push(format!("  why:     {}", g("why"))); o.push(format!("  line:    {}", g("line")));
                 let (rp, ex) = commands(path, sd, f); o.push(format!("  replay:  {rp}")); o.push(format!("  explain: {ex}"));
@@ -449,5 +448,25 @@ mod tests {
             for pr in prs.iter().filter(|pr| habits.iter().any(|h| h.id == pr.id)) {
                 if !p.yields() || pr.id == top { assert!(persona::by_construction(&p, pr, &run).is_some(), "persona {k}: habit {} is not held by construction", pr.id); checked += 1; } } }
         assert!(checked >= 20, "{checked} habits checked");
+    }
+
+    /// drives (§2.9): the search sends goal signals (deadlines, wins, cues; nested into `goals` as a host sends them): the must-do
+    /// habit holds under it, and a `pursue` property a due chore outranks is broken with a script that replays
+    #[test]
+    fn fuzz_sends_goal_signals() {
+        let p = persona::build(&json::parse(r#"{"probbit_persona":1,"identity":{"name":"Wants","version":"0.1.0","seed":0},
+            "traits":[{"id":"caution","levels":["bold","measured","careful"],"prior":[0.3,0.5,0.2]}],"inputs":[{"id":"security","kind":"flag","effects":{"pursue":{"safety":2.5}}}],
+            "habits":[{"id":"chores_due","when":{"goal.chores.deadline_hours":{"at_most":24}},"then":{"pursue":["chores"]},"priority":2}],
+            "drives":{"goals":[{"id":"fun","interest":2.0},{"id":"chores","interest":0.5},{"id":"safety","interest":1.0,"floor":0.1}]}}"#).unwrap()).unwrap();
+        let rule = |t: &str| persona::props(&p, &json::parse(t).unwrap(), "--never", "never").unwrap().remove(0);
+        let props = vec![rule(r#"{"when":{"goal.chores.deadline_hours":{"at_most":24}},"then":{"pursue":["chores"]}}"#), rule(r#"{"when":{"security":true},"then":{"pursue":["safety"]}}"#)];
+        let s = Search { seeds: vec![0, 1], fuzz_seed: 0, scripts: 8, depth: 5, beam: 2, grid: vec![0.0, 0.5, 1.0], hours: vec![1.0, 12.0, 48.0], threads: 2 };
+        let (found, turns) = fuzz(&p, &props, &s, &run);
+        assert!(turns > 50 && found[0].iter().all(Option::is_none), "the must-do held ({turns} turns)");
+        let f = found[1][0].as_ref().expect("a due chore outranks security's safety");
+        let sc = script_json(&f.script); assert!(persona::canon(&sc).contains(r#""goals":{"chores":{"deadline_hours":"#), "{}", persona::canon(&sc));
+        let mut st = persona::init(&p, Some(0), true, &run); let mut last = None;
+        for ev in sc.as_arr().unwrap() { let (doc, ns) = persona::turn(&p, &st, ev, false, &run, false).unwrap(); last = persona::breaks(&p, &props[1], &st, &doc); st = ns; }
+        assert_eq!(last.map(|b| b[0].level.clone()), Some("chores".to_string()));
     }
 }
