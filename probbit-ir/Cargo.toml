@@ -11,4 +11,4 @@ keywords = ["p-bit", "constraints", "gibbs-sampling", "probabilistic", "ising"]
 categories = ["algorithms", "science", "mathematics"]
 
 [dependencies]
-probbit-core = { path = "../probbit-core", version = "0.7.0" }
+probbit-core = { path = "../probbit-core", version = "0.8.0" }

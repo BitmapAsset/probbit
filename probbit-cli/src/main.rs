@@ -649,6 +649,8 @@ fn persona_cmd(args: &[String]) {
         _ => { let found = persona::lint(&p, eng); let unresolved = found.iter().filter(|f| !f.get("resolution").and_then(Json::as_str).is_some_and(|r| r.starts_with("yield"))).count();
             let seeds = seeds_arg(args); let warnings = persona::plan_warnings(&p, &seeds, eng);
             let mut doc = vec![("persona", jstr(&p.name)), ("conflicts", Json::Arr(found)), ("unresolved", num(unresolved as f64)), ("warnings", Json::Arr(warnings))]; let mut broken = 0;
+            // drives (§2.9): habits that outrank a goal floor, floors whose lift can reach 50
+            if let Some(mut n) = persona::floor_notes(&p) { n.extend(persona::floor_reach(&p, &seeds)); doc.push(("floors", Json::Arr(n))); }
             // with rules (§5.6): prove each one, then fuzz the ones the bound leaves unknown
             if args.iter().any(|a| a == "--never" || a == "--props") {
                 let props = rules_arg(args, &p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);

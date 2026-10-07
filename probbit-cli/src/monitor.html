@@ -206,7 +206,7 @@ function build(m) {
   $('cap').textContent = L ? 'per level of each learned trait, within ±' + L.total_cap : '';
   for (const t of (L && L.traits) || []) {
     const r = mk('div', 'row', lb); mk('div', 'id', r, t);
-    const c = mk('div', 'deltas', r), levels = ((m.traits || []).find(v => v.id === t) || { levels: [] }).levels;
+    const c = mk('div', 'deltas', r), levels = ((m.traits || []).find(v => v.id === t) || { levels: t === 'pursue' ? m.goals || [] : [] }).levels;
     V.learned.push({ t, cells: levels.map(l => { const w = mk('div', 'delta', c); mk('span', 'k', w, l); const fill = mk('i', '', mk('div', 'ctr', w)); return { fill, val: mk('span', 'v', w) }; }) });
   }
   rows('drives', false); V.drives = null;

@@ -11,5 +11,5 @@ keywords = ["p-bit", "assignment", "routing", "constraints", "probabilistic"]
 categories = ["algorithms", "science"]
 
 [dependencies]
-probbit-core = { path = "../probbit-core", version = "0.7.0" }
-probbit-ir = { path = "../probbit-ir", version = "0.7.0" }
+probbit-core = { path = "../probbit-core", version = "0.8.0" }
+probbit-ir = { path = "../probbit-ir", version = "0.8.0" }

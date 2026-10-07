@@ -351,6 +351,30 @@ mod tests {
         (text, stances)
     }
 
+    /// A life with drives (docs/persona.md §2.9): goal signals ride in the events, the strand logs them as given, `verify` replays it
+    /// byte for byte, and a changed event diverges at its line
+    #[test]
+    fn a_strand_with_goals_replays() {
+        const D: &str = r#"{"probbit_persona":1,"identity":{"name":"G","version":"1","seed":3},"traits":[{"id":"humour","levels":["none","light","playful"],"logw":[0,0.3,0.1]}],
+            "inputs":[{"id":"praise","kind":"flag"},{"id":"security","kind":"flag","effects":{"pursue":{"safety":1.0}}}],
+            "habits":[{"id":"chores_due","when":{"goal.chores.deadline_hours":{"at_most":24}},"then":{"pursue":["chores"]}}],
+            "drives":{"goals":[{"id":"fun","interest":2,"interest_spread":0.5,"reactivity_spread":0.5},{"id":"chores","starve_after":6},{"id":"safety","floor":0.1}],
+                "effects":{"afterglow":{"humour":0.6}}}}"#;
+        let doc = json::parse(D).unwrap(); let p = persona::build(&doc).unwrap();
+        let (mut live, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(4), true, &run), Clock::Fixed, "probbit test");
+        let (mut text, mut stances) = (format!("{header}\n"), vec![]);
+        let evs = [r#"{"goals":{"fun":{"cue":true,"win":1.0}},"elapsed_hours":1,"praise":true}"#, r#"{"goals":{"chores":{"deadline_hours":10}},"security":true,"elapsed_hours":2}"#,
+            r#"{"elapsed_hours":5}"#, r#"{"goals":{"fun":{"progress":0.7,"novelty":true}},"elapsed_hours":0.5}"#];
+        for e in evs { let (s, line) = live.event(&json::parse(e).unwrap(), &run).unwrap(); assert!(s.get("pursue").is_some() && s.get("drives").is_some(), "{line}");
+            text += &line; text.push('\n'); stances.push(s); }
+        // the MCP tool `probbit_live_event` passes the goals through: the same stance as the resident individual's
+        let r = tool("probbit_live_event", &[("persona".into(), doc.clone()), ("seed".into(), Json::Num(4.0)), ("event".into(), json::parse(evs[0]).unwrap())], &run).unwrap();
+        assert_eq!(r.get("stance"), Some(&stances[0]));
+        assert!(text.lines().nth(2).unwrap().contains(r#""goals":{"chores":{"deadline_hours":10}}"#), "the goals as given");
+        assert_eq!(verify(&text, &run).map(|d| d.get("ok").cloned()), Ok(Some(Json::Bool(true))));
+        assert_eq!(verify(&text.replacen(r#""elapsed_hours":2,"#, r#""elapsed_hours":6,"#, 1), &run).err().map(|e| e.0), Some(3));
+    }
+
     /// A strand continued in a second run (`resume` from the state after its last line) is the strand of one run, byte for byte;
     /// another state, another persona or an unfinished last line is refused
     #[test]

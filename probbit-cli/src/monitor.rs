@@ -49,7 +49,7 @@ struct Var { id: String, levels: Vec<String>, say: Vec<String> }
 struct Input { id: String, kind: String, max: f64 }
 /// What the layout reads from the strand's header
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
-    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64) }
+    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64), goals: Vec<String> }
 impl Meta {
     fn of(r: &Replay) -> Meta {
         let d = persona::describe(&r.live.p);
@@ -65,7 +65,9 @@ impl Meta {
             inputs: obj("inputs").into_iter().map(|(id, x)| Input { kind: x.get("kind").and_then(Json::as_str).unwrap_or("").to_string(), max: max(&id), id }).collect(),
             history: decl("history").iter().filter_map(|h| Some((h.get("id")?.as_str()?.to_string(), h.get("cap").and_then(Json::as_f64).unwrap_or(5.0)))).collect(),
             learning: d.get("learning").map(|l| (strs(l.get("traits")), l.get("total_cap").and_then(Json::as_f64).unwrap_or(1.0))),
-            caps: (cap("wanting", 3.0), cap("afterglow", 2.0)) }
+            caps: (cap("wanting", 3.0), cap("afterglow", 2.0)),
+            // a drives block's goals, in the order of the levels of `pursue` (describe hides that trait; its learned row needs them)
+            goals: strs(d.get("drives").and_then(|x| x.get("goals"))) }
     }
 }
 
@@ -238,7 +240,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     // 5. the learned deltas, centred within ±total_cap
     if let Some((traits, cap)) = &m.learning {
         for (k, t) in traits.iter().enumerate() {
-            let levels = m.traits.iter().find(|v| &v.id == t).map(|v| v.levels.clone()).unwrap_or_default();
+            let levels = m.traits.iter().find(|v| &v.id == t).map(|v| v.levels.clone()).or_else(|| (t == "pursue").then(|| m.goals.clone())).unwrap_or_default();
             let ds: Vec<f64> = f.learned.get(t).and_then(Json::as_arr).map(|a| a.iter().filter_map(Json::as_f64).collect()).unwrap_or_default();
             let cellsx: Vec<String> = levels.iter().zip(&ds).map(|(l, d)| format!("{l} {} {d:+.2}", centred(s, *d, *cap, 5))).collect();
             out.push(format!("{}{t:<idw$}  {}{}", lab(if k == 0 { "LEARNED" } else { "" }), cellsx.join("  "), if k == 0 { s.paint(GREY, &format!("  (cap {}{})", s.g("±", "+/-"), whole(*cap))) } else { String::new() }));
@@ -309,7 +311,7 @@ fn meta_json(w: Option<&Watch>, path: &str) -> Json {
             ("inputs", Json::Arr(m.inputs.iter().map(|x| o(vec![("id", s(&x.id)), ("kind", s(&x.kind)), ("max", Json::Num(x.max))])).collect())),
             ("history", Json::Arr(m.history.iter().map(|(id, cap)| o(vec![("id", s(id)), ("cap", Json::Num(*cap))])).collect())),
             ("learning", m.learning.as_ref().map_or(Json::Null, |(t, cap)| o(vec![("traits", strs(t)), ("total_cap", Json::Num(*cap))]))),
-            ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1))]))]);
+            ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1))])), ("goals", strs(&m.goals))]);
     }
     o(kv)
 }
@@ -762,6 +764,28 @@ mod tests {
         kv.retain(|(k, _)| k != "drives"); kv.push(("drives".into(), json::parse(r#"{"want":[1,"x",null],"glow":"?","surprise":[-0.5]}"#).unwrap()));
         w.last.as_mut().unwrap().doc = Json::Obj(kv); let fr = frame(Some(&w), None, "x", None, &s);
         assert!(fr.iter().any(|l| l.contains("-0.50 below expectation")) || fr.iter().any(|l| l.contains("wanting")), "{fr:?}");
+    }
+
+    /// A real drives strand (the fixture persona, goal signals in the events, praise so `pursue` learns): it replays to its
+    /// digests, the frame draws `pursue` and every goal's wanting and afterglow, and the learned row of `pursue` names the goals
+    #[test]
+    fn a_drives_strand_lights_the_drives_rows() {
+        let (p, doc) = persona::load(&format!("{}/tests/fixtures/persona/drives-adversary.json", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(4), true, &run), Clock::Fixed, "probbit test");
+        let mut text = format!("{header}\n");
+        for e in [r#"{"goals":{"fun":{"cue":true,"win":1.5}},"praise":true}"#, r#"{"goals":{"fun":{"win":1.5}},"elapsed_hours":2}"#,
+            r#"{"goals":{"craft":{"progress":0.6}},"praise":true,"elapsed_hours":1}"#, r#"{"goals":{"chores":{"deadline_hours":5}},"security":true}"#] {
+            let (_, line) = lv.event(&json::parse(e).unwrap(), &run).unwrap(); text += &line; text.push('\n');
+        }
+        let w = replays_to_its_digests(&text, "drives");
+        assert_eq!(w.meta.goals, ["fun", "craft", "chores", "safety"]);
+        let fr = frame(Some(&w), None, "x", None, &Style { th: None, ascii: true, cols: usize::MAX });
+        let at = fr.iter().position(|l| l.starts_with("DRIVES")).unwrap_or_else(|| panic!("{fr:?}"));
+        assert!(fr[at].contains("[chores 1.00]"), "{}", fr[at]);
+        for g in ["fun", "craft", "chores", "safety"] { assert!(fr.iter().any(|l| l.trim_start().starts_with(g) && l.contains("wanting [") && l.contains("afterglow [")), "{g}: {fr:?}"); }
+        let learned = fr.iter().find(|l| l.trim_start().starts_with("pursue") && !l.starts_with("DRIVES")).unwrap_or_else(|| panic!("{fr:?}"));
+        assert!(["fun ", "craft ", "chores ", "safety "].iter().all(|g| learned.contains(g)), "{learned}");
+        assert_eq!(meta_json(Some(&w), "x").get("goals").map(|g| strs(Some(g))), Some(w.meta.goals.clone()));
     }
 
     /// The page's layout lists the persona's variables in its order; a frame carries the event's document as replayed (drives
