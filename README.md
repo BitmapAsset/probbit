@@ -506,7 +506,7 @@ terminal (`--follow` redraws as the strand grows) or as a page on 127.0.0.1 (`--
 anywhere ([docs/persona.md](docs/persona.md) §5.8). No strand yet? The tutor's week, in under a minute:
 
 ```sh
-probbit monitor --demo --serve --open
+probbit monitor --demo --open
 ```
 
 ![probbit monitor: the tutor's week in the browser, the bars moving with every event](docs/probbit-monitor.gif)

@@ -20,8 +20,8 @@ All notable changes to this project are documented here. The format follows
   on 127.0.0.1 (std `TcpListener`; it binds no other address, and refuses requests addressed to another host) follows the strand
   and serves one page embedded in the binary (styles and script inline; it fetches no fonts, styles or scripts), its server-sent
   events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s) and `/doc/N`, event N's stance document
-  as `probbit live` printed it. The URL is the line on stdout; `--open` starts the default browser, best effort. `--demo --serve`
-  plays the week over and over.
+  as `probbit live` printed it. The URL is the line on stdout; `--open` serves the same and starts the default browser, best
+  effort. `probbit monitor --demo --open` plays the week over and over in the browser.
 
 ## 0.7.0 - 2026-10-06
 

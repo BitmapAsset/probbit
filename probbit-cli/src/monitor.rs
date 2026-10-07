@@ -39,7 +39,7 @@ const KEEP: usize = 10_000;
 /// Connections served at once (more are refused with 503)
 const CONNS: usize = 64;
 
-const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve [--port N] [--open]] | probbit monitor --demo [--once] [--plain] [--serve [--port N] [--open]]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. In the terminal, or\n  with --serve as a page in the browser. It changes no file (--demo: its week goes through a temporary one, removed at\n  once) and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\n  --serve     the page instead of the terminal, following the strand (or playing the demo week, over and over): its URL\n              http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or\n              scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat\n              every 15 s), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It\n              binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or\n              localhost, and sends nothing anywhere; Ctrl-C quits\n  --port N    with --serve, the port (default 0: a free one)\n  --open      with --serve, open the page in the default browser (BROWSER if set; else open on macOS, start on Windows,\n              xdg-open elsewhere); a browser that does not start fails nothing\n  --demo      the tutor's scripted week (as `probbit live examples/persona/tutor.yaml --seed 2 --demo week`), replayed in\n              memory: at a terminal or with --serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or\n              with --once, its last frame\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that\n  cannot be had, or a file that cannot be read or is not a strand.\n";
+const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [--once] [--plain] [--serve] [--open] [--port N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. In the terminal, or\n  with --serve as a page in the browser. It changes no file (--demo: its week goes through a temporary one, removed at\n  once) and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\n  --serve     the page instead of the terminal, following the strand (or playing the demo week, over and over): its URL\n              http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or\n              scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat\n              every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest\n              frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It\n              binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or\n              localhost, and sends nothing anywhere; Ctrl-C quits\n  --open      serve the page (as --serve does) and open it in the default browser (BROWSER if set; else open on macOS,\n              start on Windows, xdg-open elsewhere); a browser that does not start fails nothing\n  --port N    with --serve or --open, the port (default 0: a free one)\n  --demo      the tutor's scripted week (as `probbit live examples/persona/tutor.yaml --seed 2 --demo week`), replayed in\n              memory: at a terminal or with --serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or\n              with --once, its last frame\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that\n  cannot be had, or a file that cannot be read or is not a strand.\n";
 
 fn strs(j: Option<&Json>) -> Vec<String> { j.and_then(Json::as_arr).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() }
 
@@ -386,11 +386,13 @@ pub fn cmd(args: &[String]) {
     let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(if path.is_some() { 2 } else { 1 }).cloned());
     crate::check_flags(&a, &["--fps", "--port"], &["--follow", "--once", "--plain", "--demo", "--serve", "--open"]);
     let has = |f: &str| args.iter().any(|a| a == f);
-    let serve_ = has("--serve");
+    // --open opens the page, so it serves it: `--open` is `--serve --open`
+    let serve_ = has("--serve") || has("--open");
+    let sv = if has("--serve") { "--serve" } else { "--open" };
     if has("--follow") && has("--once") { crate::fail("monitor: --once draws one frame and --follow keeps drawing: give one of them") }
-    if serve_ && has("--once") { crate::fail("monitor: --once draws one frame and --serve keeps serving: give one of them") }
-    if let Some(f) = ["--fps", "--plain"].iter().find(|f| serve_ && has(f)) { crate::fail(&format!("monitor --serve: {f} does not apply (the page draws itself)")) }
-    if let Some(f) = ["--port", "--open"].iter().find(|f| !serve_ && has(f)) { crate::fail(&format!("monitor: {f} goes with --serve")) }
+    if serve_ && has("--once") { crate::fail(&format!("monitor: --once draws one frame and {sv} keeps serving: give one of them")) }
+    if let Some(f) = ["--fps", "--plain"].iter().find(|f| serve_ && has(f)) { crate::fail(&format!("monitor {sv}: {f} does not apply (the page draws itself)")) }
+    if !serve_ && has("--port") { crate::fail("monitor: --port goes with --serve (or --open)") }
     let fps: u32 = crate::arg(args, "--fps", 10); if !(1..=60).contains(&fps) { crate::fail("monitor: --fps N, from 1 to 60") }
     let port: u16 = crate::arg(args, "--port", 0);
     let engine = crate::persona_engine(); let eng: Engine = &engine;
@@ -572,7 +574,7 @@ fn handle(mut c: TcpStream, hub: &Hub, port: u16) {
     let path = target.split(['?', '#']).next().unwrap_or("");
     match path {
         "/" => reply(&mut c, "200 OK", "text/html; charset=utf-8", PAGE.as_bytes()),
-        "/events" => events(c, hub),
+        "/events" => events(c, hub, Duration::from_secs(BEAT)),
         p if p.starts_with("/doc/") => {
             let b = ready(hub); let k = b.docs.len() as u64;
             let doc = p[5..].parse::<u64>().ok().filter(|&n| n >= 1 && n <= b.last && b.last - n < k).map(|n| b.docs[(k - 1 - (b.last - n)) as usize].clone() + "\n");
@@ -590,8 +592,8 @@ fn reply(c: &mut TcpStream, status: &str, kind: &str, body: &[u8]) {
 }
 fn busy(mut c: TcpStream) { let _ = c.set_write_timeout(Some(Duration::from_secs(5))); reply(&mut c, "503 Service Unavailable", "text/plain", b"too many connections\n"); }
 /// `/events`: the layout and the latest frame, then each new frame (at most 20 a second: a page that falls behind gets the latest),
-/// a new layout before the frame when the strand starts over as another, and a heartbeat comment after 15 quiet seconds
-fn events(mut c: TcpStream, hub: &Hub) {
+/// a new layout before the frame when the strand starts over as another, and a heartbeat comment after `beat` quiet (15 s)
+fn events(mut c: TcpStream, hub: &Hub, beat: Duration) {
     let _ = c.set_nodelay(true);
     let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{SAFE}\r\n");
     if c.write_all(head.as_bytes()).and_then(|_| c.flush()).is_err() { return; }
@@ -599,7 +601,7 @@ fn events(mut c: TcpStream, hub: &Hub) {
     loop {
         let (meta, frame) = {
             let mut b = board(hub);
-            let until = std::time::Instant::now() + Duration::from_secs(BEAT);
+            let until = std::time::Instant::now() + beat;
             while b.layout == 0 || (b.layout == layout && b.seq == seq) {
                 let left = until.saturating_duration_since(std::time::Instant::now());
                 if left.is_zero() { break; }
@@ -726,6 +728,20 @@ mod tests {
         }
     }
 
+    /// Each example persona's scripted week (seed 2, as `probbit live PERSONA --seed 2 --demo week --strand` writes it) replays to
+    /// its digests
+    #[test]
+    fn the_example_personas_demo_weeks_replay_to_their_digests() {
+        for name in ["tutor.yaml", "ops-engineer.yaml", "trader-assistant.yaml"] {
+            let doc = persona::parse_doc(&std::fs::read_to_string(format!("{}/../examples/persona/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap(), false).unwrap();
+            let f = std::env::temp_dir().join(format!("probbit-monitor-week-{}-{name}.strand", std::process::id()));
+            let fp = f.to_string_lossy().to_string(); let _ = std::fs::remove_file(&f);
+            assert!(live::week(&doc, Some(2), Some(&fp), None, &mut |_: &str| {}, &run).is_ok(), "{name}: the demo week");
+            let text = std::fs::read_to_string(&f).unwrap(); let _ = std::fs::remove_file(&f);
+            let w = replays_to_its_digests(&text, name); assert!(w.rep.live.n >= 40, "{name}: {} events", w.rep.live.n);
+        }
+    }
+
     /// A 0.8.0 document with `pursue` and `drives` (hand-written) draws the drives rows; a document without them draws none
     #[test]
     fn drives_are_drawn_when_the_document_carries_them() {
@@ -786,6 +802,34 @@ mod tests {
             assert_eq!(json::parse(&b.frame).unwrap().get("note"), Some(&Json::Null), "{every:?}: the last frame has no note");
         }
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// Read a stream until `what` is in what came after byte `from`
+    fn read_until(s: &mut TcpStream, got: &mut String, from: usize, what: &str) {
+        let t = std::time::Instant::now();
+        while !got[from..].contains(what) {
+            assert!(t.elapsed() < Duration::from_secs(10), "no {what:?} within 10 s: {got}");
+            let mut b = [0u8; 4096]; let k = s.read(&mut b).unwrap(); assert!(k > 0, "the stream closed: {got}");
+            got.push_str(&String::from_utf8_lossy(&b[..k]));
+        }
+    }
+    /// `/events` on a quiet board: a heartbeat comment after each quiet `beat` (15 s when served; 100 ms here), before the
+    /// strand has replayed and after; a frame published meanwhile is pushed at once, the layout before it
+    #[test]
+    fn a_quiet_event_stream_carries_heartbeats() {
+        let hub: Hub = Arc::new((Mutex::new(Board::default()), Condvar::new()));
+        let l = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap(); let port = l.local_addr().unwrap().port();
+        let h = hub.clone();
+        std::thread::spawn(move || { if let Ok((c, _)) = l.accept() { events(c, &h, Duration::from_millis(100)); } });
+        let mut s = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        let mut got = String::new();
+        read_until(&mut s, &mut got, 0, ": heartbeat\n\n");
+        assert!(got.starts_with("HTTP/1.1 200 OK\r\n") && got.contains("text/event-stream") && !got.contains("event:"), "{got}");
+        let at = got.len();
+        publish(&hub, &json::obj(vec![("path", json::str("x"))]), &json::obj(vec![("n", Json::Num(1.0))]), vec![], false);
+        read_until(&mut s, &mut got, at, "event: meta\ndata: {\"path\":\"x\"}\n\nevent: frame\ndata: {\"n\":1}\n\n");
+        let at = got.len(); read_until(&mut s, &mut got, at, ": heartbeat\n\n");
+        assert!(!got[at..].contains("event:"), "nothing new, nothing but heartbeats: {got}");
     }
 
     /// The tutor `--demo` embeds is examples/persona/tutor.yaml

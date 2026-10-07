@@ -1,6 +1,6 @@
 //! `probbit monitor` (docs/persona.md §5.8) end to end: help, one frame pinned byte for byte (--once --plain), the exit codes,
-//! --follow picking up appended lines within a second and replaying a truncated strand from the start, and --serve: the page,
-//! the event stream and the stance documents over HTTP on 127.0.0.1.
+//! --follow picking up appended lines within a second and replaying a truncated strand from the start, and --serve (or --open):
+//! the page, the event stream and the stance documents over HTTP on 127.0.0.1.
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
@@ -208,4 +208,27 @@ fn serve_answers_the_page_the_events_and_the_documents() {
         let (c, out, err) = probbit(&args); assert_eq!((c, out.as_str()), (2, ""), "{args:?}: {err}"); assert!(err.contains(msg), "{args:?}: {err}");
     }
     for x in [full, f] { let _ = std::fs::remove_file(x); }
+}
+
+/// --open serves the page as --serve does, so `probbit monitor --demo --open` is the demo in the browser: the URL line, the
+/// page, the stream's layout (the demo week, Pip) and its opening frame; a browser that does not start fails nothing
+#[test]
+fn open_serves_the_page_the_demo_too() {
+    let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", "--demo", "--open"]).env("BROWSER", "probbit-test-no-such-browser")
+        .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap());
+    let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.0.stdout.take().unwrap()), &mut url).unwrap();
+    let port: u16 = url.trim_end().strip_prefix("http://127.0.0.1:").and_then(|p| p.strip_suffix('/')).unwrap_or_else(|| panic!("the URL line: {url:?}")).parse().unwrap();
+    let host = format!("127.0.0.1:{port}");
+    let (st, _, page) = get(port, "/", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(page.contains("<title>probbit monitor</title>"));
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
+    assert_eq!((evs[0].0.as_str(), evs[1].0.as_str()), ("meta", "frame"));
+    assert!(evs[0].1.contains(r#""demo":true"#) && evs[0].1.contains(r#""name":"Pip""#), "{}", evs[0].1);
+    let _ = child.0.kill(); let mut err = String::new(); child.0.stderr.take().unwrap().read_to_string(&mut err).unwrap(); drop(child);
+    assert!(err.contains("--open: no browser started"), "{err}");
+    for (args, msg) in [(vec!["monitor", "--demo", "--open", "--once"], "--once draws one frame and --open keeps serving"),
+        (vec!["monitor", WEEK, "--open", "--fps", "5"], "monitor --open: --fps does not apply"), (vec!["monitor", "--demo", "--port", "8080"], "--port goes with --serve (or --open)")] {
+        let (c, out, err) = probbit(&args); assert_eq!((c, out.as_str()), (2, ""), "{args:?}: {err}"); assert!(err.contains(msg), "{args:?}: {err}");
+    }
 }
