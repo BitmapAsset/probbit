@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.0 - unreleased
+
+### Added
+- **`probbit monitor STRAND`** (docs/persona.md §5.8, probbit-cli/src/monitor.rs): watch an individual's inner state as live
+  horizontal bars. It replays the strand with the rules of `live verify` (`live::Replay`, now shared by both), recomputing every
+  stance document from the strand alone, and draws the latest event: each trait's levels with their odds (the level taken
+  highlighted, its phrase), the moods with a sparkline of the last 50 events, the event's inputs and history features, the habits
+  in force (the bound ones marked, the violations counter), the learned deltas within their cap, the drives when a document
+  carries them, and the stance line. `--follow` replays appended lines within a second (a truncated or rotated strand is replayed
+  from the start, with a warning), `--once` prints one frame, `--plain` draws in plain ASCII. Exit 0, 1 at a line that differs (named
+  in the frame), 2 for a bad flag or a file that is not a strand. It writes nothing and sends nothing; no dependencies.
+
 ## 0.7.0 - 2026-10-06
 
 ### Added

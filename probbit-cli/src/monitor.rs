@@ -24,7 +24,7 @@ const SPARK: usize = 50;
 const BAR: usize = 20;
 const NBAR: usize = 8;
 
-const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. Read-only: nothing is\n  written or sent anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     ASCII only, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, or a file that\n  cannot be read or is not a strand.\n";
+const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. It writes nothing\n  and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, or a file that\n  cannot be read or is not a strand.\n";
 
 fn strs(j: Option<&Json>) -> Vec<String> { j.and_then(Json::as_arr).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() }
 
@@ -81,14 +81,14 @@ fn odds(doc: &Json, group: &str, v: &Var) -> Vec<f64> {
     let o = doc.get(group).and_then(|g| g.get(&v.id)).and_then(|x| x.get("odds"));
     v.levels.iter().map(|l| o.and_then(|o| o.get(l)).and_then(Json::as_f64).unwrap_or(0.0)).collect()
 }
-/// Where the odds sit along the levels, 0 (the first) to 1 (the last): the mean level index over (levels - 1)
+/// Where the odds sit along the levels, 0 (the lowest level) to 1 (the highest): the mean level index over (levels - 1)
 fn position(ps: &[f64]) -> f64 {
     let (t, k) = (ps.iter().sum::<f64>(), ps.len());
     if k < 2 || t <= 0.0 { return 0.0; }
     ps.iter().enumerate().map(|(i, p)| p * i as f64).sum::<f64>() / t / (k - 1) as f64
 }
 
-/// How a frame is drawn: the theme (None: no colour), ASCII only, the columns a line may take
+/// How a frame is drawn: the theme (None: no colour), plain ASCII, the columns a line may take
 struct Style { th: Option<Theme>, ascii: bool, cols: usize }
 impl Style {
     fn paint(&self, c: Col, s: &str) -> String { self.th.map_or_else(|| s.to_string(), |t| t.paint(c, s)) }
@@ -139,7 +139,7 @@ fn spark(s: &Style, xs: &VecDeque<f64>) -> String {
 fn hours(h: f64) -> String { if h < 1.0 / 60.0 { format!("+{:.0} s", h * 3600.0) } else if h < 1.0 { format!("+{:.1} min", h * 60.0) } else { format!("+{h:.2} h") } }
 /// A count or a cap: whole numbers without decimals
 fn whole(x: f64) -> String { if x.fract() == 0.0 && x.abs() < 1e15 { format!("{}", x as i64) } else { format!("{x}") } }
-/// A digest's first 8 hex digits
+/// A digest's leading 8 hex digits
 fn short(d: &str) -> &str { let h = d.strip_prefix("sha256:").unwrap_or(d); &h[..h.len().min(8)] }
 
 /// One frame: the lines to draw (without line endings). `note`: a warning to show (a truncated or rotated strand, an
@@ -163,7 +163,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     out.push(format!("{head} {dot} {badge}"));
     if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
     let Some(f) = f else {
-        out.push(s.paint(GREY, "no events yet: the strand has its header only"));
+        out.push(s.paint(GREY, "no events yet: the strand holds its header and no event lines"));
         out.push(s.paint(GREY, &format!("strand {path} {dot} written by {} {dot} replay: probbit live verify {path}", m.engine)));
         return out;
     };
@@ -171,7 +171,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let idw = m.traits.iter().chain(&m.moods).map(|v| v.id.chars().count()).chain(m.learning.iter().flat_map(|l| l.0.iter().map(|t| t.chars().count()))).max().unwrap_or(4).clamp(4, 14);
     let status = doc.get("status").and_then(Json::as_str).unwrap_or("");
     // 1. the stance: one row per trait
-    let mut first = true;
+    let mut top = true;
     for v in &m.traits {
         let Some(t) = doc.get("stance").and_then(|x| x.get(&v.id)) else { continue };
         let ps = odds(doc, "stance", v);
@@ -180,8 +180,8 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         let pick = v.levels.iter().position(|l| l == level).filter(|_| released);
         let say = pick.and_then(|i| v.say.get(i)).filter(|x| !x.is_empty()).cloned().unwrap_or_default();
         let note = if released { say } else { s.paint(GREY, &format!("({level}: not released)")) };
-        out.push(format!("{}{:<idw$}  {}  {}  {note}", lab(if first { "STANCE" } else { "" }), v.id, stack(s, &ps, pick, CYAN), labels(s, &v.levels, &ps, pick, CYAN)).trim_end().to_string());
-        first = false;
+        out.push(format!("{}{:<idw$}  {}  {}  {note}", lab(if top { "STANCE" } else { "" }), v.id, stack(s, &ps, pick, CYAN), labels(s, &v.levels, &ps, pick, CYAN)).trim_end().to_string());
+        top = false;
     }
     if status != "ok" && !status.is_empty() {
         let esc = doc.get("escalate").and_then(Json::as_str).map_or(String::new(), |e| format!(": {e}"));
@@ -249,7 +249,7 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
     let (pz, dv) = (doc.get("pursue").filter(|x| x.as_obj().is_some()), doc.get("drives").filter(|x| x.as_obj().is_some()));
     if pz.is_none() && dv.is_none() { return vec![]; }
     let mut out = vec![];
-    // the goals: pursue's odds (canonical order), else the keys of the first drive object
+    // the goals: pursue's odds (canonical order), else the goals a drive object names
     let mut goals: Vec<String> = pz.and_then(|p| p.get("odds")).and_then(Json::as_obj).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default();
     if goals.is_empty() { goals = dv.and_then(Json::as_obj).and_then(|o| o.iter().find_map(|(_, v)| v.as_obj())).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default(); }
     if let Some(p) = pz {
@@ -272,7 +272,7 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
     out
 }
 
-/// A strand file read as it grows: complete lines only (a line counts once its newline is written). It starts over when the
+/// A strand file read as it grows: whole lines (a line counts once its newline is written). It starts over when the
 /// file shrinks, disappears, or gets another header (truncated or rotated).
 struct Tail { path: String, at: u64, part: Vec<u8>, head: Option<Vec<u8>>, gone: bool, seen: Option<(u64, Option<std::time::SystemTime>)> }
 enum Got { Lines(Vec<String>), Restart(&'static str), Nothing }
@@ -305,7 +305,7 @@ impl Tail {
 
 /// Write to stdout -> false once the reader has gone
 fn out(s: &str) -> bool { let mut o = std::io::stdout().lock(); o.write_all(s.as_bytes()).and_then(|_| o.flush()).is_ok() }
-/// ASCII only: --plain, PROBBIT_THEME set to anything but neon, TERM=dumb
+/// Plain ASCII: --plain, PROBBIT_THEME set to anything but neon, TERM=dumb
 fn ascii(args: &[String]) -> bool {
     args.iter().any(|a| a == "--plain") || std::env::var("PROBBIT_THEME").is_ok_and(|v| !v.is_empty() && v != "neon") || std::env::var("TERM").is_ok_and(|t| t == "dumb")
 }
@@ -313,7 +313,7 @@ fn ascii(args: &[String]) -> bool {
 /// `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]`
 pub fn cmd(args: &[String]) {
     if args.iter().any(|a| a == "--help" || a == "-h") { crate::emit_raw(HELP); return; }
-    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")).cloned() else { crate::fail("monitor: the strand file goes first: probbit monitor STRAND [flags]") };
+    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")).cloned() else { crate::fail("monitor: the strand file comes before the flags: probbit monitor STRAND [flags]") };
     let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(2).cloned()); crate::check_flags(&a, &["--fps"], &["--follow", "--once", "--plain"]);
     let has = |f: &str| args.iter().any(|a| a == f);
     if has("--follow") && has("--once") { crate::fail("monitor: --once draws one frame and --follow keeps drawing: give one of them") }
@@ -323,7 +323,7 @@ pub fn cmd(args: &[String]) {
     let s = Style { th: theme::stdout(args), ascii: ascii(args), cols: if tty { theme::size(1).0.max(20) } else { usize::MAX } };
     let bytes = std::fs::read(&path).unwrap_or_else(|e| crate::fail(&format!("monitor: cannot read {path}: {e}")));
     let text = String::from_utf8_lossy(&bytes);
-    // complete lines only: a last line without its newline is still being written
+    // whole lines: a last line without its newline is still being written
     let (done, rest) = match text.rfind('\n') { Some(i) => (&text[..=i], &text[i + 1..]), None => ("", &text[..]) };
     let lines = crate::live::lines(done);
     let strand = |h: &str| json::parse(h).ok().and_then(|h| h.get("probbit_strand").and_then(Json::as_f64)) == Some(1.0);
@@ -360,7 +360,9 @@ fn follow(path: &str, s: &Style, fps: u32, eng: Engine) -> ! {
         if now != size { size = now; dirty = true; }
         if dirty && drawn.map_or(true, |t| t.elapsed() >= gap) {
             let cols = if tty { size.0.max(20) } else { usize::MAX };
-            let fr = frame(w.as_ref(), bad_head.as_ref(), path, note, &Style { cols, ..*s });
+            let mut fr = frame(w.as_ref(), bad_head.as_ref(), path, note, &Style { cols, ..*s });
+            // a frame taller than the terminal would scroll on every redraw: keep the rows that fit
+            if tty { fr.truncate(size.1.saturating_sub(1).max(1)); }
             let body: String = fr.iter().map(|l| crate::tui::clip(l, cols) + if tty { "\x1b[K\n" } else { "\n" }).collect();
             if !out(&if tty { format!("\x1b[H{body}\x1b[J") } else { format!("{body}\n") }) { std::process::exit(0) }
             dirty = false; drawn = Some(std::time::Instant::now());
@@ -410,7 +412,7 @@ mod tests {
                 assert_eq!(persona::sha(&w.last.as_ref().unwrap().doc), want, "{name}: line {}", w.rep.line);
             }
             assert_eq!(w.rep.summary(), live::verify(&text, &run).unwrap(), "{name}: the monitor's replay ends where verify does");
-            // every frame style draws it; ASCII only with --plain
+            // every frame style draws it; plain ASCII with --plain
             for (ascii, th) in [(true, None), (false, None), (false, Some(Theme { depth: theme::Depth::Ansi256 }))] {
                 let fr = frame(Some(&w), None, "x.strand", None, &Style { th, ascii, cols: usize::MAX });
                 assert!(fr.len() > 8 && fr[0].contains(&format!("event {} ", w.rep.live.n)), "{name}: {fr:?}");
