@@ -1448,6 +1448,12 @@ pub fn plan_warnings(p: &Persona, seeds: &[u64], eng: Engine) -> Vec<Json> {
         ("note".into(), Json::Str("planned level differs from the trait's own most likely level (the stance is the most likely stance as a whole); a habit pins the level, a `vouch` floor with a `hold` holds it when the odds are low".into()))])).collect()
 }
 
+/// A stance document's per-variable entries: its traits, then (drives, §4) `pursue` with its goal as the level
+fn entries(doc: &Json) -> Vec<(String, Json)> {
+    let mut v: Vec<(String, Json)> = doc.get("stance").and_then(Json::as_obj).map_or(vec![], <[(String, Json)]>::to_vec);
+    if let Some(pz) = doc.get("pursue") { let f = |k: &str| pz.get(k).cloned().unwrap_or(Json::Null); v.push(("pursue".into(), Json::Obj(vec![("level".into(), f("goal")), ("odds".into(), f("odds"))]))); }
+    v
+}
 /// Total-variation distance between two odds objects over the same levels (None if their levels differ)
 fn tv(oa: &[(String, Json)], ob: &[(String, Json)]) -> Option<f64> {
     let mut ka: Vec<&String> = oa.iter().map(|(k, _)| k).collect(); let mut kb: Vec<&String> = ob.iter().map(|(k, _)| k).collect(); ka.sort(); kb.sort();
@@ -1457,8 +1463,8 @@ fn tv(oa: &[(String, Json)], ob: &[(String, Json)]) -> Option<f64> {
 /// (turn, trait) where their levels differ (0 / 0 for identical individuals)
 pub fn distance(a: &[Json], b: &[Json]) -> Json {
     let (mut tvs, mut dis): (Vec<f64>, Vec<f64>) = (vec![], vec![]); let mut per: Vec<(String, Vec<f64>)> = vec![];
-    for (x, y) in a.iter().zip(b) { let (Some(sa), Some(sb)) = (x.get("stance").and_then(Json::as_obj), y.get("stance")) else { continue };
-        for (t, ea) in sa { let Some(eb) = sb.get(t) else { continue }; let (oa, ob) = (ea.get("odds").and_then(Json::as_obj).unwrap_or(&[]), eb.get("odds").and_then(Json::as_obj).unwrap_or(&[]));
+    for (x, y) in a.iter().zip(b) { let (sa, sb) = (entries(x), entries(y));
+        for (t, ea) in &sa { let Some(eb) = get(&sb, t) else { continue }; let (oa, ob) = (ea.get("odds").and_then(Json::as_obj).unwrap_or(&[]), eb.get("odds").and_then(Json::as_obj).unwrap_or(&[]));
             let Some(d) = tv(oa, ob) else { continue };
             tvs.push(d); match per.iter_mut().find(|(k, _)| k == t) { Some(e) => e.1.push(d), None => per.push((t.clone(), vec![d])) }
             dis.push(if ea.get("level") == eb.get("level") { 0.0 } else { 1.0 }); } }
@@ -1471,8 +1477,8 @@ pub fn distance(a: &[Json], b: &[Json]) -> Json {
 pub fn diff(p: &Persona, sa: u64, q: &Persona, sb: u64, turns: &[Json], eng: Engine) -> R<Json> {
     let (ta, _) = replay(p, Some(sa), turns, false, eng, false)?; let (tb, _) = replay(q, Some(sb), turns, false, eng, false)?;
     // the raw total-variation sum over the shared traits (as `distance`, unrounded): the first turn with the largest one
-    let tvsum = |i: usize| ta[i].get("stance").and_then(Json::as_obj).map_or(0.0, |s| s.iter().filter_map(|(t, ea)| {
-        let eb = tb[i].get("stance")?.get(t)?; tv(ea.get("odds")?.as_obj()?, eb.get("odds")?.as_obj()?) }).fold(0.0, |a, b| a + b));
+    let tvsum = |i: usize| { let eb = entries(&tb[i]); entries(&ta[i]).iter().filter_map(|(t, ea)| {
+        tv(ea.get("odds")?.as_obj()?, get(&eb, t)?.get("odds")?.as_obj()?) }).fold(0.0, |a, b| a + b) };
     let worst = argmax(ta.len().min(tb.len()), tvsum);
     let who = |p: &Persona, s: u64| Json::Obj(vec![("persona".into(), Json::Str(p.name.clone())), ("seed".into(), Json::Num(s as f64)), ("genes".into(), genes(p, s))]);
     let line_of = |t: &[Json]| t.get(worst).and_then(|x| x.get("line")).cloned().unwrap_or(Json::Null);
@@ -2048,6 +2054,16 @@ mod tests {
         assert_eq!(hs, ["chores_due", "starve_chores"], "{}", canon(&Json::Arr(n.clone())));
         assert!(n.iter().all(|x| x.get("goal").and_then(Json::as_str) == Some("safety")));
         assert!(floor_notes(&persona("").unwrap()).is_none());
+    }
+
+    /// `diff` counts `pursue` as one more variable: two individuals of the drives persona differ on it, and a persona without the
+    /// block keeps its traits only
+    #[test]
+    fn diff_counts_pursue() {
+        let p = adv(); let s: Vec<Json> = (0..12).map(|i| json::parse(&format!(r#"{{"goals":{{"craft":{{"cue":true,"win":{}}}}},"elapsed_hours":1}}"#, i % 3)).unwrap()).collect();
+        let d = diff(&p, 1, &p, 2, &s, &run).unwrap(); let per = g(&d, &["distance", "per_trait"]);
+        assert!(per.get("pursue").and_then(Json::as_f64).is_some_and(|x| x > 0.0), "{}", canon(&d));
+        let q = persona("").unwrap(); let d = diff(&q, 1, &q, 2, &[Json::Null, Json::Null], &run).unwrap(); assert!(g(&d, &["distance", "per_trait"]).get("pursue").is_none());
     }
 
     /// Hard rules and floors at the extremes: after 40 turns that cue, praise and reward only fun, the learned pursue weight for fun
