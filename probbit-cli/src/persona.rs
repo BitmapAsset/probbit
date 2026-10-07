@@ -1441,6 +1441,40 @@ pub fn floor_notes(p: &Persona) -> Option<Vec<Json>> {
             ("note".into(), Json::Str("a habit outranks a floor: on turns this habit is in force the goal's odds are 0".into()))])); } } }
     Some(out)
 }
+/// `lint` for floors (§2.9): a floor goal whose lift can reach 50 on some turn of the given individuals: the lift's iteration with
+/// the goal's unary at its least and every other goal's at its most over everything the persona can feed `pursue` (prior, the
+/// seed's drive genes, learned ±total_cap, every input and history effect at its extremes, the drive box)
+pub fn floor_reach(p: &Persona, seeds: &[u64]) -> Vec<Json> {
+    let (Some(d), Some(pi)) = (&p.drives, p.vars.iter().position(|v| v.id == "pursue")) else { return vec![] };
+    if !d.goals.iter().any(|g| g.floor > 0.0) { return vec![]; }
+    let (n, v) = (d.goals.len(), &p.vars[pi]); let span = |w: f64, cap: f64| ((w * cap).min(0.0), (w * cap).max(0.0));
+    let (sw, sa, sd) = (span(d.w_want, d.cap_w), span(d.w_glow, d.cap_a), span(d.w_deadline, 1.0));
+    let lcap = p.learning.as_ref().filter(|l| l.traits.iter().any(|t| t == "pursue")).map_or(0.0, |l| l.total_cap);
+    let eff = |e: &Eff| e.iter().find(|(t, _)| t == "pursue").map(|(_, w)| w.clone());
+    let mut most = vec![0.0f64; n];
+    for &seed in seeds {
+        let (gj, dg) = (genes(p, seed), drive_genes(p, d, seed)); let react = |id: &str| gj.get("react").and_then(|r| r.get(id)).and_then(Json::as_f64).unwrap_or(1.0);
+        let gene = |i: usize| dg.get("interest").and_then(|o| o.get(&d.goals[i].id)).and_then(Json::as_f64).unwrap_or(0.0);
+        let mut lo: Vec<f64> = (0..n).map(|i| v.base[i] + gene(i) - lcap + sw.0 + sa.0 + sd.0).collect(); let mut hi: Vec<f64> = (0..n).map(|i| v.base[i] + gene(i) + lcap + sw.1 + sa.1 + sd.1).collect();
+        let mut add = |opts: Vec<Vec<f64>>| { for i in 0..n { lo[i] += opts.iter().map(|w| w[i]).fold(f64::INFINITY, f64::min); hi[i] += opts.iter().map(|w| w[i]).fold(f64::NEG_INFINITY, f64::max); } };
+        for x in &p.inputs { let g = react(&x.id); match x.kind {
+            Kind::Flag => if let Some(e) = eff(&x.effects) { add(vec![vec![0.0; n], e.iter().map(|w| g * w).collect()]); },
+            Kind::Number => if let Some(e) = eff(&x.effects) { add(vec![vec![0.0; n], e.iter().map(|w| g * x.max * w).collect()]); },
+            Kind::Level => add(x.levels.iter().map(|l| x.by_level.iter().find(|(b, _)| b == l).and_then(|(_, e)| eff(e)).map_or(vec![0.0; n], |e| e.iter().map(|w| g * w).collect())).collect()) } }
+        for h in &p.history { if let Some(e) = eff(&h.effects) { add(vec![vec![0.0; n], e.iter().map(|w| h.cap as f64 * w).collect()]); } }
+        for (m, l) in most.iter_mut().zip(lift_iter(p, d, &lo, &hi, &vec![true; n])) { *m = m.max(l); } }
+    d.goals.iter().zip(most).filter(|(g, l)| g.floor > 0.0 && *l >= 50.0).map(|(g, l)| Json::Obj(vec![("goal".into(), Json::Str(g.id.clone())), ("floor".into(), Json::Num(g.floor)),
+        ("lift_max".into(), Json::Num(r6(l))), ("note".into(), Json::Str("the floor's lift can reach 50 or more: it outweighs everything the persona can say for or against this goal".into()))])).collect()
+}
+/// `prove` for a drives block's floors (§2.9, design §5.2): each floor holds by construction of the odds lift, on every turn whose
+/// habits allow the goal (the soundness condition, no multi-variable rule over `pursue`, is checked when the persona is read);
+/// with the habits that can exclude it. None without floors.
+pub fn floor_verdicts(p: &Persona) -> Option<Vec<Json>> {
+    let d = p.drives.as_ref()?; let notes = floor_notes(p)?; if !d.goals.iter().any(|g| g.floor > 0.0) { return None; }
+    Some(d.goals.iter().filter(|g| g.floor > 0.0).map(|g| { let by: Vec<String> = notes.iter().filter(|n| n.get("goal").and_then(Json::as_str) == Some(g.id.as_str()))
+        .filter_map(|n| n.get("habit").and_then(Json::as_str).map(str::to_string)).collect();
+        Json::Obj(vec![("goal".into(), Json::Str(g.id.clone())), ("floor".into(), Json::Num(g.floor)), ("verdict".into(), Json::Str("held_by_construction".into())), ("excluded_by".into(), jstrs(&by))]) }).collect())
+}
 /// `lint`'s decoding check (a warning, not an error): the stance is the joint plan, the most likely stance as a whole, so on
 /// coupled traits a trait's planned level can differ from its own most likely level (its marginal mode). Probes: each seed's
 /// individual at rest, then a quiet turn and every declared input alone (numbers at their maximum). -> per trait where that
@@ -2154,6 +2188,11 @@ mod tests {
         assert_eq!(hs, ["chores_due", "starve_chores"], "{}", canon(&Json::Arr(n.clone())));
         assert!(n.iter().all(|x| x.get("goal").and_then(Json::as_str) == Some("safety")));
         assert!(floor_notes(&persona("").unwrap()).is_none());
+        // a floor against a 30-unit input effect and the widest interests: its lift can reach 50
+        assert!(floor_reach(&adv(), &[0, 1, 2]).is_empty());
+        let q = build(&json::parse(&ADV.replace(r#""pursue":{"safety":1.0}"#, r#""pursue":{"fun":30.0}"#).replace(r#""interest":0.5,"#, r#""interest":0.000001,"#).replace(r#""interest":2.0,"#, r#""interest":1000000,"#)).unwrap()).unwrap();
+        let r = floor_reach(&q, &[0]); assert_eq!(r.len(), 1); assert_eq!(r[0].get("goal").and_then(Json::as_str), Some("safety"));
+        assert!(r[0].get("lift_max").and_then(Json::as_f64).unwrap() >= 50.0, "{}", canon(&r[0]));
     }
 
     /// `diff` counts `pursue` as one more variable: two individuals of the drives persona differ on it, and a persona without the
@@ -2185,6 +2224,18 @@ mod tests {
         assert_eq!(g(&out, &["stance", "caution", "level"]).as_str(), Some("careful")); assert_eq!(*g(&out, &["habits", "violations"]), Json::Num(0.0));
         assert!(g(&out, &["line"]).as_str().unwrap().contains("pursue: chores: do the chores"), "{}", canon(g(&out, &["line"])));
         let since = &ns.drives.as_ref().unwrap().since; assert_eq!(since[2], 0, "chores pursued"); assert!(since.iter().enumerate().all(|(i, s)| i == 2 || *s > 0));
+    }
+    /// The floor over many individuals: 20 seeds driven to the extremes (fun wanted to its cap, learned to the learner's cap),
+    /// then a quiet turn: safety's odds are at least its floor for every one of them
+    #[test]
+    fn the_floor_holds_for_many_individuals() {
+        let p = adv();
+        for seed in 0..20 { let mut st = init(&p, Some(seed), true, &run);
+            for i in 0..30 { let m = if i % 3 == 1 { 2.0 } else { 0.0 };
+                let ev = json::parse(&format!(r#"{{"goals":{{"fun":{{"cue":true,"progress":1,"novelty":true,"win":{m}}}}},"praise":true,"elapsed_hours":0.1}}"#)).unwrap();
+                st = turn(&p, &st, &ev, false, &run, false).unwrap().1; }
+            let (out, _) = turn(&p, &st, &json::parse(r#"{"elapsed_hours":0.1}"#).unwrap(), false, &run, false).unwrap();
+            assert!(g(&out, &["pursue", "odds", "safety"]).as_f64().unwrap() >= 0.1, "seed {seed}: {}", canon(g(&out, &["pursue"]))); }
     }
 
     /// The block, the goal signals and the drive state are read strictly; a persona without the block refuses a `drives` state field
@@ -2229,6 +2280,8 @@ mod tests {
         let p = adv(); let rule = |t: &str| json::parse(t).unwrap(); let pr = |t: &str| props(&p, &rule(t), "--never", "never");
         let must = pr(r#"{"when":{"goal.chores.deadline_hours":{"at_most":24}},"then":{"pursue":["chores"]}}"#).unwrap();
         assert_eq!(by_construction(&p, &must[0], &run), Some(vec!["chores_due".to_string()]));
+        assert_eq!(canon(&Json::Arr(floor_verdicts(&p).unwrap())), r#"[{"excluded_by":["chores_due","starve_chores"],"floor":0.1,"goal":"safety","verdict":"held_by_construction"}]"#);
+        assert!(floor_verdicts(&persona("").unwrap()).is_none());
         assert_eq!(err(pr(r#"{"when":{"goal.chores.deadline_hours":{"at_most":12}},"then":{"pursue":["chores"]}}"#)),
             "--never.when.goal.chores.deadline_hours: a property reads the goal conditions the persona's habits use: goal.chores.deadline_hours <= 24, since_pursued.chores >= 12, since_pursued.safety >= 24");
         assert_eq!(err(pr(r#"{"when":{"drv_want":1},"then":{"pursue":["chores"]}}"#)), "--never.when.drv_want: reserved for the drives block");

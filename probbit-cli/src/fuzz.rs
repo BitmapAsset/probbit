@@ -138,8 +138,10 @@ pub fn prove_doc(p: &Persona, props: &[Prop], seeds: &[u64], out: &[Verdict]) ->
             Verdict::Unknown { proved, failed } => { f.push(("verdict".into(), st("unknown"))); f.push(("proved_individuals".into(), n(*proved as f64)));
                 f.push(("unknown".into(), Json::Arr(failed.iter().map(|(sd, cell, why)| Json::Obj(vec![("seed".into(), n(*sd as f64)), ("cell".into(), cell.clone()), ("reason".into(), st(why))])).collect()))); } }
         Json::Obj(f) }).collect();
-    Json::Obj(vec![("probbit_persona_prove".into(), n(1.0)), ("persona".into(), Json::Obj(vec![("name".into(), st(&p.name)), ("version".into(), st(&p.version)), ("digest".into(), st(&p.digest))])),
-        ("seeds".into(), Json::Arr(seeds.iter().map(|x| n(*x as f64)).collect())), ("properties".into(), Json::Arr(props_j))])
+    let mut v = vec![("probbit_persona_prove".into(), n(1.0)), ("persona".into(), Json::Obj(vec![("name".into(), st(&p.name)), ("version".into(), st(&p.version)), ("digest".into(), st(&p.digest))])),
+        ("seeds".into(), Json::Arr(seeds.iter().map(|x| n(*x as f64)).collect())), ("properties".into(), Json::Arr(props_j))];
+    if let Some(f) = persona::floor_verdicts(p) { v.push(("floors".into(), Json::Arr(f))); } // drives (§2.9): goal floors
+    Json::Obj(v)
 }
 /// The human report of `prove`
 pub fn prove_human(p: &Persona, path: &str, props: &[Prop], seeds: &[u64], out: &[Verdict]) -> String {
@@ -154,6 +156,10 @@ pub fn prove_human(p: &Persona, path: &str, props: &[Prop], seeds: &[u64], out: 
                 o.push(format!("  seed {sd}: {why}; cell {}", persona::canon(cell)));
                 o.push(format!("  search it: probbit persona fuzz {} --seeds {} --never {}", word(path), ranges(seeds), word(&flow(&pr.rule)))); } }
     }
+    for f in persona::floor_verdicts(p).unwrap_or_default() { let g = |k: &str| f.get(k).cloned().unwrap_or(Json::Null);
+        let by: Vec<String> = g("excluded_by").as_arr().unwrap_or(&[]).iter().filter_map(|x| x.as_str().map(str::to_string)).collect();
+        o.push(String::new()); o.push(format!("floor  {} odds >= {}", g("goal").as_str().unwrap_or(""), persona::canon(&g("floor"))));
+        o.push(format!("  held by construction  (the odds lift; on turns whose habits allow it{})", if by.is_empty() { String::new() } else { format!("; can be excluded by {}", by.join(", ")) })); }
     o.join("\n")
 }
 
