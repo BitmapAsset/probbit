@@ -485,7 +485,7 @@ const GOAL_SIGNALS: [&str; 6] = ["progress", "novelty", "cue", "setback", "win",
 const COND_SIGNALS: [&str; 5] = ["deadline_hours", "want", "glow", "expect", "since_pursued"];
 /// A goal of the `drives` block: one level of the `pursue` variable
 #[derive(Clone)]
-struct Goal { id: String, say: String, interest_spread: f64, reactivity_spread: f64, floor: f64 }
+struct Goal { id: String, say: String, interest_spread: f64, reactivity_spread: f64, floor: f64, starve_after: Option<f64> }
 /// A goal condition of a habit (`goal.<id>.<signal>` or `since_pursued.<id>`), lowered to a flag input the turn sets: the goal's
 /// value of the signal within [lo, hi]
 #[derive(Clone)]
@@ -587,7 +587,7 @@ fn build_drives(doc: &Json) -> R<Persona> {
         let floor = num_or(gk, "floor", 0.0, &p, Some(0.0), Some(0.5), false)?;
         let sa = match get(gk, "starve_after") { None | Some(Json::Null) => None, x => Some(num(x, &at(&p, "starve_after"), Some(1.0), Some(10000.0), true)?) };
         starve.push((sa, num_or(gk, "priority", 0.0, &p, Some(-100.0), Some(100.0), true)?));
-        goals.push(Goal { id, say, interest_spread, reactivity_spread, floor }); }
+        goals.push(Goal { id, say, interest_spread, reactivity_spread, floor, starve_after: sa }); }
     need(goals.iter().fold(0.0, |a, g| a + g.floor) <= 0.5 + 1e-9, "drives.goals", "floors must sum to at most 0.5")?;
     let (w, sigs) = drive_block(dkv, "wanting", &[("half_life_hours", 12.0, 0.0, 1e6, true), ("cap", 3.0, 0.0, 1e6, true), ("drain", 0.8, 0.0, 1.0, false)], Some("signals"))?;
     let sk: &[(String, Json)] = match sigs { None => &[], Some(s) => keys(s, "drives.wanting.signals", &["progress", "novelty", "cue", "setback", "comment"], &[])? };
@@ -1472,23 +1472,32 @@ pub fn diff(p: &Persona, sa: u64, q: &Persona, sb: u64, turns: &[Json], eng: Eng
 pub fn describe(p: &Persona) -> Json {
     let s = |x: &str| Json::Str(x.to_string());
     let mut d = Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(p.seed as f64)),
-        ("traits".into(), Json::Obj(p.vars.iter().filter(|v| !v.mood).map(|v| (v.id.clone(), Json::Obj(vec![("levels".into(), jstrs(&v.levels)), ("say".into(), jstrs(&v.say))]))).collect())),
+        ("traits".into(), Json::Obj(p.vars.iter().filter(|v| !v.mood && !lowered(p, &v.id)).map(|v| (v.id.clone(), Json::Obj(vec![("levels".into(), jstrs(&v.levels)), ("say".into(), jstrs(&v.say))]))).collect())),
         ("moods".into(), Json::Obj(p.vars.iter().filter(|v| v.mood).map(|v| (v.id.clone(), jstrs(&v.levels))).collect())),
-        ("inputs".into(), Json::Obj(p.inputs.iter().map(|x| (x.id.clone(), Json::Obj(match x.kind { Kind::Level => vec![("kind".into(), s("level")), ("levels".into(), jstrs(&x.levels))],
+        ("inputs".into(), Json::Obj(p.inputs.iter().filter(|x| !lowered(p, &x.id)).map(|x| (x.id.clone(), Json::Obj(match x.kind { Kind::Level => vec![("kind".into(), s("level")), ("levels".into(), jstrs(&x.levels))],
             Kind::Flag => vec![("kind".into(), s("flag"))], Kind::Number => vec![("kind".into(), s("number"))] }))).collect())),
         ("habits".into(), Json::Arr(p.habits.iter().map(|h| s(&h.id)).collect())), ("agenda".into(), jstrs(&p.steps))]);
     // the learning block (§2.8), when there is one: what moves the learned deltas, which traits, and the caps
     if let (Json::Obj(v), Some(l)) = (&mut d, &p.learning) { v.push(("learning".into(), Json::Obj(vec![("from".into(), jstrs(&l.from)), ("traits".into(), jstrs(&l.traits)),
         ("rate".into(), Json::Num(l.rate)), ("step_cap".into(), Json::Num(l.step_cap)), ("total_cap".into(), Json::Num(l.total_cap))]))); }
+    // the drives block (§2.9), when there is one: the goals (pursue's levels) in order, their phrases, floors and starve_after
+    if let (Json::Obj(v), Some(dr)) = (&mut d, &p.drives) { let per = |f: &dyn Fn(&Goal) -> Option<Json>| Json::Obj(dr.goals.iter().filter_map(|g| f(g).map(|x| (g.id.clone(), x))).collect());
+        v.push(("drives".into(), Json::Obj(vec![("goals".into(), Json::Arr(dr.goals.iter().map(|g| s(&g.id)).collect())), ("say".into(), per(&|g| Some(s(&g.say)))),
+            ("floor".into(), per(&|g| (g.floor > 0.0).then_some(Json::Num(g.floor)))), ("starve_after".into(), per(&|g| g.starve_after.map(Json::Num))),
+            ("learn_from_surprise".into(), Json::Num(dr.kappa))]))); }
     d
 }
+/// A trait or input the drives block adds when it is lowered (`pursue`, the drive aggregates and goal conditions): not the author's
+fn lowered(p: &Persona, id: &str) -> bool { p.drives.as_ref().is_some_and(|d| id == "pursue" || d.synthetic.iter().any(|x| x == id)) }
 /// `check`: valid, with its digest and sizes (one engine call: the resting stance)
 pub fn check(p: &Persona, eng: Engine) -> R<Json> {
     let st = init(p, None, true, eng); let (prog, _) = compile(p, &st, &[], &Opts::default())?;
     let n = |x: usize| Json::Num(x as f64); let len = |k: &str| prog.get(k).and_then(Json::as_arr).map_or(0, <[Json]>::len);
     Ok(Json::Obj(vec![("ok".into(), Json::Bool(true)), ("name".into(), Json::Str(p.name.clone())), ("version".into(), Json::Str(p.version.clone())), ("digest".into(), Json::Str(p.digest.clone())),
-        ("traits".into(), n(p.vars.iter().filter(|v| !v.mood).count())), ("moods".into(), n(p.vars.iter().filter(|v| v.mood).count())), ("inputs".into(), n(p.inputs.len())),
-        ("history".into(), n(p.history.len())), ("habits".into(), n(p.habits.len())), ("steps".into(), n(p.steps.len())), ("program_vars".into(), n(len("vars"))), ("program_values".into(), n(len("values")))]))
+        ("traits".into(), n(p.vars.iter().filter(|v| !v.mood && !lowered(p, &v.id)).count())), ("moods".into(), n(p.vars.iter().filter(|v| v.mood).count())),
+        ("inputs".into(), n(p.inputs.iter().filter(|x| !lowered(p, &x.id)).count())),
+        ("history".into(), n(p.history.len())), ("habits".into(), n(p.habits.len())), ("steps".into(), n(p.steps.len())), ("program_vars".into(), n(len("vars"))), ("program_values".into(), n(len("values")))]
+        .into_iter().chain(p.drives.as_ref().map(|d| ("goals".to_string(), n(d.goals.len())))).collect()))
 }
 /// `explain`: a turn in words: per trait and mood every contribution to its field, the joint odds, the habit-free twin's level
 /// where it differs, the program's size and digest, the line and the why
@@ -2006,6 +2015,18 @@ mod tests {
         let (g1, g2) = (canon(&drive_genes(&p, &d, 1)), canon(&drive_genes(&p, &d, 2))); assert_ne!(g1, g2); assert_eq!(g1, canon(&drive_genes(&adv(), &d, 1)));
         assert_eq!(p.digest, sha(&json::parse(ADV).unwrap()));
         assert_ne!(p.digest, build(&json::parse(&ADV.replace(r#""interest":2.0"#, r#""interest":2.5"#)).unwrap()).unwrap().digest);
+    }
+
+    /// `describe` and `check` show the author's persona: no `pursue` among the traits, no lowering inputs, a `drives` object; the
+    /// synthesised starvation habits are habits in force and are listed
+    #[test]
+    fn describe_and_check_show_the_authors_persona() {
+        let p = adv(); let d = describe(&p);
+        assert_eq!(canon(d.get("drives").unwrap()), r#"{"floor":{"safety":0.1},"goals":["fun","craft","chores","safety"],"learn_from_surprise":0.5,"say":{"chores":"do the chores","craft":"build","fun":"play","safety":"check the locks"},"starve_after":{"chores":12,"safety":24}}"#);
+        assert!(d.get("traits").unwrap().get("pursue").is_none() && d.get("inputs").unwrap().as_obj().unwrap().len() == 5);
+        assert_eq!(canon(d.get("habits").unwrap()), r#"["security_careful","no_jokes_on_failure","chores_due","starve_chores","starve_safety"]"#);
+        let c = check(&p, &run).unwrap(); assert_eq!((g(&c, &["traits"]), g(&c, &["inputs"]), g(&c, &["goals"])), (&Json::Num(4.0), &Json::Num(5.0), &Json::Num(4.0)));
+        assert!(check(&persona("").unwrap(), &run).unwrap().get("goals").is_none(), "no block, no goals field");
     }
 
     /// Hard rules and floors at the extremes: after 40 turns that cue, praise and reward only fun, the learned pursue weight for fun
