@@ -337,10 +337,14 @@ mod tests {
                 "effects":{"afterglow":{"humour":0.6}}}}"#;
         let doc = json::parse(D).unwrap(); let p = persona::build(&doc).unwrap();
         let (mut live, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(4), true, &run), Clock::Fixed, "probbit test");
-        let mut text = format!("{header}\n");
-        for e in [r#"{"goals":{"fun":{"cue":true,"win":1.0}},"elapsed_hours":1,"praise":true}"#, r#"{"goals":{"chores":{"deadline_hours":10}},"security":true,"elapsed_hours":2}"#,
-            r#"{"elapsed_hours":5}"#, r#"{"goals":{"fun":{"progress":0.7,"novelty":true}},"elapsed_hours":0.5}"#] {
-            let (s, line) = live.event(&json::parse(e).unwrap(), &run).unwrap(); assert!(s.get("pursue").is_some() && s.get("drives").is_some(), "{line}"); text += &line; text.push('\n'); }
+        let (mut text, mut stances) = (format!("{header}\n"), vec![]);
+        let evs = [r#"{"goals":{"fun":{"cue":true,"win":1.0}},"elapsed_hours":1,"praise":true}"#, r#"{"goals":{"chores":{"deadline_hours":10}},"security":true,"elapsed_hours":2}"#,
+            r#"{"elapsed_hours":5}"#, r#"{"goals":{"fun":{"progress":0.7,"novelty":true}},"elapsed_hours":0.5}"#];
+        for e in evs { let (s, line) = live.event(&json::parse(e).unwrap(), &run).unwrap(); assert!(s.get("pursue").is_some() && s.get("drives").is_some(), "{line}");
+            text += &line; text.push('\n'); stances.push(s); }
+        // the MCP tool `probbit_live_event` passes the goals through: the same stance as the resident individual's
+        let r = tool("probbit_live_event", &[("persona".into(), doc.clone()), ("seed".into(), Json::Num(4.0)), ("event".into(), json::parse(evs[0]).unwrap())], &run).unwrap();
+        assert_eq!(r.get("stance"), Some(&stances[0]));
         assert!(text.lines().nth(2).unwrap().contains(r#""goals":{"chores":{"deadline_hours":10}}"#), "the goals as given");
         assert_eq!(verify(&text, &run).map(|d| d.get("ok").cloned()), Ok(Some(Json::Bool(true))));
         assert_eq!(verify(&text.replacen(r#""elapsed_hours":2,"#, r#""elapsed_hours":6,"#, 1), &run).err().map(|e| e.0), Some(3));
