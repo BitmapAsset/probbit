@@ -69,6 +69,7 @@ agenda: {...}                       # optional ordered beats of a reply
 engine: {...}                       # optional engine settings
 line: {...}                         # optional stance-line settings
 learning: {...}                     # optional bounded learning from feedback (section 2.8)
+drives: {...}                       # optional goals with wanting, afterglow and expectation; the `pursue` output (section 2.9)
 comment: any text                   # ignored
 ```
 
@@ -266,6 +267,83 @@ step 2), so the feedback turn's own stance already uses it. What learning can an
   therefore by construction, not measured.
 - A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
   as before the block existed.
+
+### 2.9 Drives (optional)
+
+```yaml
+drives:
+  goals:                            # 2-7 goals: the levels of one more variable, `pursue`
+    - id: chores                    # an identifier (not a YAML-reserved word); with the block, `pursue` is a reserved trait id
+      say: clear the chores         # the line's clause "pursue: chores: clear the chores" (default: the id, _ as spaces)
+      interest: 1.0                 # > 0 (default 1): prior weight, normalised over the goals like a trait's prior
+      interest_spread: 0.3          # 0..5 (default 0): gene, s.d. (nats) of this individual's standing interest offset
+      reactivity_spread: 0.3        # 0..3 (default 0): gene, gain exp(N(0, s^2)) on this goal's wanting evidence and afterglow
+      starve_after: 12              # optional, 1..10000 turns: then a habit forces the goal (below)
+      priority: 0                   # -100..100 (default 0): that habit's priority
+    - id: safety
+      floor: 0.1                    # optional, 0..0.5, all floors summed <= 0.5: pursue odds never below it while habits allow it
+  wanting:     {half_life_hours: 12, cap: 3, drain: 0.8, signals: {progress: 0.6, novelty: 0.5, cue: 0.4, setback: 0.5}}
+  afterglow:   {half_life_hours: 3, cap: 2}
+  expectation: {rate: 0.5, half_life_hours: 48, pe_cap: 1.0, win_max: 2.0}
+  pursue:      {want: 1.0, glow: -0.5, deadline: 1.5, deadline_tau_hours: 24}
+  effects:                          # effect maps as an input's (section 2.3), per unit of the aggregate
+    wanting:   {initiative: 0.5, verbosity: -0.3}   # x the strongest wanting over the goals
+    afterglow: {valence: 0.6, humour: 0.3}          # x the strongest afterglow
+    surprise:  {valence: 0.4}                       # x the turn's prediction error (ordinal shifts; a negative one pushes back)
+  learn_from_surprise: 0.5          # 0..1 (default 0): the prediction error joins the learning sign (section 2.8)
+```
+
+The block needs `goals`, each with an `id`; the goal fields' defaults are in the comments, `wanting`, `afterglow`,
+`expectation` and `pursue` show theirs, and `effects`, `floor` and `starve_after` have none. Bounds: half-lives, caps, `pe_cap`,
+`win_max` and `deadline_tau_hours` > 0; `drain` and `rate` 0..1; signal weights and `pursue` weights -50..50.
+
+**Goal signals** ride in the turn's inputs (or a live event) under `goals`, beside the ordinary inputs:
+`{"goals": {"chores": {"deadline_hours": 30}, "fun": {"cue": true, "win": 1.5}}, "praise": true, "elapsed_hours": 2}`.
+Per goal: `progress` 0..1, `novelty` 0..1 or true/false, `cue` true/false, `setback` 0..1, `win` 0..`win_max`, `deadline_hours`
+(a number >= 0 sets the countdown, `null` clears it). An unknown goal or signal is an error at its path.
+
+**The drive step.** Before the turn is compiled, for each goal in declared order (h = `elapsed_hours`, k = the goal's gain gene):
+
+1. **Decay by clock time:** wanting W, afterglow A and expectation E each halve per their half-life (`x 0.5^(h / half_life)`);
+   a set deadline counts down by h (not below 0). There is no per-turn inertia: a host that calls more often does not make a
+   drive fade faster.
+2. **A win of size m > 0:** the prediction error `d = clip(m - E, -pe_cap, +pe_cap)`; `E <- E + rate x (m - E)`; wanting is
+   consumed, `W <- W x (1 - drain x min(m, 1))`; `A <- A + k x max(d, 0)`; a full win (m >= 1) clears the deadline. Without a win,
+   d = 0. Repeated equal wins drive E toward m and d toward 0: they stop moving the individual.
+3. **Wanting evidence:** `W <- W + k x (progress, novelty, cue, setback) . signals` (the weights above).
+4. **Caps:** W in [0, cap], A in [0, cap], E in [0, win_max]; each value is rounded to 6 decimals.
+
+**What the stance reads.** The aggregates wanting = max over goals of W, afterglow = max of A and surprise = the summed d
+(clipped to ±pe_cap) act through `effects` exactly as number inputs do (trait effects in the field, mood effects in the mood
+evidence), and name themselves in `why` ("wanting", "afterglow", "a win above expectation", "a win below expectation").
+`pursue`'s field per goal g (section 3, step 2b) adds `want x W_g + glow x A_g + deadline / (1 + deadline_hours_g / tau)` (the
+last term 0 while no deadline is set) to the prior, the interest gene, learned weights and any input or history effects a
+persona declares on `pursue` (an input `security` with `effects: {pursue: {safety: 1.0}}`). Couplings, `then: {pursue: [...]}`
+and rules over `pursue` use the existing grammar.
+
+**Habits over goals.** `when` takes `goal.<id>.deadline_hours`, `goal.<id>.want`, `goal.<id>.glow`, `goal.<id>.expect` and
+`since_pursued.<id>` (turns since the goal was last pursued) as number conditions (a number = at least, or `{at_least,
+at_most}`); a deadline condition is false while no deadline is set. A must-do goal is a habit:
+`{id: chores_due, when: {goal.chores.deadline_hours: {at_most: 24}}, then: {pursue: [chores]}, priority: 2}`. `starve_after: N`
+adds the habit `starve_<goal>` (`when: {since_pursued.<goal>: {at_least: N}}`, `then: {pursue: [<goal>]}`, the goal's priority)
+after the declared habits. After each turn, `since` is 0 for the goal a released stance pursues and grows by 1 for every other
+goal (for all of them on a refused or fallback turn).
+
+**Floors.** A goal's `floor` is not a rule (rules constrain stances, not odds): the compiler adds the smallest lift (to 1e-6, plus
+a 1e-5 margin) to the floor goal's field so that its odds stay at least the floor whatever the levels of `pursue`'s coupling
+partners, over the goals the habits in force allow (section 3, step 2b). That bound is sound when no multi-variable rule names
+`pursue`, so a persona with a floor and such a rule is refused when it is read. A habit outranks a floor: on a turn whose
+habits exclude the floor goal its odds are 0; `probbit persona lint` lists every habit that can exclude a floor goal.
+
+**Learning from surprise.** With a learning block (section 2.8) and `learn_from_surprise: kappa`, a turn's learning sign is
+`clip(sign + kappa x surprise, -1, 1)`: a win above expectation reinforces the stance before it, a win below expectation weakens
+it, an expected win moves nothing. With `pursue` in `learning.traits`, interests drift toward the goals whose wins surprise,
+never past ±total_cap. Learning still writes the Δ table and nothing else; W, A, E, deadlines and `since` are state, outside
+its reach.
+
+The block reserves the input ids `drv_want`, `drv_glow`, `drv_surprise`, `drv_letdown` and `drv_c<N>` (the compiled form of the
+aggregates and goal conditions): inputs, habit conditions, properties and `learning.from` may not use them. A persona without the
+block gives every document byte for byte as before the block existed; `goals` in its inputs is listed in `ignored`.
 
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
