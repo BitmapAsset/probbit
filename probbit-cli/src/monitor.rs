@@ -400,18 +400,31 @@ mod tests {
         text
     }
 
+    /// Watch a strand line by line: every document's sha256 is its line's `stance` digest, and the replay ends where `verify` does
+    fn replays_to_its_digests(text: &str, name: &str) -> Watch {
+        let lines = live::lines(text);
+        let mut w = Watch::open(lines[0]).unwrap();
+        for l in &lines[1..] {
+            w.feed(l, &run); assert!(w.bad.is_none(), "{name}: {:?}", w.bad);
+            let want = json::parse(l).unwrap().get("stance").and_then(Json::as_str).unwrap().to_string();
+            assert_eq!(persona::sha(&w.last.as_ref().unwrap().doc), want, "{name}: line {}", w.rep.line);
+        }
+        assert_eq!(w.rep.summary(), live::verify(text, &run).unwrap(), "{name}: the monitor's replay ends where verify does");
+        w
+    }
+    /// More strands to check, named in PROBBIT_MONITOR_STRANDS (paths joined as in PATH; unset: nothing to do)
+    #[test]
+    fn strands_named_in_the_environment_replay_to_their_digests() {
+        let Some(v) = std::env::var_os("PROBBIT_MONITOR_STRANDS") else { return };
+        for p in std::env::split_paths(&v) { let w = replays_to_its_digests(&std::fs::read_to_string(&p).unwrap(), &p.display().to_string());
+            eprintln!("{}: {} events, every document's sha256 is its line's stance digest", p.display(), w.rep.live.n); }
+    }
+
     #[test]
     fn the_monitors_documents_are_the_strands_stances() {
         for name in ["tutor.yaml", "ops-engineer.yaml", "trader-assistant.yaml"] {
             let text = strand(&format!("{}/../examples/persona/{name}", env!("CARGO_MANIFEST_DIR")), 40);
-            let lines = live::lines(&text);
-            let mut w = Watch::open(lines[0]).unwrap();
-            for l in &lines[1..] {
-                w.feed(l, &run); assert!(w.bad.is_none(), "{name}: {:?}", w.bad);
-                let want = json::parse(l).unwrap().get("stance").and_then(Json::as_str).unwrap().to_string();
-                assert_eq!(persona::sha(&w.last.as_ref().unwrap().doc), want, "{name}: line {}", w.rep.line);
-            }
-            assert_eq!(w.rep.summary(), live::verify(&text, &run).unwrap(), "{name}: the monitor's replay ends where verify does");
+            let w = replays_to_its_digests(&text, name);
             // every frame style draws it; plain ASCII with --plain
             for (ascii, th) in [(true, None), (false, None), (false, Some(Theme { depth: theme::Depth::Ansi256 }))] {
                 let fr = frame(Some(&w), None, "x.strand", None, &Style { th, ascii, cols: usize::MAX });
