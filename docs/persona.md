@@ -769,7 +769,10 @@ against the replay (its `"checkpoints": N` is in the summary); `verify --from-ch
 checkpoint against the event line before it (prev, the stance digest, the state digest, the state read as any state is) and
 replays only what follows (`"from_checkpoint": n`); the lines before it are trusted, so run a full `verify` to check them.
 `monitor` starts at the last checkpoint and draws its event at once. A strand that ends in a checkpoint line is continued from
-the state it carries. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
+the state it carries. Measured on an Apple M4: a 10,000-event strand of a drives persona (4 goals, a floor, learning; 3,126,444
+bytes, 10 checkpoint lines) opens in `monitor --once` from its last checkpoint in 0.005 s (load 3.3), where a full `verify`
+takes 192 s. A replay from a checkpoint costs what the events after it cost: 500 events past the last one took 26 s to draw
+(load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
 strand of 0.8.0, byte for byte; a binary before this one does not read the new lines.
 
 Exit codes: `live` 0 when every event got its stance; 2 for a bad persona, state or flag, and after a bad event (each bad event
