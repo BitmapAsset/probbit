@@ -24,7 +24,7 @@ pub struct Found { pub script: Vec<Event>, pub doc: Json, pub broken: Vec<Broken
 
 fn step(p: &Persona, st: &State, e: &Event, eng: persona::Engine, turns: &AtomicUsize) -> (Json, State) {
     turns.fetch_add(1, Ordering::Relaxed);
-    persona::turn(p, st, &persona::event_json(e), false, eng, false).expect("the fuzzer's inputs are valid")
+    persona::turn_any_source(p, st, &persona::event_json(e), false, eng, false).expect("the fuzzer's inputs are valid")
 }
 /// The earliest turn of `script` (run from `st0`) whose stance breaks the property
 fn breaking_turn(p: &Persona, pr: &Prop, st0: &State, script: &[Event], eng: persona::Engine, turns: &AtomicUsize) -> Option<(usize, Json, Vec<Broken>)> {
