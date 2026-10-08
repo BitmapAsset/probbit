@@ -330,7 +330,8 @@ pub fn release_held() {
 /// where hard links are not supported, created exclusively and written
 fn create_exclusive(path: &str, text: &str) -> std::io::Result<()> {
     use std::io::Write;
-    let tmp = format!("{path}.{}.tmp", std::process::id());
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = format!("{path}.{}.{}.tmp", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     std::fs::write(&tmp, text)?;
     let r = std::fs::hard_link(&tmp, path); let _ = std::fs::remove_file(&tmp);
     match r { Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => { let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?; f.write_all(text.as_bytes()) } r => r }
@@ -839,6 +840,9 @@ mod tests {
         assert!(none.contains("reward_from") && !none.contains("learning"));
         assert_eq!(persona::build(&json::parse(&none).unwrap()).err().map(|e| e.path).as_deref(), Some("reward_from"));
         assert!(persona::describe(&kit(None).0).get("reward_from").is_none());
+        let clash = DOC.replacen(r#"{"id":"loss","kind":"flag""#, r#"{"id":"src","kind":"flag"},{"id":"loss","kind":"flag""#, 1).replacen(r#""learning":"#, r#""reward_from":["human"],"learning":"#, 1);
+        assert_eq!(persona::build(&json::parse(&clash).unwrap()).err().map(|e| (e.path, e.msg.contains("src"))), Some(("reward_from".to_string(), true)));
+        assert!(persona::build(&json::parse(&clash.replacen(r#""reward_from":["human"],"#, "", 1)).unwrap()).is_ok(), "without reward_from an input may be called src");
     }
 
     /// G1: with `reward_from: [human, env]` a reward from `src: self`, without a src, from an undeclared source or a malformed src is

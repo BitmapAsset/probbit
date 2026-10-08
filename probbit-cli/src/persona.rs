@@ -368,7 +368,7 @@ pub fn build(doc: &Json) -> R<Persona> {
     let max_tokens = num_or(lkv, "max_tokens", 40.0, "line", Some(8.0), Some(400.0), true)? as usize;
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
-    let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()))?) };
+    let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
     let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward };
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
@@ -418,8 +418,9 @@ fn learning_spec(l: &Json, vars: &[Var], inputs: &[Input]) -> R<Learning> {
 /// `reward_from` (docs/persona.md §2.10): the sources a reward-bearing input may come from -> per reward-bearing input (`bearing`:
 /// the learning block's flags, then `goals.<id>.win` per goal of a drives block) its allowed source kinds (None = any). A list of
 /// kinds (`human`, `env`) or `any` covers every reward-bearing input; a mapping names each one with its own list or `any`.
-fn reward_spec(rf: &Json, bearing: &[String]) -> R<Vec<(String, Option<Vec<String>>)>> {
+fn reward_spec(rf: &Json, bearing: &[String], inputs: &[Input]) -> R<Vec<(String, Option<Vec<String>>)>> {
     need(!bearing.is_empty(), "reward_from", "this persona has no reward-bearing input (a learning block's flags or a drives block's wins)")?;
+    need(!inputs.iter().any(|x| x.id == "src"), "reward_from", "`src` names an event's source here: no input may have that id")?;
     let kinds = |x: &Json, path: &str| -> R<Option<Vec<String>>> {
         if x.as_str() == Some("any") { return Ok(None); }
         let v = strs(x).filter(|v| !v.is_empty()).ok_or_else(|| perr(path, "a list of source kinds (human, env) or any"))?;
@@ -706,7 +707,7 @@ fn build_drives(doc: &Json) -> R<Persona> {
         need(!(vs.iter().any(|v| v == "pursue") && vs.iter().any(|v| v != "pursue")), &format!("habits.{}", h.id), "a goal floor needs `pursue` free of multi-variable rules (use then: or a coupling)")?; } } } }
     // reward_from, read here: its reward-bearing inputs include the goals' wins
     if let Some(rf) = get(kv, "reward_from").filter(|x| !x.is_null()) { let mut bearing = p.learning.as_ref().map_or(vec![], |l| l.from.clone());
-        bearing.extend(goals.iter().map(|g| format!("goals.{}.win", g.id))); p.reward = Some(reward_spec(rf, &bearing)?); }
+        bearing.extend(goals.iter().map(|g| format!("goals.{}.win", g.id))); p.reward = Some(reward_spec(rf, &bearing, &p.inputs)?); }
     p.drives = Some(Drives { goals, hl_w: w[0], cap_w: w[1], drain: w[2], sig, hl_a: a[0], cap_a: a[1], rate: e[0], hl_e: e[1], pe_cap: e[2], win_max: e[3],
         w_want: pw[0], w_glow: pw[1], w_deadline: pw[2], tau: pw[3], kappa, synthetic, conds });
     Ok(p)

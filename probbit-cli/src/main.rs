@@ -607,7 +607,7 @@ fn live_cmd(args: &[String]) {
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
         let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| lv.event(&ev, eng));
         match res {
-            Ok((stance, line)) => { let cp = (every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
+            Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
                 match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
                 if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
             Err(e) => { if ["paused", "retired"].contains(&e.code) { refused += 1 } else { bad += 1 }
