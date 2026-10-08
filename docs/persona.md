@@ -802,9 +802,10 @@ in force, the ones that bound in colour, and the violations counter (0 by constr
 level as centred bars within ±total_cap (with a learning block, section 2.8). The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
 
-**Checkpoints.** `--once` replays a strand with checkpoint lines (section 5.7) from its last checkpoint, not from the header:
-the board starts at the checkpoint's event (its stance is in the line) and the badge says "replay verified from checkpoint
-n". `--follow` and `--serve` still replay from the header.
+**Checkpoints and control lines.** A strand with checkpoint lines (section 5.7) is replayed from its last checkpoint, not from
+the header (`--once`, and the first read of `--follow` and `--serve`): the board starts at the checkpoint's event (its stance
+is in the line) and the badge says "replay verified from checkpoint n". A paused or retired individual says so next to the
+badge.
 
 **Terminal.** `--once` prints one frame and exits (the default without `--follow`). `--follow` polls the file every 100 ms and
 draws appended lines within a second (a line counts once its newline is written; a truncated, removed or rotated strand is

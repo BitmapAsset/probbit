@@ -184,6 +184,8 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let badge = match (bad, w.and_then(|w| w.rep.from)) { (Some((n, why)), _) => s.bold(RED, &format!("line {n} diverges: {why}")),
         (None, Some(c)) => s.bold(GREEN, &s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
         (None, None) => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
+    // a paused or retired individual (control lines, docs/persona.md §5.7) says so next to the badge
+    let badge = match w.map(|w| w.rep.live.status).filter(|st| *st != crate::live::Status::Active) { Some(st) => format!("{badge} {dot} {}", s.bold(if st == crate::live::Status::Retired { RED } else { YELLOW }, st.name())), None => badge };
     let Some(w) = w else {
         out.push(format!("{} {dot} {badge}", s.bold(CYAN, "probbit monitor")));
         if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
@@ -382,7 +384,13 @@ impl Followed {
     /// rotated file); Some(false): lines replayed (`each` sees the replay after every event it adds)
     fn poll(&mut self, eng: Engine, each: &mut dyn FnMut(&Watch)) -> Option<bool> {
         match self.tail.poll() {
-            Got::Lines(ls) => { for l in ls { if let Some(x) = &mut self.w { let n = x.rep.live.n; x.feed(&l, eng); if x.rep.live.n != n && x.bad.is_none() { each(x); } continue; }
+            Got::Lines(ls) => {
+                // the first read of a strand with checkpoint lines starts at the last one: its event is drawn at once
+                let mut skip = 0;
+                if self.w.is_none() && self.bad_head.is_none() { let refs: Vec<&str> = ls.iter().map(String::as_str).collect();
+                    if let Some(k) = crate::live::last_checkpoint(&refs, 0).filter(|k| *k >= 2) {
+                        if let Ok(x) = Watch::open_at(refs[0], refs[k - 1], refs[k], k + 1) { each(&x); self.w = Some(x); skip = k + 1; } } }
+                for l in ls.into_iter().skip(skip) { if let Some(x) = &mut self.w { let n = x.rep.live.n; x.feed(&l, eng); if x.rep.live.n != n && x.bad.is_none() { each(x); } continue; }
                     if self.bad_head.is_none() { match Watch::open(&l) { Ok(x) => self.w = Some(x), Err(e) => self.bad_head = Some(e) } } }
                 Some(false) }
             Got::Restart(why) => { self.w = None; self.bad_head = None; self.note = Some(why); Some(true) }
@@ -708,6 +716,27 @@ mod tests {
             let (_, line) = lv.event(&Json::Obj(ev), &run).unwrap(); text += &line; text.push('\n');
         }
         text
+    }
+
+    /// A strand with checkpoint lines (docs/persona.md §5.7): the first poll of `--follow` / `--serve` starts at the last checkpoint
+    /// and draws the event the full replay draws; after a pause line the frame says `paused` next to the badge
+    #[test]
+    fn following_starts_at_the_last_checkpoint() {
+        let (p, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/tutor.yaml")).unwrap();
+        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(5), true, &run), Clock::Fixed, "probbit test");
+        let mut text = format!("{header}\n");
+        for t in 0..25u32 { let ev = json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 2 == 0)).unwrap();
+            let (s, line) = lv.event(&ev, &run).unwrap(); text += &line; text.push('\n'); if lv.n % 10 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+        let f = std::env::temp_dir().join(format!("probbit-monitor-cp-{}.strand", std::process::id())); std::fs::write(&f, &text).unwrap();
+        let mut fl = Followed::new(f.to_str().unwrap()); let mut seen = vec![];
+        assert_eq!(fl.poll(&run, &mut |w: &Watch| seen.push(w.rep.live.n)), Some(false));
+        let w = fl.w.as_ref().unwrap(); assert_eq!((w.rep.from, w.rep.live.n, seen.first().copied()), (Some(20), 25, Some(20)));
+        let lines = live::lines(&text); let mut full = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { full.feed(l, &run); }
+        assert!(full.bad.is_none()); assert_eq!(persona::canon(&w.last.as_ref().unwrap().doc), persona::canon(&full.last.as_ref().unwrap().doc));
+        text += &lv.control("pause", "human:owner", "a check", "t").unwrap(); text.push('\n'); std::fs::write(&f, &text).unwrap();
+        assert_eq!(fl.poll(&run, &mut |_: &Watch| {}), Some(false));
+        let fr = frame(fl.w.as_ref(), None, "x", None, &Style { th: None, ascii: true, cols: usize::MAX }); assert!(fr[0].contains("paused"), "{}", fr[0]);
+        let _ = std::fs::remove_file(&f);
     }
 
     /// Watch a strand line by line: every document's sha256 is its line's `stance` digest, and the replay ends where `verify` does

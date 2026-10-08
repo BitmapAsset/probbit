@@ -24,7 +24,8 @@ All notable changes to this project are documented here. The format follows
     the pause) and nothing else moves. `verify` replays them and reports `controls` and `status`. Not an MCP tool, by design.
   - **Checkpoints**: every K-th event (`--checkpoint-every K`, default 1,000; 0 = none) a checkpoint line carries the event
     count, that event's stance and the whole state. `verify` checks each against the replay; `verify --from-checkpoint`
-    replays from the last one; `monitor --once` starts there and draws its event at once.
+    replays from the last one; `monitor` (`--once`, and the first read of `--follow` / `--serve`) starts there and draws its
+    event at once, and shows a paused or retired status next to its badge.
 - Exit code 4 for `live` and `live control`: the writer lock is held by another writer, or the individual is paused or retired.
 
 ## 0.8.0 - unreleased
