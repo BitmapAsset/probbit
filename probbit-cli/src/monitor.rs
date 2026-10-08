@@ -80,11 +80,24 @@ impl Watch {
         let rep = Replay::open(head)?; let meta = Meta::of(&rep); let n = meta.moods.len();
         Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None })
     }
+    /// The replay from a checkpoint line (`live::Replay::open_at`; `before` = the event line before it): the lines before it are
+    /// not replayed, and the board starts at the checkpoint's event (its stance, the inputs `before` logs, its learned deltas)
+    fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Watch, (usize, String)> {
+        let rep = Replay::open_at(head, before, cp, at)?; let meta = Meta::of(&rep); let n = meta.moods.len();
+        let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None };
+        if let Some(doc) = w.rep.last_stance().cloned() {
+            let given = json::parse(before).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
+            let learned = w.rep.live.st.to_json(&w.rep.live.p).get("learned").cloned().unwrap_or(Json::Null);
+            for (m, s) in w.meta.moods.iter().zip(w.spark.iter_mut()) { s.push_back(position(&odds(&doc, "mood", m))); }
+            w.last = Some(Frame { n: w.rep.live.n, doc, given, learned }); }
+        Ok(w)
+    }
     /// Replay one event line; after a line that differs, nothing more is replayed
     fn feed(&mut self, l: &str, eng: Engine) {
         if self.bad.is_some() { return; }
         match self.rep.step(l, eng) {
-            Ok(doc) => {
+            Ok(None) => {} // a control or checkpoint line: no stance to draw
+            Ok(Some(doc)) => {
                 let given = json::parse(l).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
                 let learned = self.rep.live.st.to_json(&self.rep.live.p).get("learned").cloned().unwrap_or(Json::Null);
                 for (m, s) in self.meta.moods.iter().zip(self.spark.iter_mut()) { if s.len() == SPARK { s.pop_front(); } s.push_back(position(&odds(&doc, "mood", m))); }
@@ -168,7 +181,9 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let lab = |t: &str| s.bold(MAGENTA, &format!("{t:<8}"));
     let mut out = vec![];
     let bad = bad_head.or_else(|| w.and_then(|w| w.bad.as_ref()));
-    let badge = match bad { Some((n, why)) => s.bold(RED, &format!("line {n} diverges: {why}")), None => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
+    let badge = match (bad, w.and_then(|w| w.rep.from)) { (Some((n, why)), _) => s.bold(RED, &format!("line {n} diverges: {why}")),
+        (None, Some(c)) => s.bold(GREEN, &s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
+        (None, None) => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
     let Some(w) = w else {
         out.push(format!("{} {dot} {badge}", s.bold(CYAN, "probbit monitor")));
         if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
@@ -423,7 +438,10 @@ pub fn cmd(args: &[String]) {
     if head.is_empty() { crate::fail(&format!("monitor: {path} is empty: not a strand")) }
     if !strand(head) { crate::fail(&format!("monitor: {path} is not a probbit strand (format 1)")) }
     let note = (!rest.is_empty() && !lines.is_empty()).then(|| format!("line {} is incomplete (no newline at its end): not replayed", lines.len() + 1));
-    let (w, bad_head) = match Watch::open(head) { Ok(mut w) => { for l in lines.iter().skip(1) { w.feed(l, eng); } (Some(w), None) } Err(e) => (None, Some(e)) };
+    // a strand with checkpoint lines replays from the last one (the board starts at its event and draws the latest one)
+    let start = crate::live::last_checkpoint(&lines, 0);
+    let opened = match start { Some(k) => Watch::open_at(head, lines[k - 1], lines[k], k + 1), None => Watch::open(head) };
+    let (w, bad_head) = match opened { Ok(mut w) => { for l in lines.iter().skip(start.map_or(1, |k| k + 1)) { w.feed(l, eng); } (Some(w), None) } Err(e) => (None, Some(e)) };
     let fr = frame(w.as_ref(), bad_head.as_ref(), &path, note.as_deref(), &s);
     out(&fr.iter().map(|l| crate::tui::clip(l, s.cols) + "\n").collect::<String>());
     if bad_head.is_some() || w.is_some_and(|w| w.bad.is_some()) { std::process::exit(1) }
