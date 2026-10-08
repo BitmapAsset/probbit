@@ -71,6 +71,7 @@ engine: {...}                       # optional engine settings
 line: {...}                         # optional stance-line settings
 learning: {...}                     # optional bounded learning from feedback (section 2.8)
 drives: {...}                       # optional goals with wanting, afterglow and expectation; the `pursue` output (section 2.9)
+reward_from: [human, env]           # optional: the sources a reward may come from (section 2.10)
 comment: any text                   # ignored
 ```
 
@@ -345,6 +346,43 @@ its reach.
 The block reserves the input ids `drv_want`, `drv_glow`, `drv_surprise`, `drv_letdown` and `drv_c<N>` (the compiled form of the
 aggregates and goal conditions): inputs, habit conditions, properties and `learning.from` may not use them. A persona without the
 block gives every document byte for byte as before the block existed; `goals` in its inputs is listed in `ignored`.
+
+### 2.10 Reward provenance (optional)
+
+```yaml
+reward_from: [human, env]           # every reward-bearing input: from a person or a sensor, never from the individual itself
+# or one list (or `any`) per reward-bearing input, naming each one:
+reward_from: {praise: [human], criticism: [human], goals.fun.win: [env], goals.safety.win: any}
+```
+
+A **reward-bearing input** is one that moves what an individual learns or how a goal pays off: the learning block's flags
+(`learning.from`, section 2.8) and each goal's `win` (section 2.9). An event may say who produced it with `src`:
+`human` or `human:<id>` (a person), `env` or `env:<sensor>` (a sensor: a test runner, a build, a monitor), `self` (the agent's
+own output, judged by the host) or `clock` (an idle tick); an id is 1-64 characters of `A-Z a-z 0-9 _ . - @ / :`. With
+`reward_from`, a turn whose reward-bearing input is on (a learning flag `true`, a goal's `win` above 0) needs its `src` to be
+one of the kinds listed for that input; otherwise the event is **refused whole**, as a bad event is (one `{"error"}` object at
+`inputs.src`, exit 2 for `persona turn` and at the end of a `live` run; no turn, no line, no state change):
+
+| the event | refused because |
+|---|---|
+| `{"praise": true, "src": "self"}` | a reward never comes from the individual itself |
+| `{"praise": true}` | a reward needs a source |
+| `{"goals": {"fun": {"win": 1}}, "src": "clock"}` | a source the persona does not list for it |
+| `{"praise": true, "src": "human:"}` | a malformed source |
+
+An event with no reward on is accepted from any source (`{"loss": true, "src": "self"}`: the agent reports its own failure).
+`src` is read, not compiled: it is not listed in `ignored`, it comes back in the stance's `inputs`, and the strand logs it with
+the other inputs, so `live verify` replays the decision. `any` (for one input, or for all) leaves that input's source unchecked.
+The list holds `human` and `env` only: `self` and `clock` are refused when the persona is read, and so is the key on a persona
+without a reward-bearing input; a mapping must name every reward-bearing input. `describe` lists the rule.
+
+What it guarantees, and what it does not. A refused event changes nothing, so a run equals the same run with its refused
+events removed, state and strand byte for byte (property P3, tested over 40 individuals x 300 random events mixing every
+source). The source is the host's word: provenance makes a host's claim a logged, replayed fact, it does not make it true. The
+host sets `src` in its own code (never from the model's text), and the labeller that sets `praise` or a `win` does not read
+the agent's own reply as its evidence of success. `fuzz` and `prove` search over stances, not sources: their events stand for
+events of an accepted source. A persona without the key reads `src` as any undeclared input (listed in `ignored`), and every
+document it produces is the same, byte for byte, as before the key existed.
 
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
@@ -686,9 +724,59 @@ upset and `up`, this individual's resting level, after 17 quiet hours; P(joke) o
 0.57 on day 1, 0.78 on day 2 and 0.89 on each of days 3-7, with humour's learned weights ending at [-1, +1, -0.46] for none /
 light / playful; 13 failure turns, a joke on none of them; 0 rule breaks; a 21,361-byte strand that `live verify` replays.
 
+**One writer per strand.** `--strand FILE` takes the writer lock `FILE.lock` before it reads the strand and holds it to the end of
+the run: the lock file is created exclusively (written aside and hard-linked into place, so it is never seen half written) and
+holds the writer's process id and start time. A second writer finds it and exits 4 with `{"error":{"code":"locked",...}}`
+naming the holder's pid, and changes nothing. A lock whose process is gone is stale and is taken over; a lock that names no
+process, or a process id reused by another program, stays held until a person removes it. Before every append the writer
+checks the lock is still its own, so a lock removed or taken over under a running writer stops it before it writes. Two
+`live` runs started on one state and strand (the two-writer case of an earlier test round) now give exactly one exit 0 and one
+exit 4, and the strand verifies. `probbit_live_event` (MCP) and `live control` take the lock for their one append.
+
+**Control lines: pause, resume, retire.** A person (or a sensor) stops an individual in its own log:
+
+```sh
+probbit live control pip.strand pause --by human:owner --reason "checking the last answers"
+probbit live control pip.strand resume --by human:owner --reason "checked"
+probbit live control pip.strand retire --by human:owner --reason "end of the trial"
+```
+
+Each appends one control line under the writer lock, canonical JSON chained like the others:
+`{"at":"2026-10-08T22:00:00Z","by":"human:owner","control":"pause","prev":"sha256:...","reason":"..."}` (`at` is the time it was
+written, RFC 3339 UTC; `--at TEXT` sets it). `--by` is `human[:id]` or `env[:id]`, never the individual; the reason is 1-500
+characters. Pause moves an active individual to paused, resume a paused one back, retire either to retired; nothing follows
+retire. While paused or retired every event is refused: one `{"error"}` object with code `paused` or `retired` per event,
+nothing written, exit 4 at the end of the run. **No credit crosses a control line**: the credit of the stance before it is
+cleared (section 2.8), so feedback after a resume credits no stance from before the pause, and learning cannot tie a reward to
+an interruption. Nothing else moves: moods, drives, learned weights, history and the turn count are the individual's as before,
+and the clock goes on (with `--clock fixed` the host's hours of the next event include the pause). The individual has no input
+that names a control line or unsets one: an event's `control` key is an undeclared input like any other, and the stance never
+mentions the status. Control lines are not an MCP tool: keep `live control` out of the agent's own reach.
+
+A run continues a strand that ends in control lines from `--state`, the state after the last event line (the one a run
+writes), and applies them: the status, and the cleared credit. `verify` replays control lines (a control line must be a valid
+move; a line after retire diverges) and adds `"controls": N, "status": "active" | "paused" | "retired"` to its summary when a
+strand has any. A control line is free text where it says why, so a changed reason shows at the next line's `prev`, as a
+removed line does. Measured on 50 individuals x 1,000 random events with 147 pause / resume pairs inserted at random (property
+P5): every run equals, stance for stance and state for state, the same events without control lines whose credit is cleared at
+the same points; 4 of the 50 end with other learned weights than the run without the pairs (the cleared credit's effect, at
+most 1.2 on one level). After retire, 10,000 random events are all refused and the strand and state do not change (P10).
+
+**Checkpoints.** Every K-th event (`--checkpoint-every K`, default 1,000; 0 = none) `live` appends a checkpoint line after the
+event line: `{"checkpoint":n,"prev":"sha256:...","stance":{...},"state":{...}}`, the event count, that event's stance document
+and the whole state after it, chained like the others. A full `verify` replays from the header and checks every checkpoint
+against the replay (its `"checkpoints": N` is in the summary); `verify --from-checkpoint` reads the header, checks the last
+checkpoint against the event line before it (prev, the stance digest, the state digest, the state read as any state is) and
+replays only what follows (`"from_checkpoint": n`); the lines before it are trusted, so run a full `verify` to check them.
+`monitor` starts at the last checkpoint and draws its event at once. A strand that ends in a checkpoint line is continued from
+the state it carries. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
+strand of 0.8.0, byte for byte; a binary before this one does not read the new lines.
+
 Exit codes: `live` 0 when every event got its stance; 2 for a bad persona, state or flag, and after a bad event (each bad event
-prints one `{"error"}` object on stdout, changes nothing and the run goes on). `verify` 0 when every line replays, 1 at a line
-that differs, 2 for a bad flag or an unreadable file.
+prints one `{"error"}` object on stdout, changes nothing and the run goes on); 4 when the writer lock is held by another writer
+(nothing read or written) and after events refused by a paused or retired individual. `verify` 0 when every line replays, 1 at
+a line that differs, 2 for a bad flag or an unreadable file. `control` 0 when the line is appended, 2 for a bad field or an
+invalid move, 4 when the lock is held or the individual is retired.
 
 ### 5.8 Monitor: watch an individual's inner state
 
@@ -710,6 +798,10 @@ turn used them (flags lit, numbers as bars, levels by name, the clock) and the h
 in force, the ones that bound in colour, and the violations counter (0 by construction, section 2.5). The learned deltas per
 level as centred bars within ±total_cap (with a learning block, section 2.8). The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
+
+**Checkpoints.** `--once` replays a strand with checkpoint lines (section 5.7) from its last checkpoint, not from the header:
+the board starts at the checkpoint's event (its stance is in the line) and the badge says "replay verified from checkpoint
+n". `--follow` and `--serve` still replay from the header.
 
 **Terminal.** `--once` prints one frame and exits (the default without `--follow`). `--follow` polls the file every 100 ms and
 draws appended lines within a second (a line counts once its newline is written; a truncated, removed or rotated strand is
