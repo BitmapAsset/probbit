@@ -731,7 +731,8 @@ naming the holder's pid, and changes nothing. A lock whose process is gone is st
 process, or a process id reused by another program, stays held until a person removes it. Before every append the writer
 checks the lock is still its own, so a lock removed or taken over under a running writer stops it before it writes. Two
 `live` runs started on one state and strand (the two-writer case of an earlier test round) now give exactly one exit 0 and one
-exit 4, and the strand verifies. `probbit_live_event` (MCP) and `live control` take the lock for their one append.
+exit 4, and the strand verifies. `probbit_live_event` (MCP) and `live control` take the lock for their one append, `--demo
+week --strand` for its week.
 
 **Control lines: pause, resume, retire.** A person (or a sensor) stops an individual in its own log:
 

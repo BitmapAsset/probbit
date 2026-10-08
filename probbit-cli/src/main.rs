@@ -580,8 +580,10 @@ fn live_cmd(args: &[String]) {
         if let Some(f) = ["--state", "--events", "--clock", "--watch", "--checkpoint-every"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live --demo week: {f} does not apply (the demo is its own events on the fixed clock)")) }
         // the bars on stderr at a colour terminal; the plain lines on stdout unless it is that terminal too
         let th = theme::stderr(args); let lines = th.is_none() || !theme::stdout_is_terminal();
+        // the week's strand is written under the writer lock too
+        let lock = opt("--strand").map(|f| live::Lock::take(&f).unwrap_or_else(|e| refuse("live: ", e)));
         live::week(&doc, seed_arg(args, "--seed"), opt("--strand").as_deref(), th, &mut |l: &str| if lines { emit(l) }, eng).unwrap_or_else(|e| bad_input("live: ", e));
-        return;
+        drop(lock); return;
     }
     let every: u64 = arg(args, "--checkpoint-every", live::CHECKPOINT_EVERY);
     let state_file = opt("--state"); if state_file.is_some() && opt("--seed").is_some() { fail("live: give --seed N (a new individual) or --state FILE (a stored one), not both") }
