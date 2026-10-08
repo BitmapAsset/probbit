@@ -25,6 +25,60 @@ fn parse(s: &str) -> Json { json::parse(s).unwrap_or_else(|e| panic!("not JSON (
 fn jw(j: &Json) -> String { json::write(j, false) }
 fn s<'a>(j: &'a Json, path: &[&str]) -> &'a Json { path.iter().fold(j, |x, k| x.get(k).unwrap_or_else(|| panic!("no {k} in {:.200}", jw(x)))) }
 const NAMES: [&str; 3] = ["ops-engineer", "tutor", "trader-assistant"];
+
+/// Check finite floor lifts on both sides of the raw exponential's range, including subnormal values.
+#[test]
+fn floor_lifts_hold_across_extreme_fields() {
+    let file = tmp("floor-range.json");
+    for effects in [r#"{"fun":-10,"safety":-20}"#, r#"{"fun":10}"#, r#"{"fun":10,"safety":20}"#] {
+        let doc = format!(r#"{{"probbit_persona":1,"identity":{{"name":"Fixture","version":"1"}},
+            "traits":[{{"id":"tone","levels":["low","mid","high"],"prior":[0.2,0.5,0.3]}}],
+            "inputs":[{{"id":"pressure","kind":"number","max":100,"effects":{{"pursue":{effects}}}}}],
+            "drives":{{"goals":[{{"id":"fun"}},{{"id":"safety","floor":0.1}}]}}}}"#);
+        std::fs::write(&file, doc).unwrap();
+        for json in [false, true] {
+            let mut args = vec!["persona", "prove", &file, "--never", r#"{"then":{"tone":["mid"]}}"#, "--seeds", "0"];
+            if json { args.push("--json"); }
+            let (c, out, err) = probbit(&args, ""); assert_eq!(c, 0, "{err}");
+            if json {
+                let proof = parse(&out); let floor = &s(&proof, &["floors"]).as_arr().unwrap()[0];
+                assert_eq!(s(floor, &["verdict"]).as_str(), Some("unknown"), "{out}");
+            } else { assert!(out.contains("floor  safety") && out.contains("numeric floor guarantee is not certified"), "{out}"); }
+        }
+        for pressure in [50, 74, 75, 100] {
+            let script = format!(r#"[{{"pressure":{pressure}}}]"#);
+            let (c, out, err) = probbit(&["persona", "replay", &file, "--script", &script], "");
+            assert_eq!(c, 0, "{err}");
+            let d = parse(&out);
+            assert_eq!(s(&d, &["status"]).as_str(), Some("ok"), "{out}");
+            assert_eq!(s(&d, &["pursue", "released"]), &Json::Bool(true), "{out}");
+            assert!(s(&d, &["pursue", "odds", "safety"]).as_f64().unwrap() >= 0.1, "{out}");
+            assert!(s(&d, &["pursue", "lift"]).as_obj().unwrap().iter().all(|(_, v)| v.as_f64().is_some_and(f64::is_finite)), "{out}");
+        }
+    }
+    let _ = std::fs::remove_file(file);
+}
+
+/// Check that six-decimal state output can be read with a cap that has seven decimals.
+#[test]
+fn rounded_learning_and_drive_caps_continue() {
+    for (kind, block, inputs) in [
+        ("learning", r#""inputs":[{"id":"praise","kind":"flag"}],"learning":{"from":["praise"],"traits":["tone"],"rate":0.5,"step_cap":0.1234567,"total_cap":0.1234567}"#, r#"{"praise":true}"#),
+        ("drive", r#""drives":{"goals":[{"id":"fun"},{"id":"safety"}],"wanting":{"cap":0.1234567}}"#, r#"{"goals":{"fun":{"cue":true}}}"#),
+    ] {
+        let file = tmp(&format!("{kind}-cap.json")); let state = tmp(&format!("{kind}-cap-state.json"));
+        let doc = format!(r#"{{"probbit_persona":1,"identity":{{"name":"Fixture","version":"1"}},
+            "traits":[{{"id":"tone","levels":["low","mid","high"],"prior":[0.2,0.5,0.3]}}],{block}}}"#);
+        std::fs::write(&file, doc).unwrap();
+        let (c, out, err) = probbit(&["persona", "init", &file, "--out", &state], ""); assert_eq!(c, 0, "{out}{err}");
+        for event in ["{}", inputs] {
+            let (c, out, err) = probbit(&["persona", "turn", &file, "--state", &state, "--inputs", event], ""); assert_eq!(c, 0, "{out}{err}");
+        }
+        let saved = read(&state); assert!(saved.contains("0.123457"), "{saved}");
+        let (c, out, err) = probbit(&["persona", "turn", &file, "--state", &state, "--inputs", "{}"], ""); assert_eq!(c, 0, "{out}{err}");
+        for f in [file, state] { let _ = std::fs::remove_file(f); }
+    }
+}
 fn workday() -> Vec<Json> { s(&parse(&read(&ex("workday.json"))), &["turns"]).as_arr().unwrap().to_vec() }
 
 struct Mix(u64);

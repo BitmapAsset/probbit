@@ -498,7 +498,7 @@ Learning here is a capped nudge to a few weights per trait, credited to the leve
 trait also pushes the others' levels); rule immunity is architectural, not trained. The proofs and counts cover the stance; whether
 a model writes in it is measured per model.
 
-### Drives: which goal gets the next unit of effort
+### Drives: which goal gets the next unit of effort (0.8.0, unreleased)
 
 A `drives:` block gives a persona 2-7 goals, each with wanting, afterglow and an expectation. A win moves the individual by its
 prediction error (the win's size minus what it expected), so repeated equal wins move it less and less; a new output, `pursue`,
@@ -518,7 +518,7 @@ A persona without the block gives the same documents as before, byte for byte. M
 cues, rewards and praises fun on this persona, 100 individuals x 10,000 turns: 0 habit breaks, all 6,743 must-do turns pursued
 the due chore, and the safety floor (0.1) held on every turn its habits allowed (least odds 0.141), while fun took 85 % of turns.
 
-### Watch it live: `probbit monitor`
+### Watch it live: `probbit monitor` (0.8.0, unreleased)
 
 `probbit monitor pip.strand` replays a strand with the rules of `live verify` and draws the individual's inner state as live bars:
 each trait's levels with their odds, the moods, the event's inputs, the habits that bound, the learned weights and the line, in the

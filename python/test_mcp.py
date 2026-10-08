@@ -190,6 +190,11 @@ class Mcp(unittest.TestCase):
 
     def test_live_event_logs_a_strand_the_cli_verifies(self):
         self.legacy("2025-11-25")
+        tools = self.c.request("tools/list")["result"]["tools"]
+        for tool in tools:
+            self.assertEqual(tool["annotations"]["readOnlyHint"], tool["name"] != "probbit_live_event")
+        event_tool = next(t for t in tools if t["name"] == "probbit_live_event")
+        self.assertFalse(event_tool["annotations"]["destructiveHint"])
         path = os.path.join(EX, "persona", "tutor.yaml")
         with tempfile.TemporaryDirectory() as d:
             strand = os.path.join(d, "pip.strand")

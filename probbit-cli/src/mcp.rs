@@ -204,7 +204,7 @@ fn tools() -> Json {
         for (k, x) in v.iter_mut() { if k == "description" { *x = jstr("A probbit-ir v1 program (docs/probbit-ir-json.md): variables over named values, scores, pairs, caps and the v2 constructs, plus optional flags."); }
             if k == "properties" { if let Json::Obj(pr) = x { pr.push(("flags".into(), p(&run_flags))); } } } }
     let tool = |name: &str, title: &str, desc: &str, schema: Json| obj(vec![("name", jstr(name)), ("title", jstr(title)), ("description", jstr(desc)), ("inputSchema", schema),
-        ("annotations", obj(vec![("readOnlyHint", Json::Bool(true)), ("openWorldHint", Json::Bool(false))]))]);
+        ("annotations", obj(vec![("readOnlyHint", Json::Bool(name != "probbit_live_event")), ("destructiveHint", Json::Bool(false)), ("openWorldHint", Json::Bool(false))]))]);
     Json::Arr(vec![
         tool("probbit_decide", "Route tasks to workers", "probbit decide: assign every task to one worker under hard rules (allowed sets, quotas, clamps) with workflow affinity. Returns the same JSON as the CLI: a plan that obeys every rule, odds per task, verdict exact | diagnostics_passed | partial (act on `released`, escalate `escalated`) | refused | infeasible, gate diagnostics and telemetry.", p(&router)),
         tool("probbit_run", "Run a probbit-ir program", "probbit run: a general constrained categorical program (variables, values, scores, pairs, caps, all_different, implies, tables, precedes, linear). Same answer shape as probbit_decide with `marginals` instead of `odds`.", ir),

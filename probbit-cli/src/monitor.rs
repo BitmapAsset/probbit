@@ -162,6 +162,8 @@ fn short(d: &str) -> &str { let h = d.strip_prefix("sha256:").unwrap_or(d); &h[.
 /// One frame: the lines to draw (without line endings). `note`: a warning to show (a truncated or rotated strand, an
 /// incomplete last line).
 fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note: Option<&str>, s: &Style) -> Vec<String> {
+    // Strip data's C0, DEL and C1 controls per plain line; the caller adds the frame's line endings.
+    let finish = |mut lines: Vec<String>| { if s.ascii { for line in &mut lines { line.retain(|c| !c.is_control()); } } lines };
     let dot = s.paint(DIM, s.g("·", "|"));
     let lab = |t: &str| s.bold(MAGENTA, &format!("{t:<8}"));
     let mut out = vec![];
@@ -171,7 +173,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         out.push(format!("{} {dot} {badge}", s.bold(CYAN, "probbit monitor")));
         if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
         out.push(footer(path, "", s));
-        return out;
+        return finish(out);
     };
     let m = &w.meta;
     let f = w.last.as_ref();
@@ -182,7 +184,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let Some(f) = f else {
         out.push(s.paint(GREY, "no events yet: the strand holds its header and no event lines"));
         out.push(footer(path, &m.engine, s));
-        return out;
+        return finish(out);
     };
     let doc = &f.doc;
     let idw = m.traits.iter().chain(&m.moods).map(|v| v.id.chars().count()).chain(m.learning.iter().flat_map(|l| l.0.iter().map(|t| t.chars().count()))).max().unwrap_or(4).clamp(4, 14);
@@ -253,7 +255,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     if let Some(y) = doc.get("why").and_then(Json::as_str).filter(|y| !y.is_empty()) { out.push(format!("{}{}", lab(""), s.paint(GREY, &format!("why: {y}")))); }
     // 8. the footer
     out.push(footer(path, &m.engine, s));
-    out
+    finish(out)
 }
 /// The footer: the strand, the engine that wrote it and the command that replays it; the demo's week (path "") is in memory, so
 /// the command that writes the same week instead
