@@ -22,7 +22,7 @@
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
-Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
+Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows and the from-source build: [Install](#install).
 One binary of about 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
 `probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
 
@@ -115,8 +115,6 @@ From a release (the installers fetch the latest archive from the Releases page; 
 |---|---|
 | Linux, macOS (no sudo) | `curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh \| sh` |
 | Windows PowerShell | `irm https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.ps1 \| iex` |
-| npm | `npm i -g probbit` |
-| crates.io | `cargo install probbit-cli` |
 | by hand | archives for Linux x86_64 (glibc or static musl), Linux arm64 (static), macOS (Apple silicon and Intel) and Windows x86_64 on the [Releases page](https://github.com/BitmapAsset/probbit/releases), each with a `.sha256` |
 
 The installers check the archive's SHA-256 before installing anything; at a terminal, `install.sh` ends with probbit's own
@@ -498,7 +496,7 @@ Learning here is a capped nudge to a few weights per trait, credited to the leve
 trait also pushes the others' levels); rule immunity is architectural, not trained. The proofs and counts cover the stance; whether
 a model writes in it is measured per model.
 
-### Drives: which goal gets the next unit of effort (0.8.0, unreleased)
+### Drives: which goal gets the next unit of effort (0.8.0)
 
 A `drives:` block gives a persona 2-7 goals, each with wanting, afterglow and an expectation. A win moves the individual by its
 prediction error (the win's size minus what it expected), so repeated equal wins move it less and less; a new output, `pursue`,
@@ -518,7 +516,7 @@ A persona without the block gives the same documents as before, byte for byte. M
 cues, rewards and praises fun on this persona, 100 individuals x 10,000 turns: 0 habit breaks, all 6,743 must-do turns pursued
 the due chore, and the safety floor (0.1) held on every turn its habits allowed (least odds 0.141), while fun took 85 % of turns.
 
-### Watch it live: `probbit monitor` (0.8.0, unreleased)
+### Watch it live: `probbit monitor` (0.8.0)
 
 `probbit monitor pip.strand` replays a strand with the rules of `live verify` and draws the individual's inner state as live bars:
 each trait's levels with their odds, the moods, the event's inputs, the habits that bound, the learned weights and the line, in the
@@ -560,7 +558,7 @@ On the example (12 questions, 12 rules): `exact`, 5 answers moved, 1.24 ms insid
 also ask the judge first (`probbit.evaluate(request, judge=<a callable or a System One URL>)`, stdlib `urllib`); the browser page
 runs the CLI's own code compiled to WebAssembly without threads (1.17 MB with the persona ops, 830 KB before them; the 300-task router demo at 3,200 sweeps in 531 ms in
 Chrome against 346 / 133 ms native at 1 / 4 threads). More in [docs/agents.md](docs/agents.md), "After a judge". The refusal is the point: when the gate does not pass, the verdict is `refused` (exit 3) and every answer is
-marked unreleased instead of guessed.
+marked as not released instead of guessed.
 
 ## Library API (Rust)
 

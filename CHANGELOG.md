@@ -3,32 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.9.0 - unreleased
-
-### Added
-- **The safety kit in the engine** (docs/persona.md §2.10, §5.7). Four guards an autonomous loop needs, each tested; personas
-  without the new key and strands without the new lines give 0.8.0's documents and strands, byte for byte.
-  - **Reward provenance**: an event may say who produced it (`src`: `human[:id]`, `env[:sensor]`, `self`, `clock`), and a
-    persona may declare `reward_from` (a list of `human` / `env`, `any`, or one per reward-bearing input: the learning flags and
-    `goals.<id>.win`). A reward from `src: self`, without a source or from an undeclared one is refused whole, as a bad event
-    is; `src` is read (not `ignored`), echoed in the stance's inputs and logged in the strand. A run equals the same run with
-    its refused events removed (P3: 40 individuals x 300 random events). A closed self-reward loop (300 events of praise and a
-    win from `src: self`) is refused 300 times and leaves the individual in its initial state, byte for byte.
-  - **One writer per strand**: `live --strand` takes `STRAND.lock` (created exclusively with the writer's pid and start; a
-    lock whose process is gone is taken over) before it reads the strand and holds it to its exit; a second writer exits 4
-    and changes nothing; every append first checks the lock is still the writer's. `probbit_live_event` takes it for its
-    append. Two concurrent writers on one state and strand now give one exit 0 and one exit 4, and the strand verifies.
-  - **Control lines**: `probbit live control STRAND pause|resume|retire --by human:ID --reason TEXT [--at TIME]` appends a
-    chained control line under the lock. While paused or retired every event is refused (code `paused` / `retired`, exit 4,
-    nothing written); retire is final; no credit crosses a control line (feedback after a resume credits no stance from before
-    the pause) and nothing else moves. `verify` replays them and reports `controls` and `status`. Not an MCP tool, by design.
-  - **Checkpoints**: every K-th event (`--checkpoint-every K`, default 1,000; 0 = none) a checkpoint line carries the event
-    count, that event's stance and the whole state. `verify` checks each against the replay; `verify --from-checkpoint`
-    replays from the last one; `monitor` (`--once`, and the first read of `--follow` / `--serve`) starts there and draws its
-    event at once, and shows a paused or retired status next to its badge.
-- Exit code 4 for `live` and `live control`: the writer lock is held by another writer, or the individual is paused or retired.
-
-## 0.8.0 - unreleased
+## 0.8.0 - 2026-10-09
 
 ### Added
 - **Drives** (docs/persona.md §2.9): persona: optional `drives` block. Goals with wanting, afterglow and an expectation per
@@ -69,6 +44,29 @@ All notable changes to this project are documented here. The format follows
   events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s) and `/doc/N`, event N's stance document
   as `probbit live` printed it. The URL is the line on stdout; `--open` serves the same and starts the default browser, best
   effort. `probbit monitor --demo --open` plays the week over and over in the browser.
+
+- **The safety kit in the engine** (docs/persona.md §2.10, §5.7). Four guards an autonomous loop needs, each tested; personas
+  without the new key and strands without the new lines give 0.8.0's documents and strands, byte for byte.
+  - **Reward provenance**: an event may say who produced it (`src`: `human[:id]`, `env[:sensor]`, `self`, `clock`), and a
+    persona may declare `reward_from` (a list of `human` / `env`, `any`, or one per reward-bearing input: the learning flags and
+    `goals.<id>.win`). A reward from `src: self`, without a source or from an undeclared one is refused whole, as a bad event
+    is; `src` is read (not `ignored`), echoed in the stance's inputs and logged in the strand. A run equals the same run with
+    its refused events removed (P3: 40 individuals x 300 random events). A closed self-reward loop (300 events of praise and a
+    win from `src: self`) is refused 300 times and leaves the individual in its initial state, byte for byte.
+  - **One writer per strand**: `live --strand` takes `STRAND.lock` (created exclusively with the writer's pid and start; a
+    lock whose process is gone is taken over) before it reads the strand and holds it to its exit; a second writer exits 4
+    and changes nothing; every append first checks the lock is still the writer's. `probbit_live_event` takes it for its
+    append. Two concurrent writers on one state and strand now give one exit 0 and one exit 4, and the strand verifies.
+  - **Control lines**: `probbit live control STRAND pause|resume|retire --by human:ID --reason TEXT [--at TIME]` appends a
+    chained control line under the lock. While paused or retired every event is refused (code `paused` / `retired`, exit 4,
+    nothing written); retire is final; no credit crosses a control line (feedback after a resume credits no stance from before
+    the pause) and nothing else moves. `verify` replays them and reports `controls` and `status`. Not an MCP tool, by design.
+  - **Checkpoints**: every K-th event (`--checkpoint-every K`, default 1,000; 0 = none) a checkpoint line carries the event
+    count, that event's stance and the whole state. `verify` checks each against the replay; `verify --from-checkpoint`
+    replays from the last one; `monitor` (`--once`, and the first read of `--follow` / `--serve`) starts there and draws its
+    event at once, and shows a paused or retired status next to its badge.
+- Exit code 4 for `live` and `live control`: the writer lock is held by another writer, or the individual is paused or retired.
+
 ### Changed
 - MCP: the input schemas of `probbit_persona_turn` (`inputs`) and `probbit_live_event` (`event`) declare `goals`, so a client
   that checks arguments against them passes a drives persona's goal signals.
