@@ -642,6 +642,74 @@ fn live_watch_follows_an_events_file() {
     for x in [&s1, &s2] { let _ = std::fs::remove_file(x); }
 }
 
+// ---------------- the safety kit (docs/persona.md §2.10, §5.7)
+/// 300 events of the drives fixture with `src` on each (self, a person, a sensor, the clock), rewards on many
+fn src_events() -> Vec<String> {
+    (0..300).map(|t| { let mut e = vec![r#""elapsed_hours":0.5"#.to_string()];
+        if t % 2 == 0 { e.push(r#""praise":true"#.into()); } if t % 5 == 1 { e.push(r#""criticism":true"#.into()); } if t % 3 == 0 { e.push(r#""goals":{"fun":{"win":1.0}}"#.into()); }
+        e.push(format!(r#""src":"{}""#, ["self", "human:owner", "env:tests", "clock"][t % 4])); format!("{{{}}}", e.join(",")) }).collect()
+}
+/// A persona without `reward_from` gives 0.8.0's bytes with `src` in its events (an undeclared input, listed in `ignored`): the
+/// trace, the strand and the final state of 300 events of the drives fixture (seed 4) are the ones the 0.8.0 binary writes, and
+/// the run leaves no lock file behind. The same persona with `reward_from: [human, env]` refuses the rewards from `self` and the
+/// clock (exit 2, one error at `inputs.src` per refused event) and accepts the others.
+#[test]
+fn src_without_reward_from_gives_0_8_0_bytes() {
+    let fx = format!("{}/tests/fixtures/persona/drives-adversary.json", env!("CARGO_MANIFEST_DIR"));
+    let (script, st, sd) = (tmp("src-script.json"), tmp("src-state.json"), tmp("src.strand")); for f in [&st, &sd] { let _ = std::fs::remove_file(f); }
+    let evs = src_events(); std::fs::write(&script, format!("[{}]", evs.join(","))).unwrap();
+    let (c, _, e) = probbit(&["persona", "replay", &fx, "--seed", "4", "--script", &script], ""); assert_eq!(c, 0, "{e}");
+    assert_eq!(e.trim(), "replay: 300 turns, trace sha256 ce8f247d1fe761ea651998f48360491030f15ba3c8530b0ed59d824868f71b71, final state sha256:52312b3cb8744360e7613e4db2fc5e3d326cb3c2204af7312e2a4196f9781551");
+    let (_, s0, _) = probbit(&["persona", "init", &fx, "--seed", "4"], ""); std::fs::write(&st, &s0).unwrap();
+    let (c, out, e) = probbit(&["live", &fx, "--state", &st, "--clock", "fixed", "--strand", &sd], &(evs.join("\n") + "\n")); assert_eq!(c, 0, "{e}");
+    assert!(e.contains("strand head sha256:c37fea55abbec95d0c0f1f1703741e20c26cd5d66587132917772435a5e94655, final state sha256:52312b3cb8744360e7613e4db2fc5e3d326cb3c2204af7312e2a4196f9781551"), "{e}");
+    assert_eq!(out.lines().filter(|l| l.contains(r#""ignored":["src"]"#)).count(), 300);
+    assert!(!std::path::Path::new(&format!("{sd}.lock")).exists(), "the lock is released");
+    // with reward_from: the rewards from self and the clock are refused, the others accepted
+    let mut d = parse(&read(&fx)); if let Json::Obj(kv) = &mut d { kv.push(("reward_from".into(), parse(r#"["human","env"]"#))); }
+    let guarded = tmp("src-guarded.json"); std::fs::write(&guarded, jw(&d)).unwrap(); let gs = tmp("src-guarded-state.json");
+    let (_, s0, _) = probbit(&["persona", "init", &guarded, "--seed", "4"], ""); std::fs::write(&gs, &s0).unwrap();
+    let (c, out, _) = probbit(&["live", &guarded, "--state", &gs, "--clock", "fixed"], &(evs.join("\n") + "\n")); assert_eq!(c, 2);
+    let refused = out.lines().filter(|l| l.contains(r#""path":"events["#) && l.contains(r#"].inputs.src""#)).count();
+    let rewarded = |t: usize| t % 2 == 0 || t % 5 == 1 || t % 3 == 0;
+    assert_eq!(refused, (0..300).filter(|t| rewarded(*t) && (t % 4 == 0 || t % 4 == 3)).count());
+    let (c, out, _) = probbit(&["persona", "turn", &guarded, "--state", &gs, "--inputs", r#"{"praise":true,"src":"self"}"#], ""); assert_eq!(c, 2); assert!(out.contains(r#""path":"inputs.src""#), "{out}");
+    for f in [&script, &st, &sd, &guarded, &gs] { let _ = std::fs::remove_file(f); }
+}
+
+/// The safety kit through the CLI: `--checkpoint-every` writes checkpoint lines that `verify` and `verify --from-checkpoint`
+/// check; `live control` pauses (every event refused, exit 4, nothing written), resumes and retires (final); the individual cannot
+/// control itself; a held lock refuses a second writer and a control line (exit 4) and changes nothing; no lock is left behind
+#[test]
+fn live_safety_kit_exit_codes() {
+    let (st, sd) = (tmp("kit-state.json"), tmp("kit.strand")); let lock = format!("{sd}.lock"); for f in [&st, &sd, &lock] { let _ = std::fs::remove_file(f); }
+    let tutor = ex("tutor.yaml");
+    let (_, s0, _) = probbit(&["persona", "init", &tutor, "--seed", "3"], ""); std::fs::write(&st, &s0).unwrap();
+    let evs = |n: usize| (0..n).map(|t| format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 2 == 0)).collect::<Vec<_>>().join("\n") + "\n";
+    let (c, _, e) = probbit(&["live", &tutor, "--state", &st, "--clock", "fixed", "--strand", &sd, "--checkpoint-every", "2"], &evs(5)); assert_eq!(c, 0, "{e}");
+    assert_eq!(read(&sd).lines().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), 2);
+    let (c, v, _) = probbit(&["live", "verify", &sd], ""); assert_eq!(c, 0, "{v}"); assert!(v.contains(r#""checkpoints":2"#), "{v}");
+    let (c, v, _) = probbit(&["live", "verify", &sd, "--from-checkpoint"], ""); assert_eq!(c, 0, "{v}"); assert!(v.contains(r#""from_checkpoint":4"#), "{v}");
+    let (c, o, e) = probbit(&["live", "control", &sd, "pause", "--by", "human:owner", "--reason", "a check", "--at", "2026-10-08T10:00:00Z"], ""); assert_eq!(c, 0, "{e}");
+    assert!(o.contains(r#""status":"paused""#), "{o}");
+    let before = read(&sd);
+    let (c, o, _) = probbit(&["live", &tutor, "--state", &st, "--clock", "fixed", "--strand", &sd], &evs(3)); assert_eq!(c, 4);
+    assert_eq!(o.lines().filter(|l| l.contains(r#""code":"paused""#)).count(), 3); assert_eq!(read(&sd), before, "nothing written while paused");
+    let (c, _, _) = probbit(&["live", "control", &sd, "resume", "--by", "self", "--reason", "x"], ""); assert_eq!(c, 2, "the individual cannot resume itself");
+    let (c, _, e) = probbit(&["live", "control", &sd, "resume", "--by", "human:owner", "--reason", "checked"], ""); assert_eq!(c, 0, "{e}");
+    let (c, _, e) = probbit(&["live", &tutor, "--state", &st, "--clock", "fixed", "--strand", &sd], &evs(2)); assert_eq!(c, 0, "{e}");
+    // a lock held by a running process (this test's): a second writer and a control line exit 4 and change nothing
+    std::fs::write(&lock, format!(r#"{{"pid":{},"since":"2026-10-08T10:00:00Z","t":1}}"#, std::process::id())).unwrap(); let before = read(&sd);
+    let (c, o, _) = probbit(&["live", &tutor, "--state", &st, "--clock", "fixed", "--strand", &sd], &evs(1)); assert_eq!(c, 4); assert!(o.contains(r#""code":"locked""#), "{o}");
+    let (c, _, _) = probbit(&["live", "control", &sd, "pause", "--by", "human:owner", "--reason", "x"], ""); assert_eq!(c, 4, "control takes the lock too");
+    assert_eq!(read(&sd), before); std::fs::remove_file(&lock).unwrap();
+    let (c, _, _) = probbit(&["live", "control", &sd, "retire", "--by", "human:owner", "--reason", "the end"], ""); assert_eq!(c, 0);
+    let (c, _, _) = probbit(&["live", "control", &sd, "resume", "--by", "human:owner", "--reason", "again"], ""); assert_eq!(c, 4, "retire is final");
+    let (c, v, _) = probbit(&["live", "verify", &sd], ""); assert_eq!(c, 0, "{v}"); assert!(v.contains(r#""status":"retired""#) && v.contains(r#""controls":3"#), "{v}");
+    assert!(!std::path::Path::new(&lock).exists(), "no lock left behind");
+    for f in [&st, &sd] { let _ = std::fs::remove_file(f); }
+}
+
 /// The `drives` block (0.8.0) is additive: a persona without it gives 0.7.0's documents byte for byte, with `goals` in the inputs
 /// too (an ignored input there, as it was in 0.7.0). The digests below are 0.7.0's own `persona replay` output on the same scripts
 /// (tests/fixtures/persona/drives-noblock.json: 40 random turns per example persona, with goal signals and idle hours).

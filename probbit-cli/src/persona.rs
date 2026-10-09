@@ -141,7 +141,7 @@ type Table = Vec<(String, Vec<f64>)>;
 #[derive(Clone)]
 pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub digest: String, vars: Vec<Var>, steps: Vec<String>, slots: Vec<String>, say_order: bool,
     prefer: Eff, couplings: Vec<(String, String, Vec<Vec<f64>>)>, inputs: Vec<Input>, history: Vec<Hist>, habits: Vec<Habit>, eng: Eng, max_tokens: usize, order: Vec<String>, prefix: String,
-    learning: Option<Learning>, drives: Option<Drives> }
+    learning: Option<Learning>, drives: Option<Drives>, reward: Option<Vec<(String, Option<Vec<String>>)>> }
 impl Persona {
     fn var(&self, id: &str) -> Option<&Var> { self.vars.iter().find(|v| v.id == id) }
     fn input(&self, id: &str) -> Option<&Input> { self.inputs.iter().find(|x| x.id == id) }
@@ -246,7 +246,7 @@ pub fn parse_doc(t: &str, is_json: bool) -> Result<Json, String> {
 
 /// The strict validator: document -> persona (every field type-checked, unknown fields refused at their path).
 pub fn build(doc: &Json) -> R<Persona> {
-    const TOP: [&str; 14] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "learning", "drives", "comment"];
+    const TOP: [&str; 15] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "learning", "drives", "reward_from", "comment"];
     let kv = keys(doc, "", &TOP, &["probbit_persona", "identity", "traits"])?;
     if get(kv, "drives").is_some() { return build_drives(doc); }
     need(matches!(get(kv, "probbit_persona"), Some(Json::Num(x)) if *x == 1.0), "probbit_persona", "must be 1")?;
@@ -368,7 +368,8 @@ pub fn build(doc: &Json) -> R<Persona> {
     let max_tokens = num_or(lkv, "max_tokens", 40.0, "line", Some(8.0), Some(400.0), true)? as usize;
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
-    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None };
+    let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
+    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward };
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -413,6 +414,48 @@ fn learning_spec(l: &Json, vars: &[Var], inputs: &[Input]) -> R<Learning> {
     let pos = |k: &str, hi: f64| -> R<f64> { let p = at("learning", k); let x = num(get(kv, k), &p, Some(0.0), Some(hi), false)?; need(x > 0.0, &p, "must be > 0")?; Ok(x) };
     let (rate, total_cap) = (pos("rate", 50.0)?, pos("total_cap", 50.0)?); let step_cap = pos("step_cap", total_cap)?;
     Ok(Learning { from, traits, rate, step_cap, total_cap })
+}
+/// `reward_from` (docs/persona.md §2.10): the sources a reward-bearing input may come from -> per reward-bearing input (`bearing`:
+/// the learning block's flags, then `goals.<id>.win` per goal of a drives block) its allowed source kinds (None = any). A list of
+/// kinds (`human`, `env`) or `any` covers every reward-bearing input; a mapping names each one with its own list or `any`.
+fn reward_spec(rf: &Json, bearing: &[String], inputs: &[Input]) -> R<Vec<(String, Option<Vec<String>>)>> {
+    need(!bearing.is_empty(), "reward_from", "this persona has no reward-bearing input (a learning block's flags or a drives block's wins)")?;
+    need(!inputs.iter().any(|x| x.id == "src"), "reward_from", "`src` names an event's source here: no input may have that id")?;
+    let kinds = |x: &Json, path: &str| -> R<Option<Vec<String>>> {
+        if x.as_str() == Some("any") { return Ok(None); }
+        let v = strs(x).filter(|v| !v.is_empty()).ok_or_else(|| perr(path, "a list of source kinds (human, env) or any"))?;
+        for (i, k) in v.iter().enumerate() {
+            need(k != "self", &ix(path, i), "a reward never comes from the individual itself")?;
+            need(k == "human" || k == "env", &ix(path, i), "human | env (the clock issues no rewards)")?;
+            need(!v[..i].contains(k), &ix(path, i), "listed twice")?; }
+        Ok(Some(v)) };
+    if rf.as_obj().is_none() { let k = kinds(rf, "reward_from")?; return Ok(bearing.iter().map(|b| (b.clone(), k.clone())).collect()); }
+    let allowed: Vec<&str> = bearing.iter().map(String::as_str).chain(["comment"]).collect(); let required: Vec<&str> = bearing.iter().map(String::as_str).collect();
+    let kv = keys(rf, "reward_from", &allowed, &required)?;
+    bearing.iter().map(|b| Ok((b.clone(), kinds(get(kv, b).unwrap(), &at("reward_from", b))?))).collect()
+}
+/// An event's `src` -> its kind: `human[:id]`, `env[:id]` (id: 1-64 of A-Z a-z 0-9 _ . - @ / :), `self` or `clock`; None = malformed
+pub fn src_kind(s: &str) -> Option<&'static str> {
+    let (k, id) = match s.split_once(':') { Some((k, id)) => (k, Some(id)), None => (s, None) };
+    let ok = |id: &str| (1..=64).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.-@/:".contains(&c));
+    match (k, id) { ("human", i) if i.map_or(true, ok) => Some("human"), ("env", i) if i.map_or(true, ok) => Some("env"), ("self", None) => Some("self"), ("clock", None) => Some("clock"), _ => None }
+}
+/// Reward provenance (G1, §2.10): with `reward_from`, a reward-bearing input that is on (a learning flag true, a goal's win > 0)
+/// needs the event's `src` to be one of its allowed kinds; `self`, a missing or an undeclared source refuses the event whole
+fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)]) -> R<()> {
+    const FORM: &str = "a source: human[:id] | env[:id] | self | clock (id: 1-64 of A-Z a-z 0-9 _ . - @ / :)";
+    let kind = match get(raw, "src") { None => None, Some(Json::Str(s)) => Some(src_kind(s).ok_or_else(|| perr("inputs.src", FORM))?), Some(_) => return Err(perr("inputs.src", FORM)) };
+    for (k, allowed) in rw {
+        let on = match k.strip_prefix("goals.").and_then(|r| r.strip_suffix(".win")) {
+            Some(g) => get(raw, "goals").and_then(|x| x.get(g)).and_then(|x| x.get("win")).and_then(Json::as_f64).is_some_and(|m| m > 0.0),
+            None => matches!(get(raw, k), Some(Json::Bool(true))) };
+        let Some(allowed) = allowed.as_ref().filter(|_| on) else { continue };
+        match kind {
+            None => return Err(perr("inputs.src", format!("{k} is a reward: the event needs a src ({} allowed by reward_from)", allowed.join(" or ")))),
+            Some("self") => return Err(perr("inputs.src", format!("{k} from the individual itself (src self) is refused: a reward comes from {}", allowed.join(" or ")))),
+            Some(kd) if !allowed.iter().any(|a| a == kd) => return Err(perr("inputs.src", format!("{k} from {kd} is refused: reward_from allows {}", allowed.join(" or ")))),
+            _ => {} } }
+    Ok(())
 }
 fn check_cond(k: &str, c: &Json, path: &str, inputs: &[Input], history: &[Hist]) -> R<()> {
     let range = |c: &Json| -> R<()> { if let Json::Num(_) = c { return Ok(()); }
@@ -614,7 +657,7 @@ fn build_drives(doc: &Json) -> R<Persona> {
     let eff: Vec<(String, Json)> = match get(dkv, "effects") { None => vec![], Some(x) if !truthy(x) => vec![], Some(x) => x.as_obj()
         .filter(|o| o.iter().all(|(k, _)| ["wanting", "afterglow", "surprise", "comment"].contains(&k.as_str()))).ok_or_else(|| perr("drives.effects", "a mapping with wanting / afterglow / surprise"))?.to_vec() };
     // the lowered document
-    let mut d2: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "drives").cloned().collect();
+    let mut d2: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "drives" && k != "reward_from").cloned().collect();
     let slot = |d2: &mut Vec<(String, Json)>, k: &str| -> usize { match d2.iter().position(|(x, _)| x == k) { Some(i) => i, None => { d2.push((k.into(), Json::Null)); d2.len() - 1 } } };
     for k in ["traits", "moods"] { if let Some(Json::Arr(a)) = get(&d2, k) { need(!a.iter().any(|t| t.get("id").and_then(Json::as_str) == Some("pursue")), "traits", "`pursue` is reserved when a drives block is present")?; } }
     let s = |x: &str| Json::Str(x.to_string());
@@ -662,6 +705,9 @@ fn build_drives(doc: &Json) -> R<Persona> {
     p.digest = sha(doc);
     if goals.iter().any(|g| g.floor > 0.0) { for h in &p.habits { for (k, lst) in &h.rules { for r in lst { let vs = rule_vars(k, r);
         need(!(vs.iter().any(|v| v == "pursue") && vs.iter().any(|v| v != "pursue")), &format!("habits.{}", h.id), "a goal floor needs `pursue` free of multi-variable rules (use then: or a coupling)")?; } } } }
+    // reward_from, read here: its reward-bearing inputs include the goals' wins
+    if let Some(rf) = get(kv, "reward_from").filter(|x| !x.is_null()) { let mut bearing = p.learning.as_ref().map_or(vec![], |l| l.from.clone());
+        bearing.extend(goals.iter().map(|g| format!("goals.{}.win", g.id))); p.reward = Some(reward_spec(rf, &bearing, &p.inputs)?); }
     p.drives = Some(Drives { goals, hl_w: w[0], cap_w: w[1], drain: w[2], sig, hl_a: a[0], cap_a: a[1], rate: e[0], hl_e: e[1], pe_cap: e[2], win_max: e[3],
         w_want: pw[0], w_glow: pw[1], w_deadline: pw[2], tau: pw[3], kappa, synthetic, conds });
     Ok(p)
@@ -897,6 +943,12 @@ impl State {
     }
     pub fn to_json(&self, p: &Persona) -> Json { let mut b = self.body(p); if let Json::Obj(v) = &mut b { v.push(("digest".into(), Json::Str(self.digest.clone()))); } b }
     fn seal(&mut self, p: &Persona) { self.digest = sha(&self.body(p)); }
+    /// This state with every credit 0 (a control line's, §5.7: feedback after it credits no stance before it); the same state
+    /// when there is no credit to clear (no learning block, or a stance that released no learned trait)
+    pub fn zero_credit(&self, p: &Persona) -> State {
+        if self.credit.iter().all(|(_, c)| c.iter().all(|x| *x == 0.0)) { return self.clone(); }
+        let mut s = self.clone(); for (_, c) in s.credit.iter_mut() { c.iter_mut().for_each(|x| *x = 0.0); } s.seal(p); s
+    }
     /// A state document -> State, for this persona: the format, the persona digest, the state's own digest and the genes are
     /// checked (in that order), then every field's type (a well-formed state never fails those).
     pub fn read(p: &Persona, j: &Json) -> R<State> {
@@ -1302,9 +1354,17 @@ fn habit_conflict(p: &Persona, st: &State, raw: &[(String, Json)], active: &[Str
 }
 /// One persona turn: (stance document, new state). A pure function of (persona, state, inputs, engine version). `timing` adds a
 /// non-canonical `timing` object (compile / engine / decode ms, engine calls, the 1-minute load average).
-pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> {
+pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, true) }
+/// `turn` without the provenance check (§2.10), for `fuzz` and `prove`: they search over stances, not over sources, so their events
+/// carry no `src` and stand for events of an accepted source
+pub fn turn_any_source(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, false) }
+fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool) -> R<(Json, State)> {
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     for (n, (k, _)) in raw.iter().enumerate() { if raw[..n].iter().any(|(k2, _)| k2 == k) { return Err(perr(&format!("inputs.{k}"), "duplicate input")); } }
+    // reward provenance (§2.10), first: with `reward_from`, `src` is read here (not compiled, so not `ignored`) and comes back
+    // in the stance's inputs; without it `src` is an undeclared input as before
+    let src = match &p.reward { Some(rw) => { if check { provenance(rw, &raw)?; } get(&raw, "src").cloned() } None => None };
+    let raw: Vec<(String, Json)> = if p.reward.is_some() { raw.into_iter().filter(|(k, _)| k != "src").collect() } else { raw };
     // a drives block steps the drives before the turn, which runs on the stepped state with the drive aggregates as inputs
     let given = raw; let (st2, raw) = prep(p, st, &given)?; let st = &st2;
     let t0 = Instant::now(); let mut calls = 0;
@@ -1346,6 +1406,7 @@ pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
             ("engine_calls".into(), Json::Num(calls as f64)), ("holds".into(), Json::Num(out.held.len() as f64)), ("load_avg_1m".into(), crate::sys::loadavg().map_or(Json::Null, |l| Json::Num((l * 100.0).round() / 100.0)))])); }
     let mut j = out.to_json(p, st);
     if let (Some(d), Some(ds)) = (&p.drives, &st.drives) { stance_drives(&mut j, d, ds, &out.lift, &given); }
+    if let (Some(s), Json::Obj(v)) = (src, &mut j) { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.push(("src".into(), s)); } }
     Ok((j, ns))
 }
 
@@ -1579,6 +1640,8 @@ pub fn describe(p: &Persona) -> Json {
         v.push(("drives".into(), Json::Obj(vec![("goals".into(), Json::Arr(dr.goals.iter().map(|g| s(&g.id)).collect())), ("say".into(), per(&|g| Some(s(&g.say)))),
             ("floor".into(), per(&|g| (g.floor > 0.0).then_some(Json::Num(g.floor)))), ("starve_after".into(), per(&|g| g.starve_after.map(Json::Num))),
             ("learn_from_surprise".into(), Json::Num(dr.kappa))]))); }
+    // reward_from (§2.10), when declared: per reward-bearing input its allowed source kinds, or "any"
+    if let (Json::Obj(v), Some(rw)) = (&mut d, &p.reward) { v.push(("reward_from".into(), Json::Obj(rw.iter().map(|(k, a)| (k.clone(), a.as_ref().map_or(s("any"), |a| jstrs(a)))).collect()))); }
     d
 }
 /// A trait or input the drives block adds when it is lowered (`pursue`, the drive aggregates and goal conditions): not the author's

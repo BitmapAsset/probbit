@@ -80,11 +80,24 @@ impl Watch {
         let rep = Replay::open(head)?; let meta = Meta::of(&rep); let n = meta.moods.len();
         Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None })
     }
+    /// The replay from a checkpoint line (`live::Replay::open_at`; `before` = the event line before it): the lines before it are
+    /// not replayed, and the board starts at the checkpoint's event (its stance, the inputs `before` logs, its learned deltas)
+    fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Watch, (usize, String)> {
+        let rep = Replay::open_at(head, before, cp, at)?; let meta = Meta::of(&rep); let n = meta.moods.len();
+        let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None };
+        if let Some(doc) = w.rep.last_stance().cloned() {
+            let given = json::parse(before).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
+            let learned = w.rep.live.st.to_json(&w.rep.live.p).get("learned").cloned().unwrap_or(Json::Null);
+            for (m, s) in w.meta.moods.iter().zip(w.spark.iter_mut()) { s.push_back(position(&odds(&doc, "mood", m))); }
+            w.last = Some(Frame { n: w.rep.live.n, doc, given, learned }); }
+        Ok(w)
+    }
     /// Replay one event line; after a line that differs, nothing more is replayed
     fn feed(&mut self, l: &str, eng: Engine) {
         if self.bad.is_some() { return; }
         match self.rep.step(l, eng) {
-            Ok(doc) => {
+            Ok(None) => {} // a control or checkpoint line: no stance to draw
+            Ok(Some(doc)) => {
                 let given = json::parse(l).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
                 let learned = self.rep.live.st.to_json(&self.rep.live.p).get("learned").cloned().unwrap_or(Json::Null);
                 for (m, s) in self.meta.moods.iter().zip(self.spark.iter_mut()) { if s.len() == SPARK { s.pop_front(); } s.push_back(position(&odds(&doc, "mood", m))); }
@@ -168,7 +181,11 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let lab = |t: &str| s.bold(MAGENTA, &format!("{t:<8}"));
     let mut out = vec![];
     let bad = bad_head.or_else(|| w.and_then(|w| w.bad.as_ref()));
-    let badge = match bad { Some((n, why)) => s.bold(RED, &format!("line {n} diverges: {why}")), None => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
+    let badge = match (bad, w.and_then(|w| w.rep.from)) { (Some((n, why)), _) => s.bold(RED, &format!("line {n} diverges: {why}")),
+        (None, Some(c)) => s.bold(GREEN, &s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
+        (None, None) => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
+    // a paused or retired individual (control lines, docs/persona.md §5.7) says so next to the badge
+    let badge = match w.map(|w| w.rep.live.status).filter(|st| *st != crate::live::Status::Active) { Some(st) => format!("{badge} {dot} {}", s.bold(if st == crate::live::Status::Retired { RED } else { YELLOW }, st.name())), None => badge };
     let Some(w) = w else {
         out.push(format!("{} {dot} {badge}", s.bold(CYAN, "probbit monitor")));
         if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
@@ -367,7 +384,13 @@ impl Followed {
     /// rotated file); Some(false): lines replayed (`each` sees the replay after every event it adds)
     fn poll(&mut self, eng: Engine, each: &mut dyn FnMut(&Watch)) -> Option<bool> {
         match self.tail.poll() {
-            Got::Lines(ls) => { for l in ls { if let Some(x) = &mut self.w { let n = x.rep.live.n; x.feed(&l, eng); if x.rep.live.n != n && x.bad.is_none() { each(x); } continue; }
+            Got::Lines(ls) => {
+                // the first read of a strand with checkpoint lines starts at the last one: its event is drawn at once
+                let mut skip = 0;
+                if self.w.is_none() && self.bad_head.is_none() { let refs: Vec<&str> = ls.iter().map(String::as_str).collect();
+                    if let Some(k) = crate::live::last_checkpoint(&refs, 0).filter(|k| *k >= 2) {
+                        if let Ok(x) = Watch::open_at(refs[0], refs[k - 1], refs[k], k + 1) { each(&x); self.w = Some(x); skip = k + 1; } } }
+                for l in ls.into_iter().skip(skip) { if let Some(x) = &mut self.w { let n = x.rep.live.n; x.feed(&l, eng); if x.rep.live.n != n && x.bad.is_none() { each(x); } continue; }
                     if self.bad_head.is_none() { match Watch::open(&l) { Ok(x) => self.w = Some(x), Err(e) => self.bad_head = Some(e) } } }
                 Some(false) }
             Got::Restart(why) => { self.w = None; self.bad_head = None; self.note = Some(why); Some(true) }
@@ -423,7 +446,10 @@ pub fn cmd(args: &[String]) {
     if head.is_empty() { crate::fail(&format!("monitor: {path} is empty: not a strand")) }
     if !strand(head) { crate::fail(&format!("monitor: {path} is not a probbit strand (format 1)")) }
     let note = (!rest.is_empty() && !lines.is_empty()).then(|| format!("line {} is incomplete (no newline at its end): not replayed", lines.len() + 1));
-    let (w, bad_head) = match Watch::open(head) { Ok(mut w) => { for l in lines.iter().skip(1) { w.feed(l, eng); } (Some(w), None) } Err(e) => (None, Some(e)) };
+    // a strand with checkpoint lines replays from the last one (the board starts at its event and draws the latest one)
+    let start = crate::live::last_checkpoint(&lines, 0);
+    let opened = match start { Some(k) => Watch::open_at(head, lines[k - 1], lines[k], k + 1), None => Watch::open(head) };
+    let (w, bad_head) = match opened { Ok(mut w) => { for l in lines.iter().skip(start.map_or(1, |k| k + 1)) { w.feed(l, eng); } (Some(w), None) } Err(e) => (None, Some(e)) };
     let fr = frame(w.as_ref(), bad_head.as_ref(), &path, note.as_deref(), &s);
     out(&fr.iter().map(|l| crate::tui::clip(l, s.cols) + "\n").collect::<String>());
     if bad_head.is_some() || w.is_some_and(|w| w.bad.is_some()) { std::process::exit(1) }
@@ -690,6 +716,27 @@ mod tests {
             let (_, line) = lv.event(&Json::Obj(ev), &run).unwrap(); text += &line; text.push('\n');
         }
         text
+    }
+
+    /// A strand with checkpoint lines (docs/persona.md §5.7): the first poll of `--follow` / `--serve` starts at the last checkpoint
+    /// and draws the event the full replay draws; after a pause line the frame says `paused` next to the badge
+    #[test]
+    fn following_starts_at_the_last_checkpoint() {
+        let (p, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/tutor.yaml")).unwrap();
+        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(5), true, &run), Clock::Fixed, "probbit test");
+        let mut text = format!("{header}\n");
+        for t in 0..25u32 { let ev = json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 2 == 0)).unwrap();
+            let (s, line) = lv.event(&ev, &run).unwrap(); text += &line; text.push('\n'); if lv.n % 10 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+        let f = std::env::temp_dir().join(format!("probbit-monitor-cp-{}.strand", std::process::id())); std::fs::write(&f, &text).unwrap();
+        let mut fl = Followed::new(f.to_str().unwrap()); let mut seen = vec![];
+        assert_eq!(fl.poll(&run, &mut |w: &Watch| seen.push(w.rep.live.n)), Some(false));
+        let w = fl.w.as_ref().unwrap(); assert_eq!((w.rep.from, w.rep.live.n, seen.first().copied()), (Some(20), 25, Some(20)));
+        let lines = live::lines(&text); let mut full = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { full.feed(l, &run); }
+        assert!(full.bad.is_none()); assert_eq!(persona::canon(&w.last.as_ref().unwrap().doc), persona::canon(&full.last.as_ref().unwrap().doc));
+        text += &lv.control("pause", "human:owner", "a check", "t").unwrap(); text.push('\n'); std::fs::write(&f, &text).unwrap();
+        assert_eq!(fl.poll(&run, &mut |_: &Watch| {}), Some(false));
+        let fr = frame(fl.w.as_ref(), None, "x", None, &Style { th: None, ascii: true, cols: usize::MAX }); assert!(fr[0].contains("paused"), "{}", fr[0]);
+        let _ = std::fs::remove_file(&f);
     }
 
     /// Watch a strand line by line: every document's sha256 is its line's `stance` digest, and the replay ends where `verify` does

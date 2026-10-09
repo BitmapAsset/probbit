@@ -41,7 +41,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 2>&1 >/dev/null | true`, or `--progress` into `head -c 1`: exit 134 with panic = abort, the decision lost to a log line). A
 /// failed write to stderr is ignored: the command keeps its stdout and its exit code.
 fn err_line(s: &str) { let _ = writeln!(std::io::stderr(), "{s}"); }
-fn fail(msg: &str) -> ! { tui::top_stop(); err_line(&format!("probbit: {msg}")); std::process::exit(2) }
+fn fail(msg: &str) -> ! { tui::top_stop(); err_line(&format!("probbit: {msg}")); exit(2) }
+/// Exit with `code`, releasing a strand's writer lock this process holds first (live.rs `Lock`; `std::process::exit` skips `Drop`)
+fn exit(code: i32) -> ! { live::release_held(); std::process::exit(code) }
 /// `--budget-ms inf` / `1e300` aborted (exit 134: the deadline Duration overflowed) and `NaN` never stopped sampling
 fn budget_ms(args: &[String]) -> f64 {
     let b: f64 = arg(args, "--budget-ms", 200.0);
@@ -76,14 +78,14 @@ pub(crate) fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, J
 fn emit_raw(s: &str) {
     let mut o = std::io::stdout().lock();
     if let Err(e) = o.write_all(s.as_bytes()).and_then(|_| o.flush()) {
-        if e.kind() != std::io::ErrorKind::BrokenPipe { err_line(&format!("probbit: cannot write the output: {e}")); std::process::exit(2) } }
+        if e.kind() != std::io::ErrorKind::BrokenPipe { err_line(&format!("probbit: cannot write the output: {e}")); exit(2) } }
 }
 fn emit(s: &str) { emit_raw(&format!("{s}\n")) }
 
 /// Bad input (JSON, schema, values): ONE structured error object on stdout, a human line on stderr, exit 2.
 fn bad_input(what: &str, e: json::InErr) -> ! {
     err_line(&format!("probbit: {what}{}{}", if e.path.is_empty() { String::new() } else { format!("{}: ", e.path) }, e.msg));
-    emit(&json::write(&e.to_json(), false)); std::process::exit(2)
+    emit(&json::write(&e.to_json(), false)); exit(2)
 }
 /// Emit a decision; returns its exit code. Every number in it must be finite (docs/probbit-ir-json.md "Numeric contract"). A
 /// gate diagnostic that could not be estimated (R-hat / bound infinite: too few samples, chains stuck at different values) is
@@ -218,7 +220,7 @@ fn help(cmd: &str) -> Option<String> {
         "stats" => ("The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.", "probbit stats [flags]"),
         "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools probbit_decide,\n  probbit_run, probbit_stats, probbit_demo, probbit_evaluate: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "probbit mcp"),
         "persona" => (PERSONA_HELP, "probbit persona <init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe> PERSONA [flags]"),
-        "live" => (LIVE_HELP, "probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] | probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain] | probbit live verify STRAND"),
+        "live" => (LIVE_HELP, "probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K] | probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain] | probbit live verify STRAND [--from-checkpoint] | probbit live control STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]"),
         "version" => ("Print the version.", "probbit version"), _ => return None };
     let (vals, sw) = flags_of(cmd); let mut h = format!("usage: {usage}\n  {what}\n");
     if !vals.is_empty() || !sw.is_empty() { h.push_str("flags:\n"); }
@@ -227,7 +229,7 @@ fn help(cmd: &str) -> Option<String> {
             else { FLAG_HELP.iter().find(|(k, _)| k == f).unwrap_or_else(|| panic!("no help line for {f}")).1 };
         h.push_str(&format!("  {f} {d}\n")); }
     if ["decide", "run", "evaluate", "stats"].contains(&cmd) { h.push_str("controls: flag > PROBBIT_* environment > probbit.json > default.\n"); }
-    if cmd == "live" { h.push_str("exit: 0 done (live: every event answered; verify: every line replays), 1 verify: a line differs (its number and what),\n  2 a bad persona, state, event (one {\"error\"} object on stdout per bad event; the run goes on) or flag.\n"); }
+    if cmd == "live" { h.push_str("exit: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs\n  (its number and what), 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event; the run goes on), control\n  line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one\n  {\"error\"} object per refused event; nothing is written).\n"); }
     if cmd == "persona" { h.push_str("exit: 0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule\n  held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule\n  unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"}\n  object on stdout, code \"persona\") or bad flag (stderr).\n"); }
     if ["decide", "run", "evaluate"].contains(&cmd) { h.push_str("exit: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object\n  on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.\n"); }
     Some(h)
@@ -543,32 +545,47 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
     err_line(&format!("fuzz: {turns} turns in {secs:.2} s ({:.0} turns/s, {} search thread{})", turns as f64 / secs.max(1e-9), s.threads.min(s.seeds.len().max(1)), if s.threads.min(s.seeds.len().max(1)) == 1 { "" } else { "s" }));
     if res.iter().any(|per| per.iter().any(Option::is_some)) { std::process::exit(1) }
 }
-const LIVE_HELP: &str = "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin,\n  one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods\n  decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n  --strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used,\n  the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.\nflags:\n  --seed N            a new individual (default: the persona's seed)\n  --state FILE        a stored individual instead; rewritten after every event\n  --strand FILE       log the life to FILE: a new file gets the header; an existing strand is continued from --state\n                      (the state after its last line); a strand is never rewritten, just appended to\n  --events FILE       read events from FILE (default stdin)\n  --watch             follow --events FILE as lines are appended (tail -f); stops when the file is removed\n  --clock real|fixed  real (default): elapsed hours from a monotonic clock started with the run; fixed: each event carries\n                      its own elapsed_hours (default 0), so the run is a pure function of its events\n  --demo week         one individual's scripted week on the fixed clock (7 days, events hourly 09:00-15:00): praise for short\n                      answers moves the learned verbosity deltas to their cap, a quiet night relaxes the mood to its resting\n                      level, a campaign praising jokes raises humour while failure turns stay joke-free; a persona without a\n                      learning block gets the demo's (said in the opening line). Bars on stderr at a terminal, paced 1 s per hour\n                      (nights fast-forward in 2 s); otherwise one line per event on stdout, no waiting. With --seed, --strand\n  --plain             no colour, no bars, no pacing (as NO_COLOR=1)";
-/// `probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed]`; `probbit live PERSONA --demo week`;
-/// `probbit live verify STRAND`
+const LIVE_HELP: &str = "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin,\n  one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods\n  decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n  --strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used,\n  the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.\nflags:\n  --seed N            a new individual (default: the persona's seed)\n  --state FILE        a stored individual instead; rewritten after every event\n  --strand FILE       log the life to FILE: a new file gets the header; an existing strand is continued from --state\n                      (the state after its last line); a strand is never rewritten, just appended to\n  --events FILE       read events from FILE (default stdin)\n  --watch             follow --events FILE as lines are appended (tail -f); stops when the file is removed\n  --clock real|fixed  real (default): elapsed hours from a monotonic clock started with the run; fixed: each event carries\n                      its own elapsed_hours (default 0), so the run is a pure function of its events\n  --demo week         one individual's scripted week on the fixed clock (7 days, events hourly 09:00-15:00): praise for short\n                      answers moves the learned verbosity deltas to their cap, a quiet night relaxes the mood to its resting\n                      level, a campaign praising jokes raises humour while failure turns stay joke-free; a persona without a\n                      learning block gets the demo's (said in the opening line). Bars on stderr at a terminal, paced 1 s per hour\n                      (nights fast-forward in 2 s); otherwise one line per event on stdout, no waiting. With --seed, --strand\n  --plain             no colour, no bars, no pacing (as NO_COLOR=1)\n  --checkpoint-every K  with --strand: a checkpoint line (the whole state) after every K-th event (default 1000; 0: none);\n                      `verify --from-checkpoint` and `monitor` start at the last one\nthe safety kit (docs/persona.md §5.7):\n  one writer per strand: `--strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is\n  gone is taken over). With `reward_from` in the persona (§2.10), a reward from `src: self`, without a src or from an\n  undeclared one is refused like a bad event.\n  probbit live control STRAND pause|resume|retire --by human:ID|env:ID --reason TEXT [--at TIME]\n                      append a control line under the lock: while paused or retired every event is refused (exit 4);\n                      no credit crosses a control line; retire is final; `verify` replays them and reports the status\n  probbit live verify STRAND [--from-checkpoint]   replay from the header (every checkpoint checked), or from the last checkpoint";
+/// `probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]`;
+/// `probbit live PERSONA --demo week`; `probbit live verify STRAND [--from-checkpoint]`; `probbit live control STRAND pause|resume|retire --by WHO --reason TEXT`
 fn live_cmd(args: &[String]) {
     let engine = persona_engine(); let eng: persona::Engine = &engine;
+    let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
+    // an error object on stdout, a line on stderr, then the exit: 4 for a lock held by another writer or a paused / retired individual
+    let refuse = |what: &str, e: json::InErr| -> ! { err_line(&format!("probbit: {what}{}: {}", e.path, e.msg)); emit(&json::write(&e.to_json(), false));
+        exit(if ["locked", "paused", "retired"].contains(&e.code) { 4 } else { 2 }) };
     if args.get(1).map(String::as_str) == Some("verify") {
-        let mut a = vec!["live verify".to_string()]; a.extend(args.iter().skip(3).cloned()); check_flags(&a, &[], &[]);
+        let mut a = vec!["live verify".to_string()]; a.extend(args.iter().skip(3).cloned()); check_flags(&a, &[], &["--from-checkpoint"]);
         let Some(path) = args.get(2).filter(|a| !a.starts_with("--")) else { fail("live verify: the strand file: probbit live verify STRAND") };
         let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("live verify: cannot read {path}: {e}")));
-        match live::verify(&text, eng) {
+        let res = if args.iter().any(|a| a == "--from-checkpoint") { live::verify_from_checkpoint(&text, eng) } else { live::verify(&text, eng) };
+        match res {
             Ok(doc) => emit(&persona::canon(&doc)),
             Err((line, why)) => { emit(&persona::canon(&obj(vec![("ok", Json::Bool(false)), ("line", num(line as f64)), ("diverges", jstr(&why))]))); std::process::exit(1) } }
         return;
     }
-    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else { fail("live: the persona file goes before the flags: probbit live PERSONA [flags] (or probbit live verify STRAND)") };
-    let mut a = vec!["live".to_string()]; a.extend(args.iter().skip(2).cloned()); check_flags(&a, &["--seed", "--state", "--strand", "--events", "--clock", "--demo"], &["--watch", "--plain"]);
-    let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
+    if args.get(1).map(String::as_str) == Some("control") {
+        let mut a = vec!["live control".to_string()]; a.extend(args.iter().skip(4).cloned()); check_flags(&a, &["--by", "--reason", "--at"], &[]);
+        let usage = "live control: probbit live control STRAND pause|resume|retire --by human:ID --reason TEXT";
+        let (Some(path), Some(what)) = (args.get(2).filter(|a| !a.starts_with("--")), args.get(3).filter(|a| !a.starts_with("--"))) else { fail(usage) };
+        let (Some(by), Some(reason)) = (opt("--by"), opt("--reason")) else { fail(&format!("{usage} (--by and --reason are required)")) };
+        match live::control_cmd(path, what, &by, &reason, &opt("--at").unwrap_or_else(live::utc_now)) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+        return;
+    }
+    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else { fail("live: the persona file goes before the flags: probbit live PERSONA [flags] (or probbit live verify STRAND, probbit live control STRAND ...)") };
+    let mut a = vec!["live".to_string()]; a.extend(args.iter().skip(2).cloned()); check_flags(&a, &["--seed", "--state", "--strand", "--events", "--clock", "--demo", "--checkpoint-every"], &["--watch", "--plain"]);
     let (p, doc) = persona::load(path).unwrap_or_else(|e| bad_input("live: ", e));
     if let Some(d) = opt("--demo") {
         if d != "week" { fail(&format!("live: --demo week, not {d:?}")) }
-        if let Some(f) = ["--state", "--events", "--clock", "--watch"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live --demo week: {f} does not apply (the demo is its own events on the fixed clock)")) }
+        if let Some(f) = ["--state", "--events", "--clock", "--watch", "--checkpoint-every"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live --demo week: {f} does not apply (the demo is its own events on the fixed clock)")) }
         // the bars on stderr at a colour terminal; the plain lines on stdout unless it is that terminal too
         let th = theme::stderr(args); let lines = th.is_none() || !theme::stdout_is_terminal();
+        // the week's strand is written under the writer lock too
+        let lock = opt("--strand").map(|f| live::Lock::take(&f).unwrap_or_else(|e| refuse("live: ", e)));
         live::week(&doc, seed_arg(args, "--seed"), opt("--strand").as_deref(), th, &mut |l: &str| if lines { emit(l) }, eng).unwrap_or_else(|e| bad_input("live: ", e));
-        return;
+        drop(lock); return;
     }
+    let every: u64 = arg(args, "--checkpoint-every", live::CHECKPOINT_EVERY);
     let state_file = opt("--state"); if state_file.is_some() && opt("--seed").is_some() { fail("live: give --seed N (a new individual) or --state FILE (a stored one), not both") }
     let st = match &state_file {
         Some(f) => { let t = std::fs::read_to_string(f).unwrap_or_else(|e| bad_input("live: ", persona::perr("state", format!("cannot read {f}: {e} (make one with `probbit persona init`)"))));
@@ -577,18 +594,26 @@ fn live_cmd(args: &[String]) {
         None => persona::init(&p, seed_arg(args, "--seed"), true, eng) };
     let clock = match opt("--clock").as_deref() { None | Some("real") => live::Clock::Real(std::time::Instant::now()), Some("fixed") => live::Clock::Fixed, Some(c) => fail(&format!("live: --clock real|fixed, not {c:?}")) };
     let watch = args.iter().any(|a| a == "--watch"); if watch && opt("--events").is_none() { fail("live: --watch follows an --events FILE") }
-    // --strand: a new file gets the header; an existing strand is continued from --state (the state after its last line)
+    // --strand: one writer per strand (the lock, held to the exit, from before the strand is read); a new file gets the header;
+    // an existing strand is continued from --state (the state after its last line)
     let strand = opt("--strand");
+    let lock = strand.as_ref().map(|f| live::Lock::take(f).unwrap_or_else(|e| refuse("live: ", e)));
     if let Some(f) = &strand { if std::path::Path::new(f).exists() && state_file.is_none() { fail(&format!("live: {f} exists: continue it with --state FILE (the state after its last line), or log to a new file")) } }
     let (mut lv, header) = match &strand { Some(f) => live::open(f, p, &doc, st, clock).unwrap_or_else(|e| bad_input("live: ", e)), None => (live::Live::start(p, &doc, st, clock, &live::engine()).0, None) };
-    let log = |line: &str| if let Some(f) = &strand { live::append(f, &[line]).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
-    if let Some(h) = &header { log(h); }
-    let mut bad = 0;
+    // every append first checks the lock is still this writer's: a lock removed or taken over under it stops the run unwritten
+    let log = |ls: &[&str]| if let Some(f) = &strand {
+        if !lock.as_ref().is_some_and(live::Lock::held) { refuse("live: ", json::InErr { code: "locked", path: "strand".into(), msg: format!("the writer lock {f}.lock is no longer this run's (removed or taken over): stopped before writing") }) }
+        live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
+    if let Some(h) = &header { log(&[h]); }
+    let (mut bad, mut refused) = (0, 0);
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
         let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| lv.event(&ev, eng));
         match res {
-            Ok((stance, line)) => { log(&line); if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
-            Err(e) => { bad += 1; let e = persona::perr(&format!("events[{i}].{}", e.path), e.msg); err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); emit(&json::write(&e.to_json(), false)); } } };
+            Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
+                match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
+                if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
+            Err(e) => { if ["paused", "retired"].contains(&e.code) { refused += 1 } else { bad += 1 }
+                let e = json::InErr { path: format!("events[{i}].{}", e.path), ..e }; err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); emit(&json::write(&e.to_json(), false)); } } };
     match (opt("--events"), watch) {
         // --watch: follow the file as lines are appended (a line counts once its newline is written); stops when the file is removed
         (Some(f), true) => { let mut r = std::io::BufReader::new(std::fs::File::open(&f).unwrap_or_else(|e| fail(&format!("live: cannot read {f}: {e}"))));
@@ -601,8 +626,10 @@ fn live_cmd(args: &[String]) {
                 None => Box::new(std::io::BufReader::new(std::io::stdin())) };
             for (i, l) in std::io::BufRead::lines(input).enumerate() {
                 let l = l.unwrap_or_else(|e| fail(&format!("live: cannot read the events: {e}"))); let t = l.trim(); if !t.is_empty() { one(&mut lv, i, t); } } } }
-    err_line(&format!("live: {} events, strand head {}, final state {}", lv.n, lv.head(), lv.st.digest));
-    if bad > 0 { std::process::exit(2) }
+    err_line(&format!("live: {} events, strand head {}, final state {}{}", lv.n, lv.head(), lv.st.digest, if lv.status == live::Status::Active { String::new() } else { format!(", {} ({refused} events refused)", lv.status.name()) }));
+    drop(lock);
+    if refused > 0 { exit(4) }
+    if bad > 0 { exit(2) }
 }
 /// `probbit persona <sub> PERSONA [flags]` (docs/persona.md)
 fn persona_cmd(args: &[String]) {
@@ -699,4 +726,4 @@ fn main() {
         _ => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
     }
 }
-const USAGE: &str = "usage: probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       probbit demo [--tasks N] [--seed N] [--hard] [--live]\n       probbit ir [--max-input-mb N] < problem.json\n       probbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (probbit-ir JSON v1)\n       probbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       probbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]   (the individuality layer; probbit persona --help)\n       probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed]   (a resident individual: JSONL events in, stances out)\n       probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]   (a scripted week: learning to a cap, a night, rules that hold)\n       probbit live verify STRAND   (replay a strand; the earliest line that differs)\n       probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [--open]   (watch an individual's inner state live: bars in the terminal or a page on 127.0.0.1, replayed from the strand)\n       probbit mcp   (Model Context Protocol server on stdio)\n       probbit version\n       probbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";
+const USAGE: &str = "usage: probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       probbit demo [--tasks N] [--seed N] [--hard] [--live]\n       probbit ir [--max-input-mb N] < problem.json\n       probbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (probbit-ir JSON v1)\n       probbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       probbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]   (the individuality layer; probbit persona --help)\n       probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed]   (a resident individual: JSONL events in, stances out)\n       probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]   (a scripted week: learning to a cap, a night, rules that hold)\n       probbit live verify STRAND [--from-checkpoint]   (replay a strand; the earliest line that differs)\n       probbit live control STRAND pause|resume|retire --by WHO --reason TEXT   (a control line: pause, resume or retire an individual)\n       probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [--open]   (watch an individual's inner state live: bars in the terminal or a page on 127.0.0.1, replayed from the strand)\n       probbit mcp   (Model Context Protocol server on stdio)\n       probbit version\n       probbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";
