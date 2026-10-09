@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 const WEEK: &str = "tests/fixtures/monitor/tutor-week.strand";
 
 fn probbit(args: &[&str]) -> (i32, String, String) {
-    let o = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).env_remove("NO_COLOR").env_remove("PROBBIT_THEME").stdin(Stdio::null()).output().unwrap();
+    let o = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).env_remove("NO_COLOR").env_remove("PROBBIT_THEME").env_remove("TERM").stdin(Stdio::null()).output().unwrap();
     (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())
 }
 fn tmp(tag: &str) -> String { std::env::temp_dir().join(format!("probbit-monitor-{tag}-{}.strand", std::process::id())).to_str().unwrap().to_string() }
