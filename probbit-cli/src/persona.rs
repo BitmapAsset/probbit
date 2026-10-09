@@ -519,7 +519,8 @@ impl DState {
         let per = |k: &str, ok: &dyn Fn(&Json) -> bool, msg: String| -> R<Vec<Json>> { let path = at("state.drives", k);
             let o = get(kv, k).and_then(Json::as_obj).filter(|o| o.len() == d.goals.len() && d.goals.iter().all(|g| get(o, &g.id).is_some_and(ok))).ok_or_else(|| perr(&path, msg))?;
             Ok(d.goals.iter().map(|g| get(o, &g.id).unwrap().clone()).collect()) };
-        let within = |lo: f64, hi: f64| move |x: &Json| x.as_f64().is_some_and(|v| v >= lo && v <= hi);
+        // the state keeps 6 decimals, so a value clamped to a cap with more decimals can round up to half a unit past it
+        let within = |lo: f64, hi: f64| move |x: &Json| x.as_f64().is_some_and(|v| v >= lo - 5e-7 && v <= hi + 5e-7);
         let nums = |v: Vec<Json>| v.iter().map(|x| x.as_f64().unwrap()).collect::<Vec<f64>>();
         let want = nums(per("want", &within(0.0, d.cap_w), format!("one number per goal in [0, {}]", pyn(d.cap_w)))?);
         let glow = nums(per("glow", &within(0.0, d.cap_a), format!("one number per goal in [0, {}]", pyn(d.cap_a)))?);
@@ -772,8 +773,13 @@ fn lift_iter(p: &Persona, d: &Drives, own: &[f64], other: &[f64], allowed: &[boo
     let mut l = vec![0.0; n]; let idx: Vec<usize> = (0..n).filter(|&i| d.goals[i].floor > 0.0 && allowed[i]).collect();
     for _ in 0..60 { let mut moved = false;
         for &s in &idx { let f = d.goals[s].floor;
-            let others: Vec<f64> = (0..n).filter(|&g| g != s && allowed[g]).map(|g| (other[g] + l[g] + hi[g]).exp()).collect(); if others.is_empty() { continue; }
-            let need = (f / (1.0 - f)).ln() + others.iter().fold(0.0, |a, b| a + b).ln() - own[s] - lo[s] + 1e-5; let need = (need * 1e6).ceil() / 1e6;
+            // log-sum-exp over the other goals (shifted by their max): finite for every finite field. exp() of the raw fields
+            // underflowed below about -745 nats (no lift: the floor goal fell to odds 0) and overflowed above about +709 (an
+            // infinite lift: the turn fell back).
+            let xs: Vec<f64> = (0..n).filter(|&g| g != s && allowed[g]).map(|g| other[g] + l[g] + hi[g]).collect(); if xs.is_empty() { continue; }
+            let m = xs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+            let lse = m + xs.iter().map(|x| (x - m).exp()).sum::<f64>().ln();
+            let need = (f / (1.0 - f)).ln() + lse - own[s] - lo[s] + 1e-5; let need = (need * 1e6).ceil() / 1e6;
             if need > l[s] + 1e-9 { l[s] = need; moved = true; } }
         if !moved { break; } }
     l.into_iter().map(r6).collect()
@@ -935,7 +941,7 @@ impl State {
             let o = get(kv, k).and_then(Json::as_obj).ok_or_else(|| perr(&path, "required: an object of learned traits"))?;
             need(o.len() == l.traits.len(), &path, "one entry per learned trait")?;
             l.traits.iter().map(|t| { let n = p.var(t).unwrap().levels.len(); let tp = at(&path, t);
-                let a = get(o, t).and_then(Json::as_arr).filter(|a| a.len() == n && a.iter().all(|x| x.as_f64().is_some_and(|x| x.abs() <= cap))).ok_or_else(|| perr(&tp, format!("one number per level, each within ±{}", pyn(cap))))?;
+                let a = get(o, t).and_then(Json::as_arr).filter(|a| a.len() == n && a.iter().all(|x| x.as_f64().is_some_and(|x| x.abs() <= cap + 5e-7))).ok_or_else(|| perr(&tp, format!("one number per level, each within ±{}", pyn(cap))))?;
                 Ok((t.clone(), a.iter().map(|x| x.as_f64().unwrap()).collect())) }).collect() };
         let (learned, credit) = (tab("learned", p.learning.as_ref().map_or(0.0, |l| l.total_cap))?, tab("credit", 1.0)?);
         let drives = match &p.drives { None => None, Some(d) => Some(DState::read(p, d, get(kv, "drives").unwrap(), seed)?) };
@@ -1443,39 +1449,56 @@ pub fn floor_notes(p: &Persona) -> Option<Vec<Json>> {
             ("note".into(), Json::Str("a habit outranks a floor: on turns this habit is in force the goal's odds are 0".into()))])); } } }
     Some(out)
 }
+/// Unary goal-field bounds for one individual, before floor lifts and couplings.
+fn floor_fields(p: &Persona, d: &Drives, seed: u64) -> (Vec<f64>, Vec<f64>) {
+    let (n, v) = (d.goals.len(), p.var("pursue").unwrap()); let span = |w: f64, cap: f64| ((w * cap).min(0.0), (w * cap).max(0.0));
+    let (sw, sa, sd) = (span(d.w_want, d.cap_w), span(d.w_glow, d.cap_a), span(d.w_deadline, 1.0));
+    let lcap = p.learning.as_ref().filter(|l| l.traits.iter().any(|t| t == "pursue")).map_or(0.0, |l| l.total_cap);
+    let eff = |e: &Eff| e.iter().find(|(t, _)| t == "pursue").map(|(_, w)| w.clone());
+    let (gj, dg) = (genes(p, seed), drive_genes(p, d, seed)); let react = |id: &str| gj.get("react").and_then(|r| r.get(id)).and_then(Json::as_f64).unwrap_or(1.0);
+    let gene = |i: usize| dg.get("interest").and_then(|o| o.get(&d.goals[i].id)).and_then(Json::as_f64).unwrap_or(0.0);
+    let mut lo: Vec<f64> = (0..n).map(|i| v.base[i] + gene(i) - lcap + sw.0 + sa.0 + sd.0).collect(); let mut hi: Vec<f64> = (0..n).map(|i| v.base[i] + gene(i) + lcap + sw.1 + sa.1 + sd.1).collect();
+    let mut add = |opts: Vec<Vec<f64>>| { for i in 0..n { lo[i] += opts.iter().map(|w| w[i]).fold(f64::INFINITY, f64::min); hi[i] += opts.iter().map(|w| w[i]).fold(f64::NEG_INFINITY, f64::max); } };
+    for x in &p.inputs { let g = react(&x.id); match x.kind {
+        Kind::Flag => if let Some(e) = eff(&x.effects) { add(vec![vec![0.0; n], e.iter().map(|w| g * w).collect()]); },
+        Kind::Number => if let Some(e) = eff(&x.effects) { add(vec![vec![0.0; n], e.iter().map(|w| g * x.max * w).collect()]); },
+        Kind::Level => add(x.levels.iter().map(|l| x.by_level.iter().find(|(b, _)| b == l).and_then(|(_, e)| eff(e)).map_or(vec![0.0; n], |e| e.iter().map(|w| g * w).collect())).collect()) } }
+    for h in &p.history { if let Some(e) = eff(&h.effects) { add(vec![vec![0.0; n], e.iter().map(|w| h.cap as f64 * w).collect()]); } }
+    (lo, hi)
+}
 /// `lint` for floors (§2.9): a floor goal whose lift can reach 50 on some turn of the given individuals: the lift's iteration with
 /// the goal's unary at its least and every other goal's at its most over everything the persona can feed `pursue` (prior, the
 /// seed's drive genes, learned ±total_cap, every input and history effect at its extremes, the drive box)
 pub fn floor_reach(p: &Persona, seeds: &[u64]) -> Vec<Json> {
-    let (Some(d), Some(pi)) = (&p.drives, p.vars.iter().position(|v| v.id == "pursue")) else { return vec![] };
+    let Some(d) = &p.drives else { return vec![] };
     if !d.goals.iter().any(|g| g.floor > 0.0) { return vec![]; }
-    let (n, v) = (d.goals.len(), &p.vars[pi]); let span = |w: f64, cap: f64| ((w * cap).min(0.0), (w * cap).max(0.0));
-    let (sw, sa, sd) = (span(d.w_want, d.cap_w), span(d.w_glow, d.cap_a), span(d.w_deadline, 1.0));
-    let lcap = p.learning.as_ref().filter(|l| l.traits.iter().any(|t| t == "pursue")).map_or(0.0, |l| l.total_cap);
-    let eff = |e: &Eff| e.iter().find(|(t, _)| t == "pursue").map(|(_, w)| w.clone());
-    let mut most = vec![0.0f64; n];
-    for &seed in seeds {
-        let (gj, dg) = (genes(p, seed), drive_genes(p, d, seed)); let react = |id: &str| gj.get("react").and_then(|r| r.get(id)).and_then(Json::as_f64).unwrap_or(1.0);
-        let gene = |i: usize| dg.get("interest").and_then(|o| o.get(&d.goals[i].id)).and_then(Json::as_f64).unwrap_or(0.0);
-        let mut lo: Vec<f64> = (0..n).map(|i| v.base[i] + gene(i) - lcap + sw.0 + sa.0 + sd.0).collect(); let mut hi: Vec<f64> = (0..n).map(|i| v.base[i] + gene(i) + lcap + sw.1 + sa.1 + sd.1).collect();
-        let mut add = |opts: Vec<Vec<f64>>| { for i in 0..n { lo[i] += opts.iter().map(|w| w[i]).fold(f64::INFINITY, f64::min); hi[i] += opts.iter().map(|w| w[i]).fold(f64::NEG_INFINITY, f64::max); } };
-        for x in &p.inputs { let g = react(&x.id); match x.kind {
-            Kind::Flag => if let Some(e) = eff(&x.effects) { add(vec![vec![0.0; n], e.iter().map(|w| g * w).collect()]); },
-            Kind::Number => if let Some(e) = eff(&x.effects) { add(vec![vec![0.0; n], e.iter().map(|w| g * x.max * w).collect()]); },
-            Kind::Level => add(x.levels.iter().map(|l| x.by_level.iter().find(|(b, _)| b == l).and_then(|(_, e)| eff(e)).map_or(vec![0.0; n], |e| e.iter().map(|w| g * w).collect())).collect()) } }
-        for h in &p.history { if let Some(e) = eff(&h.effects) { add(vec![vec![0.0; n], e.iter().map(|w| h.cap as f64 * w).collect()]); } }
+    let n = d.goals.len(); let mut most = vec![0.0f64; n];
+    for &seed in seeds { let (lo, hi) = floor_fields(p, d, seed);
         for (m, l) in most.iter_mut().zip(lift_iter(p, d, &lo, &hi, &vec![true; n])) { *m = m.max(l); } }
     d.goals.iter().zip(most).filter(|(g, l)| g.floor > 0.0 && *l >= 50.0).map(|(g, l)| Json::Obj(vec![("goal".into(), Json::Str(g.id.clone())), ("floor".into(), Json::Num(g.floor)),
         ("lift_max".into(), Json::Num(r6(l))), ("note".into(), Json::Str("the floor's lift can reach 50 or more: it outweighs everything the persona can say for or against this goal".into()))])).collect()
 }
 /// `prove` for a drives block's floors (§2.9, design §5.2): each floor holds by construction of the odds lift, on every turn whose
 /// habits allow the goal (the soundness condition, no multi-variable rule over `pursue`, is checked when the persona is read);
-/// with the habits that can exclude it. None without floors.
-pub fn floor_verdicts(p: &Persona) -> Option<Vec<Json>> {
+/// with the habits that can exclude it. Extreme numeric ranges are unknown. None without floors.
+pub fn floor_verdicts(p: &Persona, seeds: &[u64]) -> Option<Vec<Json>> {
     let d = p.drives.as_ref()?; let notes = floor_notes(p)?; if !d.goals.iter().any(|g| g.floor > 0.0) { return None; }
+    // Keep the construction verdict within the normal exponential range. Extreme ranges use the log-space lift at
+    // runtime, but this structural proof does not certify their floating-point rounding over every possible turn.
+    let normal = !seeds.is_empty() && seeds.iter().all(|&seed| {
+        let (mut lo, mut hi) = floor_fields(p, d, seed);
+        for (a, b, tab) in &p.couplings {
+            let rows: Vec<Vec<f64>> = if a == "pursue" { tab.clone() } else if b == "pursue" { (0..lo.len()).map(|i| tab.iter().map(|r| r[i]).collect()).collect() } else { continue };
+            for (i, r) in rows.iter().enumerate() { lo[i] += r.iter().copied().fold(f64::INFINITY, f64::min); hi[i] += r.iter().copied().fold(f64::NEG_INFINITY, f64::max); }
+        }
+        lo.iter().chain(&hi).all(|x| x.is_finite() && *x >= f64::MIN_POSITIVE.ln() && *x <= f64::MAX.ln())
+    });
     Some(d.goals.iter().filter(|g| g.floor > 0.0).map(|g| { let by: Vec<String> = notes.iter().filter(|n| n.get("goal").and_then(Json::as_str) == Some(g.id.as_str()))
         .filter_map(|n| n.get("habit").and_then(Json::as_str).map(str::to_string)).collect();
-        Json::Obj(vec![("goal".into(), Json::Str(g.id.clone())), ("floor".into(), Json::Num(g.floor)), ("verdict".into(), Json::Str("held_by_construction".into())), ("excluded_by".into(), jstrs(&by))]) }).collect())
+        let mut fields = vec![("goal".into(), Json::Str(g.id.clone())), ("floor".into(), Json::Num(g.floor)),
+            ("verdict".into(), Json::Str(if normal { "held_by_construction" } else { "unknown" }.into())), ("excluded_by".into(), jstrs(&by))];
+        if !normal { fields.push(("reason".into(), Json::Str("goal field bounds leave the normal exponential range; the numeric floor guarantee is not certified".into()))); }
+        Json::Obj(fields) }).collect())
 }
 /// `lint`'s decoding check (a warning, not an error): the stance is the joint plan, the most likely stance as a whole, so on
 /// coupled traits a trait's planned level can differ from its own most likely level (its marginal mode). Probes: each seed's
@@ -2024,6 +2047,22 @@ mod tests {
     fn inputs(pr: bool, cr: bool, loss: bool) -> Json { json::parse(&format!(r#"{{"praise":{pr},"criticism":{cr},"loss":{loss}}}"#)).unwrap() }
     fn err<T>(r: R<T>) -> String { r.err().map(|e| format!("{}: {}", e.path, e.msg)).unwrap_or_default() }
 
+    /// Check both signs at the rounded cap and refusal beyond half a unit of the sixth decimal.
+    #[test]
+    fn state_cap_rounding_has_a_bounded_tolerance() {
+        let p = persona(&LEARN.replace("0.6", "0.1234567").replace("0.2", "0.1234567")).unwrap();
+        for sign in [-1.0, 1.0] { for (value, ok) in [(0.123457, true), (0.123458, false)] {
+            let mut st = init(&p, None, true, &run); st.learned[0].1[0] = sign * value; st.seal(&p);
+            assert_eq!(State::read(&p, &st.to_json(&p)).is_ok(), ok, "learned {sign} * {value}");
+        } }
+        let p = build(&json::parse(&ADV.replace(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":0.5,"wanting":{"cap":0.1234567}"#)).unwrap()).unwrap();
+        assert_eq!(p.drives.as_ref().unwrap().cap_w, 0.1234567);
+        for (value, ok) in [(0.123457, true), (0.123458, false), (-0.000001, false)] {
+            let mut st = init(&p, None, true, &run); st.drives.as_mut().unwrap().want[0] = value; st.seal(&p);
+            assert_eq!(State::read(&p, &st.to_json(&p)).is_ok(), ok, "want {value}");
+        }
+    }
+
     /// Every turn's learned deltas equal the rule applied to the previous stance document's levels and odds (released traits; others 0):
     /// Δ += clip(sign · rate · (onehot − odds), ±step_cap), recentred to sum 0, clipped to ±total_cap, 6 decimals; no feedback
     /// (or reward and correction together) moves nothing; the deltas sum to 0 until a cap clips; a habit-forced level gives no credit
@@ -2283,8 +2322,8 @@ mod tests {
         let p = adv(); let rule = |t: &str| json::parse(t).unwrap(); let pr = |t: &str| props(&p, &rule(t), "--never", "never");
         let must = pr(r#"{"when":{"goal.chores.deadline_hours":{"at_most":24}},"then":{"pursue":["chores"]}}"#).unwrap();
         assert_eq!(by_construction(&p, &must[0], &run), Some(vec!["chores_due".to_string()]));
-        assert_eq!(canon(&Json::Arr(floor_verdicts(&p).unwrap())), r#"[{"excluded_by":["chores_due","starve_chores"],"floor":0.1,"goal":"safety","verdict":"held_by_construction"}]"#);
-        assert!(floor_verdicts(&persona("").unwrap()).is_none());
+        assert_eq!(canon(&Json::Arr(floor_verdicts(&p, &[0]).unwrap())), r#"[{"excluded_by":["chores_due","starve_chores"],"floor":0.1,"goal":"safety","verdict":"held_by_construction"}]"#);
+        assert!(floor_verdicts(&persona("").unwrap(), &[0]).is_none());
         assert_eq!(err(pr(r#"{"when":{"goal.chores.deadline_hours":{"at_most":12}},"then":{"pursue":["chores"]}}"#)),
             "--never.when.goal.chores.deadline_hours: a property reads the goal conditions the persona's habits use: goal.chores.deadline_hours <= 24, since_pursued.chores >= 12, since_pursued.safety >= 24");
         assert_eq!(err(pr(r#"{"when":{"drv_want":1},"then":{"pursue":["chores"]}}"#)), "--never.when.drv_want: reserved for the drives block");

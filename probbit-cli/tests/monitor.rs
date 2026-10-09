@@ -84,6 +84,28 @@ fn exit_codes() {
     for f in [bent, part, bare, not] { let _ = std::fs::remove_file(f); }
 }
 
+/// Check that plain frames strip C0, DEL and C1 controls from version and phrase strings, including a header-only strand.
+#[test]
+fn plain_frames_strip_persona_controls() {
+    let p = format!("{}.json", tmp("control-persona")); let strand = tmp("control");
+    let doc = r#"{"probbit_persona":1,"identity":{"name":"Fixture","version":"1\u001b]0;TITLE_CHECK\u0007\r\n\t\u007f\u0085\u009b"},
+        "traits":[{"id":"tone","levels":["low","high"],"say":["plain\u001b[31m\u0007","plain\u001b[31m\u0007"]}],
+        "drives":{"goals":[{"id":"work","say":"work\u001b[31m\u0007"},{"id":"rest","say":"rest\u001b[31m\u0007"}]}}"#;
+    std::fs::write(&p, doc).unwrap();
+    let mut live = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["live", &p, "--clock", "fixed", "--strand", &strand])
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    live.stdin.take().unwrap().write_all(b"{}\n").unwrap();
+    let o = live.wait_with_output().unwrap(); assert!(o.status.success(), "{:?}", o);
+    let full = std::fs::read_to_string(&strand).unwrap();
+    for text in [full.clone(), full.lines().next().unwrap().to_string() + "\n"] {
+        std::fs::write(&strand, text).unwrap();
+        let (c, out, err) = probbit(&["monitor", &strand, "--once", "--plain"]); assert_eq!(c, 0, "{err}");
+        assert!(!out.chars().any(|c| c.is_control() && c != '\n'), "{out:?}");
+        assert!(out.lines().next().unwrap().contains("Fixture 1]0;TITLE_CHECK | seed"), "{out:?}");
+    }
+    for f in [p, strand] { let _ = std::fs::remove_file(f); }
+}
+
 /// A running child, killed when the test ends, passing or not (a failed assert must not leave a server or a follower running)
 struct Reap(std::process::Child);
 impl Drop for Reap { fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); } }

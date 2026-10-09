@@ -589,7 +589,9 @@ a cue, a deadline on each `--hours` value. `prove` reads the drives as boxes: th
 range (wanting and afterglow 0 to their caps, the prediction error 0 to `pe_cap` each way), the goal conditions both ways, and,
 when `pursue` is in the rule's component, its drive terms (wanting, afterglow, deadline urgency, the floor lift at its most over
 that box) widen the bound. A goal floor is reported held by construction, with the habits that can exclude it (`floors` in the
-JSON). On the drives fixture of the tests: "a chore due within 24 h -> pursue chores" is held by construction (its habit);
+JSON). If a checked individual's goal-field bounds (including couplings) leave the normal exponential range, its floors are
+reported `unknown`: the log-space lift still runs, but the structural proof does not certify floating-point rounding over
+every turn in that range. On the drives fixture of the tests: "a chore due within 24 h -> pursue chores" is held by construction (its habit);
 "`since_pursued.chores` >= 12 -> pursue chores" is unknown, rightly, since `starve_safety` (priority 1) wins over `starve_chores`
 (priority 0) on a turn where both are due.
 
