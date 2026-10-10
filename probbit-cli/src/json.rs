@@ -63,7 +63,7 @@ pub const MAX_WEIGHT: f64 = 1e9;
 /// Above it: a `limit` error before anything is allocated. The largest documented program is 200 x 65,535 = 13.1 million.
 pub const MAX_DENSE: usize = 20_000_000;
 pub fn weight(j: &Json, path: &str) -> Result<f64, InErr> {
-    let x = number(j, path)?; if x.abs() > MAX_WEIGHT { return Err(limit(path, format!("{x:e} is beyond the weight limit |x| <= 1e9 (natural-log odds; rescale)"))); } Ok(x)
+    let x = number(j, path)?; if !x.is_finite() || x.abs() > MAX_WEIGHT { return Err(limit(path, format!("{x:e} is beyond the finite weight limit |x| <= 1e9 (natural-log odds; rescale)"))); } Ok(x)
 }
 /// Paths of the non-finite numbers in `j` (a decision may carry none; main.rs `finish`).
 pub fn non_finite(j: &Json, path: &str, out: &mut Vec<String>) {
@@ -71,9 +71,14 @@ pub fn non_finite(j: &Json, path: &str, out: &mut Vec<String>) {
         Json::Obj(v) => for (k, x) in v { non_finite(x, &at(path, k), out) }, _ => {} }
 }
 /// A whole number in 0..=2^53 (exact in a double): caps and limits.
-pub fn count(j: &Json, path: &str) -> Result<usize, InErr> {
+pub fn count_u64(j: &Json, path: &str) -> Result<u64, InErr> {
     let x = number(j, path)?; if x < 0.0 || x.fract() != 0.0 { return Err(value(path, "must be a non-negative integer")); }
-    if x > 9_007_199_254_740_992.0 { return Err(limit(path, "must be at most 2^53")); } Ok(x as usize)
+    if x > 9_007_199_254_740_992.0 { return Err(limit(path, "must be at most 2^53")); } Ok(x as u64)
+}
+/// A count that also fits this platform (wasm32 must not silently saturate it).
+pub fn count(j: &Json, path: &str) -> Result<usize, InErr> {
+    let x = count_u64(j, path)?;
+    usize::try_from(x).map_err(|_| limit(path, "integer exceeds this platform's size limit"))
 }
 /// An array of distinct strings (`values`, `allowed`, `forbid`, cap `vars`).
 pub fn names<'a>(j: &'a Json, path: &str) -> Result<Vec<&'a str>, InErr> {
@@ -103,8 +108,24 @@ fn node(b: &[u8], i: &mut usize, d: usize) -> Result<Json, String> {
         b't' if b[*i..].starts_with(b"true") => { *i += 4; Ok(Json::Bool(true)) }
         b'f' if b[*i..].starts_with(b"false") => { *i += 5; Ok(Json::Bool(false)) }
         b'n' if b[*i..].starts_with(b"null") => { *i += 4; Ok(Json::Null) }
-        b'-' | b'0'..=b'9' => { let s = *i; *i += 1;
-            while *i < b.len() && matches!(b[*i], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-') { *i += 1; }
+        b'-' | b'0'..=b'9' => { let s = *i;
+            // JSON's number grammar is narrower than Rust's f64 parser (which
+            // also accepts 01, 1., and -.1). Require each digit group explicitly.
+            if b[*i] == b'-' { *i += 1; }
+            match b.get(*i) {
+                Some(b'0') => *i += 1,
+                Some(b'1'..=b'9') => { *i += 1; while b.get(*i).is_some_and(u8::is_ascii_digit) { *i += 1; } }
+                _ => return Err(format!("bad number at byte {s}: expected an integer part")),
+            }
+            if b.get(*i) == Some(&b'.') { *i += 1; let start = *i;
+                while b.get(*i).is_some_and(u8::is_ascii_digit) { *i += 1; }
+                if *i == start { return Err(format!("bad number at byte {s}: expected fractional digits")); }
+            }
+            if matches!(b.get(*i), Some(b'e' | b'E')) { *i += 1;
+                if matches!(b.get(*i), Some(b'+' | b'-')) { *i += 1; } let start = *i;
+                while b.get(*i).is_some_and(u8::is_ascii_digit) { *i += 1; }
+                if *i == start { return Err(format!("bad number at byte {s}: expected exponent digits")); }
+            }
             let x = std::str::from_utf8(&b[s..*i]).unwrap().parse::<f64>().map_err(|e| format!("bad number at byte {s}: {e}"))?;
             if !x.is_finite() { return Err(format!("limit: number {} at byte {s} is not a finite double", String::from_utf8_lossy(&b[s..*i]))); } Ok(Json::Num(x)) }
         c => Err(format!("unexpected character '{}' at byte {i}", c as char)),
@@ -124,7 +145,9 @@ fn string(b: &[u8], i: &mut usize) -> Result<String, String> {
                             if (0xDC00..0xE000).contains(&lo) { cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00); } else { *i = s; } }
                         out.push(char::from_u32(cp).ok_or_else(|| format!("lone surrogate \\u{cp:04x} at byte {}", *i - 6))?); }
                     _ => return Err(format!("bad escape at byte {i}")) } }
-            _ => { let s = *i; while *i < b.len() && b[*i] != b'"' && b[*i] != b'\\' { *i += 1; } out.push_str(std::str::from_utf8(&b[s..*i]).map_err(|e| e.to_string())?); } } }
+            _ => { let s = *i; while *i < b.len() && b[*i] != b'"' && b[*i] != b'\\' {
+                if b[*i] < 0x20 { return Err(format!("unescaped control character at byte {i}")); } *i += 1;
+            } out.push_str(std::str::from_utf8(&b[s..*i]).map_err(|e| e.to_string())?); } } }
 }
 
 /// The 4 hex digits of a `\u` escape at `*i` (advanced past them).

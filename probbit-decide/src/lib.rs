@@ -937,6 +937,7 @@ pub fn polish_plan(p: &Problem, start: Option<&[usize]>, ms: f64, seed: u64) -> 
 pub fn polish_plan_sweeps(p: &Problem, start: Option<&[usize]>, sweeps: usize, seed: u64) -> Option<(f64, Vec<usize>)> { polish_plan_on(p, start, 0.0, sweeps.max(1), 4, seed) }
 /// The polish's 4 chains on `threads` workers (`--threads`); see `probbit_ir::anneal_on` for the ms / sweeps semantics.
 pub fn polish_plan_on(p: &Problem, start: Option<&[usize]>, ms: f64, sweeps: usize, threads: usize, seed: u64) -> Option<(f64, Vec<usize>)> {
+    if start.is_some_and(|x| x.len() != p.t || x.iter().any(|&a| a >= p.a) || p.violations(x) != 0) { return None; }
     let seq = probbit_core::rt::sequential(); let t = if seq { 1 } else { threads.clamp(1, 4) }; let ms = ms / 4usize.div_ceil(t) as f64;
     let betas = [2.0, 4.0, 8.0, 16.0, 32.0];
     let qs: Vec<Problem> = betas.iter().map(|&b| { let mut q = p.clone(); for v in q.h.iter_mut() { *v *= b; } q.lam *= b; q }).collect();
@@ -951,7 +952,7 @@ pub fn polish_plan_on(p: &Problem, start: Option<&[usize]>, ms: f64, sweeps: usi
             if sweeps == 0 && t0.elapsed().as_secs_f64() * 1e3 >= ms { break; }
             let mut ch = Chain::new(q, seed ^ 0x5eed, (c * 8 + k) as u64)?; ch.x = x.clone(); ch.load = vec![0; p.a]; for &a in &x { ch.load[a] += 1; }
             let stop = ms * (k + 1) as f64 / betas.len() as f64; let mut j = 0usize;
-            let n = sweeps * (k + 1) / betas.len() - sweeps * k / betas.len();
+            let n = ((sweeps as u128 * (k + 1) as u128) / betas.len() as u128 - (sweeps as u128 * k as u128) / betas.len() as u128) as usize;
             while if sweeps > 0 { j < n } else { j % 4 != 0 || t0.elapsed().as_secs_f64() * 1e3 < stop } { ch.sweep(); j += 1; let lw = p.logw(&ch.x); if lw > best.0 { best = (lw, ch.x.clone()); } }
             x = ch.x.clone();
         }
