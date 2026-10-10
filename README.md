@@ -22,7 +22,7 @@
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
-Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows and the from-source build: [Install](#install).
+Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
 One binary of about 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
 `probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
 
@@ -115,6 +115,7 @@ From a release (the installers fetch the latest archive from the Releases page; 
 |---|---|
 | Linux, macOS (no sudo) | `curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh \| sh` |
 | Windows PowerShell | `irm https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.ps1 \| iex` |
+| npm (Node 18+) | `npm i -g probbit` |
 | by hand | archives for Linux x86_64 (glibc or static musl), Linux arm64 (static), macOS (Apple silicon and Intel) and Windows x86_64 on the [Releases page](https://github.com/BitmapAsset/probbit/releases), each with a `.sha256` |
 
 The installers check the archive's SHA-256 before installing anything; at a terminal, `install.sh` ends with probbit's own
