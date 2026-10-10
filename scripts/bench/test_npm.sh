@@ -5,7 +5,7 @@
 # Then an --ignore-scripts install (fetched on first run), PROBBIT_BINARY, and a tampered .sha256 (the install must fail).
 #   scripts/bench/test_npm.sh <probbit binary> <target triple> [tag]
 set -eu
-BIN=$1 TARGET=$2 TAG=${3:-v0.2.0}
+BIN=$1 TARGET=$2 TAG=${3:-v$(node -p "require('./npm/package.json').version")}
 PY=${PY:-$(command -v python3 || command -v python)}
 WORK=$(mktemp -d 2> /dev/null || mktemp -d -t probbitnpm)
 SRV=""
@@ -28,6 +28,7 @@ done
 BASE="http://127.0.0.1:$PORT"
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) gbin() { echo "$1"; } ;; *) gbin() { echo "$1/bin"; } ;; esac
 NPM_FLAGS="--no-audit --no-fund --foreground-scripts"
+export npm_config_allow_scripts=probbit
 echo "node $(node --version), npm $(npm --version), target $TARGET"
 
 (cd npm && npm pack --pack-destination "$WORK" > /dev/null)
@@ -71,4 +72,9 @@ PROBBIT_BINARY="$BIN_ABS" PROBBIT_DOWNLOAD_BASE="http://127.0.0.1:9/nowhere" npm
 echo "== 4. tampered .sha256: npm install must fail"
 if PROBBIT_DOWNLOAD_BASE="$BASE/bad" npm install -g --prefix "$WORK/prefix4" $NPM_FLAGS "$TGZ"; then fail "a wrong checksum was accepted"; fi
 echo "ok: rejected"
+
+echo "== 5. --ignore-scripts with bad checksum must fail on first use"
+P5="$WORK/prefix5"
+npm install -g --prefix "$P5" $NPM_FLAGS --ignore-scripts "$TGZ"
+if PROBBIT_DOWNLOAD_BASE="$BASE/bad" "$(gbin "$P5")/probbit" version; then fail "first run accepted a wrong checksum"; fi
 echo "npm wrapper: all checks passed ($TARGET)"

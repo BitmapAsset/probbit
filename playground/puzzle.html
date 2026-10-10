@@ -17,6 +17,7 @@
   h1 small { display: block; font-size: 14px; font-weight: 400; color: var(--dim); letter-spacing: 0.02em; }
   h2 { margin: 30px 0 8px; font-size: 18px; }
   p { max-width: 860px; }
+  .panel, .muted, .line { overflow-wrap: anywhere; min-width: 0; }
   .sub { color: var(--dim); margin: 10px 0 16px; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
   button, select, input { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font: inherit; }
@@ -84,6 +85,8 @@
   .caption strong { color: var(--text); } .caption span { color: var(--dim); }
   @media (max-width: 560px) {
     body { font-size: 14px; }
+    table { table-layout: fixed; }
+    th, td { overflow-wrap: anywhere; }
     .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .card { min-height: 60px; }
     .lv { font-size: 12.5px; }

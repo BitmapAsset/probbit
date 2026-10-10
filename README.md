@@ -118,6 +118,11 @@ were verified from clean machines on macOS (Apple silicon) and Linux (x86_64).
 npm may print an `allow-scripts` warning: the package's only install script downloads the prebuilt binary for your platform
 and checks its SHA-256. If npm blocks the script, the binary is fetched the first time you run `probbit` instead.
 
+The shell installer defaults to `~/.local/bin`, without replacing a system-wide installation. Set
+`PROBBIT_INSTALL_DIR` to choose another directory. Both the shell and npm installers select static musl binaries
+for Linux ARM64 and for x86_64 musl systems such as Alpine. The shell and PowerShell installers check that a
+downloaded candidate starts successfully before replacing an existing binary; failed checksums leave it unchanged.
+
 From source, with Rust 1.78 or later: `cargo install --git https://github.com/BitmapAsset/probbit probbit-cli`, or clone and
 `cargo build --release -p probbit-cli` (the binary lands in `target/release/probbit`). Nothing is downloaded after the clone:
 there are no external crates.
@@ -128,7 +133,7 @@ At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes 
 
 ```
 git clone https://github.com/BitmapAsset/probbit && cd probbit
-cargo test --release --workspace                                   # 127 tests (3 core, 48 CLI, 11 stress, 18 acceptance, 47 probbit-ir; 1 ignored), ~25 s once built
+cargo test --release --workspace                                   # unit, integration, regression and exact-oracle tests
 cargo run --release -p probbit-cli -- demo --tasks 12 | cargo run --release -p probbit-cli -- decide --pretty
 cargo run --release --example agent_router                         # the full narrated demo, ~3 s
 ```

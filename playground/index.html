@@ -20,6 +20,9 @@
   #verdict { margin: 10px 0; font-size: 18px; font-weight: 700; letter-spacing: 0.04em; }
   .exact, .diagnostics_passed { color: var(--green); } .partial { color: var(--yellow); } .refused, .declined, .infeasible, .error { color: var(--red); }
   table { border-collapse: collapse; font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; margin-top: 6px; }
+  .table-scroll { max-width: 100%; overflow-x: auto; }
+  .table-scroll:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+  #runs, #verdict, .note { overflow-wrap: anywhere; }
   th, td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; } th { color: var(--dim); font-weight: 500; }
   td.moved { color: var(--magenta); } .note { color: var(--dim); font-size: 13px; margin-top: 6px; }
   details { margin-top: 16px; } summary { cursor: pointer; color: var(--dim); }
@@ -39,7 +42,7 @@ obeys every rule, with odds and a gate that refuses instead of guessing. Edit th
 <textarea id="input" spellcheck="false"></textarea>
 <div id="runs"></div>
 <div id="verdict"></div>
-<table id="odds"></table>
+<div class="table-scroll" role="region" aria-label="Decision probabilities; scroll horizontally for all columns" tabindex="0"><table id="odds"></table></div>
 <div id="odds-note" class="note"></div>
 <details><summary>full answer (JSON)</summary><pre id="raw"></pre></details>
 <h2 id="meet-three">Meet three individuals from one persona</h2>
@@ -52,7 +55,7 @@ into any model's prompt. No model is called here: the persona decides how a repl
   <span class="note">seeds</span> <select id="seeds"><option value="1,2,3">1, 2, 3</option><option value="4,5,6">4, 5, 6</option><option value="7,8,9">7, 8, 9</option></select>
   <button id="meet" class="go" disabled>Meet them</button> <span id="meet-status" class="note"></span>
 </div>
-<table id="meet-table"></table>
+<div class="table-scroll" role="region" aria-label="Persona comparison; scroll horizontally for all individuals" tabindex="0"><table id="meet-table"></table></div>
 <div class="note">Each cell: the stance line (habits first, then traits away from this individual's resting level), then three traits' levels with
 their exact odds. Habits hold in every cell (violations 0 by construction); the three differ where their genes do.</div>
 <!-- written by playground/build.sh: the module as base64 (a page opened from disk may not fetch probbit.wasm); absent over http -->

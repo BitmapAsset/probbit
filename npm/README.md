@@ -11,7 +11,7 @@ probbit stats --pretty
 ```
 
 The install step fetches the release archive for your platform from GitHub Releases (macOS arm64 and x86_64, Linux
-x86_64 with glibc, Windows x86_64), checks it against the `.sha256` file published beside it and keeps the binary inside
+x86_64 with glibc or musl, Linux ARM64 static musl, Windows x86_64), checks it against the `.sha256` file published beside it and keeps the binary inside
 this package. No dependencies; Node >= 18. If the install step could not run (`--ignore-scripts`, offline), the first
 `probbit` call fetches the binary. A checksum mismatch fails the install and installs nothing.
 
