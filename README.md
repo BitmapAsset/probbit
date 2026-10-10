@@ -105,21 +105,24 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-Today, from source with Rust 1.78 or later: `cargo install --git https://github.com/BitmapAsset/probbit probbit-cli` installs the
-`probbit` binary; or clone and `cargo build --release -p probbit-cli` (it lands in `target/release/probbit`). Nothing is downloaded
-after the clone: there are no external crates.
-
-From a release (the installers fetch the latest archive from the Releases page; the commands below were tested against a local server, PORTABILITY.md):
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.8.0; the one-liners
+were verified from clean machines on macOS (Apple silicon) and Linux (x86_64).
 
 | how | command |
 |---|---|
 | Linux, macOS (no sudo) | `curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh \| sh` |
 | Windows PowerShell | `irm https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.ps1 \| iex` |
 | npm (Node 18+) | `npm i -g probbit` |
-| by hand | archives for Linux x86_64 (glibc or static musl), Linux arm64 (static), macOS (Apple silicon and Intel) and Windows x86_64 on the [Releases page](https://github.com/BitmapAsset/probbit/releases), each with a `.sha256` |
+| by hand | archives for Linux x86_64 (glibc or static musl), Linux arm64 (static), macOS (Apple silicon and Intel) and Windows x86_64 on the [Releases page](https://github.com/BitmapAsset/probbit/releases), each with a `.sha256` beside it |
 
-The installers check the archive's SHA-256 before installing anything; at a terminal, `install.sh` ends with probbit's own
-hero screen.
+npm may print an `allow-scripts` warning: the package's only install script downloads the prebuilt binary for your platform
+and checks its SHA-256. If npm blocks the script, the binary is fetched the first time you run `probbit` instead.
+
+From source, with Rust 1.78 or later: `cargo install --git https://github.com/BitmapAsset/probbit probbit-cli`, or clone and
+`cargo build --release -p probbit-cli` (the binary lands in `target/release/probbit`). Nothing is downloaded after the clone:
+there are no external crates.
+
+At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes and the installer tests: [PORTABILITY.md](PORTABILITY.md).
 
 ## 60-second tour
 
