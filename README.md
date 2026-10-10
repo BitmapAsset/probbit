@@ -442,11 +442,11 @@ to be measured per model (no such measurement has been made here).
 ### Test a character
 
 <p align="center"><img src="docs/art/the-fuzz-finds-the-flaw.jpg" alt="a corridor of glass event cards; one card cracks cyan beside a rabbit mark; a replay trace runs under the floor" width="100%"></p>
-<p align="center"><sub><i>The fuzz finds the flaw: the shortest event script that pushes an individual out of character, shrunk and replayable.</i></sub></p>
+<p align="center"><sub><i>The fuzz finds the flaw: an event script that pushes an individual out of character, shrunk and replayable.</i></sub></p>
 
 
 A character property is a rule in habit syntax the stance must never break. `fuzz` searches event scripts for each
-individual's shortest counterexample; `prove` says `held by construction`, `proved for every event sequence` or `unknown`. The
+individual's short counterexample (not a guaranteed global minimum); `prove` says `held by construction`, `proved for every event sequence` or `unknown`. The
 tutor as it shipped in 0.5.0 is kept as a fixture, so this runs from a clone with no keys and no model:
 
 ```sh
@@ -534,6 +534,7 @@ anywhere ([docs/persona.md](docs/persona.md) §5.8). No strand yet? The tutor's 
 
 ```sh
 probbit monitor --demo --open
+probbit monitor --demo drives --open  # source checkout: synthetic goals/drive demo, not yet in the 0.8.0 release
 ```
 
 ![probbit monitor: the tutor's week in the browser, the bars moving with every event](docs/probbit-monitor.gif)

@@ -11,7 +11,16 @@ an agent harness with a shell tool. No server, no bindings, no network. The docu
 | 0 | an answer: verdict `exact`, `diagnostics_passed` or `partial` | act on `released`; escalate `escalated` (empty unless `partial`) |
 | 1 | `infeasible`: no plan satisfies the rules (a proof) | relax a rule or a cap; it is an answer, not a crash |
 | 2 | bad input: one `{"error": {"code", "path", "message"}}` object on stdout; a bad flag prints one line on stderr instead | fix the document or the flag |
-| 3 | `refused` / `declined` (the gate or a cap said no), or `{"error": {"code": "numeric"}}` | escalate the whole decision; the best-effort plan is still in the output |
+| 3 | `refused` / `declined` (the gate or a cap said no), or `{"error": {"code": "numeric"}}` | escalate the whole decision; any retained candidate plan is diagnostic only |
+
+Decision documents that carry a `plan` also carry `plan_status` (`released`, `partial`, or `diagnostic`)
+and `released_plan`, which projects the candidate onto the released IDs. On refusal this projection is empty;
+some early failures have no plan at all. The legacy `plan` remains for inspection, not unconditional execution.
+A partial projection is **not** necessarily a complete, independently feasible plan: the host must handle
+coupled actions and escalate the missing decisions. Exit 0 alone is not permission to execute every candidate action.
+
+Persona/live commands have command-specific verdicts. In particular, live exit 4 means a held writer lock,
+a paused individual or a retired individual; do not retry it as though it were a transient engine error.
 
 Every recipe below was run in the cross-platform matrix (`.github/workflows/bench.yml`; transcripts in
 `scripts/bench/results/`), on the OSes named under each.
@@ -55,11 +64,18 @@ node examples/node/decide.mjs router.json   # decide your document
 ```js
 import { probbit } from './decide.mjs';
 const r = await probbit(['decide', '--budget-ms', '200'], problem);   // problem: an object or JSON text
-if (r.kind === 'answer') act(r.output.plan, r.output.released); else escalate(r);
+if (r.kind === 'answer' && r.output.plan_status === 'released') act(r.output.released_plan);
+else escalate(r); // partial decisions need application-specific handling of coupled actions
 ```
 
 The npm package (`npm/`) installs the binary and a `probbit` command with exit codes passed through. On Windows, spawn
 `probbit.exe` itself (set `PROBBIT_BIN`): Node cannot spawn npm's `probbit.cmd` shim without a shell.
+
+## A host-enforced agent regression
+
+[examples/agent-harness](../examples/agent-harness/README.md) runs a local failing tool behind a real dispatch gate,
+records its incident, reproduces a history-dependent retry change, then checks a repaired policy and replays its strand.
+It requires no model or credentials. This is a bounded integration example, not a production permissions framework.
 
 ## PowerShell
 
