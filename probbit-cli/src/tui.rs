@@ -168,6 +168,11 @@ pub fn summary_box(th: Theme, cmd: &str, s: &Json) -> String {
     if let Some(x) = f(s.get("violations")) { head += &format!(" · violations {x}"); }
     if let Some(x) = f(s.get("plan_logw")) { head += &format!(" · plan log-weight {x:.3}"); }
     rows.push(head);
+    match s.get("plan_status").and_then(Json::as_str) {
+        Some("diagnostic") => rows.push(th.paint(YELLOW, "Diagnostic candidate only: no assignments released.")),
+        Some("partial") => rows.push(th.paint(YELLOW, "Partial release: escalated candidates are diagnostic, not decisions.")),
+        _ => {}
+    }
     if let Some(r) = s.get("reason").and_then(Json::as_str) { rows.push(th.paint(GREY, r)); }
     if let Some(g) = s.get("gate") {
         rows.push(format!("gate  R-hat {:.4} · TV bound {:.4} (tolerance {}) · {} samples × {} chains", f(g.get("rhat")).unwrap_or(f64::NAN), f(g.get("tv_bound")).unwrap_or(f64::NAN),

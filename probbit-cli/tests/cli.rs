@@ -1312,7 +1312,7 @@ fn fnv(s: &str) -> u64 { s.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b 
 /// sampled and exact decisions and programs (fixed work, so every byte but the timings is a function of input + seed). They are
 /// the 0.2.1 documents (the digests this test held through 0.4.0) with only the product name and the version renamed: the 0.5.0
 /// rename was proven byte for byte against the 0.4.0 binary on these inputs and every example before the digests were replaced.
-/// 0.8.0 gives them unchanged (the test's name carries the current version).
+/// Legacy fields remain unchanged; only the additive release annotations are projected out below.
 #[test]
 fn stdout_matches_the_0_8_0_goldens() {
     let dir = env!("CARGO_MANIFEST_DIR");
@@ -1323,7 +1323,14 @@ fn stdout_matches_the_0_8_0_goldens() {
         ("decide 300 sweeps", vec!["decide", "--sweeps", "400", "--polish-ms", "0", "--threads", "2"], &d300, 0x40f928ba3ee08dc7),
         ("decide 12 exact", vec!["decide"], &d12, 0x0bf7b950f0d9c91e), ("decide 60 hard", vec!["decide", "--sweeps", "300", "--polish-sweeps", "50", "--threads", "2"], &d60h, 0x57ac10ad6eb59d75),
         ("run knapsack sample", vec!["run", "--op", "sample", "--sweeps", "300", "--polish-ms", "0", "--threads", "2"], &ks, 0x34d3400123a33f82), ("run agent-plan", vec!["run"], &ap, 0x9e6cf2fd5c0ca15a)];
-    for (name, args, input, want) in cases { let (_, out, err) = probbit(&args, input); assert_eq!(fnv(&norm(&out)), want, "{name}: {err} {:.300}", norm(&out)); }
+    for (name, args, input, want) in cases { let (_, out, err) = probbit(&args, input);
+        // Only the additive release annotations are new. Keep every original byte pinned after their removal.
+        let old = if let Ok(json::Json::Obj(mut doc)) = json::parse(&out) {
+            if doc.iter().any(|(k, _)| k == "plan_status") {
+                doc.retain(|(k, _)| k != "plan_status" && k != "released_plan"); json::write(&json::Json::Obj(doc), false) + "\n"
+            } else { out.clone() }
+        } else { out.clone() };
+        assert_eq!(fnv(&norm(&old)), want, "{name}: {err} {:.300}", norm(&old)); }
 }
 
 /// `args` with stdin from `input`, stdout to a file and stderr on a pseudo-terminal (`script`; Unix). None = no `script` here.
@@ -1413,11 +1420,12 @@ fn summary_is_the_answer_without_the_tables() {
         let (c1, full, _) = probbit(&args, input); let mut a = args.clone(); a.push("--summary"); let (c2, sum, _) = probbit(&a, input);
         let (f, s) = (json::parse(&full).unwrap(), json::parse(&sum).unwrap());
         assert_eq!(c1, c2, "{args:?}"); assert_eq!(get(&f, "verdict"), get(&s, "verdict")); assert_eq!(get(&s, "summary").as_f64(), Some(1.0));
-        for k in ["plan", "odds", "marginals", "released", "escalated", "release_reason", "top_plans"] { assert!(s.get(k).is_none(), "{args:?}: {k} in the summary"); }
-        for k in ["gate", "telemetry", "plan_logw", "violations"] { assert_eq!(get(&f, k).is_null(), get(&s, k).is_null(), "{args:?}: {k}"); }
+        for k in ["plan", "released_plan", "odds", "marginals", "released", "escalated", "release_reason", "top_plans"] { assert!(s.get(k).is_none(), "{args:?}: {k} in the summary"); }
+        for k in ["gate", "telemetry", "plan_logw", "violations", "plan_status"] { assert_eq!(get(&f, k).is_null(), get(&s, k).is_null(), "{args:?}: {k}"); }
         let n = |j: &json::Json, k: &str| j.get(k).and_then(|x| x.as_arr()).map(|a| a.len());
         let counts = s.get("counts").unwrap(); assert_eq!(counts.get("released").and_then(|x| x.as_f64()).map(|x| x as usize), n(&f, "released"), "{args:?}");
         assert_eq!(counts.get("escalated").and_then(|x| x.as_f64()).map(|x| x as usize), n(&f, "escalated"));
+        assert_eq!(get(&f, "plan_status"), get(&s, "plan_status"));
         let Some(rel) = f.get("released").and_then(|x| x.as_arr()) else { continue };
         let worst = s.get("worst_released").and_then(|x| x.as_arr()).unwrap(); assert_eq!(worst.len(), rel.len().min(5), "{args:?}");
         let bars: Vec<f64> = worst.iter().filter_map(|w| w.get("bar").and_then(|b| b.as_f64())).collect(); assert!(bars.windows(2).all(|w| w[0] >= w[1]), "{bars:?}");
@@ -1451,4 +1459,20 @@ fn mcp_server_python_client_passes() {
     if !ok { eprintln!("python3 >= 3.9 not found: python/test_mcp.py skipped"); return; }
     let o = Command::new("python3").arg("test_mcp.py").current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../python")).env("PROBBIT_BIN", env!("CARGO_BIN_EXE_probbit")).output().unwrap();
     assert!(o.status.success(), "python/test_mcp.py failed:\n{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// Refusal has diagnostic candidates, never a released assignment: the JSON and terminal summary agree.
+#[test]
+fn refused_summary_explicitly_labels_diagnostic_candidates() {
+    let input = r#"{"probbit_ir":1,"values":["a","b"],"vars":[{"id":"x"},{"id":"y"}]}"#;
+    let args = ["run", "--op", "sample", "--sweeps", "1", "--polish-ms", "0", "--summary", "--pretty"];
+    let (code, out, err) = probbit(&args, input); assert_eq!(code, 3, "{err}");
+    let j = json::parse(&out).unwrap();
+    assert_eq!(j.get("plan_status").and_then(json::Json::as_str), Some("diagnostic"));
+    assert!(j.get("plan").is_none() && j.get("released_plan").is_none());
+    assert_eq!(j.get("counts").and_then(|c| c.get("released")).and_then(json::Json::as_f64), Some(0.0));
+    if let Some((code, _, terminal)) = under_pty(&args, input, &[], false) {
+        assert_eq!(code, 3);
+        assert!(terminal.contains("Diagnostic candidate only: no assignments released."), "{terminal}");
+    }
 }

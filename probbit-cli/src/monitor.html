@@ -23,11 +23,11 @@ header{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-botto
 .badge{margin-left:auto;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--edge);color:var(--muted);background:var(--card);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;transition:color .3s,border-color .3s,background-color .3s}
 .badge.ok{color:var(--green);border-color:#1d5a46;background:#0d211b}
 .badge.bad{color:var(--red);border-color:#6a2a2a;background:#241212;white-space:normal}
-.note{color:#e7c46a;font-size:13px}
+.note{color:#e7c46a;font-size:13px;overflow-wrap:anywhere}.legend{color:var(--muted);font-size:12px;margin:0 0 14px}.legend b{color:var(--soft)}
 .empty{color:var(--muted);padding:28px 0;text-align:center}
 section{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:10px 16px 8px;margin-bottom:12px}
 #said{background:linear-gradient(180deg,#0f1b23,var(--card));border-color:#1b2b35}
-h2{margin:0 0 6px;font-size:11px;letter-spacing:.14em;color:var(--dim);font-weight:700;display:flex;gap:10px;align-items:baseline}
+h2{margin:0 0 6px;font-size:11px;letter-spacing:.14em;color:var(--dim);font-weight:700;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 h2 small{letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
 .row{display:grid;grid-template-columns:104px minmax(150px,1.2fr) minmax(0,1fr);gap:2px 16px;align-items:center;padding:4px 0}
 .row+.row{border-top:1px solid #141b23}
@@ -88,6 +88,7 @@ h2 small{letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
 .line{font-size:clamp(17px,2.2vw,23px);line-height:1.4;font-weight:500;color:#f2f7fb;letter-spacing:.1px}
 .line.new{animation:rise .3s ease-out}
 @keyframes rise{from{opacity:.25;transform:translateY(3px)}to{opacity:1;transform:none}}
+.line,.why{overflow-wrap:anywhere}
 .why{color:var(--muted);font-size:13px;margin-top:6px}
 footer{color:var(--dim);font-size:12px;display:flex;flex-wrap:wrap;gap:4px 16px;padding:4px 2px 0;word-break:break-all}
 footer a{color:var(--muted)}
@@ -109,14 +110,15 @@ footer a:hover{color:var(--cyan)}
 <span class="badge" id="badge">connecting</span>
 </header>
 <noscript><p class="empty">This page draws with JavaScript. In a terminal, <code>probbit monitor STRAND</code> draws the same bars.</p></noscript>
+<p class="legend"><b>Reading the bars:</b> width = reported probability; colour = chosen level, not necessarily the most likely one. Mood trails show mean level, low to high, over the last 50 events.</p>
 <p class="empty" id="empty">waiting for the strand</p>
 <div class="cols"><div>
-<section id="stance" hidden><h2>STANCE <small>each trait's levels with their exact odds; the level taken in colour</small></h2><div class="rows"></div></section>
+<section id="stance" hidden><h2>STANCE <small>reported odds per level; the chosen level in colour</small></h2><div class="rows"></div></section>
 <section id="said" hidden><h2>LINE <small>the stance in words, for the model's prompt</small></h2><div class="line" id="line"></div><div class="why" id="why"></div></section>
 </div><div>
 <section id="moods" hidden><h2>MOODS <small>with their last 50 events</small></h2><div class="rows"></div></section>
 <section id="senses" hidden><h2>SENSES <small>this event's inputs and the history features</small></h2><div class="rows"></div></section>
-<section id="habits" hidden><h2>HABITS <small>in force; the ones that bound the stance in colour</small></h2><div class="rows"></div></section>
+<section id="habits" hidden><h2>HABITS <small>active = in force; colour = the no-habits twin broke this rule</small></h2><div class="rows"></div></section>
 <section id="learned" hidden><h2>LEARNED <small id="cap"></small></h2><div class="rows"></div></section>
 <section id="drives" hidden><h2>DRIVES <small>wanting, afterglow, the last prediction error</small></h2><div class="rows"></div></section>
 </div></div>
@@ -184,7 +186,7 @@ function build(m) {
   $('who').textContent = p ? p.name + ' ' + p.version : '';
   $('seed').textContent = p ? 'seed ' + p.seed + ' · individual ' + short(p.individual) : '';
   const by = m.engine ? ' · written by ' + m.engine : '';
-  $('foot').textContent = m.demo ? 'strand: the demo week, in memory' + by + ' · the same week: probbit live examples/persona/tutor.yaml --seed 2 --demo week'
+  $('foot').textContent = m.demo ? 'synthetic ' + (m.demo_kind || 'week') + ' demo in memory' + by + ' · tutor: probbit monitor --demo week · goals: probbit monitor --demo drives'
     : 'strand ' + m.path + by + ' · replay: probbit live verify ' + m.path;
   V.traits = {}; const st = rows('stance', false);
   for (const t of m.traits || []) V.traits[t.id] = levelRow(st, t, 'trait');
@@ -216,7 +218,12 @@ function build(m) {
 function draw(f) {
   if (!M) return;
   const d = obj(f.doc), p = M.persona, h = get(f.given, 'elapsed_hours');
-  if (f.diverges) badge('bad', 'line ' + f.diverges.line + ' diverges: ' + f.diverges.why); else badge('ok', 'replay verified ✓');
+  if (f.diverges) badge('bad', 'line ' + f.diverges.line + ' diverges: ' + f.diverges.why);
+  else if (!p) badge('', 'waiting for a valid strand header');
+  else {
+    const verified = f.from_checkpoint == null ? 'replay verified ✓' : 'replay verified from checkpoint ' + f.from_checkpoint + ' ✓';
+    badge(f.status === 'retired' ? 'bad' : f.status === 'paused' ? '' : 'ok', verified + (f.status && f.status !== 'active' ? ' · ' + f.status : ''));
+  }
   $('ev').textContent = p ? 'event ' + f.n : '';
   $('clk').textContent = num(h) && d ? hours(h) + ' since the event before' : '';
   $('note').textContent = f.note || ''; $('note').hidden = !f.note;
@@ -258,7 +265,7 @@ function draw(f) {
   drives(d, f.n);
   const line = $('line'), said = typeof d.line === 'string' ? d.line : '';
   if (line.textContent !== said) { line.textContent = said; line.classList.remove('new'); void line.offsetWidth; line.classList.add('new'); }
-  $('why').textContent = d.why ? 'why: ' + d.why : '';
+  $('why').textContent = d.why ? 'why: ' + (d.why === 'baseline (no live evidence)' ? 'baseline (no salient input or binding habit this event; prior state still applies)' : d.why) : '';
 }
 
 function habits(hb) {
@@ -266,7 +273,7 @@ function habits(hb) {
   const list = k => Array.isArray(hb[k]) ? hb[k].map(String) : [];
   const bound = list('bound'), on = list('active');
   if (!on.length) mk('span', 'chip dim', chips, 'none in force');
-  for (const x of on) { const c = mk('span', bound.includes(x) ? 'chip on' : 'chip', chips, x); if (bound.includes(x)) c.title = 'bound: it changed the stance'; }
+  for (const x of on) { const c = mk('span', bound.includes(x) ? 'chip on' : 'chip', chips, x); c.title = bound.includes(x) ? 'Active rule. The no-habits twin violated it.' : 'Active rule. Not flagged by the no-habits twin; it can still restrict the odds.'; }
   const v = num(hb.violations) ? hb.violations : 0;
   mk('span', 'viol ' + (v === 0 ? 'ok' : 'bad'), chips, 'violations ' + v);
   for (const k of ['yielded', 'conflict']) if (list(k).length) mk('span', 'chip dim', chips, k + ' ' + list(k).join(' '));
@@ -290,15 +297,15 @@ function drives(d, n) {
     }) };
   }
   const D = V.drives;
-  if (D.pursue) { const k = setLevels(D.pursue, pz.odds, pz.goal, pz.released); D.pursue.say.textContent = k >= 0 && typeof pz.say === 'string' ? pz.say : ''; }
+  if (D.pursue) { const k = setLevels(D.pursue, pz.odds, pz.goal, pz.released); D.pursue.say.textContent = k < 0 ? '(' + (pz.goal || 'goal') + ': not released)' : typeof pz.say === 'string' ? pz.say : ''; D.pursue.say.classList.toggle('held', k < 0); }
   const per = (v, i, g) => Array.isArray(v) ? v[i] : obj(v) ? v[g] : undefined;
   D.goals.forEach((G, i) => {
     const w = per(dv && dv.want, i, G.g), gl = per(dv && dv.glow, i, G.g), e = per(dv && dv.surprise, i, G.g);
     fillTo(G.want, w, M.caps && M.caps.wanting); G.want.val.textContent = num(w) ? f2(w) : '-';
     fillTo(G.glow, gl, M.caps && M.caps.afterglow); G.glow.val.textContent = num(gl) ? f2(gl) : '-';
-    if (num(e) && e !== 0 && G.at !== n) {
-      G.at = n; G.txt.textContent = signed(e) + (e < 0 ? ' below' : ' above') + ' expectation';
-      G.tick.style.left = 50 + Math.max(-1, Math.min(1, e)) * 50 + '%';
+    if (G.at !== n) {
+      G.at = n; G.txt.textContent = num(e) ? (e === 0 ? 'prediction error 0.00' : signed(e) + (e < 0 ? ' below' : ' above') + ' expectation') : 'prediction error unavailable';
+      G.tick.style.left = 50 + Math.max(-1, Math.min(1, num(e) ? e : 0)) * 50 + '%';
       G.pe.className = 'pe ' + (e < 0 ? 'neg' : 'pos'); void G.pe.offsetWidth; G.pe.classList.add('flash');
     }
   });
