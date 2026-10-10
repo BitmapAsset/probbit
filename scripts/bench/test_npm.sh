@@ -28,7 +28,20 @@ done
 BASE="http://127.0.0.1:$PORT"
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) gbin() { echo "$1"; } ;; *) gbin() { echo "$1/bin"; } ;; esac
 NPM_FLAGS="--no-audit --no-fund --foreground-scripts"
-export npm_config_allow_scripts=probbit
+NPM_MAJOR=$(npm --version | cut -d. -f1)
+# npm 12 identifies a local tarball by its resolved path, not its self-reported package name.
+# Allow only this exact test artifact; a registry-style "probbit" opt-in must not match a local tarball.
+install_package() {
+    if [ "$NPM_MAJOR" -ge 12 ]; then npm install -g $NPM_FLAGS "--allow-scripts=$TGZ" "$@"
+    else npm install -g $NPM_FLAGS "$@"; fi
+}
+# Keep every fallback local, and prove the candidate bytes rather than accidentally testing a published release.
+export PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_TARGET="$TARGET" PROBBIT_VERSION="$TAG"
+assert_candidate() {
+    ROOT=$(npm root -g --prefix "$1")
+    case "$TARGET" in *windows*) EXE=probbit.exe ;; *) EXE=probbit ;; esac
+    node -e 'const fs=require("fs"); if (!fs.readFileSync(process.argv[1]).equals(fs.readFileSync(process.argv[2]))) throw Error("installed binary differs from candidate");' "$ROOT/probbit/vendor/$EXE" "$BIN_ABS"
+}
 echo "node $(node --version), npm $(npm --version), target $TARGET"
 
 (cd npm && npm pack --pack-destination "$WORK" > /dev/null)
@@ -38,7 +51,8 @@ tar tzf "$TGZ" | sed 's/^/   /'
 
 echo "== 1. npm install -g $(basename "$TGZ") (PROBBIT_DOWNLOAD_BASE=$BASE/good)"
 P1="$WORK/prefix1"
-PROBBIT_DOWNLOAD_BASE="$BASE/good" npm install -g --prefix "$P1" $NPM_FLAGS "$TGZ"
+install_package --prefix "$P1" "$TGZ"
+assert_candidate "$P1"
 OLDPATH=$PATH
 PATH="$(gbin "$P1"):$OLDPATH"
 echo "\$ which probbit: $(command -v probbit)"
@@ -59,22 +73,24 @@ echo "ok: uninstalled, $(gbin "$P1")/probbit absent"
 
 echo "== 2. npm install -g --ignore-scripts: the binary is fetched on first run"
 P2="$WORK/prefix2"
-npm install -g --prefix "$P2" $NPM_FLAGS --ignore-scripts "$TGZ"
+install_package --prefix "$P2" --ignore-scripts "$TGZ"
 PROBBIT_DOWNLOAD_BASE="$BASE/good" "$(gbin "$P2")/probbit" version
+assert_candidate "$P2"
 "$(gbin "$P2")/probbit" demo --tasks 12 | "$(gbin "$P2")/probbit" decide > /dev/null
 echo "ok: first run fetched it; second run used it"
 
 echo "== 3. PROBBIT_BINARY=<local build> (no download)"
 P3="$WORK/prefix3"
-PROBBIT_BINARY="$BIN_ABS" PROBBIT_DOWNLOAD_BASE="http://127.0.0.1:9/nowhere" npm install -g --prefix "$P3" $NPM_FLAGS "$TGZ"
+(export PROBBIT_BINARY="$BIN_ABS" PROBBIT_DOWNLOAD_BASE="http://127.0.0.1:9/nowhere"; install_package --prefix "$P3" "$TGZ")
+assert_candidate "$P3"
 "$(gbin "$P3")/probbit" version
 
 echo "== 4. tampered .sha256: npm install must fail"
-if PROBBIT_DOWNLOAD_BASE="$BASE/bad" npm install -g --prefix "$WORK/prefix4" $NPM_FLAGS "$TGZ"; then fail "a wrong checksum was accepted"; fi
+if (export PROBBIT_DOWNLOAD_BASE="$BASE/bad"; install_package --prefix "$WORK/prefix4" "$TGZ"); then fail "a wrong checksum was accepted"; fi
 echo "ok: rejected"
 
 echo "== 5. --ignore-scripts with bad checksum must fail on first use"
 P5="$WORK/prefix5"
-npm install -g --prefix "$P5" $NPM_FLAGS --ignore-scripts "$TGZ"
+install_package --prefix "$P5" --ignore-scripts "$TGZ"
 if PROBBIT_DOWNLOAD_BASE="$BASE/bad" "$(gbin "$P5")/probbit" version; then fail "first run accepted a wrong checksum"; fi
 echo "npm wrapper: all checks passed ($TARGET)"
