@@ -22,17 +22,19 @@ and exit 3 (`refused` / `declined`: the gate or a cap said no; that is an answer
   ProbbitInputError   exit 2: the input or a flag was rejected (.code / .path / .message from the structured error object;
                    flag errors carry the CLI's stderr line in .message and code "flag")
   ProbbitNumericError exit 3 with an {"error": {"code": "numeric"}} object: a computed quantity was not finite (no answer)
+  ProbbitControlError live exit 4: locked / paused / retired (.code / .path / .message); no event appended
   ProbbitTimeout      the call passed `timeout_s` (the process was killed)
   ProbbitJudgeError   `evaluate`'s judge failed (HTTP error, unreachable, not JSON, a missing key variable): no answer
   ProbbitError        anything else (missing binary, a crash, unparseable output)
 Keyword flags map to CLI flags: budget_ms=200 -> --budget-ms 200; collective=False -> --collective off (collective, cluster,
 cycles take on / off); any other boolean is a switch: summary=True -> --summary, pretty=True -> --pretty, False leaves it out.
 The binary: `binary=` argument, else $PROBBIT_BIN, else `probbit` on PATH, else ../target/release/probbit next to this file.
+An explicitly selected binary that is missing or not executable raises; it never falls back to another version.
 """
 import hashlib, json, os, shutil, subprocess, tempfile, urllib.error, urllib.parse, urllib.request
 
 __all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "persona_fuzz", "persona_prove", "live_event", "live_verify", "find_binary", "ProbbitError",
-           "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout", "ProbbitJudgeError"]
+           "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout", "ProbbitJudgeError", "ProbbitControlError"]
 
 
 class ProbbitError(Exception):
@@ -46,6 +48,12 @@ class ProbbitInputError(ProbbitError):
 
     def __str__(self):
         return f"{self.code} at {self.path or '<flags>'}: {self.message}"
+
+
+class ProbbitControlError(ProbbitError):
+    """A live strand is locked, paused or retired (exit 4). Nothing was appended."""
+    def __init__(self, code, path, message, exit_code=4, stdout="", stderr=""):
+        super().__init__(message, exit_code, stdout, stderr); self.code, self.path = code, path
 
 
 class ProbbitNumericError(ProbbitError):
@@ -63,11 +71,28 @@ class ProbbitJudgeError(ProbbitError):
 
 
 def find_binary(binary=None):
-    for b in (binary, os.environ.get("PROBBIT_BIN"), shutil.which("probbit"),
+    # An explicit selection is authoritative: never silently run another installed binary.
+    selected = binary if binary is not None else os.environ.get("PROBBIT_BIN")
+    if selected is not None:
+        path = os.fspath(selected)
+        found = path if os.path.isfile(path) and os.access(path, os.X_OK) else shutil.which(path)
+        if found:
+            return os.path.abspath(found)
+        raise ProbbitError(f"selected probbit binary is missing or not executable: {path}")
+    for b in (shutil.which("probbit"),
               os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "target", "release", "probbit")):
         if b and os.path.isfile(b) and os.access(b, os.X_OK):
             return b
     raise ProbbitError("probbit binary not found: pass binary=, set PROBBIT_BIN, or build with `cargo build --release`")
+
+
+def _execute(args, *, timeout_s=None, text=None):
+    try:
+        return subprocess.run(args, input=text, capture_output=True, encoding="utf-8", timeout=timeout_s)
+    except subprocess.TimeoutExpired as e:
+        raise ProbbitTimeout(f"probbit call passed timeout_s={timeout_s}") from e
+    except OSError as e:
+        raise ProbbitError(f"cannot execute selected probbit binary: {e}") from e
 
 
 _ON_OFF = ("collective", "cluster", "cycles")
@@ -92,10 +117,7 @@ def _flags(flags):
 def _call(cmd, doc, flags, timeout_s, binary):
     text = doc if isinstance(doc, str) else json.dumps(doc)
     args = [find_binary(binary), *cmd, *_flags(flags)]
-    try:
-        p = subprocess.run(args, input=text, capture_output=True, encoding="utf-8", timeout=timeout_s)  # probbit reads and writes UTF-8, whatever the locale
-    except subprocess.TimeoutExpired as e:
-        raise ProbbitTimeout(f"probbit {' '.join(cmd)} passed timeout_s={timeout_s}") from e
+    p = _execute(args, text=text, timeout_s=timeout_s)
     try:
         out = json.loads(p.stdout) if p.stdout.strip() else None
     except ValueError:
@@ -140,7 +162,7 @@ def decide(problem, *, timeout_s=None, binary=None, **flags):
 def demo(tasks=24, seed=1, hard=False, binary=None):
     """`probbit demo`: a synthetic agent-routing document (dict)."""
     args = [find_binary(binary), "demo", "--tasks", str(tasks), "--seed", str(seed)] + (["--hard"] if hard else [])
-    p = subprocess.run(args, capture_output=True, text=True)
+    p = _execute(args)
     if p.returncode != 0:
         raise ProbbitError(f"probbit demo exited {p.returncode}: {p.stderr.strip()}", p.returncode, p.stdout, p.stderr)
     return json.loads(p.stdout)
@@ -243,10 +265,7 @@ def _json_file(d, name, doc):
 
 
 def _persona_call(args, timeout_s, binary, lines=False, answers=(0,)):
-    try:
-        p = subprocess.run([find_binary(binary), "persona", *args], capture_output=True, encoding="utf-8", timeout=timeout_s)
-    except subprocess.TimeoutExpired as e:
-        raise ProbbitTimeout(f"probbit persona {args[0]} passed timeout_s={timeout_s}") from e
+    p = _execute([find_binary(binary), "persona", *args], timeout_s=timeout_s)
     try:
         out = [json.loads(x) for x in p.stdout.splitlines()] if lines and p.returncode == 0 else (json.loads(p.stdout) if p.stdout.strip() else None)
     except ValueError:
@@ -276,7 +295,7 @@ def persona_turn(persona, state, inputs=None, *, timeout_s=None, binary=None, **
     ProbbitInputError (code "persona", .path, .message); a refused or fallback stance is an answer."""
     with tempfile.TemporaryDirectory() as d:
         nxt = os.path.join(d, "next.json")
-        args = ["turn", _persona_path(persona, d), "--state", _json_file(d, "state.json", state), "--inputs", _json_file(d, "inputs.json", inputs or {}),
+        args = ["turn", _persona_path(persona, d), "--state", _json_file(d, "state.json", state), "--inputs", _json_file(d, "inputs.json", {} if inputs is None else inputs),
                 "--out", nxt, *_flags(flags)]
         stance = _persona_call(args, timeout_s, binary)
         with open(nxt, encoding="utf-8") as f:
@@ -314,7 +333,9 @@ def persona_fuzz(persona, never=None, props=None, seeds="0-99", *, timeout_s=Non
     a character property -> the probbit_persona_fuzz document (a dict; "found" says whether any rule broke, each property its
     shortest counterexample with the replay command). never: one rule in habit syntax ({"when": {...}, "then": {...}}, or one line
     of YAML); props: a list of rules (each with an optional "id") or a props file. seeds: "0-99", "1,4,9" or a list. Flags:
-    fuzz_seed, scripts, depth, beam, grid and hours (lists or comma strings), threads. A counterexample is an answer, not an error;
+    fuzz_seed, scripts, depth, beam, grid and hours (lists or comma strings), threads, fixture_src.
+    fixture_src="env:synthetic" (or "human:synthetic") explicitly authorizes synthetic test fixtures under reward_from; it never
+    relabels production evidence. Without it source-required counterexamples carry null replay/explain commands. A counterexample is an answer, not an error;
     it tests the stance, not the words a model writes."""
     with tempfile.TemporaryDirectory() as d:
         return _persona_call(["fuzz", _persona_path(persona, d), *_rules(d, never, props, seeds, flags)], timeout_s, binary, answers=(0, 1))
@@ -330,10 +351,7 @@ def persona_prove(persona, never=None, props=None, seeds="0-99", *, timeout_s=No
 
 # ---------------------------------------------------------------- live: a resident individual (docs/persona.md §5.7)
 def _live_call(args, timeout_s, binary, answers=(0,)):
-    try:
-        p = subprocess.run([find_binary(binary), "live", *args], capture_output=True, encoding="utf-8", timeout=timeout_s)
-    except subprocess.TimeoutExpired as e:
-        raise ProbbitTimeout(f"probbit live passed timeout_s={timeout_s}") from e
+    p = _execute([find_binary(binary), "live", *args], timeout_s=timeout_s)
     try:
         out = json.loads(p.stdout) if p.stdout.strip() else None
     except ValueError:
@@ -343,6 +361,8 @@ def _live_call(args, timeout_s, binary, answers=(0,)):
         if err:
             raise ProbbitInputError(err.get("code"), err.get("path"), err.get("message"), 2, p.stdout, p.stderr)
         raise ProbbitInputError("flag", None, p.stderr.strip().removeprefix("probbit: "), 2, p.stdout, p.stderr)
+    if p.returncode == 4 and isinstance(err, dict):
+        raise ProbbitControlError(err.get("code"), err.get("path"), err.get("message"), 4, p.stdout, p.stderr)
     if p.returncode in answers and isinstance(out, dict) and not err:
         return out
     raise ProbbitError(f"probbit live exited {p.returncode}: {p.stderr.strip()[:300]}", p.returncode, p.stdout, p.stderr)
@@ -363,15 +383,25 @@ def live_event(persona, state=None, event=None, *, seed=None, strand=None, timeo
             state = _persona_call(["init", path] + (["--seed", str(seed)] if seed is not None else []), timeout_s, binary)
         sf, ev = _json_file(d, "state.json", state), os.path.join(d, "event.jsonl")
         with open(ev, "w", encoding="utf-8") as f:
-            f.write(json.dumps(event or {}, ensure_ascii=False) + "\n")
+            f.write(json.dumps({} if event is None else event, ensure_ascii=False) + "\n")
         args = [path, "--state", sf, "--clock", "fixed", "--events", ev] + (["--strand", os.fspath(strand)] if strand is not None else [])
         stance = _live_call(args, timeout_s, binary)
         with open(sf, encoding="utf-8") as f:
             out = {"stance": stance, "state": json.load(f)}
     if strand is not None:
         with open(strand, encoding="utf-8") as f:
-            last = f.read().splitlines()[-1]
-        out["strand"] = {"path": os.fspath(strand), "events": json.loads(last).get("n", 0), "head": "sha256:" + hashlib.sha256(last.encode("utf-8")).hexdigest()}
+            # A later writer may be appending while this receipt is read. Only complete
+            # lines are candidates; our own committed event always has its newline.
+            matches = [(line.rstrip("\n"), json.loads(line)) for line in f if line.endswith("\n") and line.strip()]
+        committed = [(line, row) for line, row in matches if row.get("state") == out["state"]["digest"] and "n" in row]
+        if not committed:
+            raise ProbbitError("the committed event was not found in the strand")
+        line, row = committed[-1]
+        # The CLI adds a checkpoint after each 1000th event; that checkpoint is our head.
+        index = next(i for i in range(len(matches) - 1, -1, -1) if matches[i][0] == line)
+        if index + 1 < len(matches) and matches[index + 1][1].get("checkpoint") == row["n"]:
+            line = matches[index + 1][0]
+        out["strand"] = {"path": os.fspath(strand), "events": row["n"], "head": "sha256:" + hashlib.sha256(line.encode("utf-8")).hexdigest()}
     return out
 
 

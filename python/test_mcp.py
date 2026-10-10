@@ -71,6 +71,40 @@ class Mcp(unittest.TestCase):
         self.assertIn("result", r, r)
         return r["result"]
 
+    def test_invalid_envelope_params_do_not_execute_and_server_recovers(self):
+        for msg, code in [
+            ({"jsonrpc": "2.0", "id": 5, "method": "ping", "params": []}, -32602),
+            ({"jsonrpc": "2.0", "id": 5, "method": "ping", "params": {"_meta": False}}, -32602),
+            ({"jsonrpc": "2.0", "id": 0.5, "method": "ping"}, -32600),
+            ({"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {"_meta": dict(MODERN, **{"io.modelcontextprotocol/clientCapabilities": False})}}, -32602),
+        ]:
+            self.c.send_raw(json.dumps(msg))
+            self.assertEqual(self.c.recv()["error"]["code"], code)
+        self.assertIn("result", self.c.request("ping"))
+
+    def test_fuzz_explicit_synthetic_source_replays_through_strict_persona_tool(self):
+        self.legacy()
+        persona = {"probbit_persona": 1, "identity": {"name": "Fixture", "version": "1"},
+                   "traits": [{"id": "action", "levels": ["retry", "ask"], "logw": [1, 0]}],
+                   "inputs": [{"id": "praise", "kind": "flag"}, {"id": "criticism", "kind": "flag"}],
+                   "learning": {"from": ["praise", "criticism"], "traits": ["action"], "rate": 3, "step_cap": 2, "total_cap": 2},
+                   "reward_from": ["env"]}
+        args = {"persona": persona, "never": {"then": {"action": ["retry"]}}, "seeds": [0], "scripts": 0, "depth": 3, "threads": 1}
+        raw = self.call("probbit_persona_fuzz", args)["structuredContent"]
+        self.assertIsNone(raw["properties"][0]["shortest"]["replay"])
+        f = self.call("probbit_persona_fuzz", dict(args, fixture_src="env:synthetic"))
+        self.assertFalse(f["isError"])
+        shortest = f["structuredContent"]["properties"][0]["shortest"]
+        state = self.call("probbit_persona_init", {"persona": persona, "seed": 0})["structuredContent"]
+        for event in shortest["script"]:
+            turn = self.call("probbit_persona_turn", {"persona": persona, "state": state, "inputs": event})
+            self.assertFalse(turn["isError"])
+            state = turn["structuredContent"]["state"]
+        self.assertEqual(turn["structuredContent"]["stance"], shortest["stance"])
+        self.assertTrue(self.call("probbit_persona_fuzz", dict(args, fixture_src="env:production"))["isError"])
+        bad = self.call("probbit_persona_turn", {"persona": persona, "state": state, "inputs": {"praise": True, "src": "self"}})
+        self.assertTrue(bad["isError"])
+
     def test_legacy_handshake_lists_eight_tools(self):
         init = self.legacy()
         self.assertEqual(init["protocolVersion"], "2025-06-18"); self.assertEqual(init["serverInfo"]["name"], "probbit")

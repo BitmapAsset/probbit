@@ -75,8 +75,12 @@ fn handle(msg: &Json, session: &mut Option<String>) -> Option<Json> {
     let (Some(method), Some("2.0")) = (msg.get("method").and_then(Json::as_str), msg.get("jsonrpc").and_then(Json::as_str)) else {
         return Some(error(id.unwrap_or(Json::Null), -32600, "invalid request: a JSON-RPC 2.0 object with \"jsonrpc\": \"2.0\" and a \"method\"", None)) };
     let id = id?; // notifications (initialized, cancelled, ...): nothing to answer; calls run one at a time
-    if !matches!(id, Json::Str(_) | Json::Num(_)) { return Some(error(Json::Null, -32600, "invalid request: the id must be a string or an integer", None)); }
-    let params = msg.get("params"); let meta = params.and_then(|p| p.get("_meta"));
+    if !matches!(&id, Json::Str(_)) && !matches!(&id, Json::Num(n) if n.fract() == 0.0) { return Some(error(Json::Null, -32600, "invalid request: the id must be a string or an integer", None)); }
+    let params = msg.get("params");
+    if params.is_some_and(|p| !matches!(p, Json::Obj(_))) { return Some(error(id, -32602, "invalid params: an object is required", None)); }
+    let meta = params.and_then(|p| p.get("_meta"));
+    if meta.is_some_and(|m| !matches!(m, Json::Obj(_))) { return Some(error(id, -32602, "invalid params: _meta must be an object", None)); }
+
     if method == "initialize" {
         let want = params.and_then(|p| p.get("protocolVersion")).and_then(Json::as_str).unwrap_or("");
         let v = if LEGACY.contains(&want) { want } else { LEGACY[0] }.to_string();
@@ -86,7 +90,7 @@ fn handle(msg: &Json, session: &mut Option<String>) -> Option<Json> {
     }
     let era = match meta.and_then(|m| m.get("io.modelcontextprotocol/protocolVersion")).and_then(Json::as_str) {
         Some(v) if v == MODERN || LEGACY.contains(&v) => {
-            if meta.and_then(|m| m.get("io.modelcontextprotocol/clientCapabilities")).is_none() { return Some(error(id, -32602, "invalid params: _meta lacks io.modelcontextprotocol/clientCapabilities", None)); }
+            if !matches!(meta.and_then(|m| m.get("io.modelcontextprotocol/clientCapabilities")), Some(Json::Obj(_))) { return Some(error(id, -32602, "invalid params: _meta needs an object io.modelcontextprotocol/clientCapabilities", None)); }
             Era::Modern }
         Some(v) => return Some(error(id, -32022, "Unsupported protocol version", Some(obj(vec![("supported", Json::Arr([MODERN].iter().chain(LEGACY.iter()).map(|s| jstr(s)).collect())), ("requested", jstr(v))])))),
         None => match (session.clone(), method) { (Some(v), _) => Era::Legacy(v), (None, "ping") => Era::Legacy(LEGACY[0].into()),
@@ -225,6 +229,7 @@ fn tools() -> Json {
               "never": {{"type": ["object", "string"], "description": "one rule in habit syntax, e.g. {{\"when\": {{\"sentiment\": \"negative\"}}, \"then\": {{\"humour\": {{\"at_most\": \"light\"}}}}}} (or one line of YAML)"}},
               "props": {{"type": ["array", "object"], "description": "several rules, each with an optional id (or {{\"props\": [...]}})"}},
               "seeds": {{"type": ["string", "array"], "description": "the individuals: \"0-99\" (default), \"1,4,9\" or a list of integers"}},
+              "fixture_src": {{"enum": ["env:synthetic", "human:synthetic"], "description": "Explicitly authorize an allowed source for generated synthetic fixtures only. Never authenticates or relabels production events. Without it source-required counterexamples have null replay/explain commands."}},
               "fuzz_seed": {{"type": "integer", "minimum": 0}}, "scripts": {{"type": "integer", "minimum": 0, "maximum": 1000000}}, "depth": {{"type": "integer", "minimum": 1, "maximum": 64}},
               "beam": {{"type": "integer", "minimum": 0, "maximum": 64}}, "grid": {{"type": "array", "items": {{"type": "number", "minimum": 0, "maximum": 1}}}},
               "hours": {{"type": "array", "items": {{"type": "number", "minimum": 0}}}}, "threads": {{"type": "integer", "minimum": 1, "maximum": 1024}}}}}}"#))),

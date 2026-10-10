@@ -140,5 +140,75 @@ class Live(unittest.TestCase):
             self.assertEqual(e.exception.path, "events[0].event.elapsed_hours")
 
 
+class BoundaryErrors(unittest.TestCase):
+    def test_explicit_missing_binary_does_not_fall_back(self):
+        with self.assertRaises(probbit.ProbbitError):
+            probbit.persona_init(load("tutor.json"), binary="/not/a/probbit/binary")
+
+    def test_falsey_malformed_events_are_not_replaced_with_empty_objects(self):
+        doc = load("tutor.json")
+        state = probbit.persona_init(doc)
+        for event in (False, [], "", 0):
+            with self.subTest(event=event):
+                with self.assertRaises(probbit.ProbbitInputError):
+                    probbit.persona_turn(doc, state, event)
+                with self.assertRaises(probbit.ProbbitInputError):
+                    probbit.live_event(doc, state, event)
+
+    def test_replay_error_after_a_good_turn_retains_its_type(self):
+        with self.assertRaises(probbit.ProbbitInputError) as err:
+            probbit.persona_replay(load("tutor.json"), [{}, {"sentiment": "not-a-level"}])
+        self.assertEqual(err.exception.code, "persona")
+        self.assertIn("sentiment", err.exception.path)
+
+    def test_checkpoint_event_receipt_names_the_committed_event_and_checkpoint(self):
+        import pathlib, subprocess, tempfile
+        doc = {"probbit_persona": 1, "identity": {"name": "Receipt", "version": "1"},
+               "traits": [{"id": "action", "levels": ["retry", "ask"], "logw": [1, 0]}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            policy, state, strand, events = [root / name for name in ("policy.json", "state.json", "receipt.strand", "events.jsonl")]
+            policy.write_text(json.dumps(doc), encoding="utf-8")
+            state.write_text(json.dumps(probbit.persona_init(doc)), encoding="utf-8")
+            events.write_text("{}\n" * 999, encoding="utf-8")
+            subprocess.run([probbit.find_binary(), "live", str(policy), "--state", str(state), "--clock", "fixed", "--events", str(events), "--strand", str(strand)], check=True, capture_output=True)
+            receipt = probbit.live_event(doc, json.loads(state.read_text()), {}, strand=strand)
+            verified = probbit.live_verify(strand)
+            self.assertEqual(receipt["strand"]["events"], 1000)
+            self.assertEqual(receipt["strand"]["head"], verified["last_line"])
+            self.assertEqual(verified["checkpoints"], 1)
+
+    def test_later_control_or_partial_append_cannot_replace_our_event_receipt(self):
+        import hashlib, pathlib, subprocess, tempfile
+        from unittest.mock import patch
+        original = probbit._live_call
+        with tempfile.TemporaryDirectory() as directory:
+            strand = pathlib.Path(directory) / "receipt.strand"
+            def after_event(*args, **kwargs):
+                result = original(*args, **kwargs)
+                subprocess.run([probbit.find_binary(), "live", "control", str(strand), "pause", "--by", "human:owner", "--reason", "test"], check=True, capture_output=True)
+                with strand.open("a", encoding="utf-8") as stream:
+                    stream.write('{"incomplete":')  # a subsequent writer has not finished yet
+                return result
+            with patch.object(probbit, "_live_call", side_effect=after_event):
+                receipt = probbit.live_event(load("tutor.json"), event={}, strand=strand)
+            event_line = strand.read_text().splitlines()[1]
+            expected_head = "sha256:" + hashlib.sha256(event_line.encode()).hexdigest()
+            self.assertEqual(receipt["strand"], {"path": str(strand), "events": 1, "head": expected_head})
+
+    def test_pause_is_typed_and_never_appends(self):
+        import pathlib, subprocess, tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            strand = pathlib.Path(directory) / "test.strand"
+            doc = load("tutor.json")
+            first = probbit.live_event(doc, event={}, strand=strand)
+            subprocess.run([probbit.find_binary(), "live", "control", str(strand), "pause", "--by", "human:owner", "--reason", "test"], check=True, capture_output=True)
+            before = strand.read_bytes()
+            with self.assertRaises(probbit.ProbbitControlError) as err:
+                probbit.live_event(doc, first["state"], {}, strand=strand)
+            self.assertEqual(err.exception.code, "paused")
+            self.assertEqual(strand.read_bytes(), before)
+
+
 if __name__ == "__main__":
     unittest.main()

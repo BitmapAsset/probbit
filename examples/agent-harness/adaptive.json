@@ -1,0 +1,60 @@
+{
+  "probbit_persona": 1,
+  "identity": {
+    "name": "Retry policy",
+    "version": "1",
+    "seed": 0
+  },
+  "traits": [
+    {
+      "id": "action",
+      "levels": [
+        "retry",
+        "ask"
+      ],
+      "logw": [
+        0.5,
+        0
+      ],
+      "say": [
+        "retry the local probe",
+        "escalate to the operator"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "error",
+      "kind": "flag"
+    },
+    {
+      "id": "praise",
+      "kind": "flag"
+    }
+  ],
+  "history": [
+    {
+      "id": "error_streak",
+      "of": "error",
+      "kind": "streak",
+      "cap": 3,
+      "effects": {
+        "action": 0.2
+      }
+    }
+  ],
+  "learning": {
+    "from": [
+      "praise"
+    ],
+    "traits": [
+      "action"
+    ],
+    "rate": 0.3,
+    "step_cap": 0.05,
+    "total_cap": 0.4
+  },
+  "reward_from": [
+    "env"
+  ]
+}
