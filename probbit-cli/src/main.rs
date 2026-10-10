@@ -133,7 +133,7 @@ fn summary_doc(doc: &Json, bars: &[f64], cmd: &str) -> Json {
     for (k, x) in v {
         if after_verdict && k != "tier" && k != "reason" { out.push(("counts".into(), obj(std::mem::take(&mut counts)))); after_verdict = false; }
         match k.as_str() {
-            "plan" | "odds" | "marginals" | "release_reason" | "top_plans" | "escalated" => {}
+            "plan" | "released_plan" | "odds" | "marginals" | "release_reason" | "top_plans" | "escalated" => {}
             "released" => {
                 if let Some(r) = &released { out.push(("worst_released".into(), worst(r))); }
                 if let Some(e) = &escalated { out.push(("worst_escalated".into(), worst(e))); } }
@@ -201,7 +201,7 @@ const FLAG_HELP: [(&str, &str); 29] = [
     ("--op", "decide|exact|sample    decide = exact tiers, then the sampler; exact / sample = only those (default decide)"),
     ("--deadline-ms", "N    whole-call deadline (exact N/4, then sampler + polish); answer has `deadline` + `phases`"),
     ("--pretty", "indented JSON"), ("--progress", "[MS]    one JSONL telemetry line on stderr every MS ms (default 100)"),
-    ("--tasks", "N    tasks to generate (default 12)"), ("--hard", "tight quotas + strong affinity"),
+    ("--tasks", "N    tasks to generate, 1..3333333 (default 12)"), ("--hard", "tight quotas + strong affinity"),
     ("--max-input-mb", "N    largest stdin document read, MB (default 256; 0 = no limit)"),
     ("--summary", "compact answer: verdict, counts, gate, the 5 worst released and escalated items, telemetry (no per-item tables);\n      with --pretty and a terminal on stderr, also a boxed summary there"),
     ("--top", "live monitor on stderr while it runs (tier, sweeps, updates/s, CPU, peak RSS, gate; 10 Hz), erased at exit;\n      only with a terminal on stderr; stdout unchanged"),
@@ -218,7 +218,7 @@ fn help(cmd: &str) -> Option<String> {
         "demo" => ("Emit a synthetic agent-routing document (JSON) for `probbit decide`.", "probbit demo [flags] > router.json"),
         "ir" => ("Print a router document as probbit-ir v0 text (the hardware-facing form).", "probbit ir < router.json"),
         "stats" => ("The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.", "probbit stats [flags]"),
-        "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools probbit_decide,\n  probbit_run, probbit_stats, probbit_demo, probbit_evaluate: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "probbit mcp"),
+        "mcp" => ("A Model Context Protocol server on stdio (JSON-RPC 2.0, one message per line; logs on stderr). Tools probbit_decide,\n  probbit_run, probbit_stats, probbit_demo, probbit_evaluate, probbit_persona_init, probbit_persona_turn, probbit_persona_fuzz,\n  probbit_live_event, probbit_live_verify: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.", "probbit mcp"),
         "persona" => (PERSONA_HELP, "probbit persona <init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe> PERSONA [flags]"),
         "live" => (LIVE_HELP, "probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K] | probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain] | probbit live verify STRAND [--from-checkpoint] | probbit live control STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]"),
         "version" => ("Print the version.", "probbit version"), _ => return None };
@@ -258,12 +258,12 @@ fn cycles_arg(args: &[String]) -> bool {
 fn check_flags(args: &[String], values: &[&str], switches: &[&str]) {
     let mut i = 1; let mut seen: Vec<&str> = Vec::new();
     while i < args.len() { let a = args[i].as_str();
-        if values.contains(&a) { if i + 1 >= args.len() { fail(&format!("{a} needs a value")) }
+        if values.contains(&a) { if args.get(i + 1).map_or(true, |v| v.starts_with("--")) { fail(&format!("{a} needs a value")) }
             if seen.contains(&a) { fail(&format!("{a} given twice")) } seen.push(a); i += 2; }
         else if a == "--progress" && switches.contains(&a) { if seen.contains(&a) { fail(&format!("{a} given twice")) } seen.push(a);
             i += if args.get(i + 1).is_some_and(|v| v.parse::<u64>().is_ok()) { 2 } else { 1 }; }
         else if switches.contains(&a) { i += 1; }
-        else { fail(&format!("unknown argument {a:?} for `probbit {}` (run `probbit` for usage)", args[0])) } }
+        else { fail(&format!("unknown argument {a:?} for `probbit {}` (see `probbit {} --help`)", args[0], args[0])) } }
 }
 /// Optional config file: `$PROBBIT_CONFIG`, else `./probbit.json` if present (keys chains, threads, cpu_limit, mem_limit_mb, priority).
 fn config_path() -> Option<String> { std::env::var("PROBBIT_CONFIG").ok().or_else(|| std::path::Path::new("probbit.json").exists().then(|| "probbit.json".to_string())) }
@@ -436,8 +436,11 @@ fn demo_cmd(args: &[String]) {
     let (v, w) = flags_of("demo"); check_flags(args, &v, &w);
     let seed: u64 = arg(args, "--seed", 7); let hard = args.iter().any(|a| a == "--hard"); let live = args.iter().any(|a| a == "--live");
     let th = theme::stderr(args); let auto = !live && th.is_some() && theme::stdout_is_terminal();
-    if !(live || auto) { emit(&json::write(&demo_doc(arg(args, "--tasks", 12), seed, hard), true)); return; }
-    let doc = demo_doc(arg(args, "--tasks", 300), seed, hard);
+    let tasks: usize = arg(args, "--tasks", if live || auto { 300 } else { 12 });
+    let max_tasks = json::MAX_DENSE / 6; // the generated router has six workers
+    if tasks == 0 || tasks > max_tasks { fail(&format!("--tasks must be 1 to {max_tasks} (the router's task-worker limit)")); }
+    let doc = demo_doc(tasks, seed, hard);
+    if !(live || auto) { emit(&json::write(&doc, true)); return; }
     let Some(th) = th else { err_line("probbit: --live draws on a colour terminal (stderr); no terminal, or NO_COLOR / --plain / PROBBIT_THEME=plain: printed the problem only");
         emit(&json::write(&doc, true)); return };
     let mut n = from_json(&doc).unwrap_or_else(|e| bad_input("bad problem: ", e)); n.p.collective = true; n.p.cluster = true; n.p.cycles = true; // decide's defaults
@@ -472,7 +475,7 @@ fn evaluate_cmd(args: &[String]) {
     let c = finish(evaluate::respond(&r, doc), code, &View::new(args, "evaluate"), &bars); if c != 0 { std::process::exit(c); }
 }
 
-const PERSONA_HELP: &str = "The individuality layer (docs/persona.md): a persona file (YAML subset or JSON: traits with priors, moods with\n  inertia, couplings, per-turn inputs, history, habits = hard rules) + an individual's state + this turn's inputs -> ONE probbit-ir\n  program, run in process (`probbit run --op decide` at fixed work) -> the stance: a level per trait with exact odds, the habits\n  in force and the ones that bound, a refusal when the engine cannot vouch, a why and a short stance line for any model's prompt.\n  Documents are canonical JSON (keys sorted); a turn is a pure function of (persona, state, inputs, version).\nsubcommands:\n  init PERSONA [--seed N] [--out STATE]          a new individual (genes from the seed, resting stance); stdout or --out\n  turn PERSONA --state STATE [--inputs JSON|FILE] [--out STATE2] [--timing] [--no-inertia]\n                                                 the stance on stdout; the new state replaces STATE (or goes to --out)\n  replay PERSONA [--seed N] --script JSON|FILE [--out TRACE] [--no-inertia] [--timing]\n                                                 init, then every turn of the script: one stance per line (JSONL)\n  explain PERSONA [--seed N] --script JSON|FILE --turn K   turn K in words: every contribution, the odds, the twin\n  diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script JSON|FILE   distance between two individuals\n  lint PERSONA [--never RULE | --props FILE] [--seeds 0-99] [--threads N]\n                                                 contradicting habits (every conditional habit and pair, every prev level);\n                                                 warnings: planned levels that are not their trait's most likely one;\n                                                 with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample\n  fuzz PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N]\n       [--grid LIST] [--hours LIST] [--threads N] [--json]\n                                                 search event scripts for the shortest one whose stance breaks a rule\n                                                 (habit syntax: {when: {...}, then: {...}}); shrunk, replayable (§5.6)\n  prove PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--threads N] [--json]\n                                                 per rule: held by construction (a habit implies it), proved for every\n                                                 event sequence (a sound bound), or unknown (the cell it fails; fuzz it) (§5.6)\n  check PERSONA                                  valid? digest and sizes\n  compile PERSONA --state STATE [--inputs JSON|FILE]   the turn's probbit-ir program (its sha256 = engine.program)\n  describe PERSONA                               traits, moods, inputs, habits, agenda\n  A script is a JSON list of per-turn input objects, or {\"turns\": [...]}. Resource controls as for run (PROBBIT_THREADS, ...).";
+const PERSONA_HELP: &str = "The individuality layer (docs/persona.md): a persona file (YAML subset or JSON: traits with priors, moods with\n  inertia, couplings, per-turn inputs, history, habits = hard rules) + an individual's state + this turn's inputs -> ONE probbit-ir\n  program, run in process (`probbit run --op decide` at fixed work) -> the stance: a level per trait with exact odds, the habits\n  in force and the ones that bound, a refusal when the engine cannot vouch, a why and a short stance line for any model's prompt.\n  Documents are canonical JSON (keys sorted); a turn is a pure function of (persona, state, inputs, version).\n  --pretty indents a single JSON document on stdout (init, turn, diff, lint, check, compile, describe, fuzz, prove);\n  fuzz/prove --pretty implies --json. State files stay canonical. Replay stays JSONL; explain stays plain text.\nsubcommands:\n  init PERSONA [--seed N] [--out STATE]          a new individual (genes from the seed, resting stance); stdout or --out\n  turn PERSONA --state STATE [--inputs JSON|FILE] [--out STATE2] [--timing] [--no-inertia]\n                                                 the stance on stdout; the new state replaces STATE (or goes to --out)\n  replay PERSONA [--seed N] --script JSON|FILE [--out TRACE] [--no-inertia] [--timing]\n                                                 init, then every turn of the script: one stance per line (JSONL)\n  explain PERSONA [--seed N] --script JSON|FILE --turn K   turn K in words: every contribution, the odds, the twin\n  diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script JSON|FILE   distance between two individuals\n  lint PERSONA [--never RULE | --props FILE] [--seeds 0-99] [--threads N]\n                                                 contradicting habits (every conditional habit and pair, every prev level);\n                                                 warnings: planned levels that are not their trait's most likely one;\n                                                 with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample\n  fuzz PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N]\n       [--grid LIST] [--hours LIST] [--threads N] [--json] [--fixture-src env:synthetic|human:synthetic]\n                                                 search event scripts for the shortest one whose stance breaks a rule\n                                                 (habit syntax: {when: {...}, then: {...}}); shrunk (§5.6). --fixture-src\n                                                 explicitly authorizes synthetic-source fixtures for strict replay; never\n                                                 use them to relabel production events. The persona must allow that source.\n  prove PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--threads N] [--json]\n                                                 per rule: held by construction (a habit implies it), proved for every\n                                                 event sequence (a sound bound), or unknown (the cell it fails; fuzz it) (§5.6)\n  check PERSONA                                  valid? digest and sizes\n  compile PERSONA --state STATE [--inputs JSON|FILE]   the turn's probbit-ir program (its sha256 = engine.program)\n  describe PERSONA                               traits, moods, inputs, habits, agenda\n  A script is a JSON list of per-turn input objects, or {\"turns\": [...]}. Resource controls as for run (PROBBIT_THREADS, ...).";
 /// The persona engine of this process: `persona::run_program` with the resource controls `probbit run` would use (flag > env >
 /// config > default; resolved once), and --priority low applied if asked for. They never change an answer at fixed work.
 pub(crate) fn persona_engine() -> impl Fn(&Json, &persona::Flags) -> Json {
@@ -484,6 +487,11 @@ pub(crate) fn persona_engine() -> impl Fn(&Json, &persona::Flags) -> Json {
 fn json_arg(s: &str, what: &str) -> Json {
     let t = if std::path::Path::new(s).is_file() { std::fs::read_to_string(s).unwrap_or_else(|e| bad_input("persona: ", persona::perr(what, format!("cannot read {s}: {e}")))) } else { s.to_string() };
     json::parse(t.strip_prefix('\u{feff}').unwrap_or(&t)).unwrap_or_else(|e| bad_input("persona: ", persona::perr(what, format!("not JSON: {}", e.msg))))
+}
+/// Human-readable JSON without changing the canonical values, sorted keys, digests or stored state bytes.
+fn persona_text(doc: &Json, pretty: bool) -> String {
+    let canonical = persona::canon(doc);
+    if pretty { json::write(&json::parse(&canonical).expect("canonical persona JSON"), true) } else { canonical }
 }
 /// Write a document: to `path` (write, then rename: a killed turn never leaves a half-written state), or to stdout
 fn put(path: Option<&str>, text: &str) {
@@ -528,20 +536,24 @@ fn rules_arg(args: &[String], p: &persona::Persona) -> Vec<persona::Prop> {
 }
 fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEngine) {
     let props = rules_arg(args, p);
+    let pretty = args.iter().any(|a| a == "--pretty");
     let sub = args[1].as_str();
     if props.is_empty() { fail(&format!("persona {sub}: give a rule: --never RULE (habit syntax) or --props FILE")) }
     let bounded = |f: &str, d: usize, lo: usize, hi: usize| -> usize { let x: usize = arg(args, f, d); if x < lo || x > hi { fail(&format!("{f} must be {lo} to {hi}")) } x };
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     if sub == "prove" { let (seeds, threads) = (seeds_arg(args), bounded("--threads", cores, 1, 1024));
         let t0 = std::time::Instant::now(); let out = fuzz::prove(p, &props, &seeds, threads, eng); let secs = t0.elapsed().as_secs_f64();
-        if args.iter().any(|a| a == "--json") { emit(&persona::canon(&fuzz::prove_doc(p, &props, &seeds, &out))) } else { emit(&fuzz::prove_human(p, path, &props, &seeds, &out)) }
+        if pretty || args.iter().any(|a| a == "--json") { emit(&persona_text(&fuzz::prove_doc(p, &props, &seeds, &out), pretty)) } else { emit(&fuzz::prove_human(p, path, &props, &seeds, &out)) }
         err_line(&format!("prove: {secs:.2} s"));
         if out.iter().any(|v| matches!(v, fuzz::Verdict::Unknown { .. })) { std::process::exit(1) }
         return; }
     let s = fuzz::Search { seeds: seeds_arg(args), fuzz_seed: arg(args, "--fuzz-seed", 0u64), scripts: bounded("--scripts", 60, 0, 1_000_000), depth: bounded("--depth", 8, 1, 64),
         beam: bounded("--beam", 4, 0, 64), grid: list_arg(args, "--grid", &[0.0, 0.5, 1.0], 0.0, 1.0), hours: list_arg(args, "--hours", &[1.0, 12.0, 48.0], 0.0, 1e6), threads: bounded("--threads", cores, 1, 1024) };
-    let t0 = std::time::Instant::now(); let (res, turns) = fuzz::fuzz(p, &props, &s, eng); let secs = t0.elapsed().as_secs_f64();
-    if args.iter().any(|a| a == "--json") { emit(&persona::canon(&fuzz::doc(p, path, &props, &s, &res, turns))) } else { emit(&fuzz::human(p, path, &props, &s, &res, turns)) }
+    let t0 = std::time::Instant::now(); let (mut res, turns) = fuzz::fuzz(p, &props, &s, eng); let secs = t0.elapsed().as_secs_f64();
+    if let Some(i) = args.iter().position(|a| a == "--fixture-src") {
+        fuzz::authorize_fixtures(p, &s.seeds, &mut res, &args[i + 1], eng).unwrap_or_else(|e| bad_input("persona fuzz: ", e));
+    }
+    if pretty || args.iter().any(|a| a == "--json") { emit(&persona_text(&fuzz::doc(p, path, &props, &s, &res, turns), pretty)) } else { emit(&fuzz::human(p, path, &props, &s, &res, turns)) }
     err_line(&format!("fuzz: {turns} turns in {secs:.2} s ({:.0} turns/s, {} search thread{})", turns as f64 / secs.max(1e-9), s.threads.min(s.seeds.len().max(1)), if s.threads.min(s.seeds.len().max(1)) == 1 { "" } else { "s" }));
     if res.iter().any(|per| per.iter().any(Option::is_some)) { std::process::exit(1) }
 }
@@ -638,11 +650,15 @@ fn persona_cmd(args: &[String]) {
         "init" => (&["--seed", "--out"], &[]), "turn" => (&["--state", "--inputs", "--out"], &["--timing", "--no-inertia"]),
         "replay" => (&["--seed", "--script", "--out"], &["--no-inertia", "--timing"]), "explain" => (&["--seed", "--script", "--turn"], &[]),
         "diff" => (&["--seed", "--other", "--seed2", "--script"], &[]), "compile" => (&["--state", "--inputs"], &[]), "check" | "describe" => (&[], &[]), "lint" => (&["--never", "--props", "--seeds", "--threads"], &[]),
-        "fuzz" => (&["--seeds", "--never", "--props", "--fuzz-seed", "--scripts", "--depth", "--beam", "--grid", "--hours", "--threads"], &["--json"]),
+        "fuzz" => (&["--seeds", "--never", "--props", "--fuzz-seed", "--scripts", "--depth", "--beam", "--grid", "--hours", "--threads", "--fixture-src"], &["--json"]),
         "prove" => (&["--seeds", "--never", "--props", "--threads"], &["--json"]),
         _ => fail("persona: a subcommand: init, turn, replay, explain, diff, lint, fuzz, prove, check, compile or describe (probbit persona --help)") };
+    let pretty = args.iter().any(|a| a == "--pretty");
+    if pretty && sub == "replay" { fail("persona replay emits one canonical JSON object per line (JSONL); --pretty is for single-document commands such as persona turn") }
+    if pretty && sub == "explain" { fail("persona explain already emits readable text; --pretty is for JSON commands") }
+    let mut switches = sw.to_vec(); switches.push("--pretty");
     let Some(path) = args.get(2).filter(|a| !a.starts_with("--")) else { fail(&format!("persona {sub}: the persona file comes first: probbit persona {sub} PERSONA [flags]")) };
-    let mut a = vec![format!("persona {sub}")]; a.extend(args[3..].iter().cloned()); check_flags(&a, vals, sw);
+    let mut a = vec![format!("persona {sub}")]; a.extend(args[3..].iter().cloned()); check_flags(&a, vals, &switches);
     let need = |f: &str| -> String { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned().unwrap_or_else(|| fail(&format!("persona {sub}: {f} is required"))) };
     let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
     let (p, _) = persona::load(path).unwrap_or_else(|e| bad_input("persona: ", e));
@@ -655,9 +671,11 @@ fn persona_cmd(args: &[String]) {
     let inputs = || opt("--inputs").map_or(Json::Obj(vec![]), |s| json_arg(&s, "inputs"));
     let turns = || persona::script(&json_arg(&need("--script"), "script")).unwrap_or_else(|e| bad_input("persona: ", e));
     match sub {
-        "init" => { let st = persona::init(&p, seed_arg(args, "--seed"), true, eng); put(opt("--out").as_deref(), &persona::canon(&st.to_json(&p))); }
+        "init" => { let st = persona::init(&p, seed_arg(args, "--seed"), true, eng);
+            if let Some(path) = opt("--out") { put(Some(&path), &persona::canon(&st.to_json(&p))); err_line(&format!("wrote {path} ({} {}, seed {})", p.name, p.version, st.seed)); }
+            else { emit(&persona_text(&st.to_json(&p), pretty)); } }
         "turn" => { let st = state("--state"); let (out, ns) = persona::turn(&p, &st, &inputs(), no_inertia, eng, args.iter().any(|x| x == "--timing")).unwrap_or_else(|e| bad_input("persona: ", e));
-            put(Some(&opt("--out").unwrap_or_else(|| need("--state"))), &persona::canon(&ns.to_json(&p))); emit(&persona::canon(&out)); }
+            put(Some(&opt("--out").unwrap_or_else(|| need("--state"))), &persona::canon(&ns.to_json(&p))); emit(&persona_text(&out, pretty)); }
         "replay" => { let (trace, st) = persona::replay(&p, seed_arg(args, "--seed"), &turns(), no_inertia, eng, args.iter().any(|x| x == "--timing")).unwrap_or_else(|e| bad_input("persona: ", e));
             let text: String = trace.iter().map(|t| persona::canon(t) + "\n").collect();
             match opt("--out") { Some(o) => if let Err(e) = std::fs::write(&o, &text) { fail(&format!("persona: cannot write {o}: {e}")) }, None => emit_raw(&text) }
@@ -668,10 +686,11 @@ fn persona_cmd(args: &[String]) {
             emit(&persona::explain(&p, &st, &ts[k], eng).unwrap_or_else(|e| bad_input("persona: ", e))); }
         "diff" => { let q = opt("--other").map_or_else(|| p.clone(), |o| persona::load(&o).unwrap_or_else(|e| bad_input("persona: ", e)).0);
             let (sa, sb) = (seed_arg(args, "--seed").unwrap_or(p.seed), seed_arg(args, "--seed2").unwrap_or(q.seed));
-            emit(&persona::canon(&persona::diff(&p, sa, &q, sb, &turns(), eng).unwrap_or_else(|e| bad_input("persona: ", e)))); }
-        "compile" => { let st = state("--state"); emit(&persona::program(&p, &st, &inputs()).unwrap_or_else(|e| bad_input("persona: ", e))); }
-        "check" => emit(&persona::canon(&persona::check(&p, eng).unwrap_or_else(|e| bad_input("persona: ", e)))),
-        "describe" => emit(&persona::canon(&persona::describe(&p))),
+            emit(&persona_text(&persona::diff(&p, sa, &q, sb, &turns(), eng).unwrap_or_else(|e| bad_input("persona: ", e)), pretty)); }
+        "compile" => { let st = state("--state"); let text = persona::program(&p, &st, &inputs()).unwrap_or_else(|e| bad_input("persona: ", e));
+            if pretty { emit(&json::write(&json::parse(&text).expect("compiled program JSON"), true)); } else { emit(&text); } }
+        "check" => emit(&persona_text(&persona::check(&p, eng).unwrap_or_else(|e| bad_input("persona: ", e)), pretty)),
+        "describe" => emit(&persona_text(&persona::describe(&p), pretty)),
         "fuzz" | "prove" => fuzz_cmd(args, path, &p, &engine),
         _ => { let found = persona::lint(&p, eng); let unresolved = found.iter().filter(|f| !f.get("resolution").and_then(Json::as_str).is_some_and(|r| r.starts_with("yield"))).count();
             let seeds = seeds_arg(args); let warnings = persona::plan_warnings(&p, &seeds, eng);
@@ -692,7 +711,7 @@ fn persona_cmd(args: &[String]) {
                     if let (Json::Obj(v), Some(f)) = (e, fp.iter().find(|x| x.get("id").cloned() == id)) { v.push(("fuzz".into(), f.clone())); } }
                 doc.push(("props", Json::Arr(entries))); doc.push(("broken", num(broken as f64))); }
             doc.push(("ok", Json::Bool(unresolved == 0 && broken == 0)));
-            emit(&persona::canon(&obj(doc)));
+            emit(&persona_text(&obj(doc), pretty));
             if unresolved > 0 || broken > 0 { std::process::exit(1) } }
     }
 }
@@ -722,8 +741,9 @@ fn main() {
         Some("mcp") => { check_flags(&args, &[], &[]); mcp::serve() }
         Some("version") | Some("--version") | Some("-V") => { check_flags(&args, &[], &[]); emit(&format!("probbit {VERSION}")) }
         // `probbit --help` / `-h` asked for the usage: stdout, exit 0 (it went to stderr with exit 2, as for a missing command)
-        Some("--help") | Some("-h") => emit_raw(USAGE),
-        _ => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
+        Some("--help") | Some("-h") => { check_flags(&args, &[], &["--plain"]); emit_raw(USAGE); }
+        Some(cmd) => fail(&format!("unknown command {cmd:?}; see `probbit --help`")),
+        None => { let _ = std::io::stderr().write_all(USAGE.as_bytes()); std::process::exit(2) }
     }
 }
-const USAGE: &str = "usage: probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       probbit demo [--tasks N] [--seed N] [--hard] [--live]\n       probbit ir [--max-input-mb N] < problem.json\n       probbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (probbit-ir JSON v1)\n       probbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       probbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]   (the individuality layer; probbit persona --help)\n       probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed]   (a resident individual: JSONL events in, stances out)\n       probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]   (a scripted week: learning to a cap, a night, rules that hold)\n       probbit live verify STRAND [--from-checkpoint]   (replay a strand; the earliest line that differs)\n       probbit live control STRAND pause|resume|retire --by WHO --reason TEXT   (a control line: pause, resume or retire an individual)\n       probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [--open]   (watch an individual's inner state live: bars in the terminal or a page on 127.0.0.1, replayed from the strand)\n       probbit mcp   (Model Context Protocol server on stdio)\n       probbit version\n       probbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";
+const USAGE: &str = "usage: probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < problem.json\n       probbit demo [--tasks N] [--seed N] [--hard] [--live]\n       probbit ir [--max-input-mb N] < problem.json\n       probbit run [--op decide|exact|sample] [--budget-ms N] [--deadline-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--progress [MS]] [--summary] [--top] [--pretty] < program.json   (probbit-ir JSON v1)\n       probbit evaluate [the run flags] [--program] < request.json   (decision-API adapter: System One request + judge answers + rules)\n       probbit stats [--sweeps N] [--pretty]   (machine, build, effective controls + source, measured updates/s)\n       probbit persona init|turn|replay|explain|diff|lint|fuzz|prove|check|compile|describe PERSONA [flags]   (the individuality layer; probbit persona --help)\n       probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed]   (a resident individual: JSONL events in, stances out)\n       probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]   (a scripted week: learning to a cap, a night, rules that hold)\n       probbit live verify STRAND [--from-checkpoint]   (replay a strand; the earliest line that differs)\n       probbit live control STRAND pause|resume|retire --by WHO --reason TEXT   (a control line: pause, resume or retire an individual)\n       probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [week|drives] [--open]   (watch an individual's inner state live: bars in the terminal or a page on 127.0.0.1, replayed from the strand)\n       probbit mcp   (Model Context Protocol server on stdio)\n       probbit version\n       probbit <command> --help | -h   (--plain or NO_COLOR: no colour on a terminal)\n";
