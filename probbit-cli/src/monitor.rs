@@ -182,7 +182,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let mut out = vec![];
     let bad = bad_head.or_else(|| w.and_then(|w| w.bad.as_ref()));
     let badge = match (bad, w.and_then(|w| w.rep.from)) { (Some((n, why)), _) => s.bold(RED, &format!("line {n} diverges: {why}")),
-        (None, Some(c)) => s.bold(GREEN, &s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
+        (None, Some(c)) => s.bold(GREEN, s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
         (None, None) => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
     // a paused or retired individual (control lines, docs/persona.md §5.7) says so next to the badge
     let badge = match w.map(|w| w.rep.live.status).filter(|st| *st != crate::live::Status::Active) { Some(st) => format!("{badge} {dot} {}", s.bold(if st == crate::live::Status::Retired { RED } else { YELLOW }, st.name())), None => badge };
@@ -308,8 +308,10 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
     if let Some(p) = pz {
         let v = Var { id: "pursue".into(), levels: goals.clone(), say: vec![] };
         let ps: Vec<f64> = goals.iter().map(|g| p.get("odds").and_then(|o| o.get(g)).and_then(Json::as_f64).unwrap_or(0.0)).collect();
-        let pick = p.get("goal").and_then(Json::as_str).and_then(|g| goals.iter().position(|x| x == g)).filter(|_| p.get("released") != Some(&Json::Bool(false)));
-        let say = p.get("say").and_then(Json::as_str).unwrap_or("");
+        let goal = p.get("goal").and_then(Json::as_str).unwrap_or("goal");
+        let released = p.get("released") != Some(&Json::Bool(false));
+        let pick = goals.iter().position(|x| x == goal).filter(|_| released);
+        let say = if released { p.get("say").and_then(Json::as_str).unwrap_or("").to_string() } else { s.paint(GREY, &format!("({goal}: not released)")) };
         out.push(format!("{}{:<idw$}  {}  {}  {say}", lab("DRIVES"), v.id, stack(s, &ps, pick, ORANGE), labels(s, &v.levels, &ps, pick, ORANGE)).trim_end().to_string());
     }
     if let Some(d) = dv {
@@ -445,8 +447,8 @@ pub fn cmd(args: &[String]) {
     let tty = theme::stdout_is_terminal();
     let s = Style { th: theme::stdout(args), ascii: ascii(args), cols: if tty { theme::size(1).0.max(20) } else { usize::MAX } };
     if has("--demo") {
-        if path.is_some() { crate::fail("monitor --demo plays its own week: give no STRAND") }
-        if has("--follow") { crate::fail("monitor --demo: --follow does not apply (the demo is its own week)") }
+        if path.is_some() { crate::fail("monitor --demo plays a synthetic scenario: give no STRAND") }
+        if has("--follow") { crate::fail("monitor --demo: --follow does not apply (the demo is a synthetic scenario)") }
         if serve_ { serve(port, has("--open"), &mut |hub| feed_demo(hub, demo_kind, eng)) }
         return demo(&s, has("--once"), demo_kind, eng);
     }
@@ -881,6 +883,13 @@ mod tests {
         let at = fr.iter().position(|l| l.starts_with("DRIVES")).unwrap_or_else(|| panic!("{fr:?}"));
         assert!(fr[at].contains("[ship 0.62]") && fr[at].contains("ship the next small piece"), "{}", fr[at]);
         assert!(fr[at + 2].contains("wanting [") && fr[at + 2].contains("+1.00 above expectation"), "{fr:?}");
+        let mut held = w.last.as_ref().unwrap().doc.clone();
+        if let Json::Obj(kv) = &mut held { if let Some((_, Json::Obj(p))) = kv.iter_mut().find(|(k, _)| k == "pursue") {
+            if let Some((_, released)) = p.iter_mut().find(|(k, _)| k == "released") { *released = Json::Bool(false); }
+        } }
+        let held = drives(&held, &w.meta, &s, 4, &|_| String::new()).join("\n");
+        assert!(held.contains("ship: not released"), "{held}");
+        assert!(!held.contains("ship the next small piece") && !held.contains("[ship 0.62]"), "{held}");
         // odd shapes (lists, strings, nulls) draw without a panic
         let Json::Obj(mut kv) = w.last.as_ref().unwrap().doc.clone() else { panic!() };
         kv.retain(|(k, _)| k != "drives"); kv.push(("drives".into(), json::parse(r#"{"want":[1,"x",null],"glow":"?","surprise":[-0.5]}"#).unwrap()));

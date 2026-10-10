@@ -231,7 +231,7 @@ function draw(f) {
   $('empty').hidden = !!d;
   for (const id of ['stance', 'moods', 'senses', 'habits', 'said']) $(id).hidden = !d || (id === 'moods' && !(M.moods || []).length);
   $('learned').hidden = !d || !V.learned.length;
-  if (!d) { $('drives').hidden = true; return; }
+  if (!d) { $('drives').hidden = true; $('line').textContent = ''; $('why').textContent = ''; return; }
   for (const t of M.traits || []) {
     const R = V.traits[t.id], s = get(d, 'stance', t.id);
     R.r.hidden = !s; if (!s) continue;
