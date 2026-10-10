@@ -18,7 +18,8 @@ All notable changes to this project are documented here. The format follows
   to produce runnable replay commands; production source checks are not bypassed.
 - npm forwards each termination signal unchanged, bounds download waits and selects both x86_64 and ARM64 musl assets.
   Shell installation defaults to the user's `~/.local/bin`. Installers validate candidate binaries before replacing a
-  working installation; PowerShell stages replacement on the destination filesystem. Release/target selectors reject paths.
+  working installation on the shell/PowerShell paths; PowerShell stages replacement on the destination filesystem.
+  Release/target selectors reject paths.
 - Monitor labels scripted demos, loop restarts, lifecycle and checkpoint status; preserves original `why` text, explains
   display terms and supports narrow screens. Browser playground and puzzle tables no longer force horizontal page overflow.
 - Keep the lockfile readable by the declared Rust 1.78 minimum; CI builds that compiler with `--locked`.

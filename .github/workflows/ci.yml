@@ -107,6 +107,11 @@ jobs:
           node probbit-wasm/tests/boundaries.mjs playground/probbit.wasm target/release/probbit
       - name: real browser interaction and narrow layout
         run: node playground/check-browser.mjs target/browser-check
+      - name: real monitor playback and live append in the browser
+        env:
+          PROBBIT_BIN: ${{ github.workspace }}/target/release/probbit
+          PROBBIT_BROWSER_OUT: ${{ github.workspace }}/target/browser-check/monitor
+        run: node probbit-cli/tests/monitor_browser.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -122,6 +127,7 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, run: true }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, linker: aarch64-linux-gnu-gcc }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, linker: aarch64-linux-gnu-gcc, run: true }
           - { os: macos-latest, target: x86_64-apple-darwin, run: true, rosetta: true }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, run: true, rustflags: "-C target-feature=+crt-static" }
     runs-on: ${{ matrix.os }}

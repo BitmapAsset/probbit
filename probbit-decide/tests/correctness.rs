@@ -89,9 +89,9 @@ fn router_and_lowering_match_180_independent_exhaustive_oracles() {
                 marg[i * p.a + a] += (w - best).exp() / z;
             }
         }
-        for i in 0..marg.len() {
-            close(e.marg[i], marg[i]);
-            close(lowered.marg[i], marg[i]);
+        for (i, &want) in marg.iter().enumerate() {
+            close(e.marg[i], want);
+            close(lowered.marg[i], want);
         }
     }
 }
