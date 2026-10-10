@@ -74,7 +74,8 @@ try {
     $candidate = Join-Path $InstallDir ('.probbit-' + [guid]::NewGuid().ToString('N') + '.exe')
     try {
         Copy-Item -LiteralPath $src -Destination $candidate
-        if (Test-Path -LiteralPath $dest) { [IO.File]::Replace($candidate, $dest, $null) }
+        # PowerShell coerces $null to an empty string for a string parameter; File.Replace rejects that path.
+        if (Test-Path -LiteralPath $dest) { [IO.File]::Replace($candidate, $dest, [NullString]::Value) }
         else { [IO.File]::Move($candidate, $dest) }
     } finally {
         Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
