@@ -107,6 +107,44 @@ pub fn fuzz(p: &Persona, props: &[Prop], s: &Search, eng: SyncEngine) -> (Vec<Ve
     let mut per = par(s.seeds.len(), s.threads, |i| individual(p, props, s.seeds[i], s, eng, &turns));
     ((0..props.len()).map(|i| per.iter_mut().map(|v| v.get_mut(i).and_then(Option::take)).collect()).collect(), turns.into_inner())
 }
+/// Explicitly authorize sources for newly generated synthetic test fixtures only. Never reads
+/// production events. Restrict the labels to visibly synthetic ones, run ordinary provenance
+/// validation, then regenerate the exported stance through strict replay (not turn_any_source).
+pub fn authorize_fixtures(p: &Persona, seeds: &[u64], res: &mut [Vec<Option<Found>>], source: &str, eng: persona::Engine) -> Result<(), crate::json::InErr> {
+    if !matches!(source, "env:synthetic" | "human:synthetic") {
+        return Err(persona::perr("fixture_src", "env:synthetic | human:synthetic; an explicit test-source assumption, never production provenance"));
+    }
+    if !persona::has_reward_sources(p) { return Err(persona::perr("fixture_src", "requires a persona with reward_from")); }
+    for per in res {
+        for (seed, f) in seeds.iter().zip(per) {
+            let Some(f) = f else { continue };
+            let mut script = f.script.clone();
+            for event in &mut script {
+                if event.iter().any(|(k, _)| k == "src") { return Err(persona::perr("fixture_src", "will not replace an existing source")); }
+                event.push(("src".into(), Json::Str(source.into())));
+                persona::check_provenance(p, &persona::event_json(event))?;
+            }
+            let events: Vec<Json> = script.iter().map(|e| persona::event_json(e)).collect();
+            let (stances, _) = persona::replay(p, Some(*seed), &events, false, eng, false)?;
+            f.doc = stances.last().expect("a counterexample has an event").clone();
+            f.script = script;
+        }
+    }
+    Ok(())
+}
+fn replayable(p: &Persona, f: &Found) -> bool {
+    f.script.iter().all(|e| persona::check_provenance(p, &persona::event_json(e)).is_ok())
+}
+fn fixture_info(p: &Persona, f: &Found) -> Vec<(String, Json)> {
+    if !persona::has_reward_sources(p) { return vec![]; }
+    let source = f.script.first().and_then(|e| e.iter().find(|(k, _)| k == "src")).map(|(_, v)| v.clone()).unwrap_or(Json::Null);
+    vec![("fixture_provenance".into(), Json::Obj(vec![
+        ("source".into(), source.clone()), ("synthetic".into(), Json::Bool(true)),
+        ("replayable".into(), Json::Bool(replayable(p, f))),
+        ("assumption".into(), Json::Str(if source.is_null() {
+            "search assumes accepted sources; use --fixture-src env:synthetic or human:synthetic to authorize synthetic replay; production evidence must retain its original source"
+        } else { "caller-authorized synthetic fixture source, not authenticated production evidence" }.into()))]))]
+}
 /// `f(0) .. f(n-1)` on up to `threads` threads (each takes the next index; 8 MiB stacks, as the engine's threads), in index order
 fn par<T: Send>(n: usize, threads: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let next = AtomicUsize::new(0); let slots: Vec<Mutex<Option<T>>> = (0..n).map(|_| Mutex::new(None)).collect();
@@ -187,9 +225,10 @@ pub fn ranges(seeds: &[u64]) -> String {
     out.join(",")
 }
 fn script_json(sc: &[Event]) -> Json { Json::Arr(sc.iter().map(|e| persona::event_json(e)).collect()) }
-fn commands(path: &str, seed: u64, f: &Found) -> (String, String) {
+fn commands(p: &Persona, path: &str, seed: u64, f: &Found) -> Option<(String, String)> {
+    if !replayable(p, f) { return None; }
     let sc = word(&persona::canon(&script_json(&f.script)));
-    (format!("probbit persona replay {} --seed {seed} --script {sc}", word(path)), format!("probbit persona explain {} --seed {seed} --script {sc} --turn {}", word(path), f.script.len() - 1))
+    Some((format!("probbit persona replay {} --seed {seed} --script {sc}", word(path)), format!("probbit persona explain {} --seed {seed} --script {sc} --turn {}", word(path), f.script.len() - 1)))
 }
 fn lengths(per: &[Option<Found>]) -> Vec<(usize, usize)> {
     let mut by: Vec<(usize, usize)> = vec![];
@@ -208,10 +247,11 @@ pub fn doc(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Optio
     let n = |x: f64| Json::Num(x); let st = |x: &str| Json::Str(x.to_string());
     let props_j: Vec<Json> = props.iter().zip(res).map(|(pr, per)| {
         let failing: Vec<Json> = s.seeds.iter().zip(per).filter(|(_, f)| f.is_some()).map(|(sd, _)| n(*sd as f64)).collect();
-        let sh = shortest(s, per).map_or(Json::Null, |(sd, f)| { let (rp, ex) = commands(path, sd, f);
-            Json::Obj(vec![("seed".into(), n(sd as f64)), ("script".into(), script_json(&f.script)), ("turn".into(), n((f.script.len() - 1) as f64)), ("broken".into(), broken_json(&f.broken)),
-                ("stance".into(), f.doc.clone()), ("replay".into(), st(&rp)), ("explain".into(), st(&ex))]) });
-        let cex: Vec<Json> = s.seeds.iter().zip(per).filter_map(|(sd, f)| f.as_ref().map(|f| Json::Obj(vec![("seed".into(), n(*sd as f64)), ("script".into(), script_json(&f.script))]))).collect();
+        let sh = shortest(s, per).map_or(Json::Null, |(sd, f)| { let cmds = commands(p, path, sd, f);
+            let (rp, ex) = cmds.map_or((Json::Null, Json::Null), |(r, e)| (st(&r), st(&e)));
+            let mut fields = vec![("seed".into(), n(sd as f64)), ("script".into(), script_json(&f.script)), ("turn".into(), n((f.script.len() - 1) as f64)), ("broken".into(), broken_json(&f.broken)),
+                ("stance".into(), f.doc.clone()), ("replay".into(), rp), ("explain".into(), ex)]; fields.extend(fixture_info(p, f)); Json::Obj(fields) });
+        let cex: Vec<Json> = s.seeds.iter().zip(per).filter_map(|(sd, f)| f.as_ref().map(|f| { let mut fields = vec![("seed".into(), n(*sd as f64)), ("script".into(), script_json(&f.script))]; fields.extend(fixture_info(p, f)); Json::Obj(fields) })).collect();
         Json::Obj(vec![("id".into(), st(&pr.id)), ("rule".into(), pr.rule.clone()), ("verdict".into(), st(if failing.is_empty() { "none_found" } else { "counterexample" })),
             ("individuals".into(), n(s.seeds.len() as f64)), ("failing".into(), n(failing.len() as f64)), ("failing_seeds".into(), Json::Arr(failing)),
             ("by_length".into(), Json::Obj(lengths(per).into_iter().map(|(l, c)| (l.to_string(), n(c as f64))).collect())), ("shortest".into(), sh), ("counterexamples".into(), Json::Arr(cex))]) }).collect();
@@ -246,7 +286,9 @@ pub fn human(p: &Persona, path: &str, props: &[Prop], s: &Search, res: &[Vec<Opt
                     else { o.push(format!("  turn {}: {} {} (odds {}); the rule allows {}", f.script.len() - 1, b.var, b.level, odds_text(p, &f.doc, &b.var), b.allowed.join(", "))); } }
                 let g = |k: &str| f.doc.get(k).and_then(Json::as_str).unwrap_or("").to_string();
                 o.push(format!("  why:     {}", g("why"))); o.push(format!("  line:    {}", g("line")));
-                let (rp, ex) = commands(path, sd, f); o.push(format!("  replay:  {rp}")); o.push(format!("  explain: {ex}"));
+                if let Some((rp, ex)) = commands(p, path, sd, f) { o.push(format!("  replay:  {rp}")); o.push(format!("  explain: {ex}")); }
+                else { o.push("  replay:  needs --fixture-src env:synthetic or human:synthetic (accepted by reward_from)".into()); }
+                if let Some((_, info)) = fixture_info(p, f).first() { o.push(format!("  fixture provenance: {}", persona::canon(info))); }
                 let seeds: Vec<u64> = s.seeds.iter().zip(per).filter(|(_, f)| f.is_some()).map(|(x, _)| *x).collect();
                 o.push(format!("  failing seeds: {}", ranges(&seeds))); }
         }
@@ -274,7 +316,7 @@ pub fn seeds(v: &str) -> Option<Vec<u64>> {
 pub fn tool(args: &[(String, Json)], eng: SyncEngine) -> Result<Json, crate::json::InErr> {
     use persona::perr;
     let get = |k: &str| args.iter().find(|(x, _)| x == k).map(|(_, v)| v).filter(|v| !v.is_null());
-    const KNOWN: [&str; 12] = ["persona", "persona_path", "never", "props", "seeds", "fuzz_seed", "scripts", "depth", "beam", "grid", "hours", "threads"];
+    const KNOWN: [&str; 13] = ["persona", "persona_path", "never", "props", "seeds", "fuzz_seed", "scripts", "depth", "beam", "grid", "hours", "threads", "fixture_src"];
     let mut extra: Vec<&str> = args.iter().map(|(k, _)| k.as_str()).filter(|k| !KNOWN.contains(k)).collect(); extra.sort_unstable();
     if let Some(k) = extra.first() { return Err(perr(&format!("arguments.{k}"), "unknown argument")); }
     let (p, path) = match (get("persona"), get("persona_path")) {
@@ -301,7 +343,11 @@ pub fn tool(args: &[(String, Json)], eng: SyncEngine) -> Result<Json, crate::jso
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     let s = Search { seeds: sd, fuzz_seed: whole("fuzz_seed", 0, 0, 1 << 53)? as u64, scripts: whole("scripts", 60, 0, 1_000_000)?, depth: whole("depth", 8, 1, 64)?, beam: whole("beam", 4, 0, 64)?,
         grid: nums("grid", &[0.0, 0.5, 1.0], 1.0)?, hours: nums("hours", &[1.0, 12.0, 48.0], 1e6)?, threads: whole("threads", cores, 1, 1024)? };
-    let (res, turns) = fuzz(&p, &props, &s, eng);
+    let (mut res, turns) = fuzz(&p, &props, &s, eng);
+    if let Some(source) = get("fixture_src") {
+        let source = source.as_str().ok_or_else(|| perr("arguments.fixture_src", "env:synthetic | human:synthetic"))?;
+        authorize_fixtures(&p, &s.seeds, &mut res, source, eng)?;
+    }
     Ok(doc(&p, &path, &props, &s, &res, turns))
 }
 
@@ -313,6 +359,37 @@ mod tests {
     use crate::json;
 
     fn run(prog: &Json, f: &persona::Flags) -> Json { persona::run_program(prog, f, 1, 100, 0) }
+    #[test]
+    fn synthetic_fixture_export_replays_strictly_without_weakening_sources() {
+        let p = persona::build(&json::parse(r#"{"probbit_persona":1,"identity":{"name":"Fixture","version":"1"},
+            "traits":[{"id":"action","levels":["retry","ask"],"logw":[1,0]}],
+            "inputs":[{"id":"praise","kind":"flag"},{"id":"criticism","kind":"flag"}],
+            "learning":{"from":["praise","criticism"],"traits":["action"],"rate":3,"step_cap":2,"total_cap":2},
+            "reward_from":["env"]}"#).unwrap()).unwrap();
+        let prs = persona::props(&p, &json::parse(r#"{"then":{"action":["retry"]}}"#).unwrap(), "never", "never").unwrap();
+        let s = Search { seeds: vec![0], fuzz_seed: 0, scripts: 0, depth: 3, beam: 4, grid: vec![0.0, 1.0], hours: vec![1.0], threads: 1 };
+        let (mut res, turns) = fuzz(&p, &prs, &s, &run);
+        let before = doc(&p, "fixture.json", &prs, &s, &res, turns);
+        let shortest = before.get("properties").unwrap().as_arr().unwrap()[0].get("shortest").unwrap();
+        assert_eq!(shortest.get("replay"), Some(&Json::Null));
+        let events = shortest.get("script").unwrap().as_arr().unwrap();
+        assert!(persona::replay(&p, Some(0), events, false, &run, false).is_err());
+        for src in ["env:production", "human:synthetic", "self", "clock"] {
+            assert!(authorize_fixtures(&p, &s.seeds, &mut res, src, &run).is_err(), "{src}");
+        }
+        authorize_fixtures(&p, &s.seeds, &mut res, "env:synthetic", &run).unwrap();
+        let f = res[0][0].as_ref().unwrap();
+        let events = script_json(&f.script);
+        let (replayed, _) = persona::replay(&p, Some(0), events.as_arr().unwrap(), false, &run, false).unwrap();
+        assert_eq!(replayed.last(), Some(&f.doc));
+        assert!(commands(&p, "fixture.json", 0, f).is_some());
+        assert!(authorize_fixtures(&p, &s.seeds, &mut res, "env:synthetic", &run).is_err(), "existing labels are never replaced");
+        let state = persona::init(&p, Some(0), true, &run);
+        for ev in [r#"{"praise":true}"#, r#"{"praise":true,"src":"self"}"#] {
+            assert!(persona::turn(&p, &state, &json::parse(ev).unwrap(), false, &run, false).is_err());
+        }
+    }
+
     /// A habit of a generated persona: id, `when`, `then` (JSON text) and priority
     struct H { id: String, when: String, then: String, priority: usize }
     /// A random persona: 2-3 traits (2-3 levels), a mood (inertia 0.3-0.8) coupled to each, flags f0 and f1, a level input lv (neg,
