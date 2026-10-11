@@ -1,6 +1,6 @@
 {
   "name": "probbit",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "probbit, a virtual p-bit processor for joint decisions under hard rules: installs the prebuilt probbit CLI (JSON in, JSON out).",
   "license": "Apache-2.0",
   "repository": {

@@ -105,8 +105,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.8.0; the one-liners
-were verified from clean machines on macOS (Apple silicon) and Linux (x86_64).
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.8.1.
 
 | how | command |
 |---|---|
@@ -534,7 +533,7 @@ anywhere ([docs/persona.md](docs/persona.md) §5.8). No strand yet? The tutor's 
 
 ```sh
 probbit monitor --demo --open
-probbit monitor --demo drives --open  # source checkout: synthetic goals/drive demo, not yet in the 0.8.0 release
+probbit monitor --demo drives --open  # synthetic goals/drive demo (0.8.1)
 ```
 
 ![probbit monitor: the tutor's week in the browser, the bars moving with every event](docs/probbit-monitor.gif)

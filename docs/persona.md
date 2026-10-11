@@ -698,7 +698,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.8.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.8.1","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
@@ -790,7 +790,8 @@ anchor. Historical measurement before this hardening, on an Apple M4: a 10,000-e
 bytes, 10 checkpoint lines) opens in `monitor --once` from its last checkpoint in 0.005 s (load 3.3), where a full `verify`
 takes 192 s. A replay from a checkpoint costs what the events after it cost: 500 events past the last one took 26 s to draw
 (load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
-strand of 0.8.0, byte for byte; a binary before this one does not read the new lines.
+same format as in 0.8.0. New strand headers record the current engine version, so their chain hashes differ; existing
+0.8.0 strands remain replayable. Binaries before 0.8.0 do not read checkpoint or control lines.
 
 Exit codes: `live` 0 when every event got its stance; 2 for a bad persona, state or flag, and after a bad event (each bad event
 prints one `{"error"}` object on stdout, changes nothing and the run goes on); 4 when the writer lock is held by another writer

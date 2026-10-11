@@ -650,8 +650,9 @@ fn src_events() -> Vec<String> {
         e.push(format!(r#""src":"{}""#, ["self", "human:owner", "env:tests", "clock"][t % 4])); format!("{{{}}}", e.join(",")) }).collect()
 }
 /// A persona without `reward_from` gives 0.8.0's bytes with `src` in its events (an undeclared input, listed in `ignored`): the
-/// trace, the strand and the final state of 300 events of the drives fixture (seed 4) are the ones the 0.8.0 binary writes, and
-/// the run leaves no lock file behind. The same persona with `reward_from: [human, env]` refuses the rewards from `self` and the
+/// trace, the continued 0.8.0 strand and the final state of 300 events of the drives fixture (seed 4) match the historical
+/// digests. Fresh headers identify the current binary; the run leaves no lock file behind. The same persona with
+/// `reward_from: [human, env]` refuses the rewards from `self` and the
 /// clock (exit 2, one error at `inputs.src` per refused event) and accepts the others.
 #[test]
 fn src_without_reward_from_gives_0_8_0_bytes() {
@@ -661,8 +662,15 @@ fn src_without_reward_from_gives_0_8_0_bytes() {
     let (c, _, e) = probbit(&["persona", "replay", &fx, "--seed", "4", "--script", &script], ""); assert_eq!(c, 0, "{e}");
     assert_eq!(e.trim(), "replay: 300 turns, trace sha256 ce8f247d1fe761ea651998f48360491030f15ba3c8530b0ed59d824868f71b71, final state sha256:52312b3cb8744360e7613e4db2fc5e3d326cb3c2204af7312e2a4196f9781551");
     let (_, s0, _) = probbit(&["persona", "init", &fx, "--seed", "4"], ""); std::fs::write(&st, &s0).unwrap();
+    let (c, _, e) = probbit(&["live", &fx, "--state", &st, "--clock", "fixed", "--strand", &sd], ""); assert_eq!(c, 0, "{e}");
+    let header = read(&sd); assert_eq!(header.lines().count(), 1);
+    let current_engine = concat!("\"engine\":\"probbit ", env!("CARGO_PKG_VERSION"), "\"");
+    assert!(header.contains(current_engine), "{header}");
+    // Continue a historical header: its version participates in every chained hash. Keep the 0.8.0 golden, not a new hash per release.
+    std::fs::write(&sd, header.replacen(current_engine, "\"engine\":\"probbit 0.8.0\"", 1)).unwrap();
     let (c, out, e) = probbit(&["live", &fx, "--state", &st, "--clock", "fixed", "--strand", &sd], &(evs.join("\n") + "\n")); assert_eq!(c, 0, "{e}");
     assert!(e.contains("strand head sha256:c37fea55abbec95d0c0f1f1703741e20c26cd5d66587132917772435a5e94655, final state sha256:52312b3cb8744360e7613e4db2fc5e3d326cb3c2204af7312e2a4196f9781551"), "{e}");
+    let (c, verified, e) = probbit(&["live", "verify", &sd], ""); assert_eq!(c, 0, "{verified}{e}");
     assert_eq!(out.lines().filter(|l| l.contains(r#""ignored":["src"]"#)).count(), 300);
     assert!(!std::path::Path::new(&format!("{sd}.lock")).exists(), "the lock is released");
     // with reward_from: the rewards from self and the clock are refused, the others accepted
