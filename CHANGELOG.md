@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.8.1 - 2026-10-10
 
 ### Fixed
 - Reject invalid JSON number grammar and raw control characters, platform-sized integer overflow, overflowing linear-cap
@@ -33,8 +33,8 @@ All notable changes to this project are documented here. The format follows
 - Independent enumeration/router oracles, actual WASM boundary tests, real Chromium interaction/layout checks, Node process
   contracts and cross-platform clean-prefix install tests (including Windows PowerShell 5.1/7 and npm 12).
 
-These changes are a source candidate, not an update to the published 0.8.0 artifacts. Probability gate thresholds and frozen
-benchmark corpora are unchanged. Passing finite tests is not exhaustive validation of every possible program or application.
+This patch release hardens validation, lifecycle handling and the host-facing contracts. Probability gate thresholds and
+frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive validation of every possible program or application.
 
 ## 0.8.0 - 2026-10-09
 
