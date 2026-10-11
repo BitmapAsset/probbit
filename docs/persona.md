@@ -801,19 +801,19 @@ invalid move, 4 when the lock is held or the individual is retired.
 
 ### 5.8 Monitor: watch an individual's inner state
 
-`probbit monitor STRAND` draws an individual's inner state as live horizontal bars, in the terminal or as a page in the browser.
+`probbit monitor STRAND` draws an individual's declared state as live terminal bars, or as a compact browser Activity Monitor.
 It replays the strand with the rules of `live verify` (the two share one replay), recomputing every stance document from the
 strand alone: it needs no other log, works for any strand on any machine, and says "replay verified" while every line checks,
 or names the line that differs.
 
 ```sh
 probbit monitor pip.strand --follow              # bars in the terminal, redrawn as the strand grows
-probbit monitor pip.strand --open                # the same board as a page at http://127.0.0.1:PORT/, in the browser
+probbit monitor pip.strand --open                # a channel table and inspector at http://127.0.0.1:PORT/, in the browser
 probbit monitor --demo --open                    # the tutor's week, paced, for someone without a strand yet
 probbit monitor --demo drives --open             # eight synthetic events with goals and drives
 ```
 
-**What it shows.** The latest event. A header: persona and version, seed, the individual's digest, the event number, the hours
+**What it shows.** The latest event (or a selected historical event in the browser). In the terminal, a header: persona and version, seed, the individual's digest, the event number, the hours
 since the event before, the replay badge. The stance: one row per trait, its levels as segments sized by their odds, the level
 taken in colour and the phrase it says. The moods, with a sparkline of the last 50 events. The senses: the event's inputs as the
 turn used them (flags lit, numbers as bars, levels by name, the clock) and the history features against their caps. The habits
@@ -844,36 +844,57 @@ cannot read the documents:
 | `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}`, that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
 
-The browser opens an **observatory for one individual**. Its state portrait uses concentric probability rings: one ring per
-declared mood (the first four, outside inward, in declaration order), arc length proportional to the reported odds and the
-selected level highlighted. The textual mood levels, selected trait cards, exact probabilities, stance line and engine's
-`why` stay alongside the picture. The portrait is not a face, an emotion detector, a thought stream, or a task-progress feed.
-Quiet connections do not animate new state; SSE heartbeat comments are not events.
+The browser opens a compact **Activity Monitor for one individual**, not a fleet dashboard. Its utility-style toolbar,
+channel table and inspector use system fonts and an automatic light/dark appearance (also selectable in the toolbar).
+The desktop list scrolls inside the utility; at narrow widths the inspector sits below it. This is a browser-rendered CLI
+surface, not a native Swift, WinUI or Electron app. For a native terminal snapshot, use `probbit monitor STRAND --once`;
+`--plain` adds a portable text-only form. No separate application installation is needed.
+
+**Channels.** Every declared trait and mood gets a row; when present, `pursue` and each goal's wanting, afterglow and
+prediction error become drive rows. All/Traits/Moods/Drives filters, a text filter, sortable columns and keyboard selection
+work for arbitrary persona names and channel declarations. A persona-confidence hold is marked **held**, with pre-hold odds in the inspector; an engine-unreleased trait is separately marked **unreleased**. Missing
+values are unreported, not zero. A channel's inspector shows its actual selected level/value, each reported probability,
+units, declared range, source field, optional supplied phrase and the engine's event-level `why`. That `why` is not a
+per-channel causal attribution or a model's thoughts.
+
+**Reading the graphs.** The table trace for a discrete channel follows the *currently selected level's probability* through
+past documents; the inspector plots each declared level's probability separately. No semantic ordering is assumed for the
+level names. Drive traces show the reported numeric values in engine units (wanting/afterglow) or reward error (prediction
+error), against the declared cap (including `expectation.pe_cap` for prediction error). `Δ event` compares the same quantity to the immediately preceding
+available event; probabilities use percentage points. Unknown history is a gap, not a connecting line or fabricated zero.
+Both chart axes and timeline refer to **event numbers**, not wall-clock timestamps. Quiet connections never create state,
+mood decay or graph samples; SSE heartbeat comments are not events.
 
 **Inspecting history.** The timeline loads at most the latest 50 documents from `/doc/N`, with at most four concurrent
-requests. Its marks show the first declared mood's mean level (or equal-height event marks if no moods are declared).
-Select a mark, use the previous/next buttons, or use the keyboard-accessible scrubber to hold an event. **Pause view** only
-holds the browser; it never pauses the individual. New events still arrive and **Follow latest (+N)** returns to them.
-If a held event ages out of that 50-event window, its displayed state is retained, the out-of-window condition is named,
-and the scrubber is hidden until a recent event is selected or following resumes.
-Comparisons name changes from the immediately preceding available document, not inferred causes; `why` is the engine's
-own reported evidence. Missing documents are disabled, not interpolated. A checkpoint bounds available history; a demo
-restart, changed persona, or observed strand reset clears the browser's old document cache.
+requests. Equal-sized marks represent recorded events, not workload. Select a mark, use previous/next, or use the
+keyboard-accessible scrubber to hold an event. **Hold view** freezes only the browser's inspected event; the individual
+and stream continue. **Follow latest (+N)** returns to the newest event. If a held event ages out of that 50-document
+window, its displayed state is retained, the out-of-window condition is named, and the scrubber is hidden until a recent
+event is selected. A checkpoint bounds available history. Demo restarts, changed metadata or observed strand resets clear
+the cache; metadata arriving without a following frame immediately clears the prior individual's visible state.
 
-`/doc/N` contains a stance document, not a complete monitor frame. For historical documents the page does not invent raw
-clock inputs, learned deltas, or missing mood-trail samples. The raw clock and learned panel are only populated when that
-event's full frame was actually received. The remaining replay diagnostics (moods, input/history features, habits, drives)
-stay available when the document carries them. The JSON link always points to the inspected event.
+`/doc/N` contains a stance document, not a complete monitor frame. Historical documents therefore have no invented raw
+clock inputs or learned deltas. These appear in the expandable event-evidence area only when that event's full frame was
+actually received. Document inputs, history features and rules remain available. The JSON link follows the inspected event.
 
-The connection status is separate from the inspected event: live/awaiting-event, synthetic replay, held view, paused or
-retired strand, replay divergence, and disconnected/retrying are distinguished. A disconnected page retains its last
-received state without claiming the agent is active. Replay verification always describes the current stream, including
-its checkpoint scope. No wall-clock work telemetry is implied.
+**Status is separate from the graph.** Live/awaiting-event, synthetic replay, held view, paused/frozen strand, permanently
+retired strand, replay divergence and disconnected/retrying are distinct. After 60 seconds without a newly numbered event
+received in this browser, an otherwise connected active strand is labelled **stale event**. This is *receiver age*, not an
+engine timestamp and not evidence that the host or agent is idle. Disconnects retain the last received state without claiming
+live activity. The replay badge describes the current stream and its checkpoint scope, even while an older event is held.
 
-The page is usable from 360 px wide, respects `prefers-reduced-motion`, and loads no external assets or dependencies.
-No file is changed, and nothing leaves the machine. Real Chrome/Chromium regressions (Node 22+, no npm dependencies):
-`cargo build --release -p probbit-cli`, then `node probbit-cli/tests/monitor_browser.mjs`. Fixtures and screenshots are
-synthetic; generated artifacts default to a temporary directory, not the repository.
+**Scope.** One endpoint has one individual. No agent fleet, thoughts, CPU, GPU, memory, token use or task activity is inferred.
+To add multiple agents, a host adapter would need an explicit registry of endpoint/individual identities and independently
+measured lifecycle and work telemetry, each with its own timestamp/source. Those are not supplied by the current strand or
+monitor API. A future fleet surface must keep per-individual replay/history and source attribution separate; a list of
+channels is not a list of agents.
+
+The page works from 360 px wide, respects `prefers-reduced-motion`, and loads no external assets or dependencies.
+No strand is changed, and nothing leaves the machine. Real Chrome/Chromium regressions (Node 22+, no npm dependencies):
+`cargo build --release -p probbit-cli`, then `node probbit-cli/tests/monitor_browser.mjs`. Only authored synthetic fixtures are
+used, visibly labelled in screenshots. Generated evidence defaults to a temporary directory, not the repository. The checks
+cover sorting/filtering/keyboard selection, arbitrary and traits-only personas, unreleased levels, append/hold/backfill,
+missing history gaps, checkpoint bounds, 50 documents/four fetches, stale/frozen/retired/disconnected states and metadata reset.
 
 **Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
 5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:

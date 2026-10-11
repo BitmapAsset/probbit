@@ -210,8 +210,8 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     let host = format!("127.0.0.1:{port}");
     let (st, h, page) = get(port, "/", &host);
     assert_eq!(st, "HTTP/1.1 200 OK"); assert!(h.contains("Content-Type: text/html") && h.contains("connect-src 'self'"), "{h}");
-    // The offline observatory includes its portrait and document-history controls; still no assets or dependencies.
-    assert!(page.contains("<title>probbit monitor</title>") && page.contains("new EventSource('/events')") && page.len() < 64_000, "{} bytes", page.len());
+    // The self-contained activity monitor keeps channel selection and document history offline.
+    assert!(page.contains("<title>probbit · Activity Monitor</title>") && page.contains("new EventSource('/events')") && page.len() < 64_000, "{} bytes", page.len());
     // the page fetches nothing from anywhere else: no URL in it but the SVG namespace
     assert!(page.match_indices("http").all(|(i, _)| page[i..].starts_with("http://www.w3.org/2000/svg")), "a URL in the page");
     for k in 1..=3 { let (st, _, d) = get(port, &format!("/doc/{k}"), &host); assert_eq!((st.as_str(), d.as_str()), ("HTTP/1.1 200 OK", format!("{}\n", docs[k - 1]).as_str()), "doc {k}"); }
@@ -250,7 +250,7 @@ fn open_serves_the_page_the_demo_too() {
     let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.0.stdout.take().unwrap()), &mut url).unwrap();
     let port: u16 = url.trim_end().strip_prefix("http://127.0.0.1:").and_then(|p| p.strip_suffix('/')).unwrap_or_else(|| panic!("the URL line: {url:?}")).parse().unwrap();
     let host = format!("127.0.0.1:{port}");
-    let (st, _, page) = get(port, "/", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(page.contains("<title>probbit monitor</title>"));
+    let (st, _, page) = get(port, "/", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(page.contains("<title>probbit · Activity Monitor</title>"));
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
     write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
     let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
