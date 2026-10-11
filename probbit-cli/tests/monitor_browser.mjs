@@ -69,7 +69,7 @@ async function server(args, tag) {
     if (child.exitCode !== null) throw Error('Monitor exited: ' + stderr);
     return stdout.match(/http:\/\/127\.0\.0\.1:\d+\//)?.[0];
   }, tag + ' server');
-  return {url};
+  return {url, child};
 }
 
 async function json(url) {
@@ -144,6 +144,14 @@ try {
   const send = await cdp(tabs.find(tab => tab.type === 'page').webSocketDebuggerUrl);
   await send('Page.enable');
   await send('Runtime.enable');
+  // Keep a test-only handle to the real SSE connection for the metadata-without-frame boundary.
+  // The product page has no test hooks and its normal EventSource behavior is unchanged.
+  await send('Page.addScriptToEvaluateOnNewDocument', {source:`{
+    const NativeEventSource = window.EventSource;
+    window.EventSource = class extends NativeEventSource {
+      constructor(...args) { super(...args); window.monitorTestStream = this; }
+    };
+  }`});
   await send('Emulation.setEmulatedMedia', {features: [{name: 'prefers-reduced-motion', value: 'reduce'}]});
   const value = async expression => {
     const result = await send('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true});
@@ -157,6 +165,7 @@ try {
   };
   const state = () => value(`({
     event: document.getElementById('ev')?.textContent,
+    identity: document.getElementById('identity')?.textContent,
     note: document.getElementById('note')?.textContent,
     badge: document.getElementById('badge')?.textContent,
     line: document.getElementById('line')?.textContent,
@@ -165,6 +174,17 @@ try {
     emptyHidden: document.getElementById('empty')?.hidden,
     rawHidden: document.getElementById('raw')?.hidden,
     drives: document.getElementById('drives')?.hidden,
+    stream: document.getElementById('stream-title')?.textContent,
+    streamDetail: document.getElementById('stream-detail')?.textContent,
+    portrait: document.getElementById('portrait-title')?.textContent,
+    heroHidden: document.getElementById('hero')?.hidden,
+    view: document.getElementById('view-mode')?.textContent,
+    historyCount: document.getElementById('history-count')?.textContent,
+    historyNote: document.getElementById('history-note')?.textContent,
+    historicalNoteHidden: document.getElementById('historical-note')?.hidden,
+    learnedHidden: document.getElementById('learned')?.hidden,
+    changes: document.getElementById('changes')?.textContent,
+    follow: document.getElementById('follow')?.textContent,
     scrollWidth: document.documentElement.scrollWidth, width: innerWidth,
     height: document.documentElement.scrollHeight
   })`);
@@ -190,6 +210,9 @@ try {
   await event(3);
   report.demo.event3 = await state();
   assert.equal(report.demo.event3.drives, false);
+  assert.ok(report.demo.event3.stream.includes('SYNTHETIC'));
+  assert.ok(report.demo.event3.portrait.includes('Event 3.') && report.demo.event3.portrait.includes('selected'));
+  assert.equal(await value(`getComputedStyle(document.querySelector('.portrait-ring')).transitionDuration`), '0s');
   await shot('monitor-drives-desktop', 1440, 1000);
   await shot('monitor-drives-narrow', 390, 844);
   await event(4);
@@ -204,13 +227,21 @@ try {
   await shot('monitor-drives-completed', 1440, 1000);
   await until(async () => (await state()).note?.includes('loop 2'), 'demo loop 2');
   report.demo.restarted = await state();
-  assert.equal(report.demo.restarted.event, 'event 0');
-  assert.equal(report.demo.restarted.line, '');
-  assert.equal(report.demo.restarted.why, '');
-  assert.equal(report.demo.restarted.saidHidden, true);
-  assert.equal(report.demo.restarted.emptyHidden, false);
-  assert.equal(report.demo.restarted.rawHidden, true);
-  assert.equal(report.demo.restarted.drives, true);
+  // SSE may coalesce the empty loop-start frame with event 1 (the first event has no delay).
+  assert.ok(['event 0', 'event 1'].includes(report.demo.restarted.event));
+  if (report.demo.restarted.event === 'event 0') {
+    assert.equal(report.demo.restarted.line, '');
+    assert.equal(report.demo.restarted.why, '');
+    assert.equal(report.demo.restarted.saidHidden, true);
+    assert.equal(report.demo.restarted.emptyHidden, false);
+    assert.equal(report.demo.restarted.rawHidden, true);
+    assert.equal(report.demo.restarted.drives, true);
+    assert.equal(report.demo.restarted.heroHidden, true);
+  } else {
+    assert.equal(report.demo.restarted.line, (await json(demo.url + 'doc/1')).line);
+    assert.equal(report.demo.restarted.historyCount, '1/1 recent documents');
+    assert.equal(await value(`document.getElementById('scrubber').max`), '1');
+  }
 
   const week = await server(['--demo'], 'week');
   await navigate(week.url);
@@ -229,6 +260,8 @@ try {
   await navigate(follow.url);
   await event(1);
   report.follow.before = await state();
+  assert.ok(report.follow.before.stream.includes('LIVE'));
+  assert.ok(report.follow.before.changes.includes('First recorded event'));
   await shot('monitor-follow-before', 1440, 1000);
   appendFileSync(growing, lines[2].slice(0, -1));
   await sleep(350);
@@ -243,15 +276,54 @@ try {
   assert.equal(report.follow.after.line, outputs[1].line);
   assert.deepEqual(await json(follow.url + 'doc/2'), outputs[1]);
   await shot('monitor-follow-after', 1440, 1000);
+  await value(`document.getElementById('hold').click()`);
   appendFileSync(growing, lines[3]);
+  await until(async () => (await state()).streamDetail.includes('latest received event 3'), 'paused view receives event');
+  report.follow.held = await state();
+  assert.equal(report.follow.held.event, 'event 2');
+  assert.equal(report.follow.held.line, outputs[1].line);
+  assert.ok(report.follow.held.follow.includes('+1'));
+  await shot('monitor-history-held', 1440, 1000);
+  await value(`document.getElementById('previous').click()`);
+  assert.equal((await state()).line, outputs[0].line);
+  await value(`document.getElementById('scrubber').focus()`);
+  await send('Input.dispatchKeyEvent', {type:'keyDown', key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39});
+  await send('Input.dispatchKeyEvent', {type:'keyUp', key:'ArrowRight', code:'ArrowRight', windowsVirtualKeyCode:39});
+  assert.equal((await state()).event, 'event 2');
+  await value(`document.getElementById('follow').click()`);
   await event(3);
   assert.ok((await state()).why.includes('prior state still applies'));
   assert.equal((await json(follow.url + 'doc/3')).why, 'baseline (no live evidence)');
   report.follow.rawWhyUnchanged = true;
+  // Reloading backfills /doc/N, which does not contain the full frame's raw clock or learned deltas.
+  await navigate(follow.url + '?backfill');
+  await event(3);
+  await until(async () => (await state()).historyCount === '3/3 recent documents', 'history backfill');
+  await value(`document.querySelector('[data-event="1"]').click()`);
+  report.follow.documentOnly = await state();
+  assert.equal(report.follow.documentOnly.line, outputs[0].line);
+  assert.equal(report.follow.documentOnly.historicalNoteHidden, false);
+  assert.equal(report.follow.documentOnly.learnedHidden, true);
+  assert.equal(await value(`document.getElementById('raw').getAttribute('href')`), '/doc/1');
+  await shot('monitor-historical-document', 1440, 1000);
+  await value(`document.getElementById('follow').click()`);
   command(['live', 'control', growing, 'pause', '--by', 'human:demo', '--reason', 'synthetic browser check']);
   await until(async () => (await state()).badge?.includes('paused'), 'paused status');
   report.follow.paused = await state();
+  assert.ok(report.follow.paused.stream.includes('STRAND PAUSED'));
   await shot('monitor-paused-narrow', 390, 844);
+  await value(`window.lineFlashes = 0; new MutationObserver(ms => { window.lineFlashes += ms.length; }).observe(document.getElementById('line'), {attributes:true, attributeFilter:['class']})`);
+  follow.child.kill('SIGTERM');
+  await until(async () => (await state()).stream.includes('DISCONNECTED'), 'disconnected status');
+  report.follow.disconnected = await state();
+  assert.equal(report.follow.disconnected.line, outputs[2].line);
+  await shot('monitor-disconnected', 1440, 1000);
+  await until(() => follow.child.exitCode !== null || follow.child.signalCode !== null, 'server shutdown');
+  await server([growing, '--port', new URL(follow.url).port], 'reconnected');
+  await until(async () => (await state()).stream.includes('STRAND PAUSED'), 'SSE reconnect');
+  report.follow.reconnected = await state();
+  assert.equal(report.follow.reconnected.line, outputs[2].line);
+  assert.equal(await value('window.lineFlashes'), 0, 'Re-delivering the same SSE frame must not flash a new event');
 
   const checkpoint = path.join(out, 'checkpoint-' + Date.now() + '.strand');
   command(['live', 'examples/persona/tutor.yaml', '--seed', '2', '--clock', 'fixed', '--checkpoint-every', '2', '--strand', checkpoint], '{}\n{}\n{}\n');
@@ -260,6 +332,63 @@ try {
   await event(3);
   report.checkpoint = await state();
   assert.ok(report.checkpoint.badge.includes('from checkpoint 2'));
+  await until(async () => (await state()).historyCount === '2/2 recent documents', 'checkpoint history bound');
+  assert.equal(await value(`document.getElementById('scrubber').min`), '2');
+
+  const longStrand = path.join(out, 'long-history-' + Date.now() + '.strand');
+  const longFull = path.join(out, 'long-full-' + Date.now() + '.strand');
+  command(['live', 'examples/persona/tutor.yaml', '--seed', '2', '--clock', 'fixed', '--strand', longFull], '{}\n'.repeat(111));
+  const longLines = readFileSync(longFull, 'utf8').match(/.*\n/g);
+  writeFileSync(longStrand, longLines.slice(0, 61).join(''));
+  const longServer = await server([longStrand], 'long-history');
+  await navigate(longServer.url);
+  await event(60);
+  await until(async () => (await state()).historyCount === '50/50 recent documents', 'bounded history');
+  report.history = await state();
+  assert.equal(await value(`document.querySelectorAll('#history-strip button').length`), 50);
+  assert.equal(await value(`document.getElementById('scrubber').min`), '11');
+  const stable = await value(`document.getElementById('portrait').innerHTML`);
+  await sleep(500);
+  assert.equal(await value(`document.getElementById('portrait').innerHTML`), stable, 'Quiet strand must not animate fabricated state');
+  await shot('monitor-history-50-narrow', 360, 800);
+  await value(`document.getElementById('hold').click()`);
+  appendFileSync(longStrand, longLines.slice(61).join(''));
+  await until(async () => (await state()).streamDetail.includes('latest received event 111'), 'held event outside recent window');
+  await until(async () => (await state()).historyCount === '50/50 recent documents', 'new history window');
+  report.historyOutsideWindow = await state();
+  assert.equal(report.historyOutsideWindow.event, 'event 60');
+  assert.ok(report.historyOutsideWindow.historyNote.includes('outside the recent window (#62–#111)'));
+  assert.equal(await value(`document.getElementById('scrubber').parentNode.hidden`), true);
+  assert.equal(await value(`document.querySelectorAll('#history-strip [aria-current="true"]').length`), 0);
+  await shot('monitor-held-outside-window', 1440, 1000);
+  await value(`document.getElementById('follow').click()`);
+  await event(111);
+  assert.equal(await value(`document.getElementById('scrubber').parentNode.hidden`), false);
+  assert.ok(await value(`performance.getEntriesByType('resource').every(r => new URL(r.name).origin === location.origin)`), 'No external page resources');
+  // A new persona header may arrive just before the connection drops, with no following frame.
+  // It must immediately remove the previous individual's visible state, including a held view.
+  await value(`document.getElementById('hold').click();
+    window.monitorTestStream.close();
+    window.monitorTestStream.dispatchEvent(new MessageEvent('meta', {data:JSON.stringify({
+      persona:{name:'Second fixture',version:'1',seed:9,individual:'synthetic-second'},
+      path:'synthetic.strand',traits:[],moods:[],inputs:[],history:[]
+    })}));`);
+  report.metadataOnly = await state();
+  assert.equal(report.metadataOnly.identity, 'Second fixture');
+  assert.equal(report.metadataOnly.line, '');
+  assert.equal(report.metadataOnly.why, '');
+  assert.equal(report.metadataOnly.heroHidden, true);
+  assert.equal(report.metadataOnly.saidHidden, true);
+  assert.equal(report.metadataOnly.rawHidden, true);
+  assert.equal(report.metadataOnly.learnedHidden, true);
+  assert.equal(report.metadataOnly.stream, 'AWAITING FIRST EVENT');
+  assert.equal(report.metadataOnly.badge, 'awaiting first event');
+  await value(`window.monitorTestStream.dispatchEvent(new Event('error'))`);
+  report.metadataDisconnected = await state();
+  assert.ok(report.metadataDisconnected.stream.includes('DISCONNECTED'));
+  assert.equal(report.metadataDisconnected.line, '');
+  assert.equal(report.metadataDisconnected.heroHidden, true);
+  await shot('monitor-metadata-without-frame', 1440, 1000);
   assert.equal(failures.length, 0, JSON.stringify(failures));
   report.ok = true;
 } catch (error) {

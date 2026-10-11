@@ -9,24 +9,23 @@
 <!-- probbit monitor (docs/persona.md §5.8): this page is served by `probbit monitor --serve` on 127.0.0.1. It loads nothing from
      anywhere: its styles and script are below, and its data comes from /events on the same server. -->
 <style>
-:root{--bg:#0b0f14;--card:#0f151c;--edge:#19212b;--text:#e6edf3;--soft:#aab6c2;--muted:#7d8a97;--dim:#55616d;--cyan:#22d3ee;--amber:#f5b041;--green:#34d399;--orange:#fb923c;--red:#f87171;--violet:#a78bfa;--s1:#2a3440;--s2:#212a34;--track:#161d25}
+:root{--bg:#0b1014;--card:#11191e;--edge:#26333a;--text:#e7eee9;--soft:#b5c5c8;--muted:#8c9fa6;--dim:#7d929a;--cyan:#8bdec6;--amber:#e6b77c;--green:#8bdec6;--orange:#f0b88b;--red:#f58e87;--violet:#aab9ed;--s1:#34464f;--s2:#27363e;--track:#1c2a31;--mono:ui-monospace,SFMono-Regular,Consolas,monospace}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-main{max-width:1240px;margin:0 auto;padding:18px 24px 20px}
+main{max-width:1440px;margin:0 auto;padding:24px 36px 28px}
 .cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:0 12px;align-items:start}
-header{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-bottom:14px}
+header{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin-bottom:24px}
 .mark{width:22px;height:28px;flex:none}
 .brand{font-weight:600;letter-spacing:.2px}
-.who{font-weight:600;color:var(--cyan)}
+.who{font-weight:500;color:var(--soft);margin-left:auto;overflow-wrap:anywhere}
 .facts{color:var(--muted);font-variant-numeric:tabular-nums;display:flex;gap:6px 12px;flex-wrap:wrap}
 .facts span:empty{display:none}
-.badge{margin-left:auto;padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--edge);color:var(--muted);background:var(--card);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;transition:color .3s,border-color .3s,background-color .3s}
+.badge{padding:4px 11px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--edge);color:var(--muted);background:var(--card);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .badge.ok{color:var(--green);border-color:#1d5a46;background:#0d211b}
 .badge.bad{color:var(--red);border-color:#6a2a2a;background:#241212;white-space:normal}
 .note{color:#e7c46a;font-size:13px;overflow-wrap:anywhere}.legend{color:var(--muted);font-size:12px;margin:0 0 14px}.legend b{color:var(--soft)}
 .empty{color:var(--muted);padding:28px 0;text-align:center}
-section{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:10px 16px 8px;margin-bottom:12px}
-#said{background:linear-gradient(180deg,#0f1b23,var(--card));border-color:#1b2b35}
+section{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:18px 20px;margin-bottom:14px;min-width:0}
 h2{margin:0 0 6px;font-size:11px;letter-spacing:.14em;color:var(--dim);font-weight:700;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 h2 small{letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
 .row{display:grid;grid-template-columns:104px minmax(150px,1.2fr) minmax(0,1fr);gap:2px 16px;align-items:center;padding:4px 0}
@@ -76,7 +75,7 @@ h2 small{letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
 .ctr i{position:absolute;top:0;bottom:0;left:50%;width:0;border-radius:6px;transition:width .3s ease,left .3s ease}
 .ctr i.pos{background:var(--green)}
 .ctr i.neg{background:var(--violet)}
-.pe{display:flex;align-items:center;gap:8px;font-size:12.5px;opacity:.28}
+.pe{display:flex;align-items:center;gap:8px;font-size:12.5px;opacity:.7}
 .pe.flash{animation:fade 3s ease-out forwards}
 @keyframes fade{from{opacity:1}to{opacity:.28}}
 .petrack{position:relative;width:84px;height:8px;border-radius:6px;background:var(--track)}
@@ -85,7 +84,7 @@ h2 small{letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
 .pe.neg .petrack i{background:var(--red)}
 .pe.pos .petxt{color:var(--green)}
 .pe.neg .petxt{color:var(--red)}
-.line{font-size:clamp(17px,2.2vw,23px);line-height:1.4;font-weight:500;color:#f2f7fb;letter-spacing:.1px}
+.line{font-size:clamp(19px,2.1vw,27px);line-height:1.38;font-weight:500;color:var(--text);letter-spacing:-.5px}
 .line.new{animation:rise .3s ease-out}
 @keyframes rise{from{opacity:.25;transform:translateY(3px)}to{opacity:1;transform:none}}
 .line,.why{overflow-wrap:anywhere}
@@ -93,9 +92,17 @@ h2 small{letter-spacing:0;font-weight:500;color:var(--dim);font-size:11px}
 footer{color:var(--dim);font-size:12px;display:flex;flex-wrap:wrap;gap:4px 16px;padding:4px 2px 0;word-break:break-all}
 footer a{color:var(--muted)}
 footer a:hover{color:var(--cyan)}
+.division{color:var(--muted);font-weight:400;margin-left:8px}.eyebrow{font:10px/1.5 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.mast{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-bottom:18px}.mast h1{font-size:clamp(32px,4vw,48px);font-weight:500;letter-spacing:-1.7px;margin:2px 0 8px;line-height:1.05;overflow-wrap:anywhere}.stream{max-width:380px;text-align:right}.stream strong{font:11px var(--mono);letter-spacing:.08em;color:var(--cyan)}.stream small{display:block;color:var(--muted);margin-top:7px;font-size:12px}.stream[data-mode="disconnected"] strong,.stream[data-mode="diverged"] strong{color:var(--red)}.stream[data-mode="paused"] strong{color:var(--amber)}
+.hero{display:grid;grid-template-columns:340px minmax(0,1fr);padding:0;overflow:hidden;background:linear-gradient(120deg,#14252a,var(--card) 48%)}
+.portrait{padding:24px 26px 22px;border-right:1px solid var(--edge);text-align:center;min-width:0}.portrait svg{width:100%;max-width:290px;display:block;margin:8px auto 0;overflow:visible}.portrait .eyebrow{text-align:left}.portrait-caption{font-size:11px;color:var(--muted);line-height:1.6;max-width:265px;margin:auto}.portrait svg text{fill:var(--muted);font:10px var(--mono);letter-spacing:2px}.portrait svg .event-number{font:500 53px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-2px;fill:var(--text)}.portrait-ring{transition:stroke-dasharray .45s ease,stroke-dashoffset .45s ease,stroke .45s ease;transform:rotate(-90deg);transform-origin:160px 160px;fill:none}
+.expression{padding:26px 30px;min-width:0}.expression-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:18px}.event-tag{font:11px var(--mono);color:var(--cyan);border:1px solid #33584f;padding:4px 9px;border-radius:5px;white-space:nowrap}.mood-picks{display:flex;gap:16px 32px;flex-wrap:wrap;margin-bottom:20px}.mood-pick{min-width:112px}.mood-pick .eyebrow{display:flex;align-items:center;gap:6px}.swatch{width:6px;height:6px;border-radius:50%;display:inline-block}.mood-pick strong{display:block;font-size:26px;font-weight:500;letter-spacing:-.7px;overflow-wrap:anywhere}.mood-pick small{font:11px var(--mono);color:var(--muted)}
+#said{border-top:1px solid var(--edge);padding-top:16px}#said h2{margin-bottom:8px}.why{margin-top:12px;color:var(--soft)}.change-list{display:flex;gap:6px;flex-wrap:wrap;margin-top:13px}.change{font:11px/1.6 var(--mono);color:var(--soft);padding:3px 8px;background:#1b2c32;border-radius:4px}.change.empty-change{background:none;color:var(--muted);padding-left:0}.truth{color:var(--muted);font-size:12px;margin:14px 0 0;max-width:680px}.note{padding:8px 0}.note:empty{display:none}
+.timeline-head{display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap}.timeline-head h2{margin:0}.controls{display:flex;gap:6px}button{font:inherit;font-size:12px;line-height:1.4;color:var(--soft);background:#19262d;border:1px solid #35464e;border-radius:6px;padding:6px 12px;cursor:pointer;min-height:32px}button:hover:not(:disabled){background:#263b42;color:var(--text)}button:disabled{opacity:.4;cursor:default}button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}#follow{color:var(--cyan);border-color:#426e60}#history-note{font-size:12px;color:var(--muted);margin:9px 0 0;min-height:18px}.history-strip{display:flex;gap:3px;height:48px;align-items:end;padding:8px 0 2px}.history-strip button{flex:1;min-width:0;max-width:36px;min-height:24px;height:100%;border:0;border-radius:2px;background:none;padding:0;display:flex;align-items:end;position:relative}.history-strip i{display:block;width:100%;background:#416166;border-radius:2px;height:var(--height,25%);min-height:5px}.history-strip button:hover i{background:var(--soft)}.history-strip button[aria-current="true"] i{background:var(--cyan)}.history-strip button[aria-current="true"]:after{content:"";position:absolute;bottom:-5px;left:0;right:0;height:2px;background:var(--cyan)}.history-strip button:disabled i{background:var(--edge)}.scrub-row{display:flex;align-items:center;gap:12px;margin-top:8px}.scrub-row span{font:10px var(--mono);color:var(--muted);white-space:nowrap}input[type=range]{width:100%;accent-color:var(--cyan);height:16px;cursor:pointer;margin:0}.history-meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:8px;color:var(--muted);font:10px var(--mono)}
+#stance .rows{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}#stance h2{margin-bottom:16px}.row.trait{display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--edge);border-radius:8px;padding:12px 14px;gap:7px;background:#111d23;min-width:0}.trait .id{font:10px var(--mono);text-transform:uppercase;letter-spacing:.1em}.trait .selected{font-size:18px;letter-spacing:-.3px;color:var(--cyan);overflow-wrap:anywhere}.trait .side{font-size:12px;order:2;min-height:34px}.trait .bar{height:5px;margin-top:2px}.trait .odds{font-size:10px;gap:2px 8px;color:var(--muted)}.trait.changed{border-color:#46786a}.trait .changed-label{font:9px var(--mono);text-transform:uppercase;color:var(--amber);margin-left:8px}.diagnostic-title{margin:26px 0 12px}.legend{font-size:11px;margin-bottom:14px}.cols h2{color:var(--soft)}.historical-note{color:var(--amber);font-size:12px;margin:6px 0 10px}.view-mode{font:10px var(--mono);color:var(--muted);letter-spacing:.06em}.empty{border:1px dashed var(--edge);border-radius:12px;padding:40px 20px}
 [hidden]{display:none!important}
-@media (max-width:1060px){.cols{display:block}}
-@media (max-width:760px){main{padding:16px 14px 20px}.row{grid-template-columns:1fr;gap:4px}.deltas,.dcell{grid-column:auto}.badge{margin-left:0}.row.mood{grid-template-columns:1fr}.spark{max-width:120px}}
+@media (max-width:1100px){.cols{display:block}.hero{grid-template-columns:290px minmax(0,1fr)}.expression{padding:24px}#stance .rows{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){main{padding:18px 14px 20px}header{gap:8px 12px}.who{margin-left:0}.mast{align-items:start;flex-direction:column}.stream{text-align:left}.hero{grid-template-columns:1fr}.portrait{border-right:0;border-bottom:1px solid var(--edge);padding:20px}.portrait svg{max-width:230px}.expression{padding:20px}.row{grid-template-columns:1fr;gap:4px}.deltas,.dcell{grid-column:auto}.badge{margin-left:0}.row.mood{grid-template-columns:1fr}.spark{max-width:120px}section{padding:16px}.trait .odds{font-size:10px}#stance .rows{gap:8px}.row.trait{padding:10px}.history-strip{gap:2px}.truth{font-size:11px}.portrait-caption{max-width:none}.mood-pick strong{font-size:25px}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important}.pe{opacity:1}}
 </style>
 </head>
@@ -103,21 +110,27 @@ footer a:hover{color:var(--cyan)}
 <main>
 <header>
 <svg class="mark" viewBox="100 40 312 394" role="img" aria-label="probbit"><g fill="#fff"><path d="M178 270 155 76 176 52 202 52 219 69 238 265Z"/><path d="M274 265 293 69 310 52 319 52 301 114 316 114 305 178 339 98 322 98 332 52 336 52 357 76 334 270Z"/><path fill-rule="evenodd" d="M112 308a144 114 0 1 0 288 0a144 114 0 1 0-288 0ZM124 278v52h264v-52Z"/></g><path fill="#00F0FF" d="M136 288h240v32H136Z"/></svg>
-<span class="brand">probbit monitor</span>
+<span class="brand">probbit <span class="division">/ observatory</span></span>
 <span class="who" id="who"></span>
-<span class="facts"><span id="seed"></span><span id="ev"></span><span id="clk"></span></span>
-<span class="note" id="note" hidden></span>
 <span class="badge" id="badge">connecting</span>
 </header>
 <noscript><p class="empty">This page draws with JavaScript. In a terminal, <code>probbit monitor STRAND</code> draws the same bars.</p></noscript>
-<p class="legend"><b>Reading the bars:</b> width = reported probability; colour = chosen level, not necessarily the most likely one. Mood trails show mean level, low to high, over the last 50 events.</p>
+<div class="mast"><div><div class="eyebrow">One individual. A visible history.</div><h1 id="identity">State observatory</h1><div class="facts"><span id="seed"></span><span id="clk"></span></div></div><div class="stream" id="stream" data-mode="connecting" role="status"><strong id="stream-title">CONNECTING</strong><small id="stream-detail">Waiting for the local monitor.</small></div></div>
+<p class="note" id="note" hidden></p>
 <p class="empty" id="empty">waiting for the strand</p>
+<section class="hero" id="hero" hidden aria-label="State portrait">
+<div class="portrait"><div class="eyebrow">01 / State portrait</div><svg id="portrait" viewBox="0 0 320 320" role="img" aria-labelledby="portrait-title"><title id="portrait-title">Reported mood probabilities</title><circle cx="160" cy="160" r="149" fill="none" stroke="#294047" stroke-dasharray="1 17.72"/><g id="rings"></g><circle cx="160" cy="160" r="77" fill="#102026" stroke="#294047"/><text x="160" y="131" text-anchor="middle">EVENT</text><text class="event-number" id="portrait-event" x="160" y="184" text-anchor="middle">0</text><text id="portrait-mode" x="160" y="207" text-anchor="middle">REPORTED STATE</text></svg><p class="portrait-caption" id="portrait-caption">Each ring is a declared mood. Arc length = probability; bright arc = selected level.</p></div>
+<div class="expression"><div class="expression-head"><span class="eyebrow">Declared state</span><span class="event-tag" id="ev"></span></div><div class="mood-picks" id="mood-picks"></div><div id="said" hidden><h2>STANCE IN WORDS <small>supplied to the model, not the model's thoughts</small></h2><div class="line" id="line"></div><div class="why" id="why"></div><div class="change-list" id="changes"></div></div><p class="truth">This portrait changes with recorded events. It does not observe thoughts, feelings, or whether the agent is currently working.</p></div>
+</section>
+<section id="timeline" hidden aria-label="Event history"><div class="timeline-head"><h2>02 / EVENT HISTORY <small id="view-mode"></small></h2><div class="controls"><button type="button" id="previous" aria-label="Previous recorded event">←</button><button type="button" id="next" aria-label="Next recorded event">→</button><button type="button" id="hold">Pause view</button><button type="button" id="follow" hidden>Follow latest</button></div></div><div class="history-strip" id="history-strip" aria-label="Recent event selections"></div><div class="scrub-row"><span id="history-start"></span><input id="scrubber" type="range" min="1" max="1" value="1" aria-label="Inspect recorded event"><span id="history-end"></span></div><div class="history-meta"><span id="history-count"></span><span id="history-legend"></span></div><p id="history-note" role="status"></p></section>
+<section id="stance" hidden><h2>03 / SELECTED STANCE <small>reported probabilities below; the selected level need not be the most likely</small></h2><div class="rows"></div></section>
+<div class="diagnostic-title eyebrow">Under the surface / replay diagnostics</div>
+<p class="legend"><b>Reading the bars:</b> width = reported probability; colour = chosen level. Mood trails show mean level, low to high, over the last 50 events. All values below belong to the inspected event.</p>
+<p class="historical-note" id="historical-note" hidden>Historical document only. Raw clock inputs and learned deltas were not captured in this browser frame; they are not inferred.</p>
 <div class="cols"><div>
-<section id="stance" hidden><h2>STANCE <small>reported odds per level; the chosen level in colour</small></h2><div class="rows"></div></section>
-<section id="said" hidden><h2>LINE <small>the stance in words, for the model's prompt</small></h2><div class="line" id="line"></div><div class="why" id="why"></div></section>
-</div><div>
 <section id="moods" hidden><h2>MOODS <small>with their last 50 events</small></h2><div class="rows"></div></section>
 <section id="senses" hidden><h2>SENSES <small>this event's inputs and the history features</small></h2><div class="rows"></div></section>
+</div><div>
 <section id="habits" hidden><h2>HABITS <small>active = in force; colour = the no-habits twin broke this rule</small></h2><div class="rows"></div></section>
 <section id="learned" hidden><h2>LEARNED <small id="cap"></small></h2><div class="rows"></div></section>
 <section id="drives" hidden><h2>DRIVES <small>wanting, afterglow, the last prediction error</small></h2><div class="rows"></div></section>
@@ -137,7 +150,9 @@ const short = d => String(d || '').replace(/^sha256:/, '').slice(0, 8);
 const hours = h => h < 1 / 60 ? '+' + Math.round(h * 3600) + ' s' : h < 1 ? '+' + (h * 60).toFixed(1) + ' min' : '+' + h.toFixed(2) + ' h';
 const obj = x => x && typeof x === 'object' && !Array.isArray(x) ? x : null;
 const get = (o, ...ks) => ks.reduce((a, k) => obj(a) ? a[k] : undefined, o);
-let M = null, V = {};
+let M = null, V = {}, live = null, viewed = null, held = false, connected = false;
+let epoch = 0, loading = null, historyError = '', received = '', metaKey = '';
+const cache = new Map(), absent = new Set(), COLORS = ['#e6b77c', '#8bdec6', '#aab9ed', '#f0a79a'];
 
 function badge(kind, text) { const b = $('badge'); b.className = 'badge ' + kind; b.textContent = text; b.title = text; }
 function rows(id, show) { const s = $(id); s.hidden = !show; const r = s.querySelector('.rows'); r.replaceChildren(); return r; }
@@ -146,6 +161,7 @@ function rows(id, show) { const s = $(id); s.hidden = !show; const r = s.querySe
 function levelRow(parent, v, kind) {
   const r = mk('div', 'row ' + kind, parent);
   mk('div', 'id', r, v.id);
+  const selected = kind === 'trait' ? mk('div', 'selected', r) : null;
   const c = mk('div', '', r), bar = mk('div', 'bar', c), odds = mk('div', 'odds', c);
   const n = v.levels.length || 1;
   const segs = v.levels.map((l, i) => { const s = mk('i', i % 2 ? 'b' : '', bar); s.style.width = 100 / n + '%'; return s; });
@@ -156,7 +172,7 @@ function levelRow(parent, v, kind) {
     const g = document.createElementNS(SVG, 'svg'); g.setAttribute('class', 'spark'); g.setAttribute('viewBox', '0 0 100 22'); g.setAttribute('preserveAspectRatio', 'none');
     spark = document.createElementNS(SVG, 'polyline'); g.appendChild(spark); side.appendChild(g);
   }
-  return { v, r, segs, labs, say: mk('span', 'say', side), spark };
+  return { v, r, segs, labs, say: mk('span', 'say', side), spark, selected };
 }
 function setLevels(R, odds, level, released) {
   const ps = R.v.levels.map(l => num(get(odds, l)) ? Math.max(odds[l], 0) : 0);
@@ -180,10 +196,14 @@ function fillTo(m, x, max) { m.fill.style.width = Math.min(Math.max(num(x) ? x /
 
 // the layout: built once per persona, then each frame moves the bars
 function build(m) {
+  const key = JSON.stringify(m);
+  if (key === metaKey) return;
+  metaKey = key; reset();
   M = m; V = {};
   const p = m.persona;
   document.title = p ? p.name + ' · probbit monitor' : 'probbit monitor';
   $('who').textContent = p ? p.name + ' ' + p.version : '';
+  $('identity').textContent = p ? p.name : 'State observatory';
   $('seed').textContent = p ? 'seed ' + p.seed + ' · individual ' + short(p.individual) : '';
   const by = m.engine ? ' · written by ' + m.engine : '';
   $('foot').textContent = m.demo ? 'synthetic ' + (m.demo_kind || 'week') + ' demo in memory' + by + ' · tutor: probbit monitor --demo week · goals: probbit monitor --demo drives'
@@ -212,37 +232,53 @@ function build(m) {
     V.learned.push({ t, cells: levels.map(l => { const w = mk('div', 'delta', c); mk('span', 'k', w, l); const fill = mk('i', '', mk('div', 'ctr', w)); return { fill, val: mk('span', 'v', w) }; }) });
   }
   rows('drives', false); V.drives = null;
+  $('rings').replaceChildren(); $('mood-picks').replaceChildren();
+  V.portrait = (m.moods || []).map((t, j) => {
+    const tile = mk('div', 'mood-pick', $('mood-picks')), title = mk('span', 'eyebrow', tile);
+    const dot = mk('i', 'swatch', title); dot.style.background = COLORS[j % COLORS.length];
+    mk('span', '', title, t.id);
+    const label = mk('strong', '', tile), chance = mk('small', '', tile);
+    const rings = j < 4 ? t.levels.map(() => {
+      const c = document.createElementNS(SVG, 'circle');
+      for (const [k, v] of Object.entries({cx:160, cy:160, r:132-j*14, 'stroke-width':9, class:'portrait-ring'})) c.setAttribute(k, v);
+      $('rings').appendChild(c); return c;
+    }) : [];
+    return {t, j, label, chance, rings};
+  });
   $('empty').textContent = p ? 'no events yet: the strand holds its header and no event lines' : 'waiting for the strand';
+  // Metadata can arrive without its following frame (for example, if the connection drops).
+  // Never label the previous individual's rendered state with the new identity.
+  draw({n:0, doc:null}); streamState();
 }
 
 function draw(f) {
   if (!M) return;
   const d = obj(f.doc), p = M.persona, h = get(f.given, 'elapsed_hours');
-  if (f.diverges) badge('bad', 'line ' + f.diverges.line + ' diverges: ' + f.diverges.why);
-  else if (!p) badge('', 'waiting for a valid strand header');
-  else {
-    const verified = f.from_checkpoint == null ? 'replay verified ✓' : 'replay verified from checkpoint ' + f.from_checkpoint + ' ✓';
-    badge(f.status === 'retired' ? 'bad' : f.status === 'paused' ? '' : 'ok', verified + (f.status && f.status !== 'active' ? ' · ' + f.status : ''));
-  }
+  viewed = f;
   $('ev').textContent = p ? 'event ' + f.n : '';
   $('clk').textContent = num(h) && d ? hours(h) + ' since the event before' : '';
-  $('note').textContent = f.note || ''; $('note').hidden = !f.note;
   const raw = $('raw'); raw.hidden = !(f.n > 0 && d); raw.href = '/doc/' + f.n; raw.textContent = 'event ' + f.n + ' as JSON';
   $('empty').hidden = !!d;
+  $('hero').hidden = !d; $('timeline').hidden = !d;
   for (const id of ['stance', 'moods', 'senses', 'habits', 'said']) $(id).hidden = !d || (id === 'moods' && !(M.moods || []).length);
-  $('learned').hidden = !d || !V.learned.length;
-  if (!d) { $('drives').hidden = true; $('line').textContent = ''; $('why').textContent = ''; return; }
+  $('learned').hidden = !d || !V.learned.length || !f.learned;
+  $('historical-note').hidden = !d || !f.documentOnly;
+  if (!d) { $('drives').hidden = true; $('line').textContent = ''; $('why').textContent = ''; $('changes').replaceChildren(); return; }
+  portrait(d, f.n);
   for (const t of M.traits || []) {
     const R = V.traits[t.id], s = get(d, 'stance', t.id);
     R.r.hidden = !s; if (!s) continue;
     const k = setLevels(R, s.odds, s.level, s.released);
+    R.selected.textContent = k >= 0 ? s.level : s.level + ' · held';
     R.say.textContent = k >= 0 ? (t.say && t.say[k]) || '' : '(' + s.level + ': not released)'; R.say.classList.toggle('held', k < 0);
   }
   V.status.hidden = !d.status || d.status === 'ok'; V.status.textContent = 'status ' + d.status + (d.escalate ? ': ' + d.escalate : '');
   for (const t of M.moods || []) {
     const R = V.moods[t.id], s = get(d, 'mood', t.id) || {};
     const k = setLevels(R, s.odds, s.level, true); R.say.textContent = k >= 0 ? t.levels[k] : '';
-    sparkline(R.spark, get(f.spark, t.id) || []);
+    const trail = f.documentOnly ? historyTrail(f.n, t) : get(f.spark, t.id) || [];
+    sparkline(R.spark, trail);
+    R.spark.parentNode.setAttribute('aria-label', t.id + ': ' + trail.length + ' recorded mean levels');
   }
   const ins = obj(d.inputs) || {};
   for (const S of V.inputs) {
@@ -266,6 +302,7 @@ function draw(f) {
   const line = $('line'), said = typeof d.line === 'string' ? d.line : '';
   if (line.textContent !== said) { line.textContent = said; line.classList.remove('new'); void line.offsetWidth; line.classList.add('new'); }
   $('why').textContent = d.why ? 'why: ' + (d.why === 'baseline (no live evidence)' ? 'baseline (no salient input or binding habit this event; prior state still applies)' : d.why) : '';
+  changes(d, f.n);
 }
 
 function habits(hb) {
@@ -311,11 +348,167 @@ function drives(d, n) {
   });
 }
 
+// The portrait is a probability instrument, not an inferred face or a task-activity animation.
+function portrait(d, n) {
+  $('portrait-event').textContent = n;
+  $('portrait-mode').textContent = held ? 'HISTORY HELD' : M.demo ? 'SYNTHETIC' : 'REPORTED STATE';
+  const descriptions = [];
+  for (const P of V.portrait) {
+    const s = get(d, 'mood', P.t.id) || {}, ps = P.t.levels.map(l => Math.max(0, get(s.odds, l) || 0));
+    const total = ps.reduce((a, b) => a + b, 0), chosen = P.t.levels.indexOf(s.level);
+    P.label.textContent = s.level || 'unreported';
+    P.chance.textContent = chosen >= 0 && num(ps[chosen]) ? f2(ps[chosen]) + ' reported probability' : 'no selected level';
+    let at = 0;
+    P.rings.forEach((c, i) => {
+      const length = 2 * Math.PI * (132 - P.j * 14), arc = total ? ps[i] / total * length : 0;
+      c.setAttribute('stroke', i === chosen ? COLORS[P.j % COLORS.length] : i % 2 ? '#31464f' : '#263a43');
+      c.setAttribute('stroke-dasharray', Math.max(0, arc - 3) + ' ' + (length - Math.max(0, arc - 3)));
+      c.setAttribute('stroke-dashoffset', -at); at += arc;
+    });
+    descriptions.push(P.t.id + ': ' + P.t.levels.map((l, i) => l + ' ' + f2(ps[i]) + (i === chosen ? ' selected' : '')).join(', '));
+  }
+  $('portrait-title').textContent = 'Event ' + n + '. ' + (descriptions.join('. ') || 'No moods declared.');
+  $('portrait-caption').textContent = V.portrait.length ? 'Outside inward: ' + V.portrait.slice(0, 4).map(P => P.t.id).join(' · ') + '. Arc length = probability; bright arc = selected level.' : 'No mood variables declared. This individual still has a recorded stance.';
+}
+function mean(d, t) {
+  const ps = t.levels.map(l => Math.max(0, get(d, 'mood', t.id, 'odds', l) || 0)), total = ps.reduce((a, b) => a + b, 0);
+  return total && ps.length > 1 ? ps.reduce((a, p, i) => a + p * i, 0) / total / (ps.length - 1) : 0;
+}
+function historyTrail(n, t) {
+  const xs = [];
+  for (let i = n; i >= Math.max(1, n - SPARK + 1); i--) {
+    const f = cache.get(i); if (!f) break; xs.unshift(mean(f.doc, t));
+  }
+  return xs;
+}
+function changes(d, n) {
+  const box = $('changes'); box.replaceChildren();
+  const previous = cache.get(n - 1)?.doc;
+  let count = 0, shifted = 0;
+  for (const t of M.traits || []) {
+    const now = get(d, 'stance', t.id), before = get(previous, 'stance', t.id);
+    const changed = !!before && !!now && (before.level !== now.level || before.released !== now.released);
+    V.traits[t.id].r.classList.toggle('changed', changed);
+    if (changed) {
+      count++;
+      mk('span', 'change', box, t.id + ': ' + before.level + (before.released === false ? ' (held)' : '') + ' → ' + now.level + (now.released === false ? ' (held)' : ''));
+    }
+    if (before && now && t.levels.some(l => Math.abs((get(now.odds, l) || 0) - (get(before.odds, l) || 0)) > .000001)) shifted++;
+  }
+  for (const t of M.moods || []) if (previous) {
+    const delta = mean(d, t) - mean(previous, t);
+    if (Math.abs(delta) >= .005) mk('span', 'change', box, t.id + ' mean ' + signed(delta));
+  }
+  if (!box.children.length) mk('span', 'change empty-change', box, previous ? 'Selected stance unchanged' + (shifted ? ' · probabilities shifted' : ' · no material mood shift') : n === 1 ? 'First recorded event' : 'Previous document unavailable for comparison');
+  if (previous) box.prepend(mk('span', 'change empty-change', null, 'Since #' + (n - 1) + ':'));
+  box.setAttribute('aria-label', 'Changes from event ' + (n - 1) + ': ' + count + ' trait selections changed');
+}
+function reset() {
+  epoch++; loading?.abort(); loading = null; cache.clear(); absent.clear();
+  live = null; viewed = null; held = false; historyError = ''; received = '';
+}
+function bounds() { return [Math.max(1, (live?.n || 1) - SPARK + 1, live?.from_checkpoint || 1), live?.n || 0]; }
+function streamState() {
+  const f = live;
+  if (f?.diverges) badge('bad', 'line ' + f.diverges.line + ' diverges: ' + f.diverges.why);
+  else if (!M?.persona) badge('', 'waiting for a valid strand header');
+  else if (!f) badge('', 'awaiting first event');
+  else if (f) badge(f.status === 'retired' ? 'bad' : f.status === 'paused' ? '' : 'ok',
+    (f.from_checkpoint == null ? 'replay verified ✓' : 'replay verified from checkpoint ' + f.from_checkpoint + ' ✓') + (f.status && f.status !== 'active' ? ' · ' + f.status : ''));
+  let mode = 'live', title = 'LIVE · AWAITING EVENT', detail = received ? 'Last event received here at ' + received + '. Waiting for the next recorded event.' : 'Connected to the strand. Waiting for its first recorded event.';
+  if (!connected) { mode = 'disconnected'; title = 'DISCONNECTED · RETRYING'; detail = 'Connection lost. Displayed state is retained, not live activity.'; }
+  else if (f?.diverges) { mode = 'diverged'; title = 'REPLAY DIVERGED'; detail = 'Showing the last verified event. See the replay warning above.'; }
+  else if (!M?.persona || !f?.doc) { mode = 'awaiting'; title = M?.demo ? 'SYNTHETIC REPLAY · READY' : 'AWAITING FIRST EVENT'; }
+  else if (f.status === 'paused' || f.status === 'retired') { mode = 'paused'; title = 'STRAND ' + f.status.toUpperCase(); detail = 'The individual is ' + f.status + '. Recorded state remains available for inspection.'; }
+  else if (M.demo) { mode = 'replay'; title = 'SYNTHETIC REPLAY'; detail = 'Scripted engine events, not a live agent. ' + (f.note || ''); }
+  if (held && connected && f?.doc) { title += ' · VIEW PAUSED'; detail = 'Inspecting event ' + viewed.n + '; latest received event ' + f.n + '. The stream continues in the background.'; }
+  $('stream').dataset.mode = mode; $('stream-title').textContent = title; $('stream-detail').textContent = detail;
+  $('note').textContent = f?.note || ''; $('note').hidden = !f?.note;
+}
+function timeline() {
+  if (!live || !viewed) return;
+  const [first, last] = bounds(), strip = $('history-strip'), t = M.moods?.[0], outside = viewed.n < first;
+  strip.replaceChildren(); let count = 0;
+  for (let n = first; n <= last; n++) {
+    const f = cache.get(n), b = mk('button', '', strip), bar = mk('i', '', b);
+    b.type = 'button'; b.disabled = !f; b.dataset.event = n;
+    b.setAttribute('aria-label', 'Inspect event ' + n + (f && t ? ', ' + t.id + ' mean ' + f2(mean(f.doc, t)) : ''));
+    b.setAttribute('aria-current', String(n === viewed.n));
+    b.title = b.getAttribute('aria-label'); b.onclick = () => inspect(n);
+    bar.style.setProperty('--height', (f && t ? 12 + mean(f.doc, t) * 88 : 35) + '%');
+    if (f) count++;
+  }
+  $('history-start').textContent = '#' + first; $('history-end').textContent = '#' + last;
+  const s = $('scrubber'); s.min = first; s.max = Math.max(first, last); s.value = viewed.n; s.disabled = last <= first;
+  s.parentNode.hidden = outside;
+  s.setAttribute('aria-valuetext', 'Event ' + viewed.n + (held ? ', view paused' : ', latest'));
+  $('previous').disabled = !cache.has(viewed.n - 1); $('next').disabled = !cache.has(viewed.n + 1);
+  $('hold').hidden = held; $('follow').hidden = !held;
+  $('follow').textContent = 'Follow latest' + (last > viewed.n ? ' (+' + (last - viewed.n) + ')' : '');
+  $('view-mode').textContent = held ? 'INSPECTING #' + viewed.n : 'LATEST EVENT';
+  $('history-count').textContent = count + '/' + Math.max(0, last - first + 1) + ' recent documents' + (loading ? ' · loading' : '');
+  $('history-legend').textContent = t ? 'Height = ' + t.id + ' mean level' : 'One mark per recorded event';
+  const lag = Math.max(0, last - viewed.n);
+  $('history-note').textContent = historyError || (outside ? 'Held event ' + viewed.n + ' is outside the recent window (#' + first + '–#' + last + '). Its displayed state is retained. Select a recent event or follow latest.' : held ? 'View paused, not the individual. ' + lag + ' newer event' + (lag === 1 ? '' : 's') + ' received.' : 'Select an event to inspect its state and evidence.') + (live.from_checkpoint != null ? ' History begins at checkpoint ' + live.from_checkpoint + '.' : '');
+}
+function inspect(n) {
+  const f = cache.get(n);
+  if (!f) { historyError = 'Event ' + n + ' is not available in the recent document window.'; timeline(); return; }
+  held = true; historyError = ''; draw(f); streamState(); timeline();
+}
+async function syncHistory() {
+  if (loading || !live?.doc) return;
+  const token = epoch, [first, last] = bounds(), pending = [];
+  for (let n = last - 1; n >= first; n--) if (!cache.has(n) && !absent.has(n)) pending.push(n);
+  if (!pending.length) return;
+  const controller = new AbortController(); loading = controller; timeline();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const results = await Promise.allSettled(Array.from({length:Math.min(4, pending.length)}, async () => {
+      while (pending.length && token === epoch) {
+        const n = pending.shift(), r = await fetch('/doc/' + n, {signal:controller.signal});
+        if (token !== epoch) return;
+        if (r.status === 404) { absent.add(n); continue; }
+        if (!r.ok) throw Error('History request failed');
+        const doc = await r.json();
+        if (token === epoch && n >= bounds()[0] && !cache.has(n)) cache.set(n, {n, doc, documentOnly:true});
+      }
+    }));
+    if (results.some(r => r.status === 'rejected')) throw Error('History request failed');
+    if (token === epoch) historyError = '';
+  } catch (_) { if (token === epoch) historyError = 'Some history could not be loaded. Received state is retained; reconnect or reload to retry.'; }
+  finally {
+    clearTimeout(timeout);
+    if (token === epoch) {
+      loading = null;
+      if (viewed?.doc) draw(viewed);
+      timeline();
+      if (last !== live?.n) syncHistory();
+    }
+  }
+}
+function receive(f) {
+  if (!M) return;
+  if (live && (f.n < live.n || (f.note !== live.note && /replayed from the start|strand is gone/.test(f.note || '')) || (f.n === live.n && JSON.stringify(f.doc) !== JSON.stringify(live.doc)))) reset();
+  if (f.doc && (!live || f.n !== live.n)) received = new Date().toLocaleTimeString();
+  live = f;
+  if (f.doc) cache.set(f.n, f);
+  const [first] = bounds(); for (const n of cache.keys()) if (n < first) cache.delete(n);
+  for (const n of absent) if (n < first) absent.delete(n);
+  if (!held || !viewed) draw(f);
+  streamState(); timeline(); syncHistory();
+}
+$('previous').onclick = () => inspect(viewed.n - 1);
+$('next').onclick = () => inspect(viewed.n + 1);
+$('scrubber').oninput = e => inspect(Number(e.target.value));
+$('hold').onclick = () => { held = true; draw(viewed); streamState(); timeline(); };
+$('follow').onclick = () => { held = false; historyError = ''; draw(live); streamState(); timeline(); };
 const es = new EventSource('/events');
 const safe = fn => e => { try { fn(JSON.parse(e.data)); } catch (x) { console.error(x); } };
 es.addEventListener('meta', safe(build));
-es.addEventListener('frame', safe(draw));
-es.onerror = () => badge('', 'the monitor is not answering: retrying');
+es.addEventListener('frame', safe(receive));
+es.onopen = () => { connected = true; streamState(); };
+es.onerror = () => { connected = false; streamState(); };
 })();
 </script>
 </body>

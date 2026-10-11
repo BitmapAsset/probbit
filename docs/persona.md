@@ -840,12 +840,40 @@ cannot read the documents:
 
 | route | answer |
 |---|---|
-| `/` | the page: one file embedded in the binary (about 21 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
+| `/` | the page: one file embedded in the binary (under 64 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
 | `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}`, that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
 
-The page draws the terminal's board in a dark theme, the bars moving as the odds do (`prefers-reduced-motion` respected), from
-360 px wide up. No file is changed, and nothing leaves the machine.
+The browser opens an **observatory for one individual**. Its state portrait uses concentric probability rings: one ring per
+declared mood (the first four, outside inward, in declaration order), arc length proportional to the reported odds and the
+selected level highlighted. The textual mood levels, selected trait cards, exact probabilities, stance line and engine's
+`why` stay alongside the picture. The portrait is not a face, an emotion detector, a thought stream, or a task-progress feed.
+Quiet connections do not animate new state; SSE heartbeat comments are not events.
+
+**Inspecting history.** The timeline loads at most the latest 50 documents from `/doc/N`, with at most four concurrent
+requests. Its marks show the first declared mood's mean level (or equal-height event marks if no moods are declared).
+Select a mark, use the previous/next buttons, or use the keyboard-accessible scrubber to hold an event. **Pause view** only
+holds the browser; it never pauses the individual. New events still arrive and **Follow latest (+N)** returns to them.
+If a held event ages out of that 50-event window, its displayed state is retained, the out-of-window condition is named,
+and the scrubber is hidden until a recent event is selected or following resumes.
+Comparisons name changes from the immediately preceding available document, not inferred causes; `why` is the engine's
+own reported evidence. Missing documents are disabled, not interpolated. A checkpoint bounds available history; a demo
+restart, changed persona, or observed strand reset clears the browser's old document cache.
+
+`/doc/N` contains a stance document, not a complete monitor frame. For historical documents the page does not invent raw
+clock inputs, learned deltas, or missing mood-trail samples. The raw clock and learned panel are only populated when that
+event's full frame was actually received. The remaining replay diagnostics (moods, input/history features, habits, drives)
+stay available when the document carries them. The JSON link always points to the inspected event.
+
+The connection status is separate from the inspected event: live/awaiting-event, synthetic replay, held view, paused or
+retired strand, replay divergence, and disconnected/retrying are distinguished. A disconnected page retains its last
+received state without claiming the agent is active. Replay verification always describes the current stream, including
+its checkpoint scope. No wall-clock work telemetry is implied.
+
+The page is usable from 360 px wide, respects `prefers-reduced-motion`, and loads no external assets or dependencies.
+No file is changed, and nothing leaves the machine. Real Chrome/Chromium regressions (Node 22+, no npm dependencies):
+`cargo build --release -p probbit-cli`, then `node probbit-cli/tests/monitor_browser.mjs`. Fixtures and screenshots are
+synthetic; generated artifacts default to a temporary directory, not the repository.
 
 **Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
 5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:
