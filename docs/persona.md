@@ -861,7 +861,7 @@ per-channel causal attribution or a model's thoughts.
 past documents; the inspector plots each declared level's probability separately. No semantic ordering is assumed for the
 level names. Drive traces show the reported numeric values in engine units (wanting/afterglow) or reward error (prediction
 error), against the declared cap (including `expectation.pe_cap` for prediction error). `Δ event` compares the same quantity to the immediately preceding
-available event; probabilities use percentage points. Unknown history is a gap, not a connecting line or fabricated zero.
+event, when its document is available; probabilities use percentage points. Unknown history is a gap, not a connecting line or fabricated zero.
 Both chart axes and timeline refer to **event numbers**, not wall-clock timestamps. Quiet connections never create state,
 mood decay or graph samples; SSE heartbeat comments are not events.
 

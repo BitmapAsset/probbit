@@ -527,7 +527,7 @@ the due chore, and the safety floor (0.1) held on every turn its habits allowed 
 ### Watch it live: `probbit monitor` (0.8.0)
 
 `probbit monitor pip.strand --open` opens a compact, read-only **Activity Monitor** for one individual: a sortable,
-searchable table of declared traits, moods and drives, with real probabilities, event-history traces, and a selected-channel
+searchable table of declared traits, moods and drives, with reported probabilities, event-history traces, and a selected-channel
 inspector. It reads any compatible persona from the strand; no preset character or agent integration is required.
 
 ```sh
