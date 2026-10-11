@@ -52,9 +52,10 @@ fn one_plain_frame_is_pinned() {
 fn the_demo_is_the_week_live_writes() {
     let (c, a, err) = probbit(&["monitor", "--demo", "--plain", "--once"]); assert_eq!(c, 0, "{err}");
     let (_, b, _) = probbit(&["monitor", "--demo", "--plain"]); assert_eq!(a, b, "deterministic; piped, the demo prints its last frame");
-    let week = pinned("tutor-week.once.txt", WEEK); let (wl, al): (Vec<&str>, Vec<&str>) = (week.lines().collect(), a.lines().collect());
+    let week = pinned("tutor-week.once.txt", WEEK); let (wl, al): (Vec<&str>, Vec<&str>) = (week.lines().collect(), a.lines().filter(|l| !l.starts_with("synthetic week demo")).collect());
     assert_eq!(wl.len(), al.len()); assert_eq!(wl[..wl.len() - 1], al[..al.len() - 1]);
-    assert!(al[al.len() - 1].starts_with("strand: the demo week, in memory | written by probbit ") && al[al.len() - 1].ends_with("--seed 2 --demo week"), "{a}");
+    assert!(al[al.len() - 1].starts_with("synthetic demo in memory | written by probbit ") && al[al.len() - 1].ends_with("probbit monitor --demo drives"), "{a}");
+    assert!(a.contains("synthetic week demo | loop 1 | complete"), "{a}");
     for (args, msg) in [(vec!["monitor", WEEK, "--demo"], "give no STRAND"), (vec!["monitor", "--demo", "--follow"], "--follow does not apply")] {
         let (c, _, err) = probbit(&args); assert_eq!(c, 2, "{args:?}"); assert!(err.contains(msg), "{args:?}: {err}");
     }
@@ -137,6 +138,13 @@ fn follow_picks_up_appended_lines() {
         let took = wait(&buf, at, &format!("| event {} |", k - 1), Duration::from_secs(5));
         assert!(took < Duration::from_secs(1), "event {} drawn after {took:?}", k - 1);
     }
+    // A JSON event is not committed until its newline arrives, even when all other bytes are present.
+    let at = buf.lock().unwrap().len(); let event = lead(8)[lead(7).len()..].to_string();
+    std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(event.trim_end_matches('\n').as_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(250));
+    assert!(!buf.lock().unwrap()[at..].contains("| event 7 |"), "an incomplete event must not be replayed");
+    std::fs::OpenOptions::new().append(true).open(&f).unwrap().write_all(b"\n").unwrap();
+    wait(&buf, at, "| event 7 |", Duration::from_secs(1));
     let at = buf.lock().unwrap().len();
     std::fs::write(&f, lead(3)).unwrap();
     wait(&buf, at, "the strand shrank (truncated or rotated): replayed from the start", Duration::from_secs(5));
@@ -253,4 +261,37 @@ fn open_serves_the_page_the_demo_too() {
         (vec!["monitor", WEEK, "--open", "--fps", "5"], "monitor --open: --fps does not apply"), (vec!["monitor", "--demo", "--port", "8080"], "--port goes with --serve (or --open)")] {
         let (c, out, err) = probbit(&args); assert_eq!((c, out.as_str()), (2, ""), "{args:?}: {err}"); assert!(err.contains(msg), "{args:?}: {err}");
     }
+}
+
+/// A distinct synthetic scenario, not a replacement for the byte-pinned tutor week.
+#[test]
+fn drives_demo_draws_goal_state_and_rejects_unknown_scenarios() {
+    let (c, out, err) = probbit(&["monitor", "--demo", "drives", "--once", "--plain"]);
+    assert_eq!(c, 0, "{err}");
+    for text in ["synthetic drives demo", "event 8", "DRIVES", "wanting", "afterglow", "above expectation", "LEGEND"] { assert!(out.contains(text), "{text}: {out}"); }
+    for args in [vec!["monitor", "--demo", "other"], vec!["monitor", "--demo", "--demo"]] {
+        let (c, out, err) = probbit(&args); assert_eq!(c, 2); assert!(out.is_empty()); assert!(err.contains("--demo"), "{err}");
+    }
+}
+
+/// The page makes the reset explicit: a completion cue, then loop 2 with a fresh event counter.
+#[test]
+fn served_demo_labels_its_restart() {
+    let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", "--demo", "drives", "--serve"])
+        .stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap());
+    let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.0.stdout.take().unwrap()), &mut url).unwrap();
+    let port: u16 = url.trim_end().strip_prefix("http://127.0.0.1:").unwrap().trim_end_matches('/').parse().unwrap();
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let mut count = 2; let started = Instant::now();
+    loop {
+        assert!(started.elapsed() < Duration::from_secs(20), "the demo did not label its restart");
+        let evs = stream(&mut s, &mut buf, count);
+        if evs.iter().any(|(_, d)| d.contains("loop 2")) { break; }
+        count = evs.len() + 1;
+    }
+    assert!(buf.contains("synthetic drives demo | loop 1"), "{buf}");
+    assert!(buf.contains("complete; restarting in 5 s"), "{buf}");
+    assert!(buf.contains(r#""demo_kind":"drives""#), "{buf}");
+    assert!(buf.contains(r#""pursue":{"#) && buf.contains(r#""drives":{"#), "{buf}");
 }

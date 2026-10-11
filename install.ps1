@@ -42,6 +42,8 @@ if (-not $Version) {
     if (-not $Version) { throw 'probbit install: no published release found (set -Version)' }
 }
 if (-not $Version.StartsWith('v')) { $Version = "v$Version" }
+if ($Version -notmatch '^v[A-Za-z0-9][A-Za-z0-9._+-]*$') { throw "probbit install: invalid release version: $Version" }
+if ($Target -notmatch '^[A-Za-z0-9_-]+$') { throw "probbit install: invalid target: $Target" }
 if (-not $InstallDir) { $InstallDir = Join-Path $HOME '.local\bin' }
 
 $name = "probbit-$Version-$Target"
@@ -64,11 +66,20 @@ try {
     Expand-Archive -LiteralPath $zip -DestinationPath (Join-Path $tmp 'x') -Force
     $src = Join-Path $tmp "x\$name\probbit.exe"
     if (-not (Test-Path -LiteralPath $src)) { throw "probbit install: $asset has no $name\probbit.exe" }
+    # Validate before touching an existing install. A wrong-platform or damaged executable must not replace it.
+    $ran = & $src version
+    if ($LASTEXITCODE -ne 0) { throw "probbit install: downloaded binary does not run here; existing install unchanged: $ran" }
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     $dest = Join-Path $InstallDir 'probbit.exe'
-    Copy-Item -LiteralPath $src -Destination $dest -Force
-    $ran = & $dest version
-    if ($LASTEXITCODE -ne 0) { throw "probbit install: installed $dest, but it does not run here: $ran" }
+    $candidate = Join-Path $InstallDir ('.probbit-' + [guid]::NewGuid().ToString('N') + '.exe')
+    try {
+        Copy-Item -LiteralPath $src -Destination $candidate
+        # PowerShell coerces $null to an empty string for a string parameter; File.Replace rejects that path.
+        if (Test-Path -LiteralPath $dest) { [IO.File]::Replace($candidate, $dest, [NullString]::Value) }
+        else { [IO.File]::Move($candidate, $dest) }
+    } finally {
+        Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
+    }
     Write-Host "  installed  $dest ($ran)"
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

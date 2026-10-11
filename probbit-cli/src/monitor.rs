@@ -39,7 +39,7 @@ const KEEP: usize = 10_000;
 /// Connections served at once (more are refused with 503)
 const CONNS: usize = 64;
 
-const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [--once] [--plain] [--serve] [--open] [--port N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their exact odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. In the terminal, or\n  with --serve as a page in the browser. It changes no file (--demo: its week goes through a temporary one, removed at\n  once) and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\n  --serve     the page instead of the terminal, following the strand (or playing the demo week, over and over): its URL\n              http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or\n              scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat\n              every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest\n              frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It\n              binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or\n              localhost, and sends nothing anywhere; Ctrl-C quits\n  --open      serve the page (as --serve does) and open it in the default browser (BROWSER if set; else open on macOS,\n              start on Windows, xdg-open elsewhere); a browser that does not start fails nothing\n  --port N    with --serve or --open, the port (default 0: a free one)\n  --demo      the tutor's scripted week (as `probbit live examples/persona/tutor.yaml --seed 2 --demo week`), replayed in\n              memory: at a terminal or with --serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or\n              with --once, its last frame\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that\n  cannot be had, or a file that cannot be read or is not a strand.\n";
+const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [week|drives] [--once] [--plain] [--serve] [--open] [--port N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their reported odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. In the terminal, or\n  with --serve as a page in the browser. It changes no file (--demo: its week goes through a temporary one, removed at\n  once) and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\n  --serve     the page instead of the terminal, following the strand (or looping the selected synthetic demo): its URL\n              http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or\n              scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat\n              every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest\n              frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It\n              binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or\n              localhost, and sends nothing anywhere; Ctrl-C quits\n  --open      serve the page (as --serve does) and open it in the default browser (BROWSER if set; else open on macOS,\n              start on Windows, xdg-open elsewhere); a browser that does not start fails nothing\n  --port N    with --serve or --open, the port (default 0: a free one)\n  --demo [week|drives]  synthetic data, never a live individual (default week). The tutor's week is the one\n              `probbit live examples/persona/tutor.yaml --seed 2 --demo week` writes, replayed in memory: at a terminal or with --serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or\n              with --once, its last frame. `--demo drives` plays a short goal-signal scenario with wanting, afterglow and\n              prediction errors. The page labels each loop and its restart; Ctrl-C quits.\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that\n  cannot be had, or a file that cannot be read or is not a strand.\n";
 
 fn strs(j: Option<&Json>) -> Vec<String> { j.and_then(Json::as_arr).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() }
 
@@ -182,7 +182,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let mut out = vec![];
     let bad = bad_head.or_else(|| w.and_then(|w| w.bad.as_ref()));
     let badge = match (bad, w.and_then(|w| w.rep.from)) { (Some((n, why)), _) => s.bold(RED, &format!("line {n} diverges: {why}")),
-        (None, Some(c)) => s.bold(GREEN, &s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
+        (None, Some(c)) => s.bold(GREEN, s.g(&format!("replay verified from checkpoint {c} ✓"), &format!("replay verified from checkpoint {c} [ok]"))),
         (None, None) => s.bold(GREEN, s.g("replay verified ✓", "replay verified [ok]")) };
     // a paused or retired individual (control lines, docs/persona.md §5.7) says so next to the badge
     let badge = match w.map(|w| w.rep.live.status).filter(|st| *st != crate::live::Status::Active) { Some(st) => format!("{badge} {dot} {}", s.bold(if st == crate::live::Status::Retired { RED } else { YELLOW }, st.name())), None => badge };
@@ -197,6 +197,11 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let mut head = format!("{} {} {dot} seed {} {dot} individual {} {dot} event {}", s.bold(CYAN, "probbit monitor"), s.bold(CYAN, &format!("{} {}", m.name, m.version)), m.seed, short(&m.individual), f.map_or(0, |f| f.n));
     if let Some(h) = f.and_then(|f| f.given.get("elapsed_hours")).and_then(Json::as_f64) { head += &format!(" {dot} {} since the event before", hours(h)); }
     out.push(format!("{head} {dot} {badge}"));
+    out.push(s.paint(GREY, s.g("LEGEND  width = odds; colour/[level] = chosen; shades = other levels",
+        "LEGEND  width = odds; #/[level] = chosen; =/- = other levels")));
+    out.push(s.paint(GREY, s.g("        Mood trail ▁▂▃▄▅▆▇█ = mean level low → high (last 50 events)",
+        "        Mood trail _.:-=+*# = mean level low -> high (last 50 events)")));
+    out.push(s.paint(GREY, "        Habits: active = in force; [name] = the no-habits twin broke this rule"));
     if let Some(t) = note { out.push(s.paint(YELLOW, t)); }
     let Some(f) = f else {
         out.push(s.paint(GREY, "no events yet: the strand holds its header and no event lines"));
@@ -269,17 +274,21 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     out.extend(drives(doc, m, s, idw, &lab));
     // 7. the line, and why
     if let Some(l) = doc.get("line").and_then(Json::as_str) { out.push(format!("{}{}", lab("LINE"), s.bold(CYAN, l))); }
-    if let Some(y) = doc.get("why").and_then(Json::as_str).filter(|y| !y.is_empty()) { out.push(format!("{}{}", lab(""), s.paint(GREY, &format!("why: {y}")))); }
+    if let Some(y) = doc.get("why").and_then(Json::as_str).filter(|y| !y.is_empty()) { out.push(format!("{}{}", lab(""), s.paint(GREY, &format!("why: {}", display_why(y))))); }
     // 8. the footer
     out.push(footer(path, &m.engine, s));
     finish(out)
+}
+/// Clarify the legacy explanation without changing a replayed stance document or its digest.
+fn display_why(why: &str) -> &str {
+    if why == "baseline (no live evidence)" { "baseline (no salient input or binding habit this event; prior state still applies)" } else { why }
 }
 /// The footer: the strand, the engine that wrote it and the command that replays it; the demo's week (path "") is in memory, so
 /// the command that writes the same week instead
 fn footer(path: &str, engine: &str, s: &Style) -> String {
     let dot = s.g("·", "|");
     let by = if engine.is_empty() { String::new() } else { format!(" {dot} written by {engine}") };
-    s.paint(GREY, &if path.is_empty() { format!("strand: the demo week, in memory{by} {dot} the same week: probbit live examples/persona/tutor.yaml --seed 2 --demo week") }
+    s.paint(GREY, &if path.is_empty() { format!("synthetic demo in memory{by} {dot} tutor week: probbit monitor --demo week {dot} goals: probbit monitor --demo drives") }
         else { format!("strand {path}{by} {dot} replay: probbit live verify {path}") })
 }
 /// Per goal: a drive's values, from an object keyed by goal or a list in the goals' order
@@ -299,8 +308,10 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
     if let Some(p) = pz {
         let v = Var { id: "pursue".into(), levels: goals.clone(), say: vec![] };
         let ps: Vec<f64> = goals.iter().map(|g| p.get("odds").and_then(|o| o.get(g)).and_then(Json::as_f64).unwrap_or(0.0)).collect();
-        let pick = p.get("goal").and_then(Json::as_str).and_then(|g| goals.iter().position(|x| x == g)).filter(|_| p.get("released") != Some(&Json::Bool(false)));
-        let say = p.get("say").and_then(Json::as_str).unwrap_or("");
+        let goal = p.get("goal").and_then(Json::as_str).unwrap_or("goal");
+        let released = p.get("released") != Some(&Json::Bool(false));
+        let pick = goals.iter().position(|x| x == goal).filter(|_| released);
+        let say = if released { p.get("say").and_then(Json::as_str).unwrap_or("").to_string() } else { s.paint(GREY, &format!("({goal}: not released)")) };
         out.push(format!("{}{:<idw$}  {}  {}  {say}", lab("DRIVES"), v.id, stack(s, &ps, pick, ORANGE), labels(s, &v.levels, &ps, pick, ORANGE)).trim_end().to_string());
     }
     if let Some(d) = dv {
@@ -342,7 +353,9 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
     let spark = w.map_or(Json::Obj(vec![]), |w| Json::Obj(w.meta.moods.iter().zip(&w.spark).map(|(m, xs)| (m.id.clone(), Json::Arr(xs.iter().map(|x| Json::Num(persona::r6(*x))).collect()))).collect()));
     let of = |g: fn(&Frame) -> &Json| f.map_or(Json::Null, |f| g(f).clone());
     json::obj(vec![("n", Json::Num(f.map_or(0, |f| f.n) as f64)), ("doc", of(|f| &f.doc)), ("given", of(|f| &f.given)), ("learned", of(|f| &f.learned)), ("spark", spark),
-        ("diverges", bad.map_or(Json::Null, |(l, why)| json::obj(vec![("line", Json::Num(*l as f64)), ("why", json::str(why))]))), ("note", note.map_or(Json::Null, json::str))])
+        ("diverges", bad.map_or(Json::Null, |(l, why)| json::obj(vec![("line", Json::Num(*l as f64)), ("why", json::str(why))]))), ("note", note.map_or(Json::Null, json::str)),
+        ("from_checkpoint", w.and_then(|w| w.rep.from).map_or(Json::Null, |n| json::num(n as f64))),
+        ("status", w.map_or(Json::Null, |w| json::str(w.rep.live.status.name())))])
 }
 
 /// A strand file read as it grows: whole lines (a line counts once its newline is written). It starts over when the
@@ -411,6 +424,14 @@ pub fn cmd(args: &[String]) {
     if args.iter().any(|a| ["--host", "--bind", "--address"].iter().any(|f| a == f || a.starts_with(&format!("{f}=")))) { crate::fail("monitor --serve binds 127.0.0.1 and no other address, so the page stays on this machine: there is no --host") }
     let path = args.get(1).filter(|a| !a.starts_with("--")).cloned();
     let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(if path.is_some() { 2 } else { 1 }).cloned());
+    let mut demo_kind = Demo::Week;
+    if a.iter().filter(|x| *x == "--demo").count() > 1 { crate::fail("monitor: --demo given twice") }
+    if let Some(i) = a.iter().position(|x| x == "--demo") {
+        if let Some(v) = a.get(i + 1).filter(|v| !v.starts_with('-')) {
+            demo_kind = match v.as_str() { "week" => Demo::Week, "drives" => Demo::Drives, _ => crate::fail("monitor: --demo expects week or drives") };
+            a.remove(i + 1);
+        }
+    }
     crate::check_flags(&a, &["--fps", "--port"], &["--follow", "--once", "--plain", "--demo", "--serve", "--open"]);
     let has = |f: &str| args.iter().any(|a| a == f);
     // --open opens the page, so it serves it: `--open` is `--serve --open`
@@ -426,10 +447,10 @@ pub fn cmd(args: &[String]) {
     let tty = theme::stdout_is_terminal();
     let s = Style { th: theme::stdout(args), ascii: ascii(args), cols: if tty { theme::size(1).0.max(20) } else { usize::MAX } };
     if has("--demo") {
-        if path.is_some() { crate::fail("monitor --demo plays its own week: give no STRAND") }
-        if has("--follow") { crate::fail("monitor --demo: --follow does not apply (the demo is its own week)") }
-        if serve_ { serve(port, has("--open"), &mut |hub| feed_demo(hub, eng)) }
-        return demo(&s, has("--once"), eng);
+        if path.is_some() { crate::fail("monitor --demo plays a synthetic scenario: give no STRAND") }
+        if has("--follow") { crate::fail("monitor --demo: --follow does not apply (the demo is a synthetic scenario)") }
+        if serve_ { serve(port, has("--open"), &mut |hub| feed_demo(hub, demo_kind, eng)) }
+        return demo(&s, has("--once"), demo_kind, eng);
     }
     let Some(path) = path else { crate::fail("monitor: the strand file comes before the flags: probbit monitor STRAND [flags] (or probbit monitor --demo)") };
     let bytes = std::fs::read(&path).unwrap_or_else(|e| crate::fail(&format!("monitor: cannot read {path}: {e}")));
@@ -462,6 +483,48 @@ fn redraw(mut fr: Vec<String>, size: (usize, usize)) -> bool {
     out(&format!("\x1b[H{}\x1b[J", fr.iter().map(|l| crate::tui::clip(l, size.0.max(20)) + "\x1b[K\n").collect::<String>()))
 }
 
+/// The existing tutor week stays byte-compatible; drives is a separate, explicitly synthetic scenario.
+#[derive(Clone, Copy)]
+enum Demo { Week, Drives }
+impl Demo {
+    fn name(self) -> &'static str { match self { Demo::Week => "week", Demo::Drives => "drives" } }
+    fn lines(self, eng: Engine) -> Vec<String> { match self { Demo::Week => week(eng), Demo::Drives => drive_demo(eng) } }
+    fn note(self, cycle: u64, note: Option<&str>) -> String {
+        format!("synthetic {} demo | loop {cycle}{}", self.name(), note.map_or(String::new(), |n| format!(" | {n}")))
+    }
+}
+/// A small, replayable life: goal cues, progress, wins, a setback and quiet time. No external actions or sources.
+fn drive_demo(eng: Engine) -> Vec<String> {
+    let doc = json::parse(r#"{
+      "probbit_persona":1,"identity":{"name":"Scout","version":"1.0.0","seed":2},
+      "traits":[
+        {"id":"initiative","levels":["follow","suggest","lead"],"say":["answer the question","suggest a next step","set a small exercise"]},
+        {"id":"caution","levels":["bold","measured","careful"],"say":["keep moving","check the essentials","double-check the result"]}],
+      "moods":[{"id":"valence","levels":["down","even","up"],"inertia":0.5,"half_life_hours":8}],
+      "inputs":[{"id":"deadline","kind":"flag"}],
+      "habits":[{"id":"check_when_due","when":{"deadline":true},"then":{"pursue":["check"]},"say":"check before proceeding"}],
+      "drives":{"goals":[{"id":"learn","say":"explore the lesson","interest":1.5},{"id":"rest","say":"take a break","interest":0.6},{"id":"check","say":"verify the result","interest":0.8}],
+        "effects":{"wanting":{"initiative":0.6},"afterglow":{"valence":0.8},"surprise":{"valence":0.5}}}
+    }"#).expect("embedded drives persona");
+    let p = persona::build(&doc).expect("valid drives demo persona");
+    let st = persona::init(&p, Some(2), true, eng);
+    let (mut live, head) = crate::live::Live::start(p, &doc, st, crate::live::Clock::Fixed, &crate::live::engine());
+    let mut lines = vec![head];
+    for event in [
+        r#"{"goals":{"learn":{"cue":true,"novelty":0.8}}}"#,
+        r#"{"elapsed_hours":1,"goals":{"learn":{"progress":0.6}}}"#,
+        r#"{"elapsed_hours":1,"goals":{"learn":{"win":1}}}"#,
+        r#"{"elapsed_hours":1,"goals":{"learn":{"win":0.1}}}"#,
+        r#"{"elapsed_hours":1,"goals":{"rest":{"cue":true},"learn":{"setback":0.5}}}"#,
+        r#"{"elapsed_hours":12}"#,
+        r#"{"elapsed_hours":1,"deadline":true,"goals":{"check":{"cue":true,"deadline_hours":1}}}"#,
+        r#"{"elapsed_hours":1,"goals":{"check":{"win":0.8}}}"#,
+    ] {
+        let ev = json::parse(event).expect("embedded goal signals");
+        let (_, line) = live.event(&ev, eng).expect("valid drives demo event"); lines.push(line);
+    }
+    lines
+}
 /// The demo's week: the tutor's scripted week (`live::week`, seed 2) written to a temporary strand, read back and removed -> its
 /// lines
 fn week(eng: Engine) -> Vec<String> {
@@ -491,16 +554,16 @@ fn play(lines: &[String], eng: Engine, show: &mut dyn FnMut(&Watch, Option<&str>
     true
 }
 /// `--demo`: the week replayed: at a terminal paced (`play`), otherwise (or with --once) straight to its last frame
-fn demo(s: &Style, once: bool, eng: Engine) {
-    let lines = week(eng);
+fn demo(s: &Style, once: bool, kind: Demo, eng: Engine) {
+    let lines = kind.lines(eng);
     if s.cols == usize::MAX || once {
         let mut w = Watch::open(&lines[0]).unwrap_or_else(|(n, why)| crate::fail(&format!("monitor --demo: line {n}: {why}")));
         for l in &lines[1..] { w.feed(l, eng); }
-        out(&(frame(Some(&w), None, "", None, s).join("\n") + "\n")); return;
+        out(&(frame(Some(&w), None, "", Some(&kind.note(1, Some("complete; --serve replays in a loop"))), s).join("\n") + "\n")); return;
     }
     theme::restore_cursor_on_interrupt();
     let size = || theme::size(1);
-    if !out("\x1b[?25l\x1b[2J") || !play(&lines, eng, &mut |w, note| redraw(frame(Some(w), None, "", note, &Style { cols: size().0, ..*s }), size())) { std::process::exit(0) }
+    if !out("\x1b[?25l\x1b[2J") || !play(&lines, eng, &mut |w, note| redraw(frame(Some(w), None, "", Some(&kind.note(1, note)), &Style { cols: size().0, ..*s }), size())) { std::process::exit(0) }
     out("\x1b[?25h");
 }
 
@@ -570,17 +633,26 @@ fn step(fl: &mut Followed, path: &str, hub: &Hub, eng: Engine, fresh: &mut bool,
 /// How often a long replay shows where it is, and what it says meanwhile
 const CATCH_UP: Duration = Duration::from_millis(250);
 const CATCHING_UP: &str = "replaying the strand from its header: the board catches up";
-/// The demo week for the page, paced, over and over (5 s between the weeks; a week that starts over goes from its last event
-/// straight to event 1, without the empty board in between)
-fn feed_demo(hub: &Hub, eng: Engine) -> ! {
-    let lines = week(eng);
-    let mut start = true;
+/// A synthetic scenario for the page, paced and explicitly labelled. Completion holds for 5 s, then the cycle number
+/// advances with a fresh event counter and an empty document cache.
+fn feed_demo(hub: &Hub, kind: Demo, eng: Engine) -> ! {
+    let lines = kind.lines(eng);
+    let mut cycle = 1;
     loop {
         let mut over = true;
-        play(&lines, eng, &mut |w, note| { if w.last.is_none() && !std::mem::take(&mut start) { return true; }
+        let mut last = None;
+        play(&lines, eng, &mut |w, note| {
             let docs = if w.last.is_some() && note.is_none() { vec![doc_of(w)] } else { vec![] };
-            publish(hub, &meta_json(Some(w), ""), &frame_json(Some(w), None, note), docs, std::mem::take(&mut over)); true });
-        std::thread::sleep(Duration::from_secs(5));
+            let mut meta = meta_json(Some(w), "");
+            if let Json::Obj(v) = &mut meta { v.push(("demo_kind".into(), json::str(kind.name()))); }
+            let frame = frame_json(Some(w), None, Some(&kind.note(cycle, note)));
+            publish(hub, &meta, &frame, docs, std::mem::take(&mut over)); last = Some((meta, frame)); true });
+        if let Some((meta, mut frame)) = last {
+            if let Json::Obj(v) = &mut frame { if let Some((_, note)) = v.iter_mut().find(|(k, _)| k == "note") {
+                *note = json::str(&kind.note(cycle, Some("complete; restarting in 5 s"))); } }
+            publish(hub, &meta, &frame, vec![], false);
+        }
+        std::thread::sleep(Duration::from_secs(5)); cycle += 1;
     }
 }
 
@@ -736,6 +808,9 @@ mod tests {
         text += &lv.control("pause", "human:owner", "a check", "t").unwrap(); text.push('\n'); std::fs::write(&f, &text).unwrap();
         assert_eq!(fl.poll(&run, &mut |_: &Watch| {}), Some(false));
         let fr = frame(fl.w.as_ref(), None, "x", None, &Style { th: None, ascii: true, cols: usize::MAX }); assert!(fr[0].contains("paused"), "{}", fr[0]);
+        let page = frame_json(fl.w.as_ref(), None, None);
+        assert_eq!(page.get("status").and_then(Json::as_str), Some("paused"));
+        assert_eq!(page.get("from_checkpoint").and_then(Json::as_f64), Some(20.0));
         let _ = std::fs::remove_file(&f);
     }
 
@@ -808,6 +883,13 @@ mod tests {
         let at = fr.iter().position(|l| l.starts_with("DRIVES")).unwrap_or_else(|| panic!("{fr:?}"));
         assert!(fr[at].contains("[ship 0.62]") && fr[at].contains("ship the next small piece"), "{}", fr[at]);
         assert!(fr[at + 2].contains("wanting [") && fr[at + 2].contains("+1.00 above expectation"), "{fr:?}");
+        let mut held = w.last.as_ref().unwrap().doc.clone();
+        if let Json::Obj(kv) = &mut held { if let Some((_, Json::Obj(p))) = kv.iter_mut().find(|(k, _)| k == "pursue") {
+            if let Some((_, released)) = p.iter_mut().find(|(k, _)| k == "released") { *released = Json::Bool(false); }
+        } }
+        let held = drives(&held, &w.meta, &s, 4, &|_| String::new()).join("\n");
+        assert!(held.contains("ship: not released"), "{held}");
+        assert!(!held.contains("ship the next small piece") && !held.contains("[ship 0.62]"), "{held}");
         // odd shapes (lists, strings, nulls) draw without a panic
         let Json::Obj(mut kv) = w.last.as_ref().unwrap().doc.clone() else { panic!() };
         kv.retain(|(k, _)| k != "drives"); kv.push(("drives".into(), json::parse(r#"{"want":[1,"x",null],"glow":"?","surprise":[-0.5]}"#).unwrap()));
@@ -835,6 +917,23 @@ mod tests {
         let learned = fr.iter().find(|l| l.trim_start().starts_with("pursue") && !l.starts_with("DRIVES")).unwrap_or_else(|| panic!("{fr:?}"));
         assert!(["fun ", "craft ", "chores ", "safety "].iter().all(|g| learned.contains(g)), "{learned}");
         assert_eq!(meta_json(Some(&w), "x").get("goals").map(|g| strs(Some(g))), Some(w.meta.goals.clone()));
+    }
+
+    /// The drives demo is a real strand, with positive and negative prediction errors and an enforced goal habit.
+    #[test]
+    fn synthetic_drives_demo_replays_and_exercises_its_signals() {
+        let lines = drive_demo(&run); let text = lines.join("\n") + "\n";
+        let complete = replays_to_its_digests(&text, "synthetic drives demo");
+        assert_eq!(complete.rep.live.n, 8);
+        let mut w = Watch::open(&lines[0]).unwrap(); let mut positive = false; let mut negative = false; let mut glowing = false;
+        for l in &lines[1..] {
+            w.feed(l, &run); let d = &w.last.as_ref().unwrap().doc;
+            let values = |key: &str| d.get("drives").and_then(|x| x.get(key)).and_then(Json::as_obj).unwrap().iter().filter_map(|(_, x)| x.as_f64()).collect::<Vec<_>>();
+            positive |= values("surprise").iter().any(|x| *x > 0.0); negative |= values("surprise").iter().any(|x| *x < 0.0);
+            glowing |= values("glow").iter().any(|x| *x > 0.0);
+            if w.rep.live.n == 7 { assert_eq!(d.get("pursue").and_then(|p| p.get("goal")).and_then(Json::as_str), Some("check")); }
+        }
+        assert!(positive && negative && glowing);
     }
 
     /// The page's layout lists the persona's variables in its order; a frame carries the event's document as replayed (drives

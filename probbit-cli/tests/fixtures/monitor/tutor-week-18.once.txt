@@ -1,4 +1,7 @@
 probbit monitor Pip 1.1.0 | seed 2 | individual 0231de28 | event 18 | +1.00 h since the event before | replay verified [ok]
+LEGEND  width = odds; #/[level] = chosen; =/- = other levels
+        Mood trail _.:-=+*# = mean level low -> high (last 50 events)
+        Habits: active = in force; [name] = the no-habits twin broke this rule
 STANCE  warmth      --##################   cool 0.00   neutral 0.08  [warm 0.92]  warm and encouraging
         directness  =========#########==   gentle 0.42  [balanced 0.46]  blunt 0.11
         verbosity   =################===   terse 0.06  [short 0.82]  full 0.12   a short explanation

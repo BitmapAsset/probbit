@@ -22,6 +22,7 @@ const TARGETS = {
   'darwin-arm64': 'aarch64-apple-darwin',
   'darwin-x64': 'x86_64-apple-darwin',
   'linux-x64': 'x86_64-unknown-linux-gnu',
+  'linux-arm64': 'aarch64-unknown-linux-musl',
   'win32-x64': 'x86_64-pc-windows-msvc',
   'win32-arm64': 'x86_64-pc-windows-msvc', // x64 emulation on Windows on Arm
 };
@@ -34,7 +35,7 @@ function binaryPath() {
 class ChecksumError extends Error {}
 
 async function get(url) {
-  const res = await fetch(url, { redirect: 'follow' });
+  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
   if (!res.ok) throw new Error(`GET ${url}: HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -49,7 +50,8 @@ function place(src, dest) {
     fs.renameSync(tmp, dest);
   } catch (e) {
     fs.rmSync(tmp, { force: true });
-    if (!fs.existsSync(dest)) throw e; // another process put it there first
+    // Only forgive an actual identical concurrent install, not an old binary left behind by a permission/rename error.
+    if (!fs.existsSync(dest) || !fs.readFileSync(src).equals(fs.readFileSync(dest))) throw e;
   }
 }
 
@@ -62,13 +64,18 @@ async function install(log = (m) => process.stderr.write(`${m}\n`)) {
     log(`probbit: using ${src} (PROBBIT_BINARY)`);
     return dest;
   }
-  const target = env.PROBBIT_TARGET || TARGETS[`${process.platform}-${process.arch}`];
+  const glibc = process.platform === 'linux' && process.report && process.report.getReport().header.glibcVersionRuntime;
+  const detected = process.platform === 'linux' && process.arch === 'x64' && !glibc
+    ? 'x86_64-unknown-linux-musl' : TARGETS[`${process.platform}-${process.arch}`];
+  const target = env.PROBBIT_TARGET || detected;
   if (!target) {
     throw new Error(`no prebuilt probbit for ${process.platform}-${process.arch}; build one (cargo build --release -p probbit-cli) `
       + 'and reinstall with PROBBIT_BINARY=/path/to/probbit');
   }
   let tag = env.PROBBIT_VERSION || `v${pkg.version}`;
   if (!tag.startsWith('v')) tag = `v${tag}`;
+  if (!/^v[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(tag)) throw new Error(`invalid release version: ${tag}`);
+  if (!/^[A-Za-z0-9_-]+$/.test(target)) throw new Error(`invalid target: ${target}`);
   const base = (env.PROBBIT_DOWNLOAD_BASE || `https://github.com/${REPO}/releases/download`).replace(/\/+$/, '');
   const zip = target.includes('windows');
   const name = `probbit-${tag}-${target}`;

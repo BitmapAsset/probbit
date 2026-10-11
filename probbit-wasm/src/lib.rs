@@ -68,7 +68,9 @@ pub fn demo(input: &str) -> (String, i32) {
         let int = |k: &str, d: usize| o.iter().find(|(x, _)| x == k).map_or(Ok(d), |(_, v)| json::count(v, k).map_err(|e| e.to_json()));
         let hard = match o.iter().find(|(x, _)| x == "hard") { None => false, Some((_, Json::Bool(b))) => *b, Some(_) => return Err(json::schema("hard", "must be true or false").to_json()) };
         let tasks = int("tasks", 12)?; if tasks == 0 { return Err(json::value("tasks", "at least 1").to_json()); }
-        Ok(json::write(&router::demo_doc(tasks, int("seed", 7)? as u64, hard), true))
+        if tasks > json::MAX_DENSE / 6 { return Err(json::limit("tasks", format!("at most {} tasks for the six-worker demo", json::MAX_DENSE / 6)).to_json()); }
+        let seed = o.iter().find(|(k, _)| k == "seed").map_or(Ok(7), |(_, v)| json::count_u64(v, "seed").map_err(|e| e.to_json()))?;
+        Ok(json::write(&router::demo_doc(tasks, seed, hard), true))
     };
     match go() { Ok(s) => (s, 0), Err(e) => (json::write(&e, false), 2) }
 }
@@ -95,30 +97,31 @@ fn flags(f: Option<&Json>, cmd: &str) -> Result<Flags, Json> {
     let mut o = Flags { budget: 200.0, budget_given: false, seed: 7, exact_limit: 2_000_000, exact_ms: None, fr_states: probbit_ir::FRONTIER_MAX_STATES, polish_ms: 50.0,
         polish_sweeps: 0, sweeps: 0, collective: true, cluster: true, cycles: true, chains: 4, threads: 1, mem_mb: 1024,
         mode: if cmd == "decide" { "auto" } else { "decide" }.to_string(), deadline_ms: None, program: false };
-    let kv = match f { None | Some(Json::Null) => return Ok(o), Some(Json::Obj(v)) => v, Some(_) => return Err(flag_err("", "\"flags\" must be an object")) };
+    let kv = match f { None | Some(Json::Null) => return Ok(o), Some(j @ Json::Obj(_)) => json::keyed(j, "flags").map_err(|e| flag_err(e.path.strip_prefix("flags.").unwrap_or(""), &e.msg))?, Some(_) => return Err(flag_err("", "\"flags\" must be an object")) };
     let ms = |k: &str, x: &Json, lo_open: bool| match x.as_f64() { Some(v) if v.is_finite() && v <= 1e9 && (v > 0.0 || (!lo_open && v == 0.0)) => Ok(v),
         _ => Err(flag_err(k, if lo_open { "milliseconds above 0, at most 1e9" } else { "milliseconds from 0 to 1e9" })) };
     let int = |k: &str, x: &Json, lo: u64, hi: u64| match x.as_f64() { Some(v) if v.fract() == 0.0 && v >= lo as f64 && v <= hi as f64 => Ok(v as u64),
         _ => Err(flag_err(k, &format!("an integer from {lo} to {hi}"))) };
     let on = |k: &str, x: &Json| match x { Json::Bool(b) => Ok(*b), _ => Err(flag_err(k, "true or false")) };
     let max = 1u64 << 53;
+    let size_max = max.min(usize::MAX as u64);
     for (k, x) in kv {
         match (k.as_str(), cmd) {
             ("budget_ms", _) => { o.budget = ms(k, x, false)?; o.budget_given = true; }
             ("seed", _) => o.seed = int(k, x, 0, max)?,
             ("exact_limit", _) => o.exact_limit = int(k, x, 0, max)?,
             ("exact_ms", _) => o.exact_ms = Some(ms(k, x, false)?),
-            ("frontier_states", _) => o.fr_states = int(k, x, 0, max)? as usize,
+            ("frontier_states", _) => o.fr_states = int(k, x, 0, size_max)? as usize,
             ("polish_ms", _) => o.polish_ms = ms(k, x, false)?,
-            ("polish_sweeps", _) => o.polish_sweeps = int(k, x, 0, max)? as usize,
-            ("sweeps", _) => o.sweeps = int(k, x, 0, max)? as usize,
+            ("polish_sweeps", _) => o.polish_sweeps = int(k, x, 0, size_max)? as usize,
+            ("sweeps", _) => o.sweeps = int(k, x, 0, size_max)? as usize,
             ("collective", _) => o.collective = on(k, x)?,
             ("cluster", _) => o.cluster = on(k, x)?,
             ("cycles", _) => o.cycles = on(k, x)?,
             ("chains", _) => o.chains = int(k, x, 1, 100_000)? as usize,
             ("threads", _) => { o.threads = int(k, x, 1, 1024)? as usize;
                 if cfg!(all(target_family = "wasm", target_os = "unknown")) && o.threads > 1 { return Err(flag_err(k, "this build has no threads (wasm32-unknown-unknown): 1")); } }
-            ("mem_limit_mb", _) => o.mem_mb = int(k, x, 0, max)? as usize,
+            ("mem_limit_mb", _) => o.mem_mb = int(k, x, 0, size_max)? as usize,
             ("mode", "decide") => { o.mode = x.as_str().filter(|m| ["auto", "exact", "sample"].contains(m)).ok_or_else(|| flag_err(k, "auto, exact or sample"))?.to_string(); }
             ("op", "run" | "evaluate") => { o.mode = x.as_str().filter(|m| ["decide", "exact", "sample"].contains(m)).ok_or_else(|| flag_err(k, "decide, exact or sample"))?.to_string(); }
             ("deadline_ms", "run" | "evaluate") => o.deadline_ms = Some(ms(k, x, true)?),

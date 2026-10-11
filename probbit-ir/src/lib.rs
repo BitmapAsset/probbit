@@ -71,13 +71,20 @@ const NONE: u32 = u32::MAX;
 
 impl Model {
     pub fn new(n: usize, k: usize, h: Vec<f64>, allowed: Vec<bool>, clamp: Vec<Option<usize>>, pairs: Vec<Pair>, caps: Vec<Cap>) -> Result<Model, String> {
-        if h.len() != n * k || allowed.len() != n * k || clamp.len() != n { return Err("h / allowed must have n*k entries and clamp n".into()); }
         if k == 0 || k > 65535 { return Err("k must be in 1..=65535".into()); }
+        let nk = n.checked_mul(k).ok_or("n*k exceeds the platform size limit")?;
+        if h.len() != nk || allowed.len() != nk || clamp.len() != n { return Err("h / allowed must have n*k entries and clamp n".into()); }
+        if h.iter().any(|x| !x.is_finite()) { return Err("h must contain only finite weights".into()); }
         if let Some(i) = clamp.iter().position(|c| c.map_or(false, |v| v >= k)) { return Err(format!("clamp of variable {i} out of range")); }
         let mut adj = vec![vec![]; n];
         for (q, p) in pairs.iter().enumerate() {
             if p.i >= n || p.j >= n || p.i == p.j { return Err(format!("pair {q}: bad variables ({}, {})", p.i, p.j)); }
-            if let Coupling::Table(t) = &p.c { if t.len() != k * k { return Err(format!("pair {q}: table must have k*k entries")); } }
+            match &p.c {
+                Coupling::Table(t) => { if t.len() != k * k { return Err(format!("pair {q}: table must have k*k entries")); }
+                    if t.iter().any(|x| !x.is_finite()) { return Err(format!("pair {q}: table must contain only finite weights")); } }
+                Coupling::Potts(w) if !w.is_finite() => return Err(format!("pair {q}: potts weight must be finite")),
+                _ => {}
+            }
             adj[p.i].push((p.j, q)); adj[p.j].push((p.i, q));
         }
         for a in adj.iter_mut() { a.sort(); }
@@ -85,6 +92,11 @@ impl Model {
         for (c, cp) in caps.iter().enumerate() {
             if !cp.weights.is_empty() && cp.weights.len() != cp.members.len() { return Err(format!("capacity {c}: {} weights for {} members", cp.weights.len(), cp.members.len())); }
             if let Some(&w) = cp.weights.iter().find(|&&w| w == 0 || w > MAX_CAP_WEIGHT) { return Err(format!("capacity {c}: weight {w} outside 1..={MAX_CAP_WEIGHT}")); }
+            // Loads are usize on both native and wasm32. Reject an unrepresentable
+            // bound before any sampler/search can wrap a load and admit an invalid plan.
+            if cp.weights.iter().try_fold(0usize, |s, &w| s.checked_add(w)).is_none() {
+                return Err(format!("capacity {c}: total member weight exceeds the platform size limit"));
+            }
             for &(i, v) in &cp.members {
             if i >= n || v >= k { return Err(format!("capacity {c}: member ({i}, {v}) out of range")); }
             if cap_of[i * k + v].last() == Some(&c) { return Err(format!("capacity {c}: duplicate member ({i}, {v})")); }
@@ -574,7 +586,7 @@ pub fn compile_parts(k: usize, h: &mut [f64], pairs: Vec<Pair>, caps: Vec<Cap>) 
     let nc = caps.len();
     // never binding: the most one plan can load the cap (per variable its heaviest member; unit = its distinct member variables) fits
     let caps: Vec<Cap> = caps.into_iter().filter(|cp| { let mut v: Vec<(usize, usize)> = cp.members.iter().enumerate().map(|(t, &(i, _))| (i, cp.w(t))).collect(); v.sort_unstable();
-        let most: usize = v.iter().enumerate().filter(|&(q, &(i, _))| v.get(q + 1).map_or(true, |&(j, _)| j != i)).map(|(_, &(_, w))| w).sum(); cp.limit < most }).collect();
+        let most: u128 = v.iter().enumerate().filter(|&(q, &(i, _))| v.get(q + 1).map_or(true, |&(j, _)| j != i)).map(|(_, &(_, w))| w as u128).sum(); (cp.limit as u128) < most }).collect();
     c.caps_dropped = nc - caps.len();
     (kept, caps, c)
 }
@@ -1040,6 +1052,7 @@ pub fn anneal_sweeps(m: &Model, start: Option<&[usize]>, betas: &[f64], sweeps: 
 /// chain gets ms / ceil(chains / threads), as in the sampler. threads >= chains = the old one-thread-per-chain behaviour.
 #[allow(clippy::too_many_arguments)]
 pub fn anneal_on(m: &Model, start: Option<&[usize]>, betas: &[f64], ms: f64, sweeps: usize, chains: usize, threads: usize, seed: u64) -> Option<(f64, Vec<usize>)> {
+    if start.is_some_and(|x| x.len() != m.n || x.iter().any(|&v| v >= m.k) || m.violations(x) != 0) { return None; }
     let seq = probbit_core::rt::sequential(); let t = if seq { 1 } else { threads.clamp(1, chains.max(1)) }; let ms = ms / chains.div_ceil(t) as f64;
     // R19.7: one model, the stage's beta on the chain (was a scaled Model clone per beta, built before the clock started)
     let run = |c: usize| -> Option<(f64, Vec<usize>)> {
@@ -1048,7 +1061,7 @@ pub fn anneal_on(m: &Model, start: Option<&[usize]>, betas: &[f64], ms: f64, swe
         for (q, &b) in betas.iter().enumerate() {
             let mut ch = Chain::from_state(m, seed ^ 0x5eed, (c * 64 + q) as u64, &x); ch.beta = b; ch.plain = true;
             let stop = ms * (q + 1) as f64 / nq as f64; let mut j = 0usize;
-            let n = sweeps * (q + 1) / nq - sweeps * q / nq;
+            let n = ((sweeps as u128 * (q + 1) as u128) / nq as u128 - (sweeps as u128 * q as u128) / nq as u128) as usize;
             while if sweeps > 0 { j < n } else { j % 4 != 0 || t0.elapsed().as_secs_f64() * 1e3 < stop } { ch.sweep(); j += 1; let lw = m.logw(&ch.x); if lw > best.0 { best = (lw, ch.x.clone()); } }
             x = ch.x.clone();
         }

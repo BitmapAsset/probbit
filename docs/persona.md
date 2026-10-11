@@ -640,6 +640,18 @@ ones it leaves unknown; the lint document gets `props` (each rule's `prove` entr
 Exit codes: `fuzz` 0 nothing found, 1 a counterexample; `prove` 0 every rule held or proved, 1 some rule unknown; both 2 bad
 input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); timing goes to stderr.
 
+**Source-restricted fixtures.** For a persona with `reward_from`, exported abstract counterexamples have no runnable
+`replay` or `explain` command unless a synthetic source is explicitly authorized with
+`--fixture-src env:synthetic` (or `human:synthetic`, where allowed). The exporter strictly replays that labelled script;
+it rejects incompatible source rules, records `fixture_provenance`, and never bypasses the production source check.
+The Python `persona_fuzz` and MCP fuzz tool accept `fixture_src` too. See the
+[host regression example](../examples/agent-harness/README.md). Synthetic observations are not production evidence.
+
+**Output formatting.** Single-document persona commands accept `--pretty` for stdout: init, turn, diff, lint, check,
+compile, describe, fuzz and prove (for fuzz/prove it implies `--json`). Written states and programs remain canonical;
+replay remains JSONL and explain remains text, so those commands reject `--pretty` with guidance. The
+`probbit_persona_turn` field is the document schema version, not its zero-based `turn` counter.
+
 ### 5.7 Live: a resident individual
 
 `probbit live` keeps one individual running: JSONL events in (one object of inputs per line, from `--events FILE` or stdin),
@@ -770,7 +782,11 @@ against the replay (its `"checkpoints": N` is in the summary); `verify --from-ch
 checkpoint against the event line before it (prev, the stance digest, the state digest, the state read as any state is) and
 replays only what follows (`"from_checkpoint": n`); the lines before it are trusted, so run a full `verify` to check them.
 `monitor` starts at the last checkpoint and draws its event at once. A strand that ends in a checkpoint line is continued from
-the state it carries. Measured on an Apple M4: a 10,000-event strand of a drives persona (4 goals, a floor, learning; 3,126,444
+the state it carries. Before continuation or a control append, the stored chain and lifecycle are checked from the header:
+a checkpoint cannot hide a retired status, an invalid transition or a broken preceding hash link. This structural scan
+costs time proportional to the existing log; it does not recompute earlier inference. Full `verify` is still necessary to
+check that inference. Hashes alone do not authenticate a writer or detect a wholly rewritten log without a trusted external
+anchor. Historical measurement before this hardening, on an Apple M4: a 10,000-event strand of a drives persona (4 goals, a floor, learning; 3,126,444
 bytes, 10 checkpoint lines) opens in `monitor --once` from its last checkpoint in 0.005 s (load 3.3), where a full `verify`
 takes 192 s. A replay from a checkpoint costs what the events after it cost: 500 events past the last one took 26 s to draw
 (load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
@@ -793,6 +809,7 @@ or names the line that differs.
 probbit monitor pip.strand --follow              # bars in the terminal, redrawn as the strand grows
 probbit monitor pip.strand --open                # the same board as a page at http://127.0.0.1:PORT/, in the browser
 probbit monitor --demo --open                    # the tutor's week, paced, for someone without a strand yet
+probbit monitor --demo drives --open             # eight synthetic events with goals and drives
 ```
 
 **What it shows.** The latest event. A header: persona and version, seed, the individual's digest, the event number, the hours
@@ -832,6 +849,9 @@ The page draws the terminal's board in a dark theme, the bars moving as the odds
 **Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
 5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:
 at a terminal, or with `--serve`, over and over. `--demo --once`, or a pipe, prints its last frame.
+`--demo week` explicitly selects the same tutor demo; `--demo drives` selects the embedded Scout persona's eight-event
+drive demo. Both are labelled synthetic, with a loop number and restart/completion cues. The default tutor events and
+canonical replay documents are unchanged. Demo bars are scripted engine state, not measurements of an attached agent.
 
 Exit codes: 0 when every line replays, 1 at a line that differs (the frame names it and shows the event before it), 2 for a bad
 flag, a port that cannot be had, or a file that cannot be read or is not a strand.

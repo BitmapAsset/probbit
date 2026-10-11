@@ -137,7 +137,10 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
   weight difference beyond ~745 already decides (e^745 is past the range of double-precision probability ratios), so the limit
   removes no distribution you can express; it keeps every log-space quantity (log w sums over variables, pairs and
   same-group pairs; log Z) below ~1e9 x (input size), far inside the double range (1.8e308). Caps and limits are integers
-  0..2^53. Above the limit a value is rejected, not clamped: rescale your scores.
+  0..min(2^53, usize::MAX). On wasm32 the maximum is 4,294,967,295; size/count flags must also fit that target's
+  `usize`. The sum of weights in each linear cap must fit `usize` even when individual weights are valid.
+  Seeds remain 64-bit with the JSON exact-integer bound of 2^53. Out-of-range values are rejected, never wrapped
+  or silently clamped: rescale the model or use a wider native target.
 - **Arithmetic** stays in log space: Gibbs conditionals and enumeration subtract the running max before `exp`; the frontier DP
   carries log weights and merges by log-sum-exp (before 0.2.0 it used linear weights scaled per layer, which underflowed past ~745
   nats; with weights of +-1000 it returned NaN marginals labelled `exact` and the CLI aborted, exit 134: probbit-ir test

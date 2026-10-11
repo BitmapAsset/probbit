@@ -457,6 +457,13 @@ fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)]) -> R
             _ => {} } }
     Ok(())
 }
+/// Validate the source of a generated fixture without changing it or running inference.
+/// Normal turns use this same check; callers cannot use this to authorize production evidence.
+pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
+    let raw = raw.as_obj().ok_or_else(|| perr("inputs", "must be an object"))?;
+    match &p.reward { Some(rw) => provenance(rw, raw), None => Ok(()) }
+}
+pub fn has_reward_sources(p: &Persona) -> bool { p.reward.is_some() }
 fn check_cond(k: &str, c: &Json, path: &str, inputs: &[Input], history: &[Hist]) -> R<()> {
     let range = |c: &Json| -> R<()> { if let Json::Num(_) = c { return Ok(()); }
         let kv = c.as_obj().filter(|kv| !kv.is_empty() && kv.iter().all(|(k, _)| k == "at_least" || k == "at_most")).ok_or_else(|| perr(path, "a number (at least) or {at_least, at_most}"))?;

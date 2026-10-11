@@ -35,7 +35,7 @@ pub(crate) fn from_json(j: &Json) -> Result<Named, json::InErr> {
     let ts = arr(req(j, "tasks", "")?, "tasks")?;
     let t = ts.len(); if t == 0 { return Err(value("tasks", "no tasks")); }
     // Dense (task, worker) tables (as `probbit run`'s n x k): a small document must not ask for gigabytes
-    if t.saturating_mul(a) > json::MAX_DENSE { return Err(limit("tasks", format!("{t} tasks x {a} workers = {} (task, worker) pairs; at most {}", t * a, json::MAX_DENSE))); }
+    if t.saturating_mul(a) > json::MAX_DENSE { return Err(limit("tasks", format!("{t} tasks x {a} workers = {} (task, worker) pairs; at most {}", t.saturating_mul(a), json::MAX_DENSE))); }
     let (mut h, mut allowed, mut group, mut clamp, mut tasks) = (vec![f64::NEG_INFINITY; t * a], vec![false; t * a], vec![usize::MAX; t], vec![None; t], vec![]);
     let mut gids: Vec<String> = vec![]; let mut gindex: HashMap<String, usize> = HashMap::new(); let mut tseen: HashSet<String> = HashSet::with_capacity(t);
     for (i, tk) in ts.iter().enumerate() { let tp = ix("tasks", i);
@@ -99,6 +99,10 @@ pub(crate) struct Opts { pub(crate) budget: f64, pub(crate) seed: u64, pub(crate
 /// code: 0 answer, 1 infeasible, 3 refused / declined; the per-task error bars for `--summary`). `mem` = (--mem-limit-mb, rows per
 /// chain), read only when the sampler runs.
 pub(crate) fn decide(n: &Named, o: &Opts, mem: &dyn Fn() -> (usize, usize)) -> (Json, i32, Vec<f64>) {
+    let (mut doc, code, bars) = decide_inner(n, o, mem);
+    crate::run::release_contract(&mut doc); (doc, code, bars)
+}
+fn decide_inner(n: &Named, o: &Opts, mem: &dyn Fn() -> (usize, usize)) -> (Json, i32, Vec<f64>) {
     let (budget, seed, exact_limit, polish_ms, polish_sweeps, fr_states, sweeps, mode, chains, threads, cpu_pct, xms) =
         (o.budget, o.seed, o.exact_limit, o.polish_ms, o.polish_sweeps, o.fr_states, o.sweeps, o.mode.as_str(), o.chains, o.threads, o.cpu_pct, o.xms);
     let p = &n.p;

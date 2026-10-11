@@ -33,7 +33,7 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
     let vidx = |s: &str, path: &str| vindex.get(s).copied().ok_or_else(|| value(path, format!("unknown value {s}")));
     let vs = arr(req(j, "vars", "")?, "vars")?; let n = vs.len(); if n == 0 { return Err(value("vars", "no vars")); }
     // Dense domains (h, allowed, the sampler's and gate's per-(variable, value) arrays): bounded before anything is allocated
-    if n.saturating_mul(k) > crate::json::MAX_DENSE { return Err(limit("vars", format!("{n} vars x {k} values = {} (variable, value) pairs; at most {}", n * k, crate::json::MAX_DENSE))); }
+    if n.saturating_mul(k) > crate::json::MAX_DENSE { return Err(limit("vars", format!("{n} vars x {k} values = {} (variable, value) pairs; at most {}", n.saturating_mul(k), crate::json::MAX_DENSE))); }
     // Ids are looked up in a hash index; `vars.contains` + linear `position` made parsing O(n^2) (8.3 s of an 8.4 s call
     // on 100,000 variables)
     let mut vars: Vec<String> = vec![]; let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::with_capacity(n);
@@ -62,6 +62,9 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
         let c = match (opt(p, "potts"), opt(p, "table")) {
             (Some(w), None) => Coupling::Potts(weight(w, &at(&pp, "potts"))?),
             (None, Some(t)) => { let tp = at(&pp, "table"); let rows = arr(t, &tp)?; if rows.len() != k { return Err(schema(&tp, format!("table must be k x k = {k} x {k}"))); }
+                // Validate every row before reserving k*k cells. A large alphabet
+                // with empty rows is a small malformed input, not a huge allocation.
+                for (r, row) in rows.iter().enumerate() { let rp = ix(&tp, r); if arr(row, &rp)?.len() != k { return Err(schema(&rp, format!("table rows must have k = {k} entries"))); } }
                 let mut tab = Vec::with_capacity(k * k);
                 for (r, row) in rows.iter().enumerate() { let rp = ix(&tp, r); let row = arr(row, &rp)?; if row.len() != k { return Err(schema(&rp, format!("table rows must have k = {k} entries"))); }
                     for (c, x) in row.iter().enumerate() { tab.push(weight(x, &ix(&rp, c))?); } }
@@ -132,7 +135,7 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
             listed.push(row.iter().enumerate().map(|(e, w)| { let ep = ix(&rp, e); vidx(text(w, &ep)?, &ep) }).collect::<Result<_, _>>()?); }
         let doms: Vec<Vec<usize>> = over.iter().map(|&i| (0..k).filter(|&v| allowed[i * k + v]).collect()).collect();
         let bad: Vec<Vec<usize>> = if key == "forbid" { listed } else {
-            let total: usize = doms.iter().map(Vec::len).product(); if total > 100_000 { return Err(limit(&tp, format!("{total} tuples to enumerate; at most 100,000"))); }
+            let total = doms.iter().fold(1usize, |s, d| s.saturating_mul(d.len())); if total > 100_000 { return Err(limit(&tp, format!("{total} tuples to enumerate; at most 100,000"))); }
             let mut all: Vec<Vec<usize>> = vec![vec![]]; for d in &doms { all = all.into_iter().flat_map(|t| d.iter().map(move |&v| { let mut u = t.clone(); u.push(v); u })).collect(); }
             let set: std::collections::HashSet<Vec<usize>> = listed.into_iter().collect(); all.into_iter().filter(|t| !set.contains(t)).collect() };
         for t in bad { if t.iter().zip(&over).all(|(&v, &i)| allowed[i * k + v]) {
@@ -149,7 +152,7 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
         // 1.45 GB); the loops run over the allowed slots only (the same caps in the same order, no k^2 scan)
         let (sx, sy): (Vec<usize>, Vec<usize>) = ((0..k).filter(|&a| allowed[x * k + a]).collect(), (0..k).filter(|&b| allowed[y * k + b]).collect());
         if sx.len() * sy.len() > 100_000 { return Err(limit(&cp, format!("{} slot pairs to check; at most 100,000", sx.len() * sy.len()))); }
-        for &a in &sx { for &b in &sy { if b < a + g { caps.push(Cap { weights: vec![], members: vec![(x, a), (y, b)], limit: 1 }); } } }
+        for &a in &sx { for &b in &sy { if b < a.saturating_add(g) { caps.push(Cap { weights: vec![], members: vec![(x, a), (y, b)], limit: 1 }); } } }
         tally(&caps, c0, &mut total, &cp)?; } }
     // R19.7 (P2.1) linear {"terms": [[var, value, weight], ...], "limit": L}: sum of weight x [var = value] <= L, weights whole
     // numbers 0..=1,000,000 (0, or a value the var cannot take: term dropped), each (var, value) once. One WEIGHTED cap: members
@@ -177,8 +180,8 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
             if !allowed[i * k + q] || clamp[i].is_some_and(|c| c != q) { return Err(value(&vp, format!("{var} = {} is not allowed", values[q]))); }
             x[i] = q; }
         if let Some(i) = x.iter().position(|&q| q == usize::MAX) { return Err(value("start", format!("var {} has no value (a warm start gives every variable)", vars[i]))); }
-        for (c, cp) in caps.iter().enumerate() { let load: usize = cp.members.iter().enumerate().filter(|&(_, &(i, v))| x[i] == v).map(|(t, _)| cp.w(t)).sum();
-            if load > cp.limit { return Err(value("start", format!("infeasible: lowered cap #{c} holds {load} > limit {}", cp.limit))); } }
+        for (c, cp) in caps.iter().enumerate() { let load: u128 = cp.members.iter().enumerate().filter(|&(_, &(i, v))| x[i] == v).map(|(t, _)| cp.w(t) as u128).sum();
+            if load > cp.limit as u128 { return Err(value("start", format!("infeasible: lowered cap #{c} holds {load} > limit {}", cp.limit))); } }
         Some(x) } };
     let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
     let mut m = Model::new(n, k, h, allowed, clamp, pairs, caps).map_err(|e| value("", e))?; m.start = start;
@@ -239,6 +242,19 @@ fn marginals(p: &Prog, mg: &[f64]) -> Json {
 }
 fn ids(p: &Prog, mask: &[bool], want: bool) -> Json { Json::Arr(p.vars.iter().enumerate().filter(|(i, _)| mask[*i] == want).map(|(_, id)| jstr(id)).collect()) }
 
+/// Preserve the legacy full candidate `plan`, but make its release status explicit.
+/// `released_plan` is a projection of that same feasible candidate, not a separately
+/// solved complete plan; escalated variables still require a joint completion.
+pub(crate) fn release_contract(doc: &mut Json) {
+    let Some(Json::Obj(plan)) = doc.get("plan") else { return; };
+    let verdict = doc.get("verdict").and_then(Json::as_str).unwrap_or("");
+    let status = match verdict { "exact" | "diagnostics_passed" => "released", "partial" => "partial", _ => "diagnostic" };
+    let released: std::collections::HashSet<&str> = doc.get("released").and_then(Json::as_arr)
+        .map_or_else(Default::default, |a| a.iter().filter_map(Json::as_str).collect());
+    let projection = Json::Obj(plan.iter().filter(|(id, _)| status != "diagnostic" && released.contains(id.as_str())).cloned().collect());
+    if let Json::Obj(v) = doc { v.push(("plan_status".into(), jstr(status))); v.push(("released_plan".into(), projection)); }
+}
+
 /// Runs the instruction; returns (decision document, exit code: 0 answer, 1 infeasible, 3 refused).
 /// `sweeps > 0` = fixed work per chain instead of the wall-clock budget: with `polish_ms == 0` or `polish_sweeps > 0` the answer
 /// is then a pure function of (program, seed) — byte-identical across runs and machines with the same float semantics.
@@ -247,6 +263,11 @@ fn ids(p: &Prog, mask: &[bool], want: bool) -> Json { Json::Arr(p.vars.iter().en
 /// `bars`: filled with the per-variable error bars on a sampled answer (`--summary`), left empty otherwise.
 #[allow(clippy::too_many_arguments)]
 pub fn run(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_ms: f64, polish_sweeps: usize, sweeps: usize, fr_states: usize, chains: usize, threads: usize, cpu_pct: u32, mem: (usize, usize), exact_ms: Option<f64>, deadline: Option<(probbit_core::rt::Instant, f64, bool)>, bars: &mut Vec<f64>) -> (Json, i32) {
+    let (mut doc, code) = run_inner(p, op, budget, seed, exact_limit, polish_ms, polish_sweeps, sweeps, fr_states, chains, threads, cpu_pct, mem, exact_ms, deadline, bars);
+    release_contract(&mut doc); (doc, code)
+}
+#[allow(clippy::too_many_arguments)]
+fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polish_ms: f64, polish_sweeps: usize, sweeps: usize, fr_states: usize, chains: usize, threads: usize, cpu_pct: u32, mem: (usize, usize), exact_ms: Option<f64>, deadline: Option<(probbit_core::rt::Instant, f64, bool)>, bars: &mut Vec<f64>) -> (Json, i32) {
     let m = &p.m; let t0 = probbit_core::rt::Instant::now();
     // --exact-ms (opt-in) = a hard wall-clock stop for the exact tiers below, from t0 (see main.rs `exact_ms`)
     let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();

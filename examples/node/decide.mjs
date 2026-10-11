@@ -11,7 +11,7 @@ const KIND = { 0: 'answer', 1: 'infeasible', 2: 'bad_input', 3: 'refused' };
 
 /**
  * Run `probbit <args>` with `input` (an object or JSON text; omit for none) on stdin. Resolves to {kind, exitCode, output, stderr}:
- *   'answer'     exit 0: verdict exact | diagnostics_passed | partial (act on output.released, escalate output.escalated)
+ *   'answer'     exit 0: verdict exact | diagnostics_passed | partial (inspect released_plan and escalate escalated)
  *   'infeasible' exit 1: no plan satisfies the rules (a proof, not an error)
  *   'bad_input'  exit 2: output.error = {code, path, message} for a bad document; a bad flag leaves only a stderr line
  *   'refused'    exit 3: verdict refused / declined (escalate), or output.error.code === 'numeric'
@@ -47,9 +47,9 @@ export function probbit(args, input, { bin = process.env.PROBBIT_BIN || 'probbit
 function describe(r) {
   const o = r.output || {};
   if (r.kind === 'bad_input') return o.error ? `${o.error.code} at ${o.error.path}: ${o.error.message}` : r.stderr;
-  const plan = o.plan ? Object.entries(o.plan).slice(0, 3).map(([t, w]) => `${t}->${w}`).join(', ') : '';
+  const plan = o.released_plan ? Object.entries(o.released_plan).slice(0, 3).map(([t, w]) => `${t}->${w}`).join(', ') : '';
   const released = Array.isArray(o.released) ? `, ${o.released.length} of ${o.tasks} released` : '';
-  return `verdict ${o.verdict}${released}${plan ? `, plan ${plan}, ...` : ''}${o.reason ? ` (${o.reason})` : ''}`;
+  return `verdict ${o.verdict}${released}${plan ? `, released assignments ${plan}, ...` : ''}${o.plan_status === 'diagnostic' ? ', candidate is diagnostic only' : ''}${o.reason ? ` (${o.reason})` : ''}`;
 }
 
 async function main() {
@@ -84,4 +84,4 @@ async function main() {
   process.exit(ok ? 0 : 1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

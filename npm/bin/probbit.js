@@ -16,15 +16,16 @@ async function main() {
   }
   const child = spawn(bin, process.argv.slice(2), { stdio: 'inherit' });
   const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'].filter((s) => process.platform !== 'win32' || s !== 'SIGHUP');
-  const forward = (s) => { try { child.kill(s); } catch (e) { /* already gone */ } };
-  for (const s of signals) process.on(s, forward);
+  // Node's signal events carry no argument. Bind each signal explicitly instead of accidentally forwarding SIGTERM.
+  const handlers = new Map(signals.map(s => [s, () => { try { child.kill(s); } catch (e) { /* already gone */ } }]));
+  for (const [s, handler] of handlers) process.on(s, handler);
   child.on('error', (e) => {
     process.stderr.write(`probbit: cannot run ${bin}: ${e.message}\n`);
     process.exit(127);
   });
   child.on('exit', (code, signal) => {
     if (signal) {
-      for (const s of signals) process.removeListener(s, forward);
+      for (const [s, handler] of handlers) process.removeListener(s, handler);
       process.exitCode = 128 + (os.constants.signals[signal] || 0); // if the signal is ignored here (SIGPIPE)
       process.kill(process.pid, signal); // die the same way, so the shell sees 128 + n
       return;

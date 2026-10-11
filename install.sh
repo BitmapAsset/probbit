@@ -6,7 +6,7 @@
 #
 # Environment (all optional):
 #   PROBBIT_VERSION        release tag, e.g. v0.8.0 (default: the latest release)
-#   PROBBIT_INSTALL_DIR    where `probbit` goes (default: /usr/local/bin if you can write there, else ~/.local/bin)
+#   PROBBIT_INSTALL_DIR    where `probbit` goes (default: ~/.local/bin; never overwrites a system-wide install implicitly)
 #   PROBBIT_DOWNLOAD_BASE  the archive is fetched from $PROBBIT_DOWNLOAD_BASE/<tag>/probbit-<tag>-<target>.tar.gz
 #                       (default: https://github.com/BitmapAsset/probbit/releases/download); needs PROBBIT_VERSION
 #   PROBBIT_TARGET         Rust target triple to fetch instead of the detected one
@@ -54,11 +54,15 @@ detect_target() {
             esac
             ;;
         Linux)
-            if (ldd --version 2>&1 || true) | grep -qi musl; then
-                die "this system uses musl libc (Alpine?) and the release ships a glibc build only; build from source: cargo install --git https://github.com/$REPO probbit-cli"
-            fi
             case "$arch" in
-                x86_64 | amd64) echo x86_64-unknown-linux-gnu ;;
+                x86_64 | amd64)
+                    if (ldd --version 2>&1 || true) | grep -qi musl; then
+                        echo x86_64-unknown-linux-musl
+                    else
+                        echo x86_64-unknown-linux-gnu
+                    fi
+                    ;;
+                aarch64 | arm64) echo aarch64-unknown-linux-musl ;;
                 *) die "no prebuilt probbit for Linux on $arch yet; build from source: cargo install --git https://github.com/$REPO probbit-cli" ;;
             esac
             ;;
@@ -91,6 +95,8 @@ main() {
         [ -n "$version" ] || die "no published release found (set PROBBIT_VERSION)"
     fi
     case "$version" in v*) ;; *) version="v$version" ;; esac
+    case "$version" in *[!A-Za-z0-9._+-]* | v) die "invalid release version: $version" ;; esac
+    case "$target" in *[!A-Za-z0-9_-]* | '') die "invalid target: $target" ;; esac
 
     name="probbit-$version-$target"
     asset="$name.tar.gz"
@@ -109,11 +115,12 @@ main() {
 
     tar -xzf "$tmp/$asset" -C "$tmp" || die "could not unpack $asset"
     [ -f "$tmp/$name/probbit" ] || die "$asset has no $name/probbit"
+    # Check the candidate before replacing an existing working install (wrong architecture, corrupt executable, etc.).
+    chmod 755 "$tmp/$name/probbit" || die "could not make the downloaded binary executable"
+    ran=$("$tmp/$name/probbit" version 2>&1) || die "downloaded binary does not run here; existing install unchanged: $ran"
 
     if [ -n "${PROBBIT_INSTALL_DIR:-}" ]; then
         dir="$PROBBIT_INSTALL_DIR"
-    elif [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
-        dir=/usr/local/bin
     else
         dir="${HOME:?HOME is not set; set PROBBIT_INSTALL_DIR}/.local/bin"
     fi
@@ -121,7 +128,6 @@ main() {
     [ -w "$dir" ] || die "cannot write to $dir (set PROBBIT_INSTALL_DIR to a directory you can write; this script never uses sudo)"
     cp "$tmp/$name/probbit" "$dir/.probbit.$$" && chmod 755 "$dir/.probbit.$$" && mv -f "$dir/.probbit.$$" "$dir/probbit" \
         || die "could not install into $dir"
-    ran=$("$dir/probbit" version 2>&1) || die "installed $dir/probbit, but it does not run here: $ran"
     say "  installed  $dir/probbit ($ran)"
 
     cmd=probbit
@@ -130,7 +136,8 @@ main() {
         *)
             cmd="$dir/probbit"
             say ""
-            say "$dir is not on your PATH. Add it (e.g. in ~/.profile):"
+            case "${SHELL:-}" in */zsh) profile='~/.zshrc' ;; */bash) profile='~/.bashrc (or ~/.bash_profile for login shells)' ;; *) profile='your shell profile' ;; esac
+            say "$dir is not on your PATH. Add it in $profile:"
             say "  export PATH=\"$dir:\$PATH\""
             ;;
     esac

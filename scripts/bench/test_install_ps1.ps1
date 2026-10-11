@@ -3,12 +3,11 @@
 # installs it with -DownloadBase, then the `irm | iex` form (environment variables), then the tampered copy (must fail).
 #   pwsh -File scripts/bench/test_install_ps1.ps1 -Srv <dir> [-Tag v0.2.0] [-AddToPath]
 #   powershell -ExecutionPolicy Bypass -File scripts/bench/test_install_ps1.ps1 -Srv <dir>
-param([Parameter(Mandatory = $true)][string]$Srv, [string]$Tag = 'v0.2.0', [switch]$AddToPath)
+param([Parameter(Mandatory = $true)][string]$Srv, [string]$Tag = 'v0.8.0', [switch]$AddToPath)
 $ErrorActionPreference = 'Stop'
 "PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition))"
-# Windows PowerShell 5.1 adds a UTF-8 byte-order mark to text it pipes into a native program, which probbit 0.2.0 rejects
-# (docs/agents.md, PowerShell): there the demo pipeline below goes through cmd.exe.
-$desktop = $PSVersionTable.PSEdition -ne 'Core'
+$oldPath = $env:Path
+$oldUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0); $l.Start(); $port = $l.LocalEndpoint.Port; $l.Stop()
 $server = Start-Process -FilePath python -ArgumentList @('scripts/bench/serve.py', $Srv, "$port") -PassThru -WindowStyle Hidden
 $base = "http://127.0.0.1:$port"
@@ -24,8 +23,8 @@ try {
     "`$ (Get-Command probbit).Source: $($cmd.Source)"
     if ((Resolve-Path $cmd.Source).Path -ne (Resolve-Path (Join-Path $d1 'probbit.exe')).Path) { throw "FAIL: probbit resolves to $($cmd.Source)" }
     "`$ probbit version: $(probbit version)"
-    if ($desktop) { $how = 'cmd /c "probbit demo --tasks 12 | probbit decide"'; $d = cmd /c "probbit demo --tasks 12 | probbit decide" | ConvertFrom-Json }
-    else { $how = 'probbit demo --tasks 12 | probbit decide'; $d = probbit demo --tasks 12 | probbit decide | ConvertFrom-Json }
+    $how = 'probbit demo --tasks 12 | probbit decide'
+    $d = probbit demo --tasks 12 | probbit decide | ConvertFrom-Json
     "`$ $how | ConvertFrom-Json: exit $LASTEXITCODE, verdict $($d.verdict), released $(@($d.released).Count) of $($d.tasks)"
     if ($LASTEXITCODE -ne 0 -or $d.verdict -ne 'exact') { throw 'FAIL: demo pipeline' }
     if ($AddToPath) {
@@ -53,7 +52,21 @@ try {
     $failed = $false
     try { & .\install.ps1 -DownloadBase "$base/good" -InstallDir (Join-Path $root 'bin4') } catch { $failed = $true; "rejected: $($_.Exception.Message)" }
     if (-not $failed) { throw 'FAIL: accepted' }
+
+    '== 5. failed update preserves an existing install'
+    $before = (Get-FileHash -LiteralPath (Join-Path $d1 'probbit.exe') -Algorithm SHA256).Hash
+    $failed = $false
+    try { & .\install.ps1 -DownloadBase "$base/bad" -Version $Tag -InstallDir $d1 } catch { $failed = $true }
+    if (-not $failed) { throw 'FAIL: accepted damaged update' }
+    if ((Get-FileHash -LiteralPath (Join-Path $d1 'probbit.exe') -Algorithm SHA256).Hash -ne $before) { throw 'FAIL: existing install changed' }
+
+    '== 6. valid replacement uses the same destination'
+    & .\install.ps1 -DownloadBase "$base/good" -Version $Tag -InstallDir $d1
+    if ((Get-FileHash -LiteralPath (Join-Path $d1 'probbit.exe') -Algorithm SHA256).Hash -ne $before) { throw 'FAIL: replacement changed the binary' }
     "install.ps1: all checks passed (PowerShell $($PSVersionTable.PSVersion))"
 } finally {
     Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+    $env:Path = $oldPath
+    if ($AddToPath) { [Environment]::SetEnvironmentVariable('Path', $oldUserPath, 'User') }
+    if ($root -and (Test-Path -LiteralPath $root)) { Remove-Item -LiteralPath $root -Recurse -Force }
 }

@@ -3,6 +3,39 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+- Reject invalid JSON number grammar and raw control characters, platform-sized integer overflow, overflowing linear-cap
+  totals, and invalid pair-table dimensions before allocation. WASM no longer wraps large precedence gaps, counts or weights.
+- Validate supplied anneal/polish starting assignments even when the work budget is zero.
+- Validate stored strand hashes and lifecycle transitions before continuation or control appends; a checkpoint cannot hide
+  retirement. Full inference verification and external anchoring remain separate responsibilities.
+- Python rejects an explicitly missing binary instead of falling back, and rejects invalid false/array input values rather
+  than silently treating them as empty objects. MCP and Python preserve command-specific error/lifecycle contracts.
+- Persona `--pretty` consistently formats single-document stdout without changing canonical state files. JSONL replay and
+  text explain reject the flag with guidance. Source-restricted fuzz exports require an explicitly labelled synthetic source
+  to produce runnable replay commands; production source checks are not bypassed.
+- npm forwards each termination signal unchanged, bounds download waits and selects both x86_64 and ARM64 musl assets.
+  Shell installation defaults to the user's `~/.local/bin`. Installers validate candidate binaries before replacing a
+  working installation on the shell/PowerShell paths; PowerShell stages replacement on the destination filesystem.
+  Release/target selectors reject paths.
+- Monitor labels scripted demos, loop restarts, lifecycle and checkpoint status; preserves original `why` text, explains
+  display terms and supports narrow screens. Browser playground and puzzle tables no longer force horizontal page overflow.
+- Keep the lockfile readable by the declared Rust 1.78 minimum; CI builds that compiler with `--locked`.
+
+### Added
+- Decision documents with a candidate `plan` gain `plan_status` and `released_plan`. The old full candidate is preserved for
+  compatibility; a diagnostic/refused plan is not permission to act. Partial projections may not be independently feasible.
+- `probbit monitor --demo drives` shows eight replayable synthetic goal events. The default tutor demo is unchanged.
+- `examples/agent-harness`: a local dispatch gate with a recorded incident, history-dependent retry regression, strict
+  replay and a scoped repaired-rule proof. No model, credentials or external tool action required.
+- Independent enumeration/router oracles, actual WASM boundary tests, real Chromium interaction/layout checks, Node process
+  contracts and cross-platform clean-prefix install tests (including Windows PowerShell 5.1/7 and npm 12).
+
+These changes are a source candidate, not an update to the published 0.8.0 artifacts. Probability gate thresholds and frozen
+benchmark corpora are unchanged. Passing finite tests is not exhaustive validation of every possible program or application.
+
 ## 0.8.0 - 2026-10-09
 
 ### Added

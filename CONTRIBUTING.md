@@ -7,7 +7,7 @@ rules that keep its claims honest.
 
 ```
 cargo build --release --workspace          # no network needed: there are no external crates
-cargo test --release --workspace           # 127 tests: 3 core, 48 CLI, 11 stress (+1 ignored), 18 acceptance, 47 probbit-ir
+cargo test --release --workspace           # unit, integration, regression and exact-oracle tests
 cargo run --release -p probbit-cli -- demo --tasks 12 | cargo run --release -p probbit-cli -- decide --pretty
 ```
 
@@ -18,6 +18,11 @@ loaded machine; re-run it alone before reading anything into a failure.
 
 The default build is portable (no CPU pin). `RUSTFLAGS="-C target-cpu=native"` gives the last
 bit of speed on your own machine; that binary may not run elsewhere.
+
+Release-contract checks also run on every pull request: the Python and MCP suites, npm platform/signal tests,
+and clean-prefix shell, PowerShell 5.1/7 and npm installs using locally packaged candidate binaries.
+`node --test npm/test-wrapper.cjs` needs no npm dependencies. Set `PROBBIT_BIN` to the release executable and run
+`python3 -m unittest discover -s python -p 'test_*.py'` for the integration contracts.
 
 ## Ground rules
 

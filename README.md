@@ -118,6 +118,11 @@ were verified from clean machines on macOS (Apple silicon) and Linux (x86_64).
 npm may print an `allow-scripts` warning: the package's only install script downloads the prebuilt binary for your platform
 and checks its SHA-256. If npm blocks the script, the binary is fetched the first time you run `probbit` instead.
 
+The shell installer defaults to `~/.local/bin`, without replacing a system-wide installation. Set
+`PROBBIT_INSTALL_DIR` to choose another directory. Both the shell and npm installers select static musl binaries
+for Linux ARM64 and for x86_64 musl systems such as Alpine. The shell and PowerShell installers check that a
+downloaded candidate starts successfully before replacing an existing binary; failed checksums leave it unchanged.
+
 From source, with Rust 1.78 or later: `cargo install --git https://github.com/BitmapAsset/probbit probbit-cli`, or clone and
 `cargo build --release -p probbit-cli` (the binary lands in `target/release/probbit`). Nothing is downloaded after the clone:
 there are no external crates.
@@ -128,7 +133,7 @@ At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes 
 
 ```
 git clone https://github.com/BitmapAsset/probbit && cd probbit
-cargo test --release --workspace                                   # 127 tests (3 core, 48 CLI, 11 stress, 18 acceptance, 47 probbit-ir; 1 ignored), ~25 s once built
+cargo test --release --workspace                                   # unit, integration, regression and exact-oracle tests
 cargo run --release -p probbit-cli -- demo --tasks 12 | cargo run --release -p probbit-cli -- decide --pretty
 cargo run --release --example agent_router                         # the full narrated demo, ~3 s
 ```
@@ -437,11 +442,11 @@ to be measured per model (no such measurement has been made here).
 ### Test a character
 
 <p align="center"><img src="docs/art/the-fuzz-finds-the-flaw.jpg" alt="a corridor of glass event cards; one card cracks cyan beside a rabbit mark; a replay trace runs under the floor" width="100%"></p>
-<p align="center"><sub><i>The fuzz finds the flaw: the shortest event script that pushes an individual out of character, shrunk and replayable.</i></sub></p>
+<p align="center"><sub><i>The fuzz finds the flaw: an event script that pushes an individual out of character, shrunk and replayable.</i></sub></p>
 
 
 A character property is a rule in habit syntax the stance must never break. `fuzz` searches event scripts for each
-individual's shortest counterexample; `prove` says `held by construction`, `proved for every event sequence` or `unknown`. The
+individual's short counterexample (not a guaranteed global minimum); `prove` says `held by construction`, `proved for every event sequence` or `unknown`. The
 tutor as it shipped in 0.5.0 is kept as a fixture, so this runs from a clone with no keys and no model:
 
 ```sh
@@ -529,6 +534,7 @@ anywhere ([docs/persona.md](docs/persona.md) §5.8). No strand yet? The tutor's 
 
 ```sh
 probbit monitor --demo --open
+probbit monitor --demo drives --open  # source checkout: synthetic goals/drive demo, not yet in the 0.8.0 release
 ```
 
 ![probbit monitor: the tutor's week in the browser, the bars moving with every event](docs/probbit-monitor.gif)

@@ -4,7 +4,7 @@
 # .sha256 is wrong (must fail and install nothing).
 #   scripts/bench/test_install_sh.sh <probbit binary> <target triple> [tag]      SH=dash scripts/bench/... to pick the shell
 set -eu
-BIN=$1 TARGET=$2 TAG=${3:-v0.2.0}
+BIN=$1 TARGET=$2 TAG=${3:-v$(node -p "require('./npm/package.json').version")}
 SH=${SH:-sh}
 PY=${PY:-$(command -v python3 || command -v python)}
 WORK=$(mktemp -d 2> /dev/null || mktemp -d -t probbitinst)
@@ -34,7 +34,7 @@ echo "\$ probbit demo --tasks 12 | probbit decide: exit $?, $("$PY" -c 'import j
 
 echo "== 2. default directory, scratch HOME"
 HOME="$WORK/home" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" "$SH" install.sh
-if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then want=/usr/local/bin/probbit; else want="$WORK/home/.local/bin/probbit"; fi
+want="$WORK/home/.local/bin/probbit"
 [ -x "$want" ] || { echo "FAIL: expected $want"; exit 1; }
 echo "ok: installed to $want ($("$want" version))"
 
@@ -48,4 +48,22 @@ echo "ok: rejected, $WORK/badbin/probbit absent"
 echo "== 4. PROBBIT_DOWNLOAD_BASE without PROBBIT_VERSION must fail"
 if PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_INSTALL_DIR="$WORK/bin4" "$SH" install.sh; then echo "FAIL: accepted"; exit 1; fi
 echo "ok: rejected"
+
+echo "== 5. failed update preserves an existing install"
+before=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$WORK/bin/probbit")
+if PROBBIT_DOWNLOAD_BASE="$BASE/bad" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" install.sh; then echo "FAIL: accepted damaged update"; exit 1; fi
+after=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$WORK/bin/probbit")
+[ "$before" = "$after" ] || { echo "FAIL: existing install changed"; exit 1; }
+
+echo "== 6. invalid release path is rejected before download"
+if PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION='../bad' PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" install.sh; then echo "FAIL: invalid version accepted"; exit 1; fi
+
+echo "== 7. checksummed but unrunnable candidate must preserve the working binary"
+mkdir -p "$WORK/unrunnable"
+printf '#!/bin/sh\nexit 25\n' > "$WORK/unrunnable/probbit"
+chmod +x "$WORK/unrunnable/probbit"
+sh scripts/bench/package_like_release.sh "$WORK/unrunnable/probbit" "$TARGET" "$TAG" "$WORK/srv/unrunnable/$TAG" > /dev/null
+if PROBBIT_DOWNLOAD_BASE="$BASE/unrunnable" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" install.sh; then echo "FAIL: unrunnable candidate accepted"; exit 1; fi
+after=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$WORK/bin/probbit")
+[ "$before" = "$after" ] || { echo "FAIL: unrunnable candidate replaced working binary"; exit 1; }
 echo "install.sh: all checks passed ($SH, $TARGET)"

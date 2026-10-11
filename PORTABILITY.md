@@ -122,8 +122,9 @@ No release exists yet, so every installer was tested against a local server that
 | npm wrapper (`npm/`) | `ubuntu-latest`, `windows-latest`, local M4 | `npm pack`, `npm install -g` (scratch prefix), postinstall fetch and SHA-256 check, `which probbit`, exit codes 0 / 1 / 2 / 3 passed through, `npm uninstall -g`; an `--ignore-scripts` install fetches on first run; `PROBBIT_BINARY`; a wrong `.sha256` fails the install |
 | `docs/agents.md` recipes | shell, Python (`python/test_probbit.py`), Node (`examples/node/decide.mjs`): Linux, macOS arm64 and x86_64, Windows (Git Bash); PowerShell 7.6: Windows | each recipe as written, plus one call per exit code |
 
-Install locations: `install.sh` writes `/usr/local/bin` when it can (every runner image above: their user can write it)
-and `~/.local/bin` otherwise (the local M4, where `/usr/local/bin` belongs to root), and never uses sudo; `install.ps1`
+Historical install locations in the measurements above: `install.sh` wrote `/usr/local/bin` when writable,
+and `~/.local/bin` otherwise. The current source defaults to `~/.local/bin` on every shell host; use
+`PROBBIT_INSTALL_DIR` for an explicit system-wide destination. It never uses sudo. `install.ps1`
 writes `$HOME\.local\bin`, adds it to the session's PATH, and to the user PATH only with `-AddToPath`. Names: `probbit` is
 free on npm and `probbit`, `probbit-core`, `probbit-ir`, `probbit-decide` and `probbit-cli` are free on crates.io (checked 2026-10-01
 22:31 PDT); nothing was published.
@@ -139,7 +140,8 @@ free on npm and `probbit`, `probbit-core`, `probbit-ir`, `probbit-decide` and `p
 2. **The Linux release binary needs glibc 2.34.** `release.yml` builds `x86_64-unknown-linux-gnu` on `ubuntu-latest`.
    The static musl build above runs on any x86_64 Linux and was within 4% (run 2) and 7% (run 1) of the glibc build on
    the same VM, with 2.5-3.2 MiB less peak memory (BENCHMARK-MATRIX.md). Shipping it, plus `aarch64-unknown-linux-musl`,
-   would also give `install.sh` something for Alpine and arm64 Linux, which it refuses today.
+   now provides the released binaries for Alpine and arm64 Linux. The current shell/npm installers select these
+   targets automatically; the earlier refusal described in these historical measurements is superseded.
 3. **The Windows binary needs `VCRUNTIME140.dll`.** Linking the CRT statically (`-C target-feature=+crt-static` for the
    msvc release build) would remove that; not built or measured here.
 4. **Two wall-clock test bounds failed on shared runners** in run 1: `run_deadline_ms_bounds_the_whole_call` on

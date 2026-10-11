@@ -3,8 +3,18 @@ on:
   push:
     branches: [main]
   pull_request:
+permissions:
+  contents: read
 jobs:
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.78.0
+      - run: cargo build --release --locked --workspace
   test:
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -13,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
       - name: build
         run: cargo build --release --workspace
       - name: test
@@ -26,13 +39,61 @@ jobs:
         run: cargo run --release -p probbit-cli -- stats --pretty
       - name: agent_router example
         run: cargo run --release --example agent_router
+      - name: Python and MCP integration contracts
+        shell: bash
+        run: |
+          B="$PWD/target/release/probbit"
+          if [ "$RUNNER_OS" = Windows ]; then B="$(cygpath -w "$B.exe")"; fi
+          export PROBBIT_BIN="$B"
+          python -m unittest discover -s python -p 'test_*.py'
+          node examples/node/decide.mjs
+      - name: npm platform and process contracts
+        run: node --test npm/test-wrapper.cjs
+      - name: clean-prefix install and npm package contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET=$(rustc -vV | sed -n 's/^host: //p')
+          TAG=v$(node -p "require('./npm/package.json').version")
+          BIN=target/release/probbit
+          [ "$RUNNER_OS" = Windows ] && BIN="$BIN.exe"
+          if [ "$RUNNER_OS" != Windows ]; then
+            python3 scripts/tests/test_install_contract.py
+            sh scripts/bench/test_install_sh.sh "$BIN" "$TARGET" "$TAG"
+          else
+            sh scripts/bench/package_like_release.sh "$BIN" "$TARGET" "$TAG" "target/install-fixture/good/$TAG"
+            cp -R target/install-fixture/good target/install-fixture/bad
+            printf '%064d  %s\n' 0 "probbit-$TAG-$TARGET.zip" > "target/install-fixture/bad/$TAG/probbit-$TAG-$TARGET.zip.sha256"
+            for PS in pwsh powershell; do
+              "$PS" -NoProfile -ExecutionPolicy Bypass -File scripts/bench/test_install_ps1.ps1 -Srv target/install-fixture -Tag "$TAG"
+            done
+          fi
+          sh scripts/bench/test_npm.sh "$BIN" "$TARGET" "$TAG"
+      - name: npm 12 clean-prefix contracts
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          npm install -g npm@12
+          sh scripts/bench/test_npm.sh target/release/probbit x86_64-unknown-linux-gnu
+  npm-node18:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '18'
+      - run: node --test npm/test-wrapper.cjs
   wasm:
+    timeout-minutes: 15
     # probbit-wasm, the browser build (wasm32-unknown-unknown, no threads): built as playground/build.sh builds it, then loaded by
     # Node with the playground's own loader and run on the 300-task demo (--sweeps 3200) and the evaluate example; check.mjs
     # exits 1 unless both answer with 0 violations. The no-thread = 4-thread equality runs natively in `test` (probbit-wasm tests).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -40,6 +101,22 @@ jobs:
         run: sh playground/build.sh
       - name: run under Node
         run: node --version && node playground/check.mjs playground/probbit.wasm
+      - name: WASM integer boundaries and native parity
+        run: |
+          cargo build --release -p probbit-cli
+          node probbit-wasm/tests/boundaries.mjs playground/probbit.wasm target/release/probbit
+      - name: real browser interaction and narrow layout
+        run: node playground/check-browser.mjs target/browser-check
+      - name: real monitor playback and live append in the browser
+        env:
+          PROBBIT_BIN: ${{ github.workspace }}/target/release/probbit
+          PROBBIT_BROWSER_OUT: ${{ github.workspace }}/target/browser-check/monitor
+        run: node probbit-cli/tests/monitor_browser.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: browser-check
+          path: target/browser-check/
   release-targets:
     # The release archives' targets that `test` does not build (release.yml runs only on tags): built here, so a tag is
     # never the first build of a target. Static musl (x86_64 runs here, aarch64 is cross-linked), macOS x86_64 under
@@ -50,6 +127,7 @@ jobs:
         include:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, run: true }
           - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, linker: aarch64-linux-gnu-gcc }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, linker: aarch64-linux-gnu-gcc, run: true }
           - { os: macos-latest, target: x86_64-apple-darwin, run: true, rosetta: true }
           - { os: windows-latest, target: x86_64-pc-windows-msvc, run: true, rustflags: "-C target-feature=+crt-static" }
     runs-on: ${{ matrix.os }}
