@@ -7,9 +7,10 @@
 
 The corpus: every persona of fixtures/gen.py's P0 list x seeds 0-2 x its committed random scripts, through `persona replay`
 and `live --clock fixed` (stances, error objects, final state, strand), plus `init`, `check`, `describe`, `compile`, `lint
---seeds 0-99`, and `lint`, `fuzz` and `prove` documents of the shipped rules. A strand differs between versions only in its
-header's `engine` string and the `prev` hashes chained from it, so strands are compared with those masked; the recorded
-strands of seed 0 must also verify, and the tutor's continues with 20 committed events to the recorded bytes.
+--seeds 0-99`, and `lint`, `fuzz` and `prove` documents of the shipped rules; personas and rules are passed by their paths
+relative to the repository root, so no document depends on where the clone lives. A strand differs between versions only
+in its header's `engine` string and the `prev` hashes chained from it, so strands are compared with those masked; the
+recorded strands of seed 0 must also verify, and the tutor's continues with 20 committed events to the recorded bytes.
 """
 import json
 import os
@@ -73,7 +74,13 @@ def without_senses_warning(name, data):
 
 
 def rel(path):
-    return os.path.join(common.REPO, path)
+    """A repository path as the corpus passes it: relative to the root, where every command runs (common.run's cwd). A
+    fuzz counterexample's `explain` and `replay` strings name the persona path as given, so an absolute path would tie the
+    recorded bytes to the clone's location."""
+    return path
+
+
+PROPS_DIR = os.path.relpath(os.path.join(P0, "props"), common.REPO).replace(os.sep, "/")
 
 
 def outputs(keep_strands=None):
@@ -96,7 +103,7 @@ def outputs(keep_strands=None):
             code, out, _ = common.run(["persona", "lint", p, "--seeds", "0-99"])
             yield "lint/%s" % key, code, out
             if key in PROPS:
-                props = os.path.join(P0, "props", PROPS[key])
+                props = PROPS_DIR + "/" + PROPS[key]
                 code, out, _ = common.run(["persona", "lint", p, "--props", props, "--seeds", "0-99"])
                 yield "lint-props/%s" % key, code, out
                 code, out, _ = common.run(["persona", "prove", p, "--props", props, "--seeds", "0-99", "--json"])

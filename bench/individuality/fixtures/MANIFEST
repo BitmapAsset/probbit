@@ -6,7 +6,7 @@
 binary probbit-0.8.2 2c3455ef93092fd5036be766b19e96954cc4d164c15773f1411759fc26b93669
 # Re-record: PROBBIT_BIN=<0.8.2 binary> python3 ../p0.py record (gives these bytes); check: python3 ../p0.py check
 82bb5b3d140739addac6dcde8e3d31e70d15e46bdb7ece9bb48e2a712286f744 7029 gen.py
-c68f9d2dff98e57cf43ebaa91d6737b497e6c04d67d1efc04e5503e529f08d16 65059 p0/EXPECTED
+ac483b0746c79c4b1cebca2f357b8b85a97c37c5de961d700bff6a4c8033ddcd 65059 p0/EXPECTED
 82e6748f463f6ab7f93a1959176fcf2c7a1cc709d271dd20cae14e0eb731f783 1300 p0/personas/scout.json
 d7b6541670ac26f143c757f5bcf4ef3151db3452fb80d7a2d604497394f13875 102 p0/props/retry.json
 c4b513d05a1e0273e8e865104ac8185fcc0648f60319129fc9f49f6a3751f5ee 122 p0/props/tutor.json
@@ -53,7 +53,7 @@ a88d3b20b41e9843f2b9ac9b117d5b462ec6b1095c762da531cb98481ff48432 43389 p0/strand
 615978432a80e6b8be7fdf6e2382438516dc67acae56c562221c89654cae479e 6815 p0/strands/tutor-s0-0.appended
 cf9073507dad98bedc4f09ca2e49f34862919240c64c548b7a1dcf58fda4804b 1160 p0/strands/tutor-s0-0.state.json
 4db5f3d83a0e6df0ea632c35957cdb0970665422af9054fa50e5468e13a888ab 55008 p0/strands/tutor-s0-0.strand
-81b67a8364ac4aa3a884ca1ff8222ac4904e3493cc66cb6d8c8246e8760dcf14 12370 ../p0.py
+e2ffc0667ba2b5ccb6061c9bee43b4474a6568924404a14fe39f94c8e1018272 12841 ../p0.py
 #
 # Metrics a, b, d and e: frozen 2026-10-14 before their first run (personas, generator, streams, bars).
 # Re-generate the streams: python3 lives.py (gives these bytes).

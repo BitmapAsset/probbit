@@ -166,3 +166,10 @@ d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 sta
   outputs apart (`stderr_senses_warning_only`). The recorded outputs, scripts and strands are unchanged. Reason: the line is
   part of the senses release (an undeclared key is named once); it is not a document, and every document stays
   byte-identical. MANIFEST's p0.py line was updated with the change.
+- `p0.py` and `fixtures/p0/EXPECTED`: the corpus now passes personas and rules by their paths relative to the repository
+  root, where every command runs. Reason: a fuzz document that finds a counterexample names the persona path as given in
+  its `explain` and `replay` strings, so `fuzz/adaptive-fixture` (43,726 bytes recorded from one clone) differed from a
+  clone at another path while the engine's bytes were the same. EXPECTED was re-recorded with the same released 0.8.2
+  binary (sha256 in MANIFEST) using relative paths: one line changed (`fuzz/adaptive-fixture`, now 43,646 bytes); every
+  other output, the scripts and the strands are unchanged. MANIFEST's EXPECTED and p0.py lines were updated with the
+  change.
