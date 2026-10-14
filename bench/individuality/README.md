@@ -32,7 +32,12 @@ bench/individuality/
     lives.py             the seeded generator of the streams; its outputs are committed in lives/ and checked against MANIFEST
     bars.json            the gated bars
     gen.py, p0/          the P0 corpus: personas, scripts, the recorded outputs and strands
-  twins.py  habituation.py  replay.py  habits.py
+    dispatch.yaml        metric c: the shipped dispatch policy with a credit block; dispatch-noblock.yaml without it
+    credit_draws.py      metric c's seeded draws per decision, committed in credit/ and checked against MANIFEST
+    bars-c.json          metric c's gated bars
+    sensed-plain.yaml    metric a's reported control: the senses as plain 0.8 number inputs
+  twins.py  habituation.py  credit.py  replay.py  habits.py
+  twins_addressed.py   metric a re-measured with Design B (and the control), on the frozen fixture and bars
 ```
 
 ## Shared fixtures
@@ -176,6 +181,11 @@ exactly that line there and counts those outputs apart.
 One run on an Apple M4 (development build, 10.0 s): a1 0.145 (interval 0.096–0.199) and a2 0.1307 against 0.1329 fail their
 bars; b1 0.304149 with 0 of 4,522 values differing, b2 3.422977, b3 100 %, b4 100 % of 232 decisions, b5 100 % of 116 probes,
 d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 stances with 72 bound pass. See BENCHMARKS.md §10.
+
+With action-addressed feedback (development build): c1, c2, c3 and c4 100 % (8,393 payments, 15,000 events, 3,802 open
+outcomes, 2,793 refusable, 50 of 50 runs byte-identical without their refused events); metric a re-measured with Design B
+(`twins_addressed.py`): a1 0.1725 (interval 0.1175–0.235), a2 0.1223 against 0.1366, both still below their bars; the
+plain-inputs control 0.155 and 0.0295. See BENCHMARKS.md §11.
 
 ## Changes after freezing
 
