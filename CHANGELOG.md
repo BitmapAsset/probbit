@@ -21,6 +21,10 @@ All notable changes to this project are documented here. The format follows
 - `examples/persona/dispatch-policy.yaml` + `dispatch-props.json`: the rule lock on an agent that learns whether to act or
   ask first. Every rule is held by construction for seeds 0-99; without its routine habit, `check` finds the broken seeds
   (README, "Check in CI").
+- `examples/rule-check/demo.py` (Python 3.9 standard library, probbit 0.8.2 or later): the rule-check demo on the dispatch
+  example. Without the routine habit, the day-0 check flags 7 of 20 individuals, exactly the 7 that 300 synthetic rewarded
+  events teach to ask about routine work (24 of 24 over seeds 0-99); with the habit, `held_by_construction` and 0 of 20.
+  `python/test_rule_check_demo.py` runs it small (4 individuals, 20 events, about 2 s).
 
 ### Fixed
 - `cargo +1.78.0 test --workspace --locked` compiles again: a CLI test used `std::io::pipe()` (Rust 1.87); it now gets a
