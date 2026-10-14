@@ -502,6 +502,25 @@ strand fails (1 wins); 3 when the only problem is an unproven rule (the bound ca
 counterexample); 2 for a bad persona, rule file or flag. `--json` prints one document with the `persona lint` report under
 `rules`, one entry per strand and the verdict counts.
 
+**The rule lock, on the shipped example.** `examples/persona/dispatch-policy.yaml` is an agent that learns from feedback
+whether to act on a request or ask a person first; `dispatch-props.json` holds the three rules it must keep (ask before
+risky work, ask after two failures in a row, act on routine work). With its `routine_acts` habit, every rule is
+`held_by_construction` for seeds 0-99 (exit 0, 0.02 s on an Apple M4). Delete that habit, as a policy update might, and the
+same command catches it before the first task:
+
+```sh
+probbit check dispatch-without-routine-habit.yaml --props examples/persona/dispatch-props.json
+#   rule    risky_work_asks        held_by_construction
+#   rule    repeated_failures_ask  held_by_construction
+#   rule    routine_work_acts      broken seeds 3,6,11,15-17,21,36-37,46,49,57,77,83,85
+#   check: held 2 · broken 1 · unproven 0 · strands 0/0      (exit 1, 0.67 s)
+```
+
+The bound proves `routine_work_acts` for 76 of the 100 individuals and leaves 24 unknown; the search breaks it on 15 of
+those 24 (9 of them with a single event, so before any learning). The other 9 it cannot break at depth 8: checked alone
+(`--seeds 18,20,28,30-31,79,87,92,96`) they report `unproven` and exit 3, which fails the job unless you allow it. Measured
+on this file with probbit 0.8.3 (unreleased), seeds 0-99, default depth.
+
 **As a GitHub Action.** The repository root is a composite action that installs probbit with `install.sh`, runs `probbit
 check --json`, annotates each broken rule and failing strand as an error and each unproven rule as a warning (with the seed
 numbers), and uploads the JSON report as an artifact:
