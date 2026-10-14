@@ -176,6 +176,9 @@ function diagnostics(f) {
     const bar=Array.from({length:12},(_,i)=>i===c?'●':i===t?'┃':'─').join(''),norm=x.kind==='flag'?'rate '+f2(mean):(x.scale==='log1p'?f2(Math.expm1(mean)):f2(mean))+' '+x.unit;
     fact(inputs,'Sense · '+(x.say||x.id),bar+'  '+(r?'read '+JSON.stringify(r.raw)+' · z '+(r.z<0?'−':'+')+Math.abs(r.z).toFixed(1):'not read')+' · normal '+norm+' over '+(num(n)?n:0)+' readings');
     if(num(nm.moved)&&nm.moved>x.drift_cap/2)fact(inputs,'⚠ Normal moved',(x.say||x.id)+': '+nm.moved+' within 50 events (over drift_cap / 2 = '+(x.drift_cap/2)+')');}
+  const cr=obj(d.credit);if(f.open)fact(inputs,'Open decisions',f.open.length?f.open.map(o=>o.turn+' (e '+f2(o.e)+')').join(' · '):'None');
+  if(cr&&cr.paid)fact(inputs,'Paid',`turn ${cr.paid.turn} · e ${f2(cr.paid.e)} · sign ${cr.paid.sign}`+(cr.paid.absorbed?' · absorbed':''));
+  if(cr&&cr.closed?.length)fact(inputs,'Closed',cr.closed.map(x=>x.turn+' '+x.as).join(' · '));
   const habits=$('habit-list');habits.replaceChildren();const hb=d.habits||{},active=hb.active||[],bound=hb.bound||[];
   for(const name of active)mk('span','chip'+(bound.includes(name)?' on':''),habits,name+(bound.includes(name)?' · bound':''));
   if(!active.length)mk('span','chip',habits,'No rules in force');mk('span','chip',habits,'Violations: '+(num(hb.violations)?hb.violations:'unreported'));

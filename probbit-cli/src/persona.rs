@@ -933,6 +933,34 @@ fn settle(p: &Persona, j: &mut Json, mut ns: State, k: &Pay, s: Settled) -> Stat
     if let Some((_, d)) = v.iter_mut().find(|(key, _)| key == "state_digest") { *d = Json::Str(ns.digest.clone()); }
     ns
 }
+/// The fuzzer's payments (§2.8, a credit block only): `await`, then `for` and `cancel` as kinds that `resolve_payments` turns
+/// into turns against the state an event runs on. -> (key, kinds)
+pub fn payment_alphabet(p: &Persona) -> Vec<(String, Vec<Json>)> {
+    if p.credit().is_none() { return vec![]; }
+    let k = |v: &[&str]| v.iter().map(|x| Json::Str(x.to_string())).collect::<Vec<Json>>();
+    vec![("await".into(), vec![Json::Bool(true)]), ("for".into(), k(&["late", "reordered", "previous", "closed", "unknown", "mismatch"])), ("cancel".into(), k(&["oldest", "unknown"]))]
+}
+/// A fuzz event's payment kinds resolved against the state it runs on: `for` names the oldest open decision (late), the newest
+/// (reordered), the previous stance, a past turn no longer open (a duplicate, or a payment after a cancel or expiry), a turn to
+/// come (unknown), or the oldest open decision bound to another stance's digest (mismatch); `cancel` the oldest open decision
+/// or a turn to come. A kind with nothing to name is left out; every other input is as given.
+pub fn resolve_payments(p: &Persona, st: &State, e: &[(String, Json)]) -> Vec<(String, Json)> {
+    if p.credit().is_none() { return e.to_vec(); }
+    let (t, open) = (st.turn, &st.open); let n = |x: u64| Json::Num(x as f64);
+    e.iter().filter_map(|(k, x)| { let kind = x.as_str().unwrap_or("");
+        let v = match (k.as_str(), kind) {
+            ("for", "late") => open.first().map(|o| n(o.turn)),
+            ("for", "reordered") => open.last().filter(|_| open.len() > 1).map(|o| n(o.turn)),
+            ("for", "previous") => t.checked_sub(1).map(n),
+            ("for", "closed") => (0..t.saturating_sub(1)).rev().find(|x| !open.iter().any(|o| o.turn == *x)).map(n),
+            ("for", "unknown") | ("cancel", "unknown") => Some(if k == "for" { n(t + 3) } else { Json::Arr(vec![n(t + 5)]) }),
+            ("for", "mismatch") => open.first().map(|o| Json::Obj(vec![("turn".into(), n(o.turn)), ("stance".into(), Json::Str(format!("sha256:{}", "0".repeat(64))))])),
+            ("cancel", "oldest") => open.first().map(|o| Json::Arr(vec![n(o.turn)])),
+            _ => Some(x.clone()) };
+        v.map(|v| (k.clone(), v)) }).collect()
+}
+/// Is `id` a learning block's reward or correction flag (§2.8)?
+pub fn learning_flag(p: &Persona, id: &str) -> bool { p.learning.as_ref().is_some_and(|l| l.from.iter().any(|f| f == id)) }
 /// The open decisions of a state with a credit block (§2.8): (turn, the eligibility a payment at the next turn would get); none
 /// without one
 pub fn open_decisions(p: &Persona, st: &State) -> Option<Vec<(u64, f64)>> {
