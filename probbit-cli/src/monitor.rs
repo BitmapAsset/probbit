@@ -47,14 +47,14 @@ struct Var { id: String, levels: Vec<String>, say: Vec<String> }
 struct Input { id: String, kind: String, max: f64 }
 /// What the layout reads from the strand's header
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
-    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64), goals: Vec<String> }
+    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String> }
 impl Meta {
     fn of(r: &Replay) -> Meta {
         let d = persona::describe(&r.live.p);
         let obj = |k: &str| d.get(k).and_then(Json::as_obj).map(|o| o.to_vec()).unwrap_or_default();
         let decl = |k: &str| r.doc.get(k).and_then(Json::as_arr).map(|a| a.to_vec()).unwrap_or_default();
         let max = |id: &str| decl("inputs").iter().find(|i| i.get("id").and_then(Json::as_str) == Some(id)).and_then(|i| i.get("max")).and_then(Json::as_f64).unwrap_or(1.0);
-        let cap = |b: &str, d: f64| r.doc.get("drives").and_then(|x| x.get(b)).and_then(|x| x.get("cap")).and_then(Json::as_f64).unwrap_or(d);
+        let cap = |b: &str, k: &str, d: f64| r.doc.get("drives").and_then(|x| x.get(b)).and_then(|x| x.get(k)).and_then(Json::as_f64).unwrap_or(d);
         Meta { name: r.live.p.name.clone(), version: r.live.p.version.clone(), seed: r.live.st.seed,
             individual: r.header.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string(),
             engine: r.header.get("engine").and_then(Json::as_str).unwrap_or("").to_string(),
@@ -63,7 +63,7 @@ impl Meta {
             inputs: obj("inputs").into_iter().map(|(id, x)| Input { kind: x.get("kind").and_then(Json::as_str).unwrap_or("").to_string(), max: max(&id), id }).collect(),
             history: decl("history").iter().filter_map(|h| Some((h.get("id")?.as_str()?.to_string(), h.get("cap").and_then(Json::as_f64).unwrap_or(5.0)))).collect(),
             learning: d.get("learning").map(|l| (strs(l.get("traits")), l.get("total_cap").and_then(Json::as_f64).unwrap_or(1.0))),
-            caps: (cap("wanting", 3.0), cap("afterglow", 2.0)),
+            caps: (cap("wanting", "cap", 3.0), cap("afterglow", "cap", 2.0), cap("expectation", "pe_cap", 1.0)),
             // a drives block's goals, in the order of the levels of `pursue` (describe hides that trait; its learned row needs them)
             goals: strs(d.get("drives").and_then(|x| x.get("goals"))) }
     }
@@ -339,7 +339,7 @@ fn meta_json(w: Option<&Watch>, path: &str) -> Json {
             ("inputs", Json::Arr(m.inputs.iter().map(|x| o(vec![("id", s(&x.id)), ("kind", s(&x.kind)), ("max", Json::Num(x.max))])).collect())),
             ("history", Json::Arr(m.history.iter().map(|(id, cap)| o(vec![("id", s(id)), ("cap", Json::Num(*cap))])).collect())),
             ("learning", m.learning.as_ref().map_or(Json::Null, |(t, cap)| o(vec![("traits", strs(t)), ("total_cap", Json::Num(*cap))]))),
-            ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1))])), ("goals", strs(&m.goals))]);
+            ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1)), ("prediction_error", Json::Num(m.caps.2))])), ("goals", strs(&m.goals))]);
     }
     o(kv)
 }
@@ -931,6 +931,23 @@ mod tests {
             if w.rep.live.n == 7 { assert_eq!(d.get("pursue").and_then(|p| p.get("goal")).and_then(Json::as_str), Some("check")); }
         }
         assert!(positive && negative && glowing);
+    }
+
+    /// Monitor scales come from this persona, including a non-default prediction-error cap.
+    #[test]
+    fn drive_metadata_preserves_declared_scales() {
+        let doc = json::parse(r#"{"probbit_persona":1,"identity":{"name":"Scale fixture","version":"1"},
+            "traits":[{"id":"approach","levels":["consider","act"]}],
+            "drives":{"goals":[{"id":"repair"},{"id":"explore"}],"wanting":{"cap":7},
+                "afterglow":{"cap":4},"expectation":{"pe_cap":2.5}}}"#).unwrap();
+        let p = persona::build(&doc).unwrap();
+        let (_, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit test");
+        let w = Watch::open(&header).unwrap();
+        let meta = meta_json(Some(&w), "fixture.strand");
+        let caps = meta.get("caps").unwrap();
+        assert_eq!(caps.get("wanting").and_then(Json::as_f64), Some(7.0));
+        assert_eq!(caps.get("afterglow").and_then(Json::as_f64), Some(4.0));
+        assert_eq!(caps.get("prediction_error").and_then(Json::as_f64), Some(2.5));
     }
 
     /// The page's layout lists the persona's variables in its order; a frame carries the event's document as replayed (drives

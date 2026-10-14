@@ -216,5 +216,5 @@ Practical notes for agent use:
   (on Linux and macOS) `--priority low` keep it from crowding the agent's own process.
 - `--top`, `demo --live` and the hero screen draw only on a terminal; an agent's pipes never see them.
 - A persona's character rules in CI: `probbit persona lint PERSONA --props rules.json` proves each rule or, when the bound
-  cannot decide it, fuzzes it (exit 1 when one breaks); `probbit persona fuzz` / `prove` with `--json` give the documents
+  cannot decide it, fuzzes it (exit 1 when one breaks; exit 3 when one stays unproven: unknown and no counterexample found); `probbit persona fuzz` / `prove` with `--json` give the documents
   (docs/persona.md §5.6). They test the stance a host gets, not the words a model writes.

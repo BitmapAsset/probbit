@@ -73,4 +73,13 @@ sh scripts/bench/package_like_release.sh "$WORK/unrunnable/probbit" "$TARGET" "$
 if PROBBIT_DOWNLOAD_BASE="$BASE/unrunnable" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" install.sh; then echo "FAIL: unrunnable candidate accepted"; exit 1; fi
 after=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$WORK/bin/probbit")
 [ "$before" = "$after" ] || { echo "FAIL: unrunnable candidate replaced working binary"; exit 1; }
+
+echo "== 8. the PATH hint names the rc file of the user's shell"
+case "$(uname -s)" in Darwin) bashrc='~/.bash_profile' ;; *) bashrc='~/.bashrc' ;; esac
+for pair in "/bin/zsh ~/.zshrc" "/usr/local/bin/zsh ~/.zshrc" "/bin/bash $bashrc" "/bin/dash ~/.profile" " ~/.profile"; do
+    shell=${pair% *} want=${pair##* }
+    out=$(SHELL="$shell" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/hint" PROBBIT_MAN_DIR="$WORK/man8" "$SH" install.sh 2>&1)
+    case "$out" in *"$WORK/hint is not on your PATH. Add it in $want:"*) ;; *) echo "FAIL: SHELL=$shell: no hint naming $want"; echo "$out"; exit 1 ;; esac
+    echo "ok: SHELL=${shell:-(empty)} -> $want"
+done
 echo "install.sh: all checks passed ($SH, $TARGET)"

@@ -245,7 +245,7 @@ const F_P_PROPS: Flag = Flag { name: "--props", arg: "FILE", help: "rules from a
 const F_P_SEEDS: Flag = Flag { name: "--seeds", arg: "LIST", help: "the individuals: 0-99 (default), 7, 1,4,9 or 0-9,20-29; seeds 0 to 2^53, at most 100000" };
 const F_P_THREADS: Flag = Flag { name: "--threads", arg: "N", help: "search threads, 1 to 1024 (default: the logical CPUs)" };
 const F_P_JSON: Flag = Flag { name: "--json", arg: "", help: "the JSON document instead of the readable report" };
-const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json) or bad flag (stderr).";
+const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json) or bad flag (stderr), 3 lint (with rules): a rule the bound leaves unknown and the search cannot break (\"unproven\", not broken).";
 const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what), 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written).";
 pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "persona", aliases: &[], group: "persona", summary: "the individuality layer: persona + state + inputs -> one stance",
@@ -267,7 +267,7 @@ pub(crate) static COMMANDS: &[Command] = &[
                     Flag { name: "--other", arg: "PERSONA2", help: "the second individual's persona (default: the same persona)" },
                     Flag { name: "--seed2", arg: "B", help: "the second individual's seed (default: its persona's seed)" }, F_P_SCRIPT] },
             Sub { name: "lint", args: "PERSONA [--never RULE | --props FILE] [--seeds 0-99] [--threads N]",
-                help: "contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample",
+                help: "contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample, exit 3 when a rule stays unknown and the search finds none (\"unproven\": not broken, not proved either)",
                 flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS, F_P_THREADS] },
             Sub { name: "fuzz", args: "PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json] [--fixture-src env:synthetic|human:synthetic]",
                 help: "search event scripts for the shortest one whose stance breaks a rule (habit syntax: {when: {...}, then: {...}}); shrunk (§5.6). --fixture-src explicitly authorizes synthetic-source fixtures for strict replay; never use them to relabel production events. The persona must allow that source.",
@@ -743,7 +743,7 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
         if out.iter().any(|v| matches!(v, fuzz::Verdict::Unknown { .. })) { std::process::exit(1) }
         return; }
     let s = fuzz::Search { seeds: seeds_arg(args), fuzz_seed: arg(args, "--fuzz-seed", 0u64), scripts: bounded("--scripts", 60, 0, 1_000_000), depth: bounded("--depth", 8, 1, 64),
-        beam: bounded("--beam", 4, 0, 64), grid: list_arg(args, "--grid", &[0.0, 0.5, 1.0], 0.0, 1.0), hours: list_arg(args, "--hours", &[1.0, 12.0, 48.0], 0.0, 1e6), threads: bounded("--threads", cores, 1, 1024) };
+        beam: bounded("--beam", 4, 0, 64), grid: fuzz::grid(p, &props, &list_arg(args, "--grid", &[0.0, 0.5, 1.0], 0.0, 1.0)), hours: list_arg(args, "--hours", &[1.0, 12.0, 48.0], 0.0, 1e6), threads: bounded("--threads", cores, 1, 1024) };
     let t0 = std::time::Instant::now(); let (mut res, turns) = fuzz::fuzz(p, &props, &s, eng); let secs = t0.elapsed().as_secs_f64();
     if let Some(i) = args.iter().position(|a| a == "--fixture-src") {
         fuzz::authorize_fixtures(p, &s.seeds, &mut res, &args[i + 1], eng).unwrap_or_else(|e| bad_input("persona fuzz: ", e));
@@ -885,7 +885,8 @@ fn persona_cmd(args: &[String]) {
         "fuzz" | "prove" => fuzz_cmd(args, path, &p, &engine),
         _ => { let found = persona::lint(&p, eng); let unresolved = found.iter().filter(|f| !f.get("resolution").and_then(Json::as_str).is_some_and(|r| r.starts_with("yield"))).count();
             let seeds = seeds_arg(args); let warnings = persona::plan_warnings(&p, &seeds, eng);
-            let mut doc = vec![("persona", jstr(&p.name)), ("conflicts", Json::Arr(found)), ("unresolved", num(unresolved as f64)), ("warnings", Json::Arr(warnings))]; let mut broken = 0;
+            let mut doc = vec![("persona", jstr(&p.name)), ("conflicts", Json::Arr(found)), ("unresolved", num(unresolved as f64)), ("warnings", Json::Arr(warnings))];
+            let (mut broken, mut unproven) = (0, vec![]);
             // drives (§2.9): habits that outrank a goal floor, floors whose lift can reach 50
             if let Some(mut n) = persona::floor_notes(&p) { n.extend(persona::floor_reach(&p, &seeds)); doc.push(("floors", Json::Arr(n))); }
             // with rules (§5.6): prove each one, then fuzz the ones the bound leaves unknown
@@ -893,17 +894,29 @@ fn persona_cmd(args: &[String]) {
                 let props = rules_arg(args, &p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);
                 let verdicts = fuzz::prove(&p, &props, &seeds, threads, &engine);
                 let unknown: Vec<persona::Prop> = props.iter().zip(&verdicts).filter(|(_, v)| matches!(v, fuzz::Verdict::Unknown { .. })).map(|(q, _)| q.clone()).collect();
-                let s = fuzz::Search { seeds: seeds.clone(), fuzz_seed: 0, scripts: 60, depth: 8, beam: 4, grid: vec![0.0, 0.5, 1.0], hours: vec![1.0, 12.0, 48.0], threads };
+                let s = fuzz::Search { seeds: seeds.clone(), fuzz_seed: 0, scripts: 60, depth: 8, beam: 4, grid: fuzz::grid(&p, &unknown, &[0.0, 0.5, 1.0]), hours: vec![1.0, 12.0, 48.0], threads };
                 let (res, turns) = if unknown.is_empty() { (vec![], 0) } else { fuzz::fuzz(&p, &unknown, &s, &engine) };
                 let fd = fuzz::doc(&p, path, &unknown, &s, &res, turns); let fp = fd.get("properties").and_then(Json::as_arr).unwrap_or(&[]).to_vec();
                 broken = fp.iter().filter(|x| x.get("verdict").and_then(Json::as_str) == Some("counterexample")).count();
                 let mut entries = fuzz::prove_doc(&p, &props, &seeds, &verdicts).get("properties").and_then(Json::as_arr).unwrap_or(&[]).to_vec();
                 for e in entries.iter_mut() { let id = e.get("id").cloned();
                     if let (Json::Obj(v), Some(f)) = (e, fp.iter().find(|x| x.get("id").cloned() == id)) { v.push(("fuzz".into(), f.clone())); } }
-                doc.push(("props", Json::Arr(entries))); doc.push(("broken", num(broken as f64))); }
-            doc.push(("ok", Json::Bool(unresolved == 0 && broken == 0)));
+                // unproven: the bound left it unknown and the search found no counterexample. Not broken, and not proved either.
+                for (q, v) in props.iter().zip(&verdicts) {
+                    let fuzz::Verdict::Unknown { failed, .. } = v else { continue };
+                    if fp.iter().any(|x| x.get("id").and_then(Json::as_str) == Some(q.id.as_str()) && x.get("verdict").and_then(Json::as_str) == Some("counterexample")) { continue; }
+                    let searched = obj(vec![("individuals", num(s.seeds.len() as f64)), ("scripts", num(s.scripts as f64)), ("depth", num(s.depth as f64)), ("beam", num(s.beam as f64)),
+                        ("grid", Json::Arr(s.grid.iter().map(|x| num(*x)).collect())), ("hours", Json::Arr(s.hours.iter().map(|x| num(*x)).collect()))]);
+                    unproven.push(obj(vec![("id", jstr(&q.id)), ("rule", q.rule.clone()), ("seeds_unknown", Json::Arr(failed.iter().map(|f| num(f.0 as f64)).collect())), ("searched", searched)])); }
+                doc.push(("props", Json::Arr(entries))); doc.push(("broken", num(broken as f64))); doc.push(("unproven", Json::Arr(unproven.clone()))); }
+            doc.push(("ok", Json::Bool(unresolved == 0 && broken == 0 && unproven.is_empty())));
             emit(&persona_text(&obj(doc), pretty));
-            if unresolved > 0 || broken > 0 { std::process::exit(1) } }
+            if !unproven.is_empty() {
+                let ids: Vec<&str> = unproven.iter().filter_map(|u| u.get("id").and_then(Json::as_str)).collect();
+                err_line(&format!("lint: {} rule{} unproven, not broken: {} (the bound left {} unknown and the search found no counterexample; `probbit persona prove` names the cell)",
+                    ids.len(), if ids.len() == 1 { "" } else { "s" }, ids.join(", "), if ids.len() == 1 { "it" } else { "them" })); }
+            if unresolved > 0 || broken > 0 { std::process::exit(1) }
+            if !unproven.is_empty() { std::process::exit(3) } }
     }
 }
 

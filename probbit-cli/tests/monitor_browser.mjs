@@ -55,8 +55,9 @@ function command(args, input) {
 }
 
 async function server(args, tag) {
-  const child = spawn(bin, ['monitor', ...args, '--serve'], {
-    cwd: repo, env: {...process.env, PROBBIT_THREADS: '2'},
+  const monitorArgs = args.map(arg => path.isAbsolute(arg) && path.dirname(arg) === out ? path.basename(arg) : arg);
+  const child = spawn(bin, ['monitor', ...monitorArgs, '--serve'], {
+    cwd: out, env: {...process.env, PROBBIT_THREADS: '2'},
   });
   children.push(child);
   let stdout = '', stderr = '', error;
@@ -69,7 +70,7 @@ async function server(args, tag) {
     if (child.exitCode !== null) throw Error('Monitor exited: ' + stderr);
     return stdout.match(/http:\/\/127\.0\.0\.1:\d+\//)?.[0];
   }, tag + ' server');
-  return {url};
+  return {url, child};
 }
 
 async function json(url) {
@@ -144,6 +145,32 @@ try {
   const send = await cdp(tabs.find(tab => tab.type === 'page').webSocketDebuggerUrl);
   await send('Page.enable');
   await send('Runtime.enable');
+  // Keep a test-only handle to the real SSE connection for the metadata-without-frame boundary.
+  // The product page has no test hooks and its normal EventSource behavior is unchanged.
+  await send('Page.addScriptToEvaluateOnNewDocument', {source:`{
+    const NativeEventSource = window.EventSource;
+    window.EventSource = class extends NativeEventSource {
+      constructor(...args) { super(...args); window.monitorTestStream = this; }
+    };
+  }`});
+  await send('Page.addScriptToEvaluateOnNewDocument', {source:`{
+    const nativeFetch = window.fetch;
+    window.monitorFetch = {active:0, maximum:0, docs:[]};
+    window.fetch = async (...args) => {
+      if (!String(args[0]).startsWith('/doc/')) return nativeFetch(...args);
+      const stats = window.monitorFetch; stats.active++; stats.maximum = Math.max(stats.maximum,stats.active); stats.docs.push(args[0]);
+      try {
+        if (new URL(location.href).searchParams.has('gap') && args[0] === '/doc/2') return new Response('',{status:404});
+        return await nativeFetch(...args);
+      } finally { stats.active--; }
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      const label = document.createElement('span'); label.className='synthetic'; label.textContent='SYNTHETIC TEST';
+      document.querySelector('.titlebar').insertBefore(label,document.querySelector('.identity'));
+      const sourceLabel=document.getElementById('synthetic'),syncLabel=()=>{label.hidden=!sourceLabel.hidden;};
+      new MutationObserver(syncLabel).observe(sourceLabel,{attributes:true,attributeFilter:['hidden']});syncLabel();
+    });
+  }`});
   await send('Emulation.setEmulatedMedia', {features: [{name: 'prefers-reduced-motion', value: 'reduce'}]});
   const value = async expression => {
     const result = await send('Runtime.evaluate', {expression, returnByValue: true, awaitPromise: true});
@@ -157,6 +184,7 @@ try {
   };
   const state = () => value(`({
     event: document.getElementById('ev')?.textContent,
+    identity: document.getElementById('identity')?.textContent,
     note: document.getElementById('note')?.textContent,
     badge: document.getElementById('badge')?.textContent,
     line: document.getElementById('line')?.textContent,
@@ -164,104 +192,199 @@ try {
     saidHidden: document.getElementById('said')?.hidden,
     emptyHidden: document.getElementById('empty')?.hidden,
     rawHidden: document.getElementById('raw')?.hidden,
-    drives: document.getElementById('drives')?.hidden,
+    stream: document.getElementById('stream-title')?.textContent,
+    mode: document.getElementById('stream')?.dataset.mode,
+    streamDetail: document.getElementById('stream-detail')?.textContent,
+    workspaceHidden: document.getElementById('workspace')?.hidden,
+    view: document.getElementById('view-mode')?.textContent,
+    historyCount: document.getElementById('history-count')?.textContent,
+    historyNote: document.getElementById('history-note')?.textContent,
+    historicalNoteHidden: document.getElementById('historical-note')?.hidden,
+    learnedHidden: document.getElementById('learned')?.hidden,
+    changes: document.getElementById('changes')?.textContent,
+    follow: document.getElementById('follow')?.textContent,
+    selected: document.getElementById('channel-title')?.textContent,
+    channelValue: document.getElementById('channel-value')?.textContent,
+    channelOdds: document.getElementById('channel-odds')?.textContent,
     scrollWidth: document.documentElement.scrollWidth, width: innerWidth,
     height: document.documentElement.scrollHeight
   })`);
   async function shot(name, width, height) {
-    await viewport(width, height);
-    await sleep(150);
+    await viewport(width, height); await sleep(120);
     const frame = await state();
     assert.ok(frame.scrollWidth <= width, 'Horizontal overflow: ' + JSON.stringify(frame));
+    assert.ok(!(await value(`document.getElementById('foot').textContent`)).includes(repo) && !(await value(`document.getElementById('foot').textContent`)).includes(out),'Screenshots must not embed private fixture paths');
     const screenshot = await send('Page.captureScreenshot', {
-      format: 'png', captureBeyondViewport: true,
-      clip: {x: 0, y: 0, width, height: Math.max(height, frame.height), scale: 1},
+      format:'png', captureBeyondViewport:true,
+      clip:{x:0,y:0,width,height:Math.max(height,frame.height),scale:1},
     });
-    write(name + '.png', Buffer.from(screenshot.data, 'base64'));
-    report.screenshots.push({name, ...frame});
+    write(name+'.png',Buffer.from(screenshot.data,'base64'));
+    report.screenshots.push({name,...frame});
   }
-  const event = number => until(async () => (await state()).event === 'event ' + number, 'event ' + number);
-  const learnError = () => value(`[...document.querySelectorAll('#drives .row')]
-    .find(row => row.querySelector('.id')?.textContent === 'learn')?.querySelector('.petxt')?.textContent`);
+  const event = number => until(async () => (await state()).event === 'event '+number, 'event '+number);
+  const click = selector => value(`document.querySelector(${JSON.stringify(selector)}).click()`);
+  const rows = () => value(`[...document.querySelectorAll('#channel-rows tr')].map(r=>({key:r.dataset.channel,name:r.querySelector('button').textContent,selected:r.getAttribute('aria-selected'),current:r.querySelector('.current-col').textContent,odds:r.querySelector('.odds-col').textContent}))`);
+  const selected = key => click('#channel-rows button[data-channel="'+key+'"]');
 
-  const demo = await server(['--demo', 'drives'], 'drives');
-  await viewport(1440, 1000);
-  await navigate(demo.url);
-  await event(3);
+  const demo = await server(['--demo','drives'],'drives');
+  await viewport(1280,820); await navigate(demo.url); await event(3);
   report.demo.event3 = await state();
-  assert.equal(report.demo.event3.drives, false);
-  await shot('monitor-drives-desktop', 1440, 1000);
-  await shot('monitor-drives-narrow', 390, 844);
-  await event(4);
-  report.demo.negativeError = await learnError();
-  assert.ok(report.demo.negativeError.includes('below expectation'));
-  await shot('monitor-drives-negative', 1440, 1000);
+  assert.ok(report.demo.event3.stream.includes('SYNTHETIC'));
+  assert.equal((await rows()).length,13);
+  await value(`document.getElementById('theme').value='light';document.getElementById('theme').dispatchEvent(new Event('change'))`);
+  await selected('drive:want:learn');
+  assert.equal((await state()).selected,'learn · wanting');
+  assert.equal((await state()).channelOdds,'engine units');
+  const doc3=await json(demo.url+'doc/3');
+  assert.equal((await state()).channelValue,doc3.drives.want.learn.toFixed(2));
+  assert.ok(await value(`document.getElementById('channel-facts').textContent.includes('0 to 3')`));
+  assert.equal(await value(`getComputedStyle(document.querySelector('.spark')).transitionDuration`),'0s');
+  await shot('activity-desktop-light',1280,820);
+  assert.ok((await state()).height<=820,'Useful desktop should fit one viewport');
+  await value(`document.getElementById('theme').value='dark'; document.getElementById('theme').dispatchEvent(new Event('change'))`);
+  await shot('activity-desktop-dark',1280,820);
+  await event(4); await selected('drive:surprise:learn');
+  report.demo.negativeError=await state();
+  assert.ok(Number((await state()).channelValue)<0);
+  assert.ok(await value(`document.getElementById('channel-facts').textContent.includes('Below expectation')`));
   await event(5);
-  report.demo.clearedError = await learnError();
-  assert.equal(report.demo.clearedError, 'prediction error 0.00');
-  await until(async () => (await state()).note?.includes('complete; restarting'), 'demo completion cue');
-  report.demo.completed = await state();
-  await shot('monitor-drives-completed', 1440, 1000);
-  await until(async () => (await state()).note?.includes('loop 2'), 'demo loop 2');
-  report.demo.restarted = await state();
-  assert.equal(report.demo.restarted.event, 'event 0');
-  assert.equal(report.demo.restarted.line, '');
-  assert.equal(report.demo.restarted.why, '');
-  assert.equal(report.demo.restarted.saidHidden, true);
-  assert.equal(report.demo.restarted.emptyHidden, false);
-  assert.equal(report.demo.restarted.rawHidden, true);
-  assert.equal(report.demo.restarted.drives, true);
+  assert.equal((await state()).selected,'learn · prediction error','Selection survives new event');
+  assert.equal((await state()).channelValue,'0.00');
+  await until(async()=>(await state()).note.includes('complete; restarting'),'demo completion cue');
+  await until(async()=>(await state()).note.includes('loop 2'),'demo loop 2');
+  report.demo.restarted=await state();
+  assert.ok(['event 0','event 1'].includes(report.demo.restarted.event));
+  if(report.demo.restarted.event==='event 0')assert.equal(report.demo.restarted.workspaceHidden,true);
 
-  const week = await server(['--demo'], 'week');
-  await navigate(week.url);
-  await event(3);
-  await shot('monitor-week-desktop', 1440, 1000);
-  await shot('monitor-week-narrow', 390, 844);
+  // Author a different persona: no assumptions about the tutor, a preset character, or fixed mood/trait names.
+  const persona=path.join(out,'instrument-fixture.json');
+  writeFileSync(persona,JSON.stringify({probbit_persona:1,identity:{name:'Field unit synthetic',version:'1'},
+    traits:[{id:'response_depth',levels:['brief','detailed'],say:['be brief','provide detail']},{id:'release_gate',levels:['low','high'],prior:[0.2,0.8],vouch:0.99,hold:'low'}],
+    moods:[{id:'reserve',levels:['low','steady','full'],inertia:0.5,half_life_hours:4}],
+    inputs:[{id:'boost',kind:'flag',effects:{reserve:2,response_depth:1}}]}));
+  const full=path.join(out,'follow-full.strand'),growing=path.join(out,'follow-growing.strand');
+  const outputs=command(['live',persona,'--seed','2','--clock','fixed','--strand',full],
+    '{"boost":true,"elapsed_hours":1}\n{}\n{"boost":true,"elapsed_hours":2}\n').trim().split('\n').map(JSON.parse);
+  const lines=readFileSync(full,'utf8').match(/.*\n/g);writeFileSync(growing,lines.slice(0,2).join(''));
+  const follow=await server([growing],'follow');
+  await viewport(1280,820);await navigate(follow.url);await event(1);
+  assert.equal((await state()).identity,'Field unit synthetic');
+  assert.equal(await value(`document.querySelectorAll('#identity synthetic').length`),0,'Identity uses textContent');
+  assert.ok((await state()).changes.includes('First recorded event'));
+  assert.ok((await rows()).find(r=>r.key==='trait:release_gate').current.includes('held'));
+  await selected('trait:release_gate');assert.ok(await value(`document.getElementById('channel-sub').textContent.includes('Held at declared level')`));assert.ok(await value(`document.getElementById('channel-facts').textContent.includes('Before hold')`));
+  await click('[data-filter="mood"]');assert.deepEqual((await rows()).map(r=>r.name),['reserve']);
+  assert.equal((await state()).selected,'reserve');assert.ok(await value(`document.getElementById('channel-sub').textContent.includes('No previous event')`));
+  await click('[data-filter="all"]');
+  await click('[data-sort="name"] button');
+  assert.deepEqual((await rows()).map(r=>r.name),['release_gate','reserve','response_depth']);
+  await click('[data-sort="name"] button');
+  assert.deepEqual((await rows()).map(r=>r.name),['response_depth','reserve','release_gate']);
+  await value(`document.getElementById('search').value='res';document.getElementById('search').dispatchEvent(new Event('input'))`);
+  assert.deepEqual((await rows()).map(r=>r.name),['response_depth','reserve']);
+  await value(`document.getElementById('search').value='no-such-channel';document.getElementById('search').dispatchEvent(new Event('input'))`);
+  assert.equal((await rows()).length,0);assert.equal(await value(`document.getElementById('inspector').hidden`),true);
+  await value(`document.getElementById('search').value='';document.getElementById('search').dispatchEvent(new Event('input'));document.querySelector('#channel-rows button').focus()`);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40});
+  assert.equal((await state()).selected,'reserve');
+  const firstOdds=outputs[0].mood.reserve.odds[outputs[0].mood.reserve.level];
+  assert.equal((await state()).channelOdds,(firstOdds*100).toFixed(1)+'%');
+  report.table={sort:true,filter:true,search:true,selection:true,keyboard:true,genericPersona:true,confidenceHold:true};
+  appendFileSync(growing,lines[2].slice(0,-1));await sleep(350);assert.equal((await state()).event,'event 1');
+  const appended=Date.now();appendFileSync(growing,'\n');await event(2);report.follow.appendLatencyMs=Date.now()-appended;
+  assert.ok(report.follow.appendLatencyMs<1000);assert.equal((await state()).selected,'reserve');
+  assert.equal((await state()).line,outputs[1].line);assert.deepEqual(await json(follow.url+'doc/2'),outputs[1]);
+  await click('#hold');appendFileSync(growing,lines[3]);
+  await until(async()=>(await state()).streamDetail.includes('latest received event 3'),'held view receives event');
+  assert.equal((await state()).event,'event 2');assert.equal((await state()).line,outputs[1].line);assert.ok((await state()).follow.includes('+1'));
+  await click('#previous');assert.equal((await state()).line,outputs[0].line);
+  await value(`document.getElementById('scrubber').focus()`);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39});
+  assert.equal((await state()).event,'event 2');await click('#follow');await event(3);
+  report.follow.heldView=true;
+  // Advance only the browser's receiver-age clock. Channel state must not decay on a timer.
+  const stable=await value(`document.getElementById('detail-chart').innerHTML`);
+  await value(`window.realNow=Date.now;Date.now=()=>window.realNow()+61000`);
+  await until(async()=>(await state()).mode==='stale','explicit stale event threshold');
+  assert.equal(await value(`document.getElementById('detail-chart').innerHTML`),stable,'Quiet state is not fabricated');
+  assert.ok((await state()).streamDetail.includes('does not prove the agent is idle'));
+  await value(`Date.now=window.realNow`);report.follow.stale=true;
 
-  const full = path.join(out, 'follow-full-' + Date.now() + '.strand');
-  const growing = path.join(out, 'follow-growing-' + Date.now() + '.strand');
-  const outputs = command(['live', 'examples/persona/tutor.yaml', '--seed', '2', '--clock', 'fixed', '--strand', full],
-    '{"praise":true,"elapsed_hours":1}\n{"loss":true,"elapsed_hours":1}\n{}\n').trim().split('\n').map(JSON.parse);
-  const lines = readFileSync(full, 'utf8').match(/.*\n/g);
-  writeFileSync(growing, lines.slice(0, 2).join(''));
-  const follow = await server([growing], 'follow');
-  await viewport(1440, 1000);
-  await navigate(follow.url);
-  await event(1);
-  report.follow.before = await state();
-  await shot('monitor-follow-before', 1440, 1000);
-  appendFileSync(growing, lines[2].slice(0, -1));
-  await sleep(350);
-  assert.equal((await state()).event, 'event 1');
-  report.follow.incompleteHeld = true;
-  const appended = Date.now();
-  appendFileSync(growing, '\n');
-  await until(async () => (await state()).event === 'event 2', 'appended event', 2000);
-  report.follow.appendLatencyMs = Date.now() - appended;
-  assert.ok(report.follow.appendLatencyMs < 1000, 'Follow update exceeded one second');
-  report.follow.after = await state();
-  assert.equal(report.follow.after.line, outputs[1].line);
-  assert.deepEqual(await json(follow.url + 'doc/2'), outputs[1]);
-  await shot('monitor-follow-after', 1440, 1000);
-  appendFileSync(growing, lines[3]);
-  await event(3);
-  assert.ok((await state()).why.includes('prior state still applies'));
-  assert.equal((await json(follow.url + 'doc/3')).why, 'baseline (no live evidence)');
-  report.follow.rawWhyUnchanged = true;
-  command(['live', 'control', growing, 'pause', '--by', 'human:demo', '--reason', 'synthetic browser check']);
-  await until(async () => (await state()).badge?.includes('paused'), 'paused status');
-  report.follow.paused = await state();
-  await shot('monitor-paused-narrow', 390, 844);
+  // Reload only returns stance documents for history, not original raw clock/learned frames.
+  await navigate(follow.url+'?backfill');await event(3);
+  await until(async()=>(await state()).historyCount==='3/3 recent documents','history backfill');
+  await click('[data-event="1"]');report.follow.documentOnly=await state();
+  assert.equal((await state()).line,outputs[0].line);assert.equal((await state()).historicalNoteHidden,false);assert.equal((await state()).learnedHidden,true);
+  assert.ok(await value(`document.getElementById('input-facts').textContent.includes('Not captured in this frame')`));
+  assert.equal(await value(`document.getElementById('raw').getAttribute('href')`),'/doc/1');
+  await shot('activity-narrow-history',390,844);
+  await click('#follow');command(['live','control',growing,'pause','--by','human:fixture','--reason','synthetic browser check']);
+  await until(async()=>(await state()).mode==='paused','strand pause');assert.ok((await state()).stream.includes('STATE FROZEN'));
+  command(['live','control',growing,'retire','--by','human:fixture','--reason','synthetic browser check']);
+  await until(async()=>(await state()).mode==='retired','strand retired');assert.ok((await state()).streamDetail.includes('final'));
+  report.follow.retired=await state();
+  follow.child.kill('SIGTERM');await until(async()=>(await state()).mode==='disconnected','disconnected status');assert.equal((await state()).line,outputs[2].line);
+  await shot('activity-disconnected',1280,820);
+  await until(()=>follow.child.exitCode!==null||follow.child.signalCode!==null,'server shutdown');
+  await server([growing,'--port',new URL(follow.url).port],'reconnected');
+  await until(async()=>(await state()).mode==='retired','SSE reconnect');assert.equal((await state()).line,outputs[2].line);
 
-  const checkpoint = path.join(out, 'checkpoint-' + Date.now() + '.strand');
-  command(['live', 'examples/persona/tutor.yaml', '--seed', '2', '--clock', 'fixed', '--checkpoint-every', '2', '--strand', checkpoint], '{}\n{}\n{}\n');
-  const checkpointServer = await server([checkpoint], 'checkpoint');
-  await navigate(checkpointServer.url);
-  await event(3);
-  report.checkpoint = await state();
-  assert.ok(report.checkpoint.badge.includes('from checkpoint 2'));
-  assert.equal(failures.length, 0, JSON.stringify(failures));
-  report.ok = true;
+  // A missing event remains a gap, disabled in history and unjoined in the selected channel plot.
+  await navigate(follow.url+'?gap');await event(3);
+  await until(async()=>(await state()).historyCount==='2/3 recent documents','history gap');
+  assert.equal(await value(`document.querySelector('[data-event="2"]').disabled`),true);
+  await selected('mood:reserve');
+  const paths=await value(`[...document.querySelectorAll('#detail-chart path')].map(p=>p.getAttribute('d'))`);
+  assert.ok(paths.length===3&&paths.every(d=>!d.includes('L')&&d.split('M').length===3),'Missing event is not interpolated: '+paths);
+  report.historyGap=true;
+
+  const checkpoint=path.join(out,'checkpoint.strand');
+  command(['live',persona,'--seed','2','--clock','fixed','--checkpoint-every','2','--strand',checkpoint],'{}\n{}\n{}\n');
+  const cp=await server([checkpoint],'checkpoint');await navigate(cp.url);await event(3);
+  await until(async()=>(await state()).historyCount==='2/2 recent documents','checkpoint bound');
+  assert.ok((await state()).badge.includes('from checkpoint 2'));assert.equal(await value(`document.getElementById('scrubber').min`),'2');report.checkpoint=true;
+
+  const longStrand=path.join(out,'long-history.strand'),longFull=path.join(out,'long-full.strand');
+  command(['live',persona,'--seed','2','--clock','fixed','--strand',longFull],'{}\n'.repeat(111));
+  const longLines=readFileSync(longFull,'utf8').match(/.*\n/g);writeFileSync(longStrand,longLines.slice(0,61).join(''));
+  const longServer=await server([longStrand],'long-history');await navigate(longServer.url);await event(60);
+  await until(async()=>(await state()).historyCount==='50/50 recent documents','bounded history');
+  assert.equal(await value(`document.querySelectorAll('#history-strip button').length`),50);assert.equal(await value(`document.getElementById('scrubber').min`),'11');
+  const fetches=await value(`window.monitorFetch`);assert.ok(fetches.maximum<=4&&fetches.maximum>0);assert.equal(fetches.docs.length,49);report.bounds={documents:50,maximumFetches:fetches.maximum};
+  await click('#hold');appendFileSync(longStrand,longLines.slice(61).join(''));
+  await until(async()=>(await state()).streamDetail.includes('latest received event 111'),'held outside window');
+  await until(async()=>(await state()).historyCount==='50/50 recent documents','new bounded window');
+  assert.equal((await state()).event,'event 60');assert.ok((await state()).historyNote.includes('outside the recent window (#62–#111)'));
+  assert.equal(await value(`document.getElementById('scrubber').parentNode.hidden`),true);assert.equal(await value(`document.querySelectorAll('#history-strip [aria-current="true"]').length`),0);
+  await shot('activity-held-outside-window',360,800);await click('#follow');await event(111);
+  assert.equal(await value(`document.getElementById('scrubber').parentNode.hidden`),false);
+  assert.ok(await value(`performance.getEntriesByType('resource').every(r=>new URL(r.name).origin===location.origin)`),'No external resources');
+  // Persona changes without an accompanying frame must erase prior visible state, including held views.
+  await value(`document.getElementById('hold').click();window.monitorTestStream.close();window.monitorTestStream.dispatchEvent(new MessageEvent('meta',{data:JSON.stringify({persona:{name:'Second fixture',version:'1',seed:9,individual:'synthetic-second'},path:'synthetic.strand',traits:[],moods:[],inputs:[],history:[]})}));`);
+  report.metadataOnly=await state();assert.equal(report.metadataOnly.identity,'Second fixture');assert.equal(report.metadataOnly.line,'');assert.equal(report.metadataOnly.why,'');assert.equal(report.metadataOnly.workspaceHidden,true);assert.equal(report.metadataOnly.rawHidden,true);assert.equal(report.metadataOnly.learnedHidden,true);assert.equal(report.metadataOnly.stream,'AWAITING FIRST EVENT');
+  await value(`window.monitorTestStream.dispatchEvent(new Event('error'))`);assert.equal((await state()).mode,'disconnected');assert.equal((await state()).workspaceHidden,true);
+  // No moods or drives is a normal supported persona, not an empty app.
+  const bare=path.join(out,'traits-only.json'),bareStrand=path.join(out,'traits-only.strand');
+  writeFileSync(bare,JSON.stringify({probbit_persona:1,identity:{name:'Minimal fixture',version:'1'},traits:[{id:'approach',levels:['consider','act']}]}));
+  command(['live',bare,'--clock','fixed','--strand',bareStrand],'{}\n');
+  const bareServer=await server([bareStrand],'traits-only');await navigate(bareServer.url);await event(1);assert.equal((await rows()).length,1);assert.equal((await state()).selected,'approach');
+  await click('[data-filter="drive"]');assert.equal((await rows()).length,0);assert.equal(await value(`document.getElementById('no-match').hidden`),false);report.traitsOnly=true;
+  const refusing=path.join(out,'unreleased.json'),refusingStrand=path.join(out,'unreleased.strand');
+  const refusingPersona=JSON.parse(readFileSync(path.join(repo,'examples/persona/tutor.json'),'utf8'));
+  refusingPersona.engine={op:'sample',sweeps:8,on_conflict:'yield'};writeFileSync(refusing,JSON.stringify(refusingPersona));
+  const refused=JSON.parse(command(['live',refusing,'--clock','fixed','--strand',refusingStrand],'{}\n').trim());
+  const unreleased=Object.keys(refused.stance).find(k=>refused.stance[k].released===false);assert.ok(unreleased,'Fixture must genuinely withhold a trait');
+  const refusingServer=await server([refusingStrand],'unreleased');await navigate(refusingServer.url);await event(1);await selected('trait:'+unreleased);
+  assert.ok((await rows()).find(r=>r.key==='trait:'+unreleased).current.includes('unreleased'));assert.ok(await value(`document.getElementById('channel-sub').textContent.includes('engine did not vouch')`));report.unreleased=true;
+  const capped=path.join(out,'declared-scales.json'),cappedStrand=path.join(out,'declared-scales.strand');
+  writeFileSync(capped,JSON.stringify({probbit_persona:1,identity:{name:'Scale fixture',version:'1'},traits:[{id:'approach',levels:['consider','act']}],drives:{goals:[{id:'repair'},{id:'explore'}],wanting:{cap:7},afterglow:{cap:4},expectation:{pe_cap:2.5}}}));
+  command(['live',capped,'--clock','fixed','--strand',cappedStrand],'{}\n');
+  const cappedServer=await server([cappedStrand],'declared-scales');await navigate(cappedServer.url);await event(1);
+  await selected('drive:surprise:repair');assert.ok(await value(`document.getElementById('channel-facts').textContent.includes('-2.5 to 2.5')`));
+  assert.ok(await value(`document.getElementById('detail-chart').textContent.includes('2.50')`));report.declaredScales=true;
+  assert.equal(failures.length,0,JSON.stringify(failures));report.ok=true;
 } catch (error) {
   report.error = String(error.stack || error);
   process.exitCode = 1;

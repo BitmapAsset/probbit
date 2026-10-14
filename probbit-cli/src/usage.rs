@@ -140,7 +140,7 @@ pub(crate) fn top_help(cmds: &[Command], version: &str) -> String {
     h
 }
 /// The exit codes of every command (the man page's EXIT STATUS, the top-level help)
-pub(crate) const EXIT: &str = "0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input (a line on stderr; for bad input also one {\"error\"} object on stdout when stdout is not a terminal); 3 refused / declined / non-finite (decide, run, evaluate); 4 refused by a lock, a pause or a retirement (live). Each command's --help has its own list.";
+pub(crate) const EXIT: &str = "0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input (a line on stderr; for bad input also one {\"error\"} object on stdout when stdout is not a terminal); 3 refused / declined / non-finite (decide, run, evaluate), or a rule left unproven (persona lint); 4 refused by a lock, a pause or a retirement (live). Each command's --help has its own list.";
 pub(crate) const TOP_EXAMPLES: [&str; 6] = [
     "probbit demo | probbit decide --summary --pretty",
     "probbit run --pretty < examples/knapsack-20.json",
