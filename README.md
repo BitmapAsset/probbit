@@ -502,6 +502,37 @@ strand fails (1 wins); 3 when the only problem is an unproven rule (the bound ca
 counterexample); 2 for a bad persona, rule file or flag. `--json` prints one document with the `persona lint` report under
 `rules`, one entry per strand and the verdict counts.
 
+**As a GitHub Action.** The repository root is a composite action that installs probbit with `install.sh`, runs `probbit
+check --json`, annotates each broken rule and failing strand as an error and each unproven rule as a warning (with the seed
+numbers), and uploads the JSON report as an artifact:
+
+```yaml
+- uses: actions/checkout@v7
+- uses: BitmapAsset/probbit@v0.8.3     # the action needs probbit 0.8.3 or later
+  with:
+    persona: agent/policy.yaml
+    props: agent/rules.json
+    strands: |
+      receipts/*.strand
+    seeds: 0-99
+```
+
+| input | default | |
+|---|---|---|
+| `persona` | (required) | the persona file |
+| `props` | | the rules file; empty = habit contradictions and strands only |
+| `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
+| `seeds` | `0-99` | the individuals |
+| `depth` | probbit's (8) | events per fuzzed script |
+| `version` | `latest` | the release `install.sh` installs (`v0.8.3`, ...) |
+| `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
+| `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
+| `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |
+
+Outputs: `exit-code` and `json` (the report's path). Linux and macOS runners work (this repository runs it on `ubuntu-latest`
+and `macos-latest`); jq, which the action uses, is on GitHub's images. Windows runners stop at once with one error line: use `ubuntu-latest` or `macos-latest` for this step
+(`install.ps1` installs probbit on Windows for running `probbit check` by hand).
+
 ### Live: an individual on a clock, learning inside caps
 
 `probbit live` keeps one individual running: JSONL events in, one stance per event out. A clock stamps the hours between events,
