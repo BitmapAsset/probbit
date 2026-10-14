@@ -514,6 +514,34 @@ fn fuzz_is_deterministic_and_never_breaks_a_habit() {
     }
 }
 
+/// 0.8.2: the search's grid gains every threshold the rule and the habits read on a number input. "No jokes at stakes 0.7 to
+/// 0.8" sits between the default grid points (0, 0.5, 1): the random search alone (`--beam 0`) never put it in force and found
+/// nothing; now the grid reports [0, 0.5, 1, 0.7, 0.8] and the single event {"stakes": 0.7} breaks it. The thresholds go on the
+/// grid's scale (a fraction of the input's max), from habits too, each once, after the given points.
+#[test]
+fn fuzz_grid_includes_the_thresholds_of_the_rule_and_the_habits() {
+    let rule = "{when: {stakes: {at_least: 0.7, at_most: 0.8}}, then: {humour: [none]}}";
+    for grid in [None, Some("0,0.5,1")] {
+        let mut args = vec!["persona", "fuzz", "examples/persona/tutor.yaml", "--never", rule, "--seeds", "0-4", "--beam", "0", "--scripts", "40", "--json"];
+        if let Some(g) = grid { args.extend(["--grid", g]); }
+        let (c, out, e) = probbit_at_root(&args); assert_eq!(c, 1, "{e}");
+        let d = parse(&out); assert_eq!(jw(s(&d, &["search", "grid"])), "[0,0.5,1,0.7,0.8]");
+        assert_eq!(jw(s(&d, &["properties"]).as_arr().unwrap()[0].get("shortest").and_then(|x| x.get("script")).unwrap()), r#"[{"stakes":0.7}]"#);
+    }
+    // a threshold already on the grid is not added twice
+    let (_, out, _) = probbit_at_root(&["persona", "fuzz", "examples/persona/tutor.yaml", "--never", "{when: {stakes: 0.5}, then: {humour: [none]}}", "--seeds", "0", "--scripts", "1", "--beam", "0", "--json"]);
+    assert_eq!(jw(s(&parse(&out), &["search", "grid"])), "[0,0.5,1]");
+    // max 100: a habit's 65 and the rule's 42 become 0.65 and 0.42 (sorted, after the given points)
+    let file = tmp("grid-thresholds.json");
+    std::fs::write(&file, r#"{"probbit_persona":1,"identity":{"name":"Fixture","version":"1"},
+        "traits":[{"id":"tone","levels":["calm","sharp"],"prior":[0.6,0.4]}],
+        "inputs":[{"id":"pressure","kind":"number","max":100,"effects":{"tone":1}}],
+        "habits":[{"id":"calm_under_pressure","when":{"pressure":{"at_least":65}},"then":{"tone":["calm"]}}]}"#).unwrap();
+    let (_, out, e) = probbit(&["persona", "fuzz", &file, "--never", r#"{"when":{"pressure":42},"then":{"tone":["calm"]}}"#, "--seeds", "0", "--scripts", "1", "--beam", "0", "--json"], "");
+    assert_eq!(jw(s(&parse(&out), &["search", "grid"])), "[0,0.5,1,0.42,0.65]", "{e}");
+    let _ = std::fs::remove_file(&file);
+}
+
 /// A bad rule is one error object at its path (exit 2), like a bad habit; a missing rule or a bad flag is a stderr line (exit 2)
 #[test]
 fn fuzz_refuses_bad_rules_and_flags() {

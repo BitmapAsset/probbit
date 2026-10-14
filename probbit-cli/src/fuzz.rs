@@ -19,6 +19,13 @@ type Event = Vec<(String, Json)>;
 
 /// The search settings (the flags of `probbit persona fuzz`)
 pub struct Search { pub seeds: Vec<u64>, pub fuzz_seed: u64, pub scripts: usize, pub depth: usize, pub beam: usize, pub grid: Vec<f64>, pub hours: Vec<f64>, pub threads: usize }
+/// The search's grid: the given points in their order, then every threshold the rules and the habits read on a number input
+/// (persona::thresholds) that is not one of them, so a condition that flips between two given points can still be put in force
+pub fn grid(p: &Persona, props: &[Prop], given: &[f64]) -> Vec<f64> {
+    let mut g = given.to_vec();
+    for t in persona::thresholds(p, props) { if !g.contains(&t) { g.push(t); } }
+    g
+}
 /// One individual's shortest counterexample to one property, shrunk: the script, the breaking turn's stance document, what broke
 pub struct Found { pub script: Vec<Event>, pub doc: Json, pub broken: Vec<Broken> }
 
@@ -342,7 +349,7 @@ pub fn tool(args: &[(String, Json)], eng: SyncEngine) -> Result<Json, crate::jso
         .ok_or_else(|| perr("arguments.seeds", "e.g. \"0-99\", \"1,4,9\" or a list of integers (0 to 2^53, at most 100000)"))?;
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     let s = Search { seeds: sd, fuzz_seed: whole("fuzz_seed", 0, 0, 1 << 53)? as u64, scripts: whole("scripts", 60, 0, 1_000_000)?, depth: whole("depth", 8, 1, 64)?, beam: whole("beam", 4, 0, 64)?,
-        grid: nums("grid", &[0.0, 0.5, 1.0], 1.0)?, hours: nums("hours", &[1.0, 12.0, 48.0], 1e6)?, threads: whole("threads", cores, 1, 1024)? };
+        grid: grid(&p, &props, &nums("grid", &[0.0, 0.5, 1.0], 1.0)?), hours: nums("hours", &[1.0, 12.0, 48.0], 1e6)?, threads: whole("threads", cores, 1, 1024)? };
     let (mut res, turns) = fuzz(&p, &props, &s, eng);
     if let Some(source) = get("fixture_src") {
         let source = source.as_str().ok_or_else(|| perr("arguments.fixture_src", "env:synthetic | human:synthetic"))?;

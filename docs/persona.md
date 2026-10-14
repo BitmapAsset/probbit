@@ -595,7 +595,10 @@ writes. Two commands test it over a population of individuals (`--seeds 0-99`); 
 line of YAML), `--props FILE` several (`{"props": [...]}`, each with an optional `id`).
 
 **`fuzz`** searches event scripts built from the persona's declared inputs (flags, levels, numbers on `--grid` x their max,
-idle hours on `--hours`): random scripts, then a beam guided by the exact odds (the next events that put the most odds on a
+idle hours on `--hours`). The grid (default 0, 0.5, 1) also gets, after the given points and each once, every threshold the
+rule's `when` and the habits' `when` read on a number input, as a fraction of that input's max (since 0.8.2): a rule in force
+only at stakes 0.7 to 0.8 is searched at 0.7 and 0.8; `search.grid` in the JSON lists the grid used. The search runs random
+scripts, then a beam guided by the exact odds (the next events that put the most odds on a
 level the rule forbids). Each individual's shortest counterexample is shrunk (drop events, then single inputs) and printed with
 the breaking turn's levels, odds, why and line, and the `replay` / `explain` commands that reproduce it. The search is Philox
 keyed by `--fuzz-seed` and the seed: the same inputs give the same report, byte for byte, on any number of threads. "None

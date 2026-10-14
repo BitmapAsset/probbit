@@ -548,7 +548,7 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
         if out.iter().any(|v| matches!(v, fuzz::Verdict::Unknown { .. })) { std::process::exit(1) }
         return; }
     let s = fuzz::Search { seeds: seeds_arg(args), fuzz_seed: arg(args, "--fuzz-seed", 0u64), scripts: bounded("--scripts", 60, 0, 1_000_000), depth: bounded("--depth", 8, 1, 64),
-        beam: bounded("--beam", 4, 0, 64), grid: list_arg(args, "--grid", &[0.0, 0.5, 1.0], 0.0, 1.0), hours: list_arg(args, "--hours", &[1.0, 12.0, 48.0], 0.0, 1e6), threads: bounded("--threads", cores, 1, 1024) };
+        beam: bounded("--beam", 4, 0, 64), grid: fuzz::grid(p, &props, &list_arg(args, "--grid", &[0.0, 0.5, 1.0], 0.0, 1.0)), hours: list_arg(args, "--hours", &[1.0, 12.0, 48.0], 0.0, 1e6), threads: bounded("--threads", cores, 1, 1024) };
     let t0 = std::time::Instant::now(); let (mut res, turns) = fuzz::fuzz(p, &props, &s, eng); let secs = t0.elapsed().as_secs_f64();
     if let Some(i) = args.iter().position(|a| a == "--fixture-src") {
         fuzz::authorize_fixtures(p, &s.seeds, &mut res, &args[i + 1], eng).unwrap_or_else(|e| bad_input("persona fuzz: ", e));
@@ -703,7 +703,7 @@ fn persona_cmd(args: &[String]) {
                 let props = rules_arg(args, &p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);
                 let verdicts = fuzz::prove(&p, &props, &seeds, threads, &engine);
                 let unknown: Vec<persona::Prop> = props.iter().zip(&verdicts).filter(|(_, v)| matches!(v, fuzz::Verdict::Unknown { .. })).map(|(q, _)| q.clone()).collect();
-                let s = fuzz::Search { seeds: seeds.clone(), fuzz_seed: 0, scripts: 60, depth: 8, beam: 4, grid: vec![0.0, 0.5, 1.0], hours: vec![1.0, 12.0, 48.0], threads };
+                let s = fuzz::Search { seeds: seeds.clone(), fuzz_seed: 0, scripts: 60, depth: 8, beam: 4, grid: fuzz::grid(&p, &unknown, &[0.0, 0.5, 1.0]), hours: vec![1.0, 12.0, 48.0], threads };
                 let (res, turns) = if unknown.is_empty() { (vec![], 0) } else { fuzz::fuzz(&p, &unknown, &s, &engine) };
                 let fd = fuzz::doc(&p, path, &unknown, &s, &res, turns); let fp = fd.get("properties").and_then(Json::as_arr).unwrap_or(&[]).to_vec();
                 broken = fp.iter().filter(|x| x.get("verdict").and_then(Json::as_str) == Some("counterexample")).count();

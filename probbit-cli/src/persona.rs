@@ -1806,6 +1806,17 @@ pub fn alphabet(p: &Persona, grid: &[f64], hours: &[f64]) -> Vec<(String, &'stat
         let h = pos_hours(); if !h.is_empty() { out.push((format!("goal.{}.deadline_hours", g.id), "goal", h)); } } }
     out
 }
+/// The thresholds the rules and the habits read on number inputs, on the grid's scale (a fraction of the input's max), each once,
+/// in ascending order: the values at which a condition flips, so the search can put an input exactly there
+pub fn thresholds(p: &Persona, props: &[Prop]) -> Vec<f64> {
+    let mut out: Vec<f64> = vec![];
+    for w in p.habits.iter().map(|h| &h.when).chain(props.iter().map(|q| &q.habit.when)) { for (k, c) in w {
+        // the host's number inputs (the drives' own inputs are not on the search's alphabet)
+        let Some(x) = p.input(k).filter(|x| x.kind == Kind::Number && !p.drives.as_ref().is_some_and(|d| d.synthetic.contains(&x.id))) else { continue };
+        let ts: Vec<f64> = match c { Json::Num(t) => vec![*t], _ => ["at_least", "at_most"].iter().filter_map(|b| c.get(b).and_then(Json::as_f64)).collect() };
+        for t in ts { if t >= 0.0 && t <= x.max { let g = t / x.max; if !out.contains(&g) { out.push(g); } } } } }
+    out.sort_by(|a, b| a.partial_cmp(b).unwrap()); out
+}
 /// An event of the alphabet as turn inputs: `goal.<id>.<signal>` entries nested into `goals` (after the host's inputs)
 pub fn event_json(e: &[(String, Json)]) -> Json {
     let mut v: Vec<(String, Json)> = vec![]; let mut goals: Vec<(String, Json)> = vec![];

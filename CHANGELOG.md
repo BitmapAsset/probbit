@@ -11,6 +11,10 @@ All notable changes to this project are documented here. The format follows
   document gains `"unproven": [{id, rule, seeds_unknown, searched}]`, `ok` is false, stderr says "unproven, not broken", and the
   exit code is the new **3** (0: every rule held or proved; 1: an unresolved contradiction or a counterexample, which wins over
   3; 2: bad input, as before). Up to 0.8.1 the same case exited 0 with `ok: true`. docs/persona.md §5.5.
+- `persona fuzz`, MCP `probbit_persona_fuzz` and `lint`'s search add every threshold the rule's `when` and the habits' `when`
+  read on a number input to the grid (as a fraction of that input's max, after the given points, each once; `search.grid` lists
+  them). A rule in force only between two default grid points (for example stakes 0.7 to 0.8) is now reached by the random
+  search too. Personas whose rules and habits read no number thresholds off the grid get the same search, byte for byte.
 
 ## 0.8.1 - 2026-10-10
 
