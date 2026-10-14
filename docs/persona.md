@@ -388,8 +388,8 @@ document it produces is the same, byte for byte, as before the key existed.
 
 A sense is a reading the host measures (a tool failure, a latency, a message tempo, a silence) in declared units, from a named
 source. The engine keeps a learned **normal** per sense (mean, variance, count) and turns each reading into a capped z-score
-against it, which moves moods and traits as any input does. The same reading moves two individuals differently once their
-normals differ, and `why` names the normal a reading was judged against. Design notes and arithmetic:
+against it, which moves moods and traits as any input does; `why` names the normal a reading was judged against. Design
+notes and arithmetic:
 [docs/rfcs/0001-senses-and-reward.md](rfcs/0001-senses-and-reward.md).
 
 ```yaml

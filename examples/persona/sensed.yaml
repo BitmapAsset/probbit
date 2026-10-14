@@ -1,7 +1,6 @@
 # A fictional persona with senses: an agent that runs tools for a person. probbit persona format 1 (docs/persona.md §2.11).
-# Four readings the host measures (tool failures, tool latency, message tempo, silence) are judged against the normal this
-# individual learns from its own log, so the same reading moves two lives differently, and `why` names the normal it was
-# judged against. The host acts on caution: bold = go ahead, measured = show the plan, then go, careful = show the diff and wait.
+# Four readings the host measures (tool failures, tool latency, message tempo, silence), each judged as a capped z-score
+# against a normal (mean, variance, count) kept from this individual's earlier readings; `why` names the normal it used. The host acts on caution: bold = go ahead, measured = show the plan, then go, careful = show the diff and wait.
 probbit_persona: 1
 identity:
   name: Vale
