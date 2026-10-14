@@ -368,6 +368,11 @@ pub(crate) static COMMANDS: &[Command] = &[
         before: &[], flags: &[F_CONTROLS, &[Flag { name: "--sweeps", arg: "N", help: "sweeps of the throughput measurement (default 2000)" }, F_PRETTY, F_PLAIN]],
         subs: &[], list_subs: false, shared: false, after: &[CONTROLS_NOTE], examples: &["probbit stats --pretty"],
         run: stats_cmd },
+    Command { name: "help", aliases: &[], group: "other", summary: "this screen, or a command's or subcommand's help (as COMMAND --help)",
+        usage: &["help [COMMAND [SUBCOMMAND]]"],
+        about: "Print the help of a command or subcommand, the same text as `probbit COMMAND [SUBCOMMAND] --help`; alone, the same as `probbit --help`.",
+        before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[], examples: &["probbit help persona fuzz"],
+        run: help_cmd },
     Command { name: "version", aliases: &["--version", "-V"], group: "other", summary: "print the version (also --version, -V)",
         usage: &["version"], about: "Print the version.",
         before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[], examples: &[],
@@ -872,6 +877,22 @@ fn mcp_cmd(args: &[String]) { check_flags(args, &[], &[]); mcp::serve() }
 fn version_cmd(args: &[String]) { check_flags(args, &[], &[]); emit(&format!("probbit {VERSION}")) }
 /// `probbit --help` piped (and `probbit help`): the grouped usage; at a terminal the hero screen
 fn top_help() -> String { usage::top_help(COMMANDS, VERSION) }
+/// `probbit help [COMMAND [SUBCOMMAND]]`: the same text as `probbit COMMAND [SUBCOMMAND] --help`; alone, as `probbit --help`
+/// (the hero screen at a terminal, else the usage). Exit 0; an unknown command or subcommand exits 2.
+fn help_cmd(args: &[String]) {
+    let words: Vec<&str> = args[1..].iter().map(String::as_str).filter(|a| *a != "--plain").collect();
+    match words[..] {
+        [] => if theme::stdout_is_terminal() { emit_raw(&tui::hero(theme::stdout(args))) } else { emit_raw(&top_help()) },
+        [name, ..] if words.len() <= 2 => {
+            let Some(c) = command(name) else { fail(&format!("unknown command {name:?}; see `probbit --help`")) };
+            match words.get(1) {
+                None => emit_raw(&usage::command_help(c)),
+                Some(s) => match c.sub(s) { Some(s) => emit_raw(&usage::sub_help(c, s)),
+                    None => fail(&format!("unknown subcommand {s:?} for `probbit {}`; see `probbit {} --help`", c.name, c.name)) } }
+        }
+        _ => fail("help: at most a command and a subcommand: probbit help [COMMAND [SUBCOMMAND]]"),
+    }
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
