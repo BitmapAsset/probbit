@@ -1,7 +1,9 @@
 """P0: a persona without the new blocks gives the documents it gave before them, byte for byte (Python 3.9, stdlib only).
 
     python3 p0.py record   # with a released binary: writes fixtures/p0/EXPECTED, the strands and fixtures/MANIFEST
-    python3 p0.py check    # with the binary under test: every output equals its recorded sha256 (exit 1 if not)
+    python3 p0.py check    # with the binary under test: every output equals its recorded sha256 (exit 1 if not); a
+                           # `live` stderr may also carry the one senses warning line (SENSES_WARNING) where its script
+                           # sends `senses`, and is reported apart
 
 The corpus: every persona of fixtures/gen.py's P0 list x seeds 0-2 x its committed random scripts, through `persona replay`
 and `live --clock fixed` (stances, error objects, final state, strand), plus `init`, `check`, `describe`, `compile`, `lint
@@ -46,6 +48,28 @@ def masked_strand(data):
 
 def masked_err(err):
     return re.sub(r"strand head sha256:[0-9a-f]{64}", "strand head *", err).encode("utf-8")
+
+
+# The one line 0.9.0 adds to a corpus output: `live` says once per run, on stderr, that a persona without a senses block
+# got a `senses` key (an undeclared input, listed in `ignored` as before). Only the scripts that carry `senses` (k=1) get
+# it, at their first such event; it is not a document: stdout, states and strands stay byte-identical.
+SENSES_WARNING = ("probbit: live: events[%d]: this persona has no senses block: `senses` is an undeclared input "
+                  "(listed in ignored), no reading is judged\n")
+
+
+def first_senses_event(key, k):
+    events = common.read_jsonl(os.path.join(P0, "scripts", "%s-%d.jsonl" % (key, k)))
+    return next((i for i, e in enumerate(events) if "senses" in e), None)
+
+
+def without_senses_warning(name, data):
+    """For a `live` stderr whose script carries `senses`: the bytes without the warning line, else None."""
+    m = re.match(r"live/([^/]+)/s\d+/(\d+)/stderr$", name)
+    i = m and first_senses_event(m.group(1), int(m.group(2)))
+    if i is None:
+        return None
+    line = (SENSES_WARNING % i).encode("utf-8")
+    return data.replace(line, b"", 1) if data.count(line) == 1 else None
 
 
 def rel(path):
@@ -166,7 +190,8 @@ def record():
 
 
 def check(verbose=False):
-    """Returns (outputs checked, differing names, strands verified, strand failures, seconds)."""
+    """Returns (outputs checked, differing names, stderr outputs equal but for the senses warning, strands verified,
+    strand failures, seconds)."""
     t0 = time.time()
     expected = {}
     with open(os.path.join(P0, "EXPECTED"), encoding="utf-8") as f:
@@ -176,6 +201,7 @@ def check(verbose=False):
             sha, size, code, name = ln.split()
             expected[name] = (sha, int(size), int(code))
     diffs = []
+    warned = []
     seen = 0
     names = set()
     for name, code, data in outputs():
@@ -184,6 +210,10 @@ def check(verbose=False):
         e = expected.get(name)
         got = (common.sha256_bytes(data), len(data), code)
         if e != got:
+            rest = without_senses_warning(name, data)
+            if rest is not None and e == (common.sha256_bytes(rest), len(rest), code):
+                warned.append(name)
+                continue
             diffs.append(name)
             if verbose:
                 print("DIFF %s: expected %s, got %s" % (name, e, got))
@@ -204,15 +234,16 @@ def check(verbose=False):
         if expected.get(name) != (common.sha256_bytes(data), len(data), code):
             diffs.append(name)
     missing = [n for n in expected if n not in names]
-    return seen, diffs + missing, nverified, vfail, time.time() - t0
+    return seen, diffs + missing, warned, nverified, vfail, time.time() - t0
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "record":
         record()
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
-        n, diffs, nv, vfail, secs = check(verbose=True)
-        print(json.dumps({"outputs": n, "differ": len(diffs), "strands_verified": nv, "verify_failed": vfail,
+        n, diffs, warned, nv, vfail, secs = check(verbose=True)
+        print(json.dumps({"outputs": n, "differ": len(diffs), "identical": n - len(diffs) - len(warned),
+                          "stderr_senses_warning_only": len(warned), "strands_verified": nv, "verify_failed": vfail,
                           "seconds": round(secs, 1)}))
         sys.exit(1 if diffs or vfail else 0)
     else:
