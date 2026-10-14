@@ -408,6 +408,12 @@ pub(crate) static COMMANDS: &[Command] = &[
             ("exit", "0 the script, 2 no shell or an unknown one (the list of shells on stderr).")],
         examples: &["probbit completions zsh > ~/.zfunc/_probbit", "source <(probbit completions bash)"],
         run: completions_cmd },
+    Command { name: "man", aliases: &[], group: "other", summary: "the manual page (roff), generated from this table: probbit man | man -l -",
+        usage: &["man"],
+        about: "Print the manual page in roff (man(7) macros): NAME, SYNOPSIS, DESCRIPTION, COMMANDS (every command, subcommand and flag of this help), EXIT STATUS, ENVIRONMENT, EXAMPLES, SEE ALSO. The release archives carry it as docs/probbit.1 and install.sh installs it to ~/.local/share/man/man1/.",
+        before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[],
+        examples: &["probbit man | man -l -", "probbit man > ~/.local/share/man/man1/probbit.1"],
+        run: man_cmd },
     Command { name: "version", aliases: &["--version", "-V"], group: "other", summary: "print the version (also --version, -V)",
         usage: &["version"], about: "Print the version.",
         before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[], examples: &[],
@@ -923,6 +929,8 @@ fn completions_cmd(args: &[String]) {
     let mut a = vec!["completions".to_string()]; a.extend(args[2..].iter().cloned()); check_flags(&a, &[], &[]);
     match usage::completions(sh, COMMANDS) { Some(s) => emit_raw(&s), None => fail(&format!("completions: unknown shell {sh:?}; one of {shells}")) }
 }
+/// `probbit man` (usage::man; docs/probbit.1 is its output)
+fn man_cmd(args: &[String]) { check_flags(args, &[], &[]); emit_raw(&usage::man(COMMANDS, VERSION)) }
 /// `probbit help [COMMAND [SUBCOMMAND]]`: the same text as `probbit COMMAND [SUBCOMMAND] --help`; alone, as `probbit --help`
 /// (the hero screen at a terminal, else the usage). Exit 0; an unknown command or subcommand exits 2.
 fn help_cmd(args: &[String]) {

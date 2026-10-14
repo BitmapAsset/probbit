@@ -24,6 +24,10 @@ and clean-prefix shell, PowerShell 5.1/7 and npm installs using locally packaged
 `node --test npm/test-wrapper.cjs` needs no npm dependencies. Set `PROBBIT_BIN` to the release executable and run
 `python3 -m unittest discover -s python -p 'test_*.py'` for the integration contracts.
 
+The command table in `probbit-cli/src/main.rs` (`COMMANDS`) is the one source of every `--help`, `probbit help`, the shell
+completions and the man page; the parser reads its flags from it. After changing it or bumping the version, regenerate the
+committed man page: `cargo run -p probbit-cli -- man > docs/probbit.1` (test `committed_man_page_is_generated`).
+
 ## Ground rules
 
 - **No external crates on the shipped path.** `cargo build` must keep working offline.

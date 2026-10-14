@@ -1,5 +1,5 @@
-//! What the command table (`COMMANDS`, main.rs) renders: every `--help` / `probbit help` screen and the did-you-mean of an
-//! unknown command or subcommand. The parser reads the same table (`flags_of`,
+//! What the command table (`COMMANDS`, main.rs) renders: every `--help` / `probbit help` screen, the did-you-mean of an unknown
+//! command or subcommand, `probbit completions bash|zsh|fish` and `probbit man`. The parser reads the same table (`flags_of`,
 //! `sub_flags`), so the help, the completions and the man page list exactly what is accepted and cannot drift from it.
 
 /// A flag. `arg`: "" = a switch; "[X]" = an optional value (parsed as a switch: `--progress [MS]`, `--demo [week|drives]`);
@@ -67,7 +67,8 @@ pub(crate) fn wrap(first: &str, text: &str, indent: usize) -> String {
     out
 }
 /// A synopsis wrapped to `WIDTH` without splitting a [bracketed] or (grouped) part: continuation lines start at `indent`.
-fn wrap_synopsis(first: &str, syn: &str, indent: usize) -> String {
+fn wrap_synopsis(first: &str, syn: &str, indent: usize) -> String { wrap_synopsis_to(first, syn, indent, WIDTH) }
+fn wrap_synopsis_to(first: &str, syn: &str, indent: usize, width: usize) -> String {
     let mut parts: Vec<String> = vec![]; let mut depth = 0i32;
     for w in syn.split(' ').filter(|w| !w.is_empty()) {
         if depth > 0 { let l = parts.last_mut().unwrap(); l.push(' '); l.push_str(w); } else { parts.push(w.to_string()); }
@@ -75,7 +76,7 @@ fn wrap_synopsis(first: &str, syn: &str, indent: usize) -> String {
     }
     let (mut out, mut line) = (String::new(), first.to_string());
     for p in parts {
-        if line.chars().count() + 1 + p.chars().count() > WIDTH && line.trim().len() > first.trim().len() { out.push_str(&line); out.push('\n'); line = " ".repeat(indent); }
+        if line.chars().count() + 1 + p.chars().count() > width && line.trim().len() > first.trim().len() { out.push_str(&line); out.push('\n'); line = " ".repeat(indent); }
         if !line.ends_with(' ') { line.push(' '); } line.push_str(&p);
     }
     out.push_str(&line); out.push('\n'); out
@@ -270,4 +271,58 @@ fn fish(cmds: &[Command]) -> String {
     }
     s += "complete -c probbit -s h -l help -d 'usage and every flag'\n";
     s
+}
+
+/// roff text: backslashes as `\e`, `-` as `\-` (a real hyphen-minus: flags can be copied), any other non-ASCII character as
+/// `\[uXXXX]` (the page is ASCII: § · → render under groff and mandoc alike), a line-leading `.` or `'` guarded
+fn roff(t: &str) -> String {
+    let t: String = t.replace('\\', "\\e").replace('-', "\\-").chars().map(|c| if c.is_ascii() { c.to_string() } else { format!("\\[u{:04X}]", c as u32) }).collect();
+    t.split('\n').map(|l| if l.starts_with(['.', '\'']) { format!("\\&{l}") } else { l.to_string() }).collect::<Vec<_>>().join("\n")
+}
+fn roff_flag(f: &Flag) -> String { format!(".TP\n\\fB{}\\fR{}\n{}\n", roff(f.name), if f.arg.is_empty() { String::new() } else { format!(" \\fI{}\\fR", roff(f.arg)) }, roff(&f.help.replace('\n', " "))) }
+/// A synopsis line in a no-fill block, wrapped for an 80-column terminal (7 columns of man's indent) with a hanging indent
+fn man_synopsis(u: &str) -> String {
+    let w = wrap_synopsis_to("probbit", u, 8, 72);
+    roff(w.trim_end()).replacen("probbit", "\\fBprobbit\\fR", 1) + "\n"
+}
+/// `probbit man`: the manual page (roff, man(7) macros) from the table: NAME, SYNOPSIS, DESCRIPTION, COMMANDS, EXIT STATUS,
+/// ENVIRONMENT, EXAMPLES, SEE ALSO. docs/probbit.1 is this output, committed (test `committed_man_page_is_generated`).
+pub(crate) fn man(cmds: &[Command], version: &str) -> String {
+    let mut m = format!(".TH PROBBIT 1 \"\" \"probbit {version}\" \"probbit manual\"\n");
+    m += ".SH NAME\nprobbit \\- a virtual probabilistic (p\\-bit) processor: joint decisions under hard rules, with gated odds\n";
+    m += ".SH SYNOPSIS\n.nf\n";
+    for c in cmds { for u in c.usage { m += &man_synopsis(u); } }
+    m += ".fi\n.SH DESCRIPTION\n";
+    m += &roff("probbit reads a JSON problem on stdin and writes a JSON answer on stdout: exact where the structure allows, sampled otherwise, and a sampled answer passes a published diagnostics gate or is refused. The persona, live and monitor commands are the individuality layer: a persona file, an individual's state and a turn's inputs give one stance with exact odds, and a strand logs a life that replays byte for byte.");
+    m += "\n.PP\n";
+    m += &roff("Every command takes --help (-h): its usage, every flag with its default and its exit codes; probbit help COMMAND [SUBCOMMAND] prints the same. An unknown command or subcommand exits 2 and names the closest one.");
+    m += "\n.PP\n";
+    m += &roff("Errors: one human line on stderr, always. A bad input document also gives one {\"error\": {\"code\", \"path\", \"message\"}} object on stdout when stdout is not a terminal, or with --json. A bad command or flag prints nothing on stdout unless --json is given (code \"flag\", or \"command\" with a \"suggestion\"). --json is accepted by every command and changes no answer.");
+    m += "\n.SH COMMANDS\n";
+    for c in cmds {
+        m += &format!(".SS {}\n{}\n", c.name, roff(c.summary));
+        m += ".PP\n.nf\n"; for u in c.usage { m += &man_synopsis(u); } m += ".fi\n";
+        for p in c.about.split('\n') { m += &format!(".PP\n{}\n", roff(p)); }
+        for (t, x) in c.before { m += &format!(".PP\n\\fI{}\\fR: {}\n", roff(t), roff(&x.replace('\n', " "))); }
+        if c.flags().next().is_some() { m += ".PP\nFlags:\n.RS 4\n"; for f in c.flags() { m += &roff_flag(f); } m += ".RE\n"; }
+        if !c.subs.is_empty() {
+            m += ".PP\nSubcommands:\n.RS 4\n";
+            for s in c.subs {
+                m += &format!(".TP\n\\fB{}\\fR {}\n{}\n", roff(s.name), roff(s.args), roff(&s.help.replace('\n', " ")));
+                if !s.flags.is_empty() { m += ".RS 4\n"; for f in s.flags { m += &roff_flag(f); } m += ".RE\n"; }
+            }
+            m += ".RE\n";
+        }
+        for (t, x) in c.after { m += &format!(".PP\n\\fI{}\\fR: {}\n", roff(t), roff(&x.replace('\n', " "))); }
+        if !c.examples.is_empty() { m += ".PP\nExamples:\n.RS 4\n.nf\n"; for e in c.examples { m += &format!("{}\n", roff(e)); } m += ".fi\n.RE\n"; }
+    }
+    m += &format!(".SH EXIT STATUS\n{}\n", roff(EXIT));
+    m += ".SH ENVIRONMENT\n";
+    m += &roff("PROBBIT_CHAINS, PROBBIT_THREADS, PROBBIT_CPU_LIMIT, PROBBIT_MEM_LIMIT_MB, PROBBIT_PRIORITY: the processor controls (flag > environment > probbit.json, or the file PROBBIT_CONFIG names > default). NO_COLOR=1 or PROBBIT_THEME=plain: no colour on a terminal.");
+    m += "\n.SH EXAMPLES\n.nf\n";
+    for e in TOP_EXAMPLES { m += &format!("{}\n", roff(e)); }
+    m += ".fi\n.SH SEE ALSO\n";
+    m += &roff("README.md, docs/CHEATSHEET.md, docs/persona.md, docs/probbit-ir-json.md and docs/agents.md in the release archive or at https://github.com/BitmapAsset/probbit");
+    m += "\n";
+    m
 }
