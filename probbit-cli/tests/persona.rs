@@ -565,7 +565,35 @@ fn lint_with_rules_proves_then_fuzzes_the_unknown_ones() {
     assert_eq!((s(&p[1], &["verdict"]).as_str(), s(&p[1], &["fuzz", "verdict"]).as_str()), (Some("unknown"), Some("counterexample")));
     assert_eq!(jw(s(&p[1], &["fuzz", "shortest", "script"])), r#"[{"sentiment":"negative"}]"#);
     let (c, out, e) = probbit_at_root(&["persona", "lint", TUTOR_050, "--never", "{when: {sentiment: negative}, then: {directness: {at_most: balanced}}}", "--seeds", "0-2"]); assert_eq!(c, 0, "{e}");
-    assert_eq!(s(&parse(&out), &["ok"]), &Json::Bool(true));
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), jw(s(&l, &["unproven"]))), (&Json::Bool(true), "[]".to_string()));
+    let _ = std::fs::remove_file(&props);
+}
+
+/// 0.8.2: a rule the bound leaves unknown and the search cannot break is not green. On the shipped tutor, "a loss makes it warm"
+/// is unknown for seeds 0-2 and fuzz finds no counterexample: exit 3, `ok` false, `broken` 0, one `unproven` entry naming the
+/// undecided seeds and what was searched, and "unproven, not broken" on stderr. A proved rule stays exit 0; a broken rule next to
+/// an unproven one exits 1 and still lists the unproven one.
+#[test]
+fn lint_reports_an_unknown_unbroken_rule_as_unproven() {
+    let tutor = "examples/persona/tutor.yaml";
+    let (c, out, e) = probbit_at_root(&["persona", "lint", tutor, "--never", "{when: {loss: true}, then: {warmth: [warm]}}", "--seeds", "0-2"]);
+    assert_eq!(c, 3, "{e}"); assert!(e.contains("1 rule unproven, not broken: never"), "{e}");
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), s(&l, &["broken"]).as_f64()), (&Json::Bool(false), Some(0.0)));
+    let p = s(&l, &["props"]).as_arr().unwrap(); assert_eq!((s(&p[0], &["verdict"]).as_str(), s(&p[0], &["fuzz", "verdict"]).as_str()), (Some("unknown"), Some("none_found")));
+    let u = s(&l, &["unproven"]).as_arr().unwrap(); assert_eq!(u.len(), 1, "{out}");
+    assert_eq!((s(&u[0], &["id"]).as_str(), jw(s(&u[0], &["rule"])), jw(s(&u[0], &["seeds_unknown"]))),
+        (Some("never"), r#"{"then":{"warmth":["warm"]},"when":{"loss":true}}"#.to_string(), "[0,1,2]".to_string()));
+    assert_eq!(jw(s(&u[0], &["searched"])), r#"{"beam":4,"depth":8,"grid":[0,0.5,1],"hours":[1,12,48],"individuals":3,"scripts":60}"#);
+    // proved: exit 0, nothing unproven, nothing on stderr about it
+    let (c, out, e) = probbit_at_root(&["persona", "lint", tutor, "--never", "{when: {error: true}, then: {caution: {at_least: measured}}}", "--seeds", "0-2"]);
+    assert_eq!(c, 0, "{e}"); assert_eq!(jw(s(&parse(&out), &["unproven"])), "[]"); assert!(!e.contains("unproven"), "{e}");
+    // broken next to unproven: exit 1, both reported
+    let props = tmp("lint-unproven.json");
+    std::fs::write(&props, r#"{"props": [{"id": "praise_lifts", "when": {"praise": true}, "then": {"valence": {"at_least": "even"}}},
+        {"id": "loss_warm", "when": {"loss": true}, "then": {"warmth": ["warm"]}}]}"#).unwrap();
+    let (c, out, e) = probbit_at_root(&["persona", "lint", tutor, "--props", &props, "--seeds", "0-2"]); assert_eq!(c, 1, "{e}");
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), s(&l, &["broken"]).as_f64()), (&Json::Bool(false), Some(1.0)));
+    assert_eq!(s(&l, &["unproven"]).as_arr().unwrap().iter().map(|u| s(u, &["id"]).as_str().unwrap()).collect::<Vec<_>>(), ["loss_warm"]);
     let _ = std::fs::remove_file(&props);
 }
 

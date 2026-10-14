@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.2 - unreleased
+
+### Changed
+- `persona lint` with rules (`--never RULE` / `--props FILE`) no longer reports green on a rule it could not settle. When
+  `prove` leaves a rule `unknown` and the default `fuzz` search finds no counterexample, the rule is **unproven**: the lint
+  document gains `"unproven": [{id, rule, seeds_unknown, searched}]`, `ok` is false, stderr says "unproven, not broken", and the
+  exit code is the new **3** (0: every rule held or proved; 1: an unresolved contradiction or a counterexample, which wins over
+  3; 2: bad input, as before). Up to 0.8.1 the same case exited 0 with `ok: true`. docs/persona.md §5.5.
+
 ## 0.8.1 - 2026-10-10
 
 ### Fixed

@@ -461,7 +461,8 @@ probbit persona prove examples/persona/tutor.yaml --seeds 0-99 \
 #   held by construction  (habit no_play_when_upset)      (exit 0; the tutor now ships with that one habit)
 ```
 
-`probbit persona lint PERSONA --props rules.json` runs both in CI (exit 1 when a rule breaks); MCP `probbit_persona_fuzz` and
+`probbit persona lint PERSONA --props rules.json` runs both in CI (exit 1 when a rule breaks, exit 3 when a rule is
+unproven: unknown to the bound and unbroken by the search); MCP `probbit_persona_fuzz` and
 Python `probbit.persona_fuzz` / `persona_prove` give the same documents. Both commands test the stance the host gets, not the
 words a model writes; "none found" from `fuzz` is evidence over the scripts it searched, not a proof
 ([docs/persona.md](docs/persona.md) §5.6 has the bound and its limits).
