@@ -525,7 +525,7 @@ A persona without the block gives the same documents as before, byte for byte. M
 cues, rewards and praises fun on this persona, 100 individuals x 10,000 turns: 0 habit breaks, all 6,743 must-do turns pursued
 the due chore, and the safety floor (0.1) held on every turn its habits allowed (least odds 0.141), while fun took 85 % of turns.
 
-### Watch it live: `probbit monitor` (0.8.0)
+### Watch it live: `probbit monitor` (0.8.0; Activity Monitor page 0.8.2)
 
 `probbit monitor pip.strand --open` opens a compact, read-only **Activity Monitor** for one individual: a sortable,
 searchable table of declared traits, moods and drives, with reported probabilities, event-history traces, and a selected-channel
@@ -535,6 +535,7 @@ inspector. It reads any compatible persona from the strand; no preset character 
 probbit monitor pip.strand --once --plain   # native CLI snapshot; no browser or server
 probbit monitor pip.strand --follow        # live terminal bars
 probbit monitor pip.strand --open          # browser-rendered utility on 127.0.0.1
+probbit monitor --demo --open              # no strand yet: the tutor's synthetic week, in under a minute
 probbit monitor --demo drives --open       # synthetic goals/drive scenario
 ```
 

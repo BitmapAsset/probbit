@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.8.2 - unreleased
 
+### Added
+- `probbit monitor STRAND --open` (and `--serve`) shows an Activity Monitor for one individual: a sortable, filterable table of
+  the persona's declared traits, moods and, when present, drive channels, with each channel's reported level or value, a trace
+  over recorded events and a change against exactly the preceding event (a gap when that document is missing); an inspector
+  with the full distribution, units, declared range, source field and the event's `why`; holding a past event while new ones
+  arrive; and separate states for replay divergence, stale receiver age, a held view, a paused or retired strand, a
+  persona-confidence hold, an engine-unreleased trait and a lost connection. It works for any persona read from the strand.
+  The page is embedded in the binary with no external assets; the terminal view (`--once`, `--follow`, `--plain`) is unchanged.
+  The monitor's layout gains `caps.prediction_error` from the persona's `expectation.pe_cap`. docs/persona.md §5.8.
+
 ### Changed
 - `persona lint` with rules (`--never RULE` / `--props FILE`) no longer reports green on a rule it could not settle. When
   `prove` leaves a rule `unknown` and the default `fuzz` search finds no counterexample, the rule is **unproven**: the lint
