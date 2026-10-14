@@ -133,9 +133,13 @@ struct Habit { id: String, when: Vec<(String, Json)>, then: Vec<(String, Json)>,
 #[derive(Clone)]
 struct Eng { op: String, sweeps: usize, polish_sweeps: usize, exact_limit: u64, chains: usize, twin: bool, positional: bool, yields: bool }
 /// bounded learning (docs/persona.md §2.8): `from` = the reward flag, then (optional) the correction flag; the traits whose learned
-/// deltas move; the step and total caps (natural-log weights)
+/// deltas move; the step and total caps (natural-log weights); `credit` = action-addressed feedback, when declared
 #[derive(Clone)]
-struct Learning { from: Vec<String>, traits: Vec<String>, rate: f64, step_cap: f64, total_cap: f64 }
+struct Learning { from: Vec<String>, traits: Vec<String>, rate: f64, step_cap: f64, total_cap: f64, credit: Option<Credit> }
+/// `learning.credit` (§2.8): at most `max_open` decisions await an outcome; a payment's eligibility halves per `half_life_events`
+/// of delay, and an open decision expires after 4 half-lives
+#[derive(Clone)]
+struct Credit { max_open: usize, half_life: f64 }
 /// Learned deltas or credits: per learned trait, one number per level (in `learning.traits` order)
 type Table = Vec<(String, Vec<f64>)>;
 #[derive(Clone)]
@@ -147,6 +151,10 @@ impl Persona {
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
     /// A senses block (§2.11)
     pub fn has_senses(&self) -> bool { self.senses.is_some() }
+    /// A `learning.credit` block (§2.8)
+    fn credit(&self) -> Option<&Credit> { self.learning.as_ref().and_then(|l| l.credit.as_ref()) }
+    /// A `learning.credit` block (§2.8): `await`, `for` and `cancel` are read on every event
+    pub fn has_credit(&self) -> bool { self.credit().is_some() }
     fn var(&self, id: &str) -> Option<&Var> { self.vars.iter().find(|v| v.id == id) }
     fn input(&self, id: &str) -> Option<&Input> { self.inputs.iter().find(|x| x.id == id) }
     fn habit(&self, id: &str) -> &Habit { self.habits.iter().find(|h| h.id == id).expect("habit id") }
@@ -408,9 +416,10 @@ fn habit_spec(hb: &Json, path: &str, inputs: &[Input], history: &[Hist], vars: &
     Ok(Habit { id, when, then, rules, say, priority })
 }
 /// The `learning` block (docs/persona.md §2.8): `from` = 1-2 distinct flag inputs (the reward, then the correction), `traits` =
-/// distinct trait ids (moods do not learn), `rate`, `step_cap` and `total_cap` positive, with step_cap <= total_cap <= 50
+/// distinct trait ids (moods do not learn), `rate`, `step_cap` and `total_cap` positive, with step_cap <= total_cap <= 50; `credit`
+/// (optional): `max_open` a whole number 1-64 (default 8), `half_life_events` 1-10000 (default 32)
 fn learning_spec(l: &Json, vars: &[Var], inputs: &[Input]) -> R<Learning> {
-    let kv = keys(l, "learning", &["from", "traits", "rate", "step_cap", "total_cap", "comment"], &["from", "traits", "rate", "step_cap", "total_cap"])?;
+    let kv = keys(l, "learning", &["from", "traits", "rate", "step_cap", "total_cap", "credit", "comment"], &["from", "traits", "rate", "step_cap", "total_cap"])?;
     let ids = |k: &str, max: usize, ok: &dyn Fn(&str) -> bool, what: &str| -> R<Vec<String>> { let p = at("learning", k);
         let v = strs(get(kv, k).unwrap()).filter(|v| !v.is_empty() && v.len() <= max).ok_or_else(|| perr(&p, format!("a list of 1 to {max} ids")))?;
         for (i, x) in v.iter().enumerate() { need(ok(x), &ix(&p, i), what)?; need(!v[..i].contains(x), &ix(&p, i), "listed twice")?; }
@@ -419,7 +428,10 @@ fn learning_spec(l: &Json, vars: &[Var], inputs: &[Input]) -> R<Learning> {
     let traits = ids("traits", vars.len(), &|x| vars.iter().any(|v| v.id == x && !v.mood), "not a trait of this persona (moods do not learn)")?;
     let pos = |k: &str, hi: f64| -> R<f64> { let p = at("learning", k); let x = num(get(kv, k), &p, Some(0.0), Some(hi), false)?; need(x > 0.0, &p, "must be > 0")?; Ok(x) };
     let (rate, total_cap) = (pos("rate", 50.0)?, pos("total_cap", 50.0)?); let step_cap = pos("step_cap", total_cap)?;
-    Ok(Learning { from, traits, rate, step_cap, total_cap })
+    let credit = match get(kv, "credit") { None | Some(Json::Null) => None, Some(c) => { let ck = keys(c, "learning.credit", &["max_open", "half_life_events", "comment"], &[])?;
+        Some(Credit { max_open: num_or(ck, "max_open", 8.0, "learning.credit", Some(1.0), Some(64.0), true)? as usize,
+            half_life: num_or(ck, "half_life_events", 32.0, "learning.credit", Some(1.0), Some(10000.0), false)? }) } };
+    Ok(Learning { from, traits, rate, step_cap, total_cap, credit })
 }
 /// `reward_from` (docs/persona.md §2.10): the sources a reward-bearing input may come from -> per reward-bearing input (`bearing`:
 /// the learning block's flags, then `goals.<id>.win` per goal of a drives block) its allowed source kinds (None = any). A list of
@@ -470,10 +482,12 @@ pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
     if let Some(rw) = &p.reward { provenance(rw, raw)?; }
     // readings (§2.11, S2): each one's source, its own or the event's, of a kind its sense reads from
     if let Some(sn) = &p.senses { src_form(raw)?; sense_step(sn, &SState::zero(&p.name, sn, p.seed), raw, get(raw, "src"), true)?; }
+    // a cancel (§2.8, B-R5) comes from env or a person
+    if p.credit().is_some() && get(raw, "cancel").is_some() { src_form(raw)?; cancel_src(get(raw, "src"))?; }
     Ok(())
 }
-/// A persona whose events need a source: rewards (`reward_from`) or readings (a senses block)
-pub fn has_reward_sources(p: &Persona) -> bool { p.reward.is_some() || p.senses.is_some() }
+/// A persona whose events need a source: rewards (`reward_from`), readings (a senses block) or cancels (a credit block)
+pub fn has_reward_sources(p: &Persona) -> bool { p.reward.is_some() || p.senses.is_some() || p.credit().is_some() }
 fn check_cond(k: &str, c: &Json, path: &str, inputs: &[Input], history: &[Hist]) -> R<()> {
     let range = |c: &Json| -> R<()> { if let Json::Num(_) = c { return Ok(()); }
         let kv = c.as_obj().filter(|kv| !kv.is_empty() && kv.iter().all(|(k, _)| k == "at_least" || k == "at_most")).ok_or_else(|| perr(path, "a number (at least) or {at_least, at_most}"))?;
@@ -800,13 +814,130 @@ fn prep(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, che
     let ns = drive_step(d, ds, &x)?; let host = host_inputs(d, &ns, &drive_ctx(d, &ns), &x)?;
     s2.drives = Some(ns); Ok((s2, host))
 }
-/// An event's `src`, read (not compiled) with `reward_from` or a senses block: checked (`check`), taken out of the inputs and
-/// returned; without either it stays an undeclared input
+/// An event's `src`, read (not compiled) with `reward_from`, a senses block or a credit block: checked (`check`), taken out of the
+/// inputs and returned; without any of them it stays an undeclared input
 fn take_src(p: &Persona, raw: Vec<(String, Json)>, check: bool) -> R<(Option<Json>, Vec<(String, Json)>)> {
-    if p.reward.is_none() && p.senses.is_none() { return Ok((None, raw)); }
+    if p.reward.is_none() && p.senses.is_none() && p.credit().is_none() { return Ok((None, raw)); }
     if check { match &p.reward { Some(rw) => provenance(rw, &raw)?, None => src_form(&raw)? } }
     let src = get(&raw, "src").cloned();
     Ok((src, raw.into_iter().filter(|(k, _)| k != "src").collect()))
+}
+
+// ------------------------------------------------------------------------------------- action-addressed feedback (§2.8)
+/// The event keys of a credit block, read (not compiled): `await` (the host will report this decision's outcome), `for` (the
+/// decision a reward or correction pays: a turn, or {turn, stance} with the paid stance's digest) and `cancel` (the open decisions
+/// no outcome will come for); `given` = the keys as given, echoed in the stance's inputs
+#[derive(Default)]
+struct Pay { wait: bool, pays: Option<(u64, Option<String>)>, cancel: Option<Vec<u64>>, given: Vec<(String, Json)> }
+const PAY_KEYS: [&str; 3] = ["await", "for", "cancel"];
+/// "sha256:" and 64 lower-case hex digits
+fn is_digest(s: &str) -> bool { s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) }
+/// A stance's digest (§2.8): sha256 of the stance document's canonical JSON without `credit`, `state_digest` and `timing`. The
+/// state remembers it (an open decision's, the previous stance's) without hashing itself, and `for: {turn, stance}` binds it.
+pub fn stance_digest(doc: &Json) -> String {
+    match doc { Json::Obj(v) => sha(&Json::Obj(v.iter().filter(|(k, _)| !["credit", "state_digest", "timing"].contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
+}
+/// With a credit block: `await`, `for` and `cancel` taken out of the inputs and read (B-R5: a malformed value refuses the event);
+/// without one they stay undeclared inputs (listed in `ignored`)
+fn take_pay(p: &Persona, raw: Vec<(String, Json)>) -> R<(Option<Pay>, Vec<(String, Json)>)> {
+    let Some(c) = p.credit() else { return Ok((None, raw)) };
+    let whole = |x: &Json| x.as_f64().filter(|v| *v >= 0.0 && v.fract() == 0.0 && *v <= 9_007_199_254_740_992.0).map(|v| v as u64);
+    let list = format!("a list of at most {} turns (max_open), each a whole number >= 0", c.max_open);
+    let mut k = Pay::default();
+    for (key, x) in raw.iter().filter(|(key, _)| PAY_KEYS.contains(&key.as_str())) {
+        match key.as_str() {
+            "await" => k.wait = match x { Json::Bool(b) => *b, _ => return Err(perr("inputs.await", "true | false (true: the host will report this decision's outcome)")) },
+            "for" => k.pays = Some(match x {
+                Json::Obj(_) => { let o = keys(x, "inputs.for", &["turn", "stance"], &["turn", "stance"])?;
+                    let n = whole(get(o, "turn").unwrap()).ok_or_else(|| perr("inputs.for.turn", "a turn: a whole number >= 0"))?;
+                    let s = get(o, "stance").and_then(Json::as_str).filter(|s| is_digest(s)).ok_or_else(|| perr("inputs.for.stance", "the paid stance's digest (sha256:<64 hex>: its credit.stance)"))?;
+                    (n, Some(s.to_string())) }
+                _ => (whole(x).ok_or_else(|| perr("inputs.for", "the decision this feedback pays: a turn (a whole number >= 0) or {turn, stance}"))?, None) }),
+            _ => { let a = x.as_arr().filter(|a| a.len() <= c.max_open).ok_or_else(|| perr("inputs.cancel", list.clone()))?;
+                k.cancel = Some(a.iter().enumerate().map(|(i, n)| whole(n).ok_or_else(|| perr(&ix("inputs.cancel", i), "a turn: a whole number >= 0"))).collect::<R<Vec<u64>>>()?); } }
+        k.given.push((key.clone(), x.clone())); }
+    Ok((Some(k), raw.into_iter().filter(|(key, _)| !PAY_KEYS.contains(&key.as_str())).collect()))
+}
+/// B-R5: a cancel says no outcome will come, so it comes from env or a person: never from the individual, the clock or nowhere
+fn cancel_src(src: Option<&Json>) -> R<()> {
+    match src.and_then(Json::as_str).and_then(src_kind) { Some("env" | "human") => Ok(()),
+        _ => Err(perr("inputs.src", "a cancel needs a source: env[:id] or human[:id] (never the individual itself or the clock)")) }
+}
+/// What the credit step settled before compile, for the stance's `credit` object: the payment (turn, eligibility, sign, absorbed,
+/// the paid stance's digest) and the decisions closed (by a control line, expired, cancelled, paid), in that order
+struct Settled { paid: Option<(u64, f64, f64, bool, String)>, closed: Vec<(u64, &'static str)> }
+/// The credit step (§2.8, RFC 0001 B.2), after the drive step and before compile; t = this turn. Open decisions with t − n − 1 >=
+/// 4 x half_life_events expire, the cancels close theirs (B-R4 against the open set after expiry), then feedback (a learning flag
+/// on, or with drives κ x surprise != 0) pays one decision: the one `for` names (an open one, or the previous stance t − 1), else
+/// t − 1 when no other decision is open (B-R1, B-R2, B-R3; B-R6 for a digest-bound `for`). The paid credit (the open decision's,
+/// or the state's for t − 1) and its eligibility e = 0.5^((t − n − 1) / half_life_events), 6 decimals, go to compile's learner.
+/// Anything refused is refused whole, before any change. -> (the state compile reads, what was settled)
+fn credit_step(p: &Persona, st: &State, host: &[(String, Json)], k: &Pay, src: Option<&Json>, check: bool) -> R<(State, Settled)> {
+    let (c, l) = (p.credit().unwrap(), p.learning.as_ref().unwrap()); let t = st.turn;
+    if k.cancel.is_some() && check { cancel_src(src)?; }
+    // feedback, read as compile reads it (the inputs are checked first)
+    let (vals, _, _, _) = resolve_inputs(p, st, host)?;
+    let on = |id: &String| matches!(get(&vals, id), Some(Json::Bool(true)));
+    let flags = l.from.iter().enumerate().fold(0.0, |s, (i, id)| if on(id) { s + if i == 0 { 1.0 } else { -1.0 } } else { s });
+    let ks = match (&p.drives, &st.drives) { (Some(d), Some(ds)) => Some(drive_ctx(d, ds).learn_sign), _ => None };
+    let feedback = l.from.iter().any(on) || ks.is_some_and(|x| x != 0.0);
+    let sign = match ks { Some(x) => (flags + x).clamp(-1.0, 1.0), None => flags };
+    // B-R3: `for` names the decision a reward or a correction pays
+    if k.pays.is_some() && !feedback { return Err(perr("inputs.for", "this event carries no feedback: `for` names the decision a reward or a correction pays")); }
+    let prev = t.checked_sub(1);
+    let paid = if feedback { k.pays.as_ref().map(|x| x.0).or(prev) } else { None };
+    let turns = |o: &[Open]| if o.is_empty() { "none".to_string() } else { o.iter().map(|x| x.turn.to_string()).collect::<Vec<_>>().join(", ") };
+    // a control line's closures are reported now; then expiry, then the cancels (B-R4) against the open set after it
+    let mut ns = st.clone(); let mut closed: Vec<(u64, &'static str)> = ns.control_closed.drain(..).map(|n| (n, "control")).collect();
+    let (keep, gone): (Vec<Open>, Vec<Open>) = ns.open.drain(..).partition(|o| (t.saturating_sub(o.turn + 1) as f64) < 4.0 * c.half_life);
+    closed.extend(gone.iter().map(|o| (o.turn, "expired"))); ns.open = keep;
+    let cancel = k.cancel.as_deref().unwrap_or(&[]);
+    for (i, n) in cancel.iter().enumerate() { let path = ix("inputs.cancel", i);
+        need(!cancel[..i].contains(n), &path, "listed twice")?;
+        need(paid != Some(*n), &path, &format!("turn {n} is the decision this event's feedback pays"))?;
+        need(ns.open.iter().any(|o| o.turn == *n), &path, &format!("turn {n} is not open (open: {})", turns(&ns.open)))?; }
+    for n in cancel { ns.open.retain(|o| o.turn != *n); closed.push((*n, "cancelled")); }
+    let Some(n) = paid else { return Ok((ns, Settled { paid: None, closed })) };
+    // B-R1: without `for`, feedback pays the previous stance only while no other decision is open
+    if k.pays.is_none() { let others: Vec<Open> = ns.open.iter().filter(|o| Some(o.turn) != prev).cloned().collect();
+        need(others.is_empty(), "inputs.for", &format!("feedback without `for` while other decisions are open ({}): name the decision it pays", turns(&others)))?; }
+    // B-R2: an open decision, or the previous stance
+    let (credit, digest) = match ns.open.iter().position(|o| o.turn == n) {
+        Some(i) => { let o = ns.open.remove(i); closed.push((n, "paid")); (o.credit, o.stance) }
+        None if Some(n) == prev => (st.credit.clone(), st.prev_stance.clone().unwrap_or_default()),
+        None => return Err(perr("inputs.for", format!("turn {n} is neither open nor the previous stance ({}): paid, cancelled, expired, evicted, never opened or still to come (open: {})",
+            prev.map_or("none".to_string(), |x| x.to_string()), turns(&ns.open)))) };
+    // B-R6: a digest-bound `for` pays the stance it names
+    if let Some(s) = k.pays.as_ref().and_then(|x| x.1.as_ref()) { need(*s == digest, "inputs.for.stance", &format!("turn {n}'s stance is {digest}, not {s}"))?; }
+    let e = if Some(n) == prev { 1.0 } else { r6(0.5f64.powf((t - n - 1) as f64 / c.half_life)) };
+    let absorbed = credit.iter().all(|(_, v)| v.iter().all(|x| *x == 0.0));
+    ns.credit = credit; ns.elig = e;
+    Ok((ns, Settled { paid: Some((n, e, sign, absorbed, digest)), closed }))
+}
+/// After the turn (§2.8): the keys echoed in the stance's inputs, its `credit` object (paid, closed, open, this stance's digest),
+/// an awaited decision opened (beyond max_open the oldest is evicted), the state remembering this stance's digest
+fn settle(p: &Persona, j: &mut Json, mut ns: State, k: &Pay, s: Settled) -> State {
+    let c = p.credit().unwrap(); let t = ns.turn - 1;
+    let Json::Obj(v) = j else { return ns };
+    if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(key, _)| key == "inputs") { ins.extend(k.given.iter().cloned()); }
+    let digest = stance_digest(&Json::Obj(v.clone())); let mut closed = s.closed;
+    if k.wait { ns.open.push(Open { turn: t, credit: ns.credit.clone(), stance: digest.clone() });
+        while ns.open.len() > c.max_open { closed.push((ns.open.remove(0).turn, "evicted")); } }
+    ns.prev_stance = Some(digest.clone()); ns.elig = 1.0; ns.seal(p);
+    let n = |x: u64| Json::Num(x as f64);
+    let paid = s.paid.map_or(Json::Null, |(turn, e, sign, absorbed, stance)| Json::Obj(vec![("turn".into(), n(turn)), ("e".into(), Json::Num(e)), ("sign".into(), Json::Num(sign)),
+        ("absorbed".into(), Json::Bool(absorbed)), ("stance".into(), Json::Str(stance))]));
+    v.push(("credit".into(), Json::Obj(vec![("paid".into(), paid),
+        ("closed".into(), Json::Arr(closed.iter().map(|(x, a)| Json::Obj(vec![("turn".into(), n(*x)), ("as".into(), Json::Str(a.to_string()))])).collect())),
+        ("open".into(), Json::Arr(ns.open.iter().map(|o| n(o.turn)).collect())), ("stance".into(), Json::Str(digest))])));
+    if let Some((_, d)) = v.iter_mut().find(|(key, _)| key == "state_digest") { *d = Json::Str(ns.digest.clone()); }
+    ns
+}
+/// The open decisions of a state with a credit block (§2.8): (turn, the eligibility a payment at the next turn would get); none
+/// without one
+pub fn open_decisions(p: &Persona, st: &State) -> Option<Vec<(u64, f64)>> {
+    let c = p.credit()?;
+    Some(st.open.iter().map(|o| (o.turn, if o.turn + 1 == st.turn { 1.0 } else { r6(0.5f64.powf(st.turn.saturating_sub(o.turn + 1) as f64 / c.half_life)) })).collect())
 }
 /// The stance document of a drives turn: `pursue` leaves `stance` for its own object (goal, p, odds, released, say, the floor lift),
 /// `drives` = the values this turn used, `inputs` = the host's (the goals as given, the synthetic inputs left out)
@@ -1225,7 +1356,11 @@ fn values_of(p: &Persona) -> Vec<String> {
 #[derive(Clone)]
 pub struct State { pub seed: u64, pub turn: u64, persona: [String; 3], genes: Json, mood: Vec<(String, Vec<f64>)>, history: Vec<(String, Vec<bool>)>, prev: HashMap<String, String>,
     agenda: Option<Vec<String>>, rest: Option<Vec<(String, String)>>, learned: Table, credit: Table, drives: Option<DState>, senses: Option<SState>,
-    learned_from: Option<Vec<(String, u64, u64)>>, pub digest: String }
+    learned_from: Option<Vec<(String, u64, u64)>>, open: Vec<Open>, prev_stance: Option<String>, control_closed: Vec<u64>, elig: f64, pub digest: String }
+/// A decision awaiting its outcome (§2.8, `open_credit`): its turn, its credit (onehot(level) − odds per learned trait it released)
+/// and its stance's digest
+#[derive(Clone)]
+struct Open { turn: u64, credit: Table, stance: String }
 /// `learned_from` (§2.11): per learned trait the feedback turns that moved it, (rewards, corrections), with a learning block and
 /// `line.why_past` on (None otherwise)
 fn learned_from0(p: &Persona) -> Option<Vec<(String, u64, u64)>> {
@@ -1235,14 +1370,15 @@ fn table(t: &Table) -> Json { Json::Obj(t.iter().map(|(k, v)| (k.clone(), Json::
 /// A zero table over the learned traits (none without a learning block)
 fn zeros(p: &Persona) -> Table { p.learning.as_ref().map_or(vec![], |l| l.traits.iter().map(|t| (t.clone(), vec![0.0; p.var(t).unwrap().levels.len()])).collect()) }
 /// The learner (docs/persona.md §2.8). `sign` is this turn's feedback (+1 reward, -1 correction, 0 none: nothing moves); `credit`
-/// is the previous stance's onehot(level) - odds per learned trait. The step sign · rate · credit is clipped to ±step_cap per
-/// level and recentred to sum 0 (it moves weight between levels; zero credit moves nothing), added, and every delta is clipped to
-/// ±total_cap. It returns nothing but the delta table, which compile adds to trait unaries: habits and allowed levels are not
-/// reachable from here, so learning can never remove a rule.
-fn learn(l: &Learning, credit: &Table, sign: f64, delta: &Table) -> Table {
+/// is the paid stance's onehot(level) - odds per learned trait (the previous stance's without a credit block). The step sign ·
+/// rate · credit is clipped to ±step_cap per level, scaled by the payment's eligibility `e` (1 for the previous stance, so the
+/// step is 0.8's) and recentred to sum 0 (it moves weight between levels; zero credit moves nothing), added, and every delta is
+/// clipped to ±total_cap. It returns nothing but the delta table, which compile adds to trait unaries: habits and allowed levels
+/// are not reachable from here, so learning can never remove a rule.
+fn learn(l: &Learning, credit: &Table, sign: f64, e: f64, delta: &Table) -> Table {
     if sign == 0.0 { return delta.clone(); }
     delta.iter().zip(credit).map(|((t, d), (_, g))| {
-        let step: Vec<f64> = g.iter().map(|x| (sign * l.rate * x).clamp(-l.step_cap, l.step_cap)).collect();
+        let step: Vec<f64> = g.iter().map(|x| e * (sign * l.rate * x).clamp(-l.step_cap, l.step_cap)).collect();
         let mean = step.iter().fold(0.0, |a, b| a + b) / step.len() as f64;
         (t.clone(), d.iter().zip(&step).map(|(a, x)| r6((a + (x - mean)).clamp(-l.total_cap, l.total_cap))).collect()) }).collect()
 }
@@ -1271,15 +1407,23 @@ impl State {
         if let (Some(sn), Some(ss)) = (&p.senses, &self.senses) { v.push(("senses".into(), ss.to_json(sn))); }
         if let Some(lf) = &self.learned_from { v.push(("learned_from".into(), Json::Obj(lf.iter().map(|(t, r, c)| (t.clone(),
             Json::Obj(vec![("rewards".into(), Json::Num(*r as f64)), ("corrections".into(), Json::Num(*c as f64))]))).collect()))); }
+        // a credit block (§2.8): the decisions awaiting an outcome, the previous stance's digest, the decisions a control line closed
+        if p.credit().is_some() {
+            v.push(("open_credit".into(), Json::Arr(self.open.iter().map(|o| Json::Obj(vec![("turn".into(), Json::Num(o.turn as f64)), ("credit".into(), table(&o.credit)),
+                ("stance".into(), Json::Str(o.stance.clone()))])).collect())));
+            v.push(("prev_stance".into(), self.prev_stance.as_ref().map_or(Json::Null, |s| Json::Str(s.clone()))));
+            v.push(("control_closed".into(), Json::Arr(self.control_closed.iter().map(|t| Json::Num(*t as f64)).collect()))); }
         Json::Obj(v)
     }
     pub fn to_json(&self, p: &Persona) -> Json { let mut b = self.body(p); if let Json::Obj(v) = &mut b { v.push(("digest".into(), Json::Str(self.digest.clone()))); } b }
     fn seal(&mut self, p: &Persona) { self.digest = sha(&self.body(p)); }
-    /// This state with every credit 0 (a control line's, §5.7: feedback after it credits no stance before it); the same state
-    /// when there is no credit to clear (no learning block, or a stance that released no learned trait)
+    /// This state with every credit 0 and (a credit block, §2.8) every open decision closed: a control line's (§5.7), feedback
+    /// after it credits no stance before it; the next stance lists the closed decisions (as `control`). The same state when there
+    /// is nothing to clear (no learning block, or a stance that released no learned trait, and no decision open)
     pub fn zero_credit(&self, p: &Persona) -> State {
-        if self.credit.iter().all(|(_, c)| c.iter().all(|x| *x == 0.0)) { return self.clone(); }
-        let mut s = self.clone(); for (_, c) in s.credit.iter_mut() { c.iter_mut().for_each(|x| *x = 0.0); } s.seal(p); s
+        if self.credit.iter().all(|(_, c)| c.iter().all(|x| *x == 0.0)) && self.open.is_empty() { return self.clone(); }
+        let mut s = self.clone(); for (_, c) in s.credit.iter_mut() { c.iter_mut().for_each(|x| *x = 0.0); }
+        let closed: Vec<u64> = s.open.drain(..).map(|o| o.turn).collect(); s.control_closed.extend(closed); s.seal(p); s
     }
     /// A state document -> State, for this persona: the format, the persona digest, the state's own digest and the genes are
     /// checked (in that order), then every field's type (a well-formed state never fails those).
@@ -1294,16 +1438,19 @@ impl State {
         need(p.senses.is_none() || get(kv, "senses").is_some(), "state.senses", "required with a senses block")?;
         let keeps_from = learned_from0(p).is_some();
         need(!keeps_from || get(kv, "learned_from").is_some(), "state.learned_from", "required with a learning block and line.why_past")?;
-        const SK: [&str; 15] = ["probbit_persona_state", "persona", "seed", "turn", "genes", "mood", "history", "prev", "rest", "digest", "learned", "credit", "drives", "senses", "learned_from"];
+        const SK: [&str; 18] = ["probbit_persona_state", "persona", "seed", "turn", "genes", "mood", "history", "prev", "rest", "digest", "learned", "credit", "drives", "senses", "learned_from",
+            "open_credit", "prev_stance", "control_closed"];
         let mut sk: Vec<&str> = SK[..10].to_vec();
         if p.learning.is_some() { sk.extend(&SK[10..12]); }
         if p.drives.is_some() { sk.push(SK[12]); }
         if p.senses.is_some() { sk.push(SK[13]); }
         if keeps_from { sk.push(SK[14]); }
+        if p.credit().is_some() { sk.extend(&SK[15..18]); for k in &SK[15..18] { need(get(kv, k).is_some(), &at("state", k), "required with a credit block")?; } }
         keys(j, "state", &sk, &["persona", "seed", "turn", "genes", "mood", "history", "prev", "digest"])
             .map_err(|e| if e.msg.starts_with("unknown field") && (e.path == "state.learned" || e.path == "state.credit") { perr(&e.path, "this persona has no learning block") }
                 else if e.msg.starts_with("unknown field") && e.path == "state.drives" { perr(&e.path, "this persona has no drives block") }
                 else if e.msg.starts_with("unknown field") && e.path == "state.senses" { perr(&e.path, "this persona has no senses block") }
+                else if e.msg.starts_with("unknown field") && ["state.open_credit", "state.prev_stance", "state.control_closed"].contains(&e.path.as_str()) { perr(&e.path, "this persona has no credit block (learning.credit)") }
                 else if e.msg.starts_with("unknown field") && e.path == "state.learned_from" { perr(&e.path, "this persona keeps no learned_from (a learning block with line.why_past)") } else { e })?;
         let whole = |k: &str| num(get(kv, k), &at("state", k), Some(0.0), Some(9_007_199_254_740_992.0), true).map(|x| x as u64);
         let (seed, turn) = (whole("seed")?, whole("turn")?);
@@ -1343,7 +1490,27 @@ impl State {
             Some(z.iter().map(|(t, _, _)| { let tp = at("state.learned_from", t); let e = keys(get(o, t).ok_or_else(|| perr(&tp, "required"))?, &tp, &["rewards", "corrections"], &["rewards", "corrections"])?;
                 let w = |k: &str| num(get(e, k), &at(&tp, k), Some(0.0), Some(9_007_199_254_740_992.0), true).map(|x| x as u64);
                 Ok((t.clone(), w("rewards")?, w("corrections")?)) }).collect::<R<Vec<_>>>()?) } };
-        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, digest: get(kv, "digest").and_then(Json::as_str).unwrap_or("").to_string() })
+        // a credit block (§2.8): at most max_open open decisions, turns increasing and before this state's turn, credits within ±1, a
+        // stance digest each; the previous stance's digest (null before the first turn); the decisions a control line closed
+        let (mut open, mut prev_stance, mut control_closed) = (vec![], None, vec![]);
+        if let (Some(c), Some(l)) = (p.credit(), &p.learning) {
+            let turn_at = |x: &Json, path: &str, after: Option<u64>| -> R<u64> { let n = num(Some(x), path, Some(0.0), Some(9_007_199_254_740_992.0), true)? as u64;
+                need(n < turn, path, "a turn before this state's turn")?; need(after.map_or(true, |a| n > a), path, "turns increasing")?; Ok(n) };
+            let oa = get(kv, "open_credit").and_then(Json::as_arr).filter(|a| a.len() <= c.max_open).ok_or_else(|| perr("state.open_credit", format!("a list of at most {} open decisions (max_open)", c.max_open)))?;
+            for (i, o) in oa.iter().enumerate() { let op = ix("state.open_credit", i); let ok = keys(o, &op, &["turn", "credit", "stance"], &["turn", "credit", "stance"])?;
+                let n = turn_at(get(ok, "turn").unwrap(), &at(&op, "turn"), open.last().map(|x: &Open| x.turn))?;
+                let cp = at(&op, "credit"); let co = get(ok, "credit").and_then(Json::as_obj).filter(|o| o.len() == l.traits.len()).ok_or_else(|| perr(&cp, "one entry per learned trait"))?;
+                let credit = l.traits.iter().map(|t| { let lv = p.var(t).unwrap().levels.len();
+                    let a = get(co, t).and_then(Json::as_arr).filter(|a| a.len() == lv && a.iter().all(|x| x.as_f64().is_some_and(|x| x.abs() <= 1.0 + 5e-7))).ok_or_else(|| perr(&at(&cp, t), "one number per level, each within ±1"))?;
+                    Ok((t.clone(), a.iter().map(|x| x.as_f64().unwrap()).collect())) }).collect::<R<Table>>()?;
+                let stance = get(ok, "stance").and_then(Json::as_str).filter(|s| is_digest(s)).ok_or_else(|| perr(&at(&op, "stance"), "a stance digest (sha256:<64 hex>)"))?.to_string();
+                open.push(Open { turn: n, credit, stance }); }
+            prev_stance = match get(kv, "prev_stance").unwrap() { Json::Null if turn == 0 => None, Json::Str(s) if turn > 0 && is_digest(s) => Some(s.clone()),
+                _ => return Err(perr("state.prev_stance", "the previous stance's digest (sha256:<64 hex>); null before the first turn")) };
+            let ca = get(kv, "control_closed").and_then(Json::as_arr).filter(|a| a.len() <= c.max_open).ok_or_else(|| perr("state.control_closed", format!("a list of at most {} turns", c.max_open)))?;
+            for (i, x) in ca.iter().enumerate() { let n = turn_at(x, &ix("state.control_closed", i), control_closed.last().copied())?; control_closed.push(n); } }
+        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, open, prev_stance, control_closed, elig: 1.0,
+            digest: get(kv, "digest").and_then(Json::as_str).unwrap_or("").to_string() })
     }
 }
 
@@ -1421,7 +1588,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let new_learned = match &p.learning { None => vec![], Some(l) => {
         let sign = l.from.iter().enumerate().fold(0.0, |s, (i, id)| if matches!(get(&vals, id), Some(Json::Bool(true))) { s + if i == 0 { 1.0 } else { -1.0 } } else { s });
         let sign = match &dctx { Some(c) => (sign + c.learn_sign).clamp(-1.0, 1.0), None => sign }; learn_sign = sign;
-        learn(l, &st.credit, sign, &st.learned) } };
+        learn(l, &st.credit, sign, st.elig, &st.learned) } };
     for (i, v) in p.vars.iter().enumerate() { contrib[i].push(("prior".into(), v.base.clone()));
         if let Some(g) = st.shift(&v.id) { contrib[i].push(("genes".into(), centered(v.levels.len()).iter().map(|c| g * c).collect())); }
         if let Some((_, d)) = new_learned.iter().find(|(t, d)| *t == v.id && d.iter().any(|x| *x != 0.0)) { contrib[i].push(("learned".into(), d.clone())); } }
@@ -1729,9 +1896,14 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
     // reward provenance (§2.10), first: with `reward_from` (or a senses block, §2.11), `src` is read here (not compiled, so not
     // `ignored`) and comes back in the stance's inputs; without either `src` is an undeclared input as before
     let (src, raw) = take_src(p, raw, check)?;
+    // with a credit block (§2.8) `await`, `for` and `cancel` are read here too (not compiled, so not `ignored`) and come back in
+    // the stance's inputs
+    let (pay, raw) = take_pay(p, raw)?;
     // a senses block steps the normals and a drives block the drives before the turn, which runs on the stepped state with the
-    // lowering's inputs
-    let given = raw; let (st2, raw) = prep(p, st, &given, src.as_ref(), check)?; let st = &st2;
+    // lowering's inputs; then the credit step settles what this turn's feedback pays
+    let given = raw; let (st2, raw) = prep(p, st, &given, src.as_ref(), check)?;
+    let (st2, settled) = match &pay { Some(k) => { let (s, d) = credit_step(p, &st2, &raw, k, src.as_ref(), check)?; (s, Some(d)) } None => (st2, None) };
+    let st = &st2;
     let t0 = Instant::now(); let mut calls = 0;
     let o = Opts { no_inertia, ..Default::default() };
     let (mut prog, mut meta) = compile(p, st, &raw, &o)?; let mut ptext = digest_of(&text(&prog));
@@ -1773,6 +1945,7 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
     if let (Some(sn), Some(ss)) = (&p.senses, &st.senses) { stance_senses(&mut j, sn, ss, &given); }
     if let (Some(d), Some(ds)) = (&p.drives, &st.drives) { stance_drives(&mut j, d, ds, &out.lift, &given); }
     if let (Some(s), Json::Obj(v)) = (src, &mut j) { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.push(("src".into(), s)); } }
+    if let (Some(k), Some(d)) = (&pay, settled) { ns = settle(p, &mut j, ns, k, d); }
     Ok((j, ns))
 }
 
@@ -1789,7 +1962,7 @@ pub fn init(p: &Persona, seed: Option<u64>, rest: bool, eng: Engine) -> State {
         history: { let mut h: Vec<(String, Vec<bool>)> = vec![]; for x in &p.history { if !h.iter().any(|(k, _)| *k == x.of) { h.push((x.of.clone(), vec![])); } } h },
         prev: p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect(), agenda: (!p.steps.is_empty()).then(|| p.steps.clone()), rest: None,
         learned: zeros(p), credit: zeros(p), drives: p.drives.as_ref().map(|d| DState::zero(p, d, seed)), senses: p.senses.as_ref().map(|sn| SState::zero(&p.name, sn, seed)),
-        learned_from: learned_from0(p), digest: String::new() };
+        learned_from: learned_from0(p), open: vec![], prev_stance: None, control_closed: vec![], elig: 1.0, digest: String::new() };
     if rest { if let Ok((prog, _)) = compile(p, &st, &[], &Opts { twin: Some(false), ..Default::default() }) {
         let doc = eng(&prog, &flags(p, &st));
         if let Some(plan) = doc.get("plan").and_then(Json::as_obj) {
@@ -1846,8 +2019,10 @@ pub fn replay(p: &Persona, seed: Option<u64>, turns: &[Json], no_inertia: bool, 
 /// `compile`: the turn's program (insertion order; its sha256 is the stance's `engine.program`)
 pub fn program(p: &Persona, st: &State, raw: &Json) -> R<String> {
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
-    let (src, raw) = if p.senses.is_some() { take_src(p, raw, true)? } else { (None, raw) };
+    let (src, raw) = if p.senses.is_some() || p.credit().is_some() { take_src(p, raw, true)? } else { (None, raw) };
+    let (pay, raw) = take_pay(p, raw)?;
     let (st, raw) = prep(p, st, &raw, src.as_ref(), true)?;
+    let st = match &pay { Some(k) => credit_step(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
     Ok(text(&compile(p, &st, &raw, &Opts::default())?.0))
 }
 
@@ -2017,9 +2192,13 @@ pub fn describe(p: &Persona) -> Json {
         ("inputs".into(), Json::Obj(p.inputs.iter().filter(|x| !lowered(p, &x.id)).map(|x| (x.id.clone(), Json::Obj(match x.kind { Kind::Level => vec![("kind".into(), s("level")), ("levels".into(), jstrs(&x.levels))],
             Kind::Flag => vec![("kind".into(), s("flag"))], Kind::Number => vec![("kind".into(), s("number"))] }))).collect())),
         ("habits".into(), Json::Arr(p.habits.iter().map(|h| s(&h.id)).collect())), ("agenda".into(), jstrs(&p.steps))]);
-    // the learning block (§2.8), when there is one: what moves the learned deltas, which traits, and the caps
-    if let (Json::Obj(v), Some(l)) = (&mut d, &p.learning) { v.push(("learning".into(), Json::Obj(vec![("from".into(), jstrs(&l.from)), ("traits".into(), jstrs(&l.traits)),
-        ("rate".into(), Json::Num(l.rate)), ("step_cap".into(), Json::Num(l.step_cap)), ("total_cap".into(), Json::Num(l.total_cap))]))); }
+    // the learning block (§2.8), when there is one: what moves the learned deltas, which traits, and the caps; the credit block's
+    // settings when declared
+    if let (Json::Obj(v), Some(l)) = (&mut d, &p.learning) { let mut lv = vec![("from".into(), jstrs(&l.from)), ("traits".into(), jstrs(&l.traits)),
+        ("rate".into(), Json::Num(l.rate)), ("step_cap".into(), Json::Num(l.step_cap)), ("total_cap".into(), Json::Num(l.total_cap))];
+        if let Some(c) = &l.credit { lv.push(("credit".into(), Json::Obj(vec![("max_open".into(), Json::Num(c.max_open as f64)), ("half_life_events".into(), Json::Num(c.half_life)),
+            ("expires_after".into(), Json::Num(r6(4.0 * c.half_life)))]))); }
+        v.push(("learning".into(), Json::Obj(lv))); }
     // the drives block (§2.9), when there is one: the goals (pursue's levels) in order, their phrases, floors and starve_after
     if let (Json::Obj(v), Some(dr)) = (&mut d, &p.drives) { let per = |f: &dyn Fn(&Goal) -> Option<Json>| Json::Obj(dr.goals.iter().filter_map(|g| f(g).map(|x| (g.id.clone(), x))).collect());
         v.push(("drives".into(), Json::Obj(vec![("goals".into(), Json::Arr(dr.goals.iter().map(|g| s(&g.id)).collect())), ("say".into(), per(&|g| Some(s(&g.say)))),
@@ -2060,8 +2239,10 @@ pub fn check(p: &Persona, eng: Engine) -> R<Json> {
 /// where it differs, the program's size and digest, the line and the why
 pub fn explain(p: &Persona, st: &State, raw: &Json, eng: Engine) -> R<String> {
     let rawv: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
-    let (src, rawv) = if p.senses.is_some() { take_src(p, rawv, true)? } else { (None, rawv) };
+    let (src, rawv) = if p.senses.is_some() || p.credit().is_some() { take_src(p, rawv, true)? } else { (None, rawv) };
+    let (pay, rawv) = take_pay(p, rawv)?;
     let (st2, host) = prep(p, st, &rawv, src.as_ref(), true)?;
+    let st2 = match &pay { Some(k) => credit_step(p, &st2, &host, k, src.as_ref(), true)?.0, None => st2 };
     let (prog, meta) = compile(p, &st2, &host, &Opts::default())?; let doc = eng(&prog, &flags(p, st)); let (out, _) = turn(p, st, raw, false, eng, false)?;
     let plan: HashMap<String, String> = doc.get("plan").and_then(Json::as_obj).map_or_else(HashMap::new, |o| o.iter().map(|(k, v)| (k.clone(), back(p, k, v.as_str().unwrap_or("")))).collect());
     let g = |k: &str| out.get(k).cloned().unwrap_or(Json::Null); let s = |j: &Json| j.as_str().map_or_else(|| canon(j), str::to_string);
@@ -2630,7 +2811,7 @@ mod tests {
     fn the_learning_block_and_state_fields_are_strict() {
         let bad = |l: &str| err(persona(&format!(r#","learning":{{{l}}}"#)));
         let base = r#""from":["praise","criticism"],"traits":["verbosity"],"rate":0.5,"step_cap":0.2,"total_cap":0.6"#;
-        assert_eq!(bad(&format!(r#"{base},"spread":1"#)), "learning.spread: unknown field (allowed: comment, from, rate, step_cap, total_cap, traits)");
+        assert_eq!(bad(&format!(r#"{base},"spread":1"#)), "learning.spread: unknown field (allowed: comment, credit, from, rate, step_cap, total_cap, traits)");
         assert_eq!(bad(r#""from":["praise"],"traits":["verbosity"],"rate":0.5,"step_cap":0.2"#), "learning.total_cap: required");
         assert_eq!(bad(&base.replace(r#"["praise","criticism"]"#, r#"["praise","valence"]"#)), "learning.from[1]: not a flag input of this persona");
         assert_eq!(bad(&base.replace(r#"["verbosity"]"#, r#"["valence"]"#)), "learning.traits[0]: not a trait of this persona (moods do not learn)");
