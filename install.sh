@@ -10,6 +10,8 @@
 #   PROBBIT_DOWNLOAD_BASE  the archive is fetched from $PROBBIT_DOWNLOAD_BASE/<tag>/probbit-<tag>-<target>.tar.gz
 #                       (default: https://github.com/BitmapAsset/probbit/releases/download); needs PROBBIT_VERSION
 #   PROBBIT_TARGET         Rust target triple to fetch instead of the detected one
+#   PROBBIT_MAN_DIR        where the manual page probbit.1 goes, when the archive has one (default: ~/.local/share/man/man1;
+#                       a failure there is reported and installs nothing less)
 # Needs curl or wget, tar, and one of sha256sum, shasum or openssl.
 set -eu
 
@@ -129,6 +131,16 @@ main() {
     cp "$tmp/$name/probbit" "$dir/.probbit.$$" && chmod 755 "$dir/.probbit.$$" && mv -f "$dir/.probbit.$$" "$dir/probbit" \
         || die "could not install into $dir"
     say "  installed  $dir/probbit ($ran)"
+    # the manual page (archives from 0.8.2 carry docs/probbit.1): never fatal, never outside PROBBIT_MAN_DIR or HOME
+    if [ -f "$tmp/$name/docs/probbit.1" ]; then
+        mandir="${PROBBIT_MAN_DIR:-}"
+        if [ -z "$mandir" ] && [ -n "${HOME:-}" ]; then mandir="$HOME/.local/share/man/man1"; fi
+        if [ -n "$mandir" ] && mkdir -p "$mandir" 2> /dev/null && cp "$tmp/$name/docs/probbit.1" "$mandir/probbit.1" 2> /dev/null; then
+            say "  installed  $mandir/probbit.1 (man probbit)"
+        else
+            say "  skipped    the manual page (set PROBBIT_MAN_DIR to a directory you can write; or: probbit man)"
+        fi
+    fi
 
     cmd=probbit
     case ":$PATH:" in

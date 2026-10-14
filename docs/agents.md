@@ -10,7 +10,7 @@ an agent harness with a shell tool. No server, no bindings, no network. The docu
 |---|---|---|
 | 0 | an answer: verdict `exact`, `diagnostics_passed` or `partial` | act on `released`; escalate `escalated` (empty unless `partial`) |
 | 1 | `infeasible`: no plan satisfies the rules (a proof) | relax a rule or a cap; it is an answer, not a crash |
-| 2 | bad input: one `{"error": {"code", "path", "message"}}` object on stdout; a bad flag prints one line on stderr instead | fix the document or the flag |
+| 2 | bad input: one `{"error": {"code", "path", "message"}}` object on stdout (piped, as an agent runs it; `--json` at a terminal); a bad flag prints one line on stderr instead | fix the document or the flag |
 | 3 | `refused` / `declined` (the gate or a cap said no), or `{"error": {"code": "numeric"}}` | escalate the whole decision; any retained candidate plan is diagnostic only |
 
 Decision documents that carry a `plan` also carry `plan_status` (`released`, `partial`, or `diagnostic`)

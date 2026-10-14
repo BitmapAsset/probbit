@@ -25,7 +25,8 @@ BASE="http://127.0.0.1:$PORT"
 echo "shell under test: $SH ($(command -v "$SH")); archive: $(ls "$WORK/srv/good/$TAG")"
 
 echo "== 1. piped to $SH, PROBBIT_INSTALL_DIR set, version given without the v"
-PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="${TAG#v}" PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" < install.sh
+PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="${TAG#v}" PROBBIT_INSTALL_DIR="$WORK/bin" PROBBIT_MAN_DIR="$WORK/man/man1" "$SH" < install.sh
+cmp "$WORK/man/man1/probbit.1" docs/probbit.1 || { echo "FAIL: the manual page was not installed to PROBBIT_MAN_DIR"; exit 1; }
 PATH="$WORK/bin:$PATH"
 echo "\$ command -v probbit: $(command -v probbit)"
 echo "\$ probbit version: $(probbit version)"
@@ -36,7 +37,8 @@ echo "== 2. default directory, scratch HOME"
 HOME="$WORK/home" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" "$SH" install.sh
 want="$WORK/home/.local/bin/probbit"
 [ -x "$want" ] || { echo "FAIL: expected $want"; exit 1; }
-echo "ok: installed to $want ($("$want" version))"
+[ -f "$WORK/home/.local/share/man/man1/probbit.1" ] || { echo "FAIL: expected the manual page under the scratch HOME"; exit 1; }
+echo "ok: installed to $want ($("$want" version))" and its manual page
 
 echo "== 3. tampered .sha256 must fail and install nothing"
 if PROBBIT_DOWNLOAD_BASE="$BASE/bad" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/badbin" "$SH" install.sh; then
@@ -58,6 +60,11 @@ after=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb"
 echo "== 6. invalid release path is rejected before download"
 if PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION='../bad' PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" install.sh; then echo "FAIL: invalid version accepted"; exit 1; fi
 
+echo "== 6b. an unwritable man directory is not fatal"
+PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/bin6" PROBBIT_MAN_DIR="/dev/null/man1" "$SH" install.sh > "$WORK/out6b"
+[ -x "$WORK/bin6/probbit" ] && grep -q "skipped    the manual page" "$WORK/out6b" || { echo "FAIL: a man directory failure broke the install"; cat "$WORK/out6b"; exit 1; }
+echo "ok: binary installed, manual page skipped"
+
 echo "== 7. checksummed but unrunnable candidate must preserve the working binary"
 mkdir -p "$WORK/unrunnable"
 printf '#!/bin/sh\nexit 25\n' > "$WORK/unrunnable/probbit"
@@ -71,7 +78,7 @@ echo "== 8. the PATH hint names the rc file of the user's shell"
 case "$(uname -s)" in Darwin) bashrc='~/.bash_profile' ;; *) bashrc='~/.bashrc' ;; esac
 for pair in "/bin/zsh ~/.zshrc" "/usr/local/bin/zsh ~/.zshrc" "/bin/bash $bashrc" "/bin/dash ~/.profile" " ~/.profile"; do
     shell=${pair% *} want=${pair##* }
-    out=$(SHELL="$shell" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/hint" "$SH" install.sh 2>&1)
+    out=$(SHELL="$shell" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/hint" PROBBIT_MAN_DIR="$WORK/man8" "$SH" install.sh 2>&1)
     case "$out" in *"$WORK/hint is not on your PATH. Add it in $want:"*) ;; *) echo "FAIL: SHELL=$shell: no hint naming $want"; echo "$out"; exit 1 ;; esac
     echo "ok: SHELL=${shell:-(empty)} -> $want"
 done

@@ -21,7 +21,8 @@ pub fn parse(src: &str) -> Result<Json, InErr> {
 }
 
 /// A structured input error (docs/probbit-ir-json.md "Input contract"): `probbit decide`, `run` and `ir` print it as ONE JSON object
-/// `{"error":{"code","path","message"}}` on stdout (plus a human line on stderr) and exit 2. `code`: `schema` (bad JSON, a wrong
+/// `{"error":{"code","path","message"}}` on stdout (plus a human line on stderr; at a terminal without --json, the line only:
+/// main.rs `error_object`) and exit 2. `code`: `schema` (bad JSON, a wrong
 /// type, an unknown, duplicate or missing field), `value` (well-typed but unusable: an unknown or duplicate name, an empty domain,
 /// a number out of its range), `limit` (beyond a documented numeric or size limit). `path`: `tasks[3].allowed`, "" = the document.
 #[derive(Debug)]

@@ -1,0 +1,872 @@
+.TH PROBBIT 1 "" "probbit 0.8.1" "probbit manual"
+.SH NAME
+probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under hard rules, with gated odds
+.SH SYNOPSIS
+.nf
+\fBprobbit\fR persona SUB PERSONA [flags]
+        (SUB: init turn replay explain diff lint fuzz prove check compile describe)
+\fBprobbit\fR live PERSONA [\-\-seed N | \-\-state FILE] [\-\-strand FILE]
+        [\-\-events FILE [\-\-watch]] [\-\-clock real|fixed]
+        [\-\-checkpoint\-every K]
+\fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N] [\-\-strand FILE] [\-\-plain]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint]
+\fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
+        [\-\-at TIME]
+\fBprobbit\fR monitor STRAND [\-\-follow] [\-\-once] [\-\-plain] [\-\-fps N] [\-\-serve]
+        [\-\-open] [\-\-port N]
+\fBprobbit\fR monitor \-\-demo [week|drives] [\-\-once] [\-\-plain] [\-\-serve]
+        [\-\-open] [\-\-port N]
+\fBprobbit\fR decide [flags] < router.json
+\fBprobbit\fR run [flags] < program.json
+\fBprobbit\fR evaluate [flags] < request.json
+\fBprobbit\fR demo [flags] > router.json
+\fBprobbit\fR ir [\-\-max\-input\-mb N] [\-\-plain] < router.json
+\fBprobbit\fR mcp
+\fBprobbit\fR stats [flags]
+\fBprobbit\fR help [COMMAND [SUBCOMMAND]]
+\fBprobbit\fR completions bash|zsh|fish
+\fBprobbit\fR man
+\fBprobbit\fR version
+.fi
+.SH DESCRIPTION
+probbit reads a JSON problem on stdin and writes a JSON answer on stdout: exact where the structure allows, sampled otherwise, and a sampled answer passes a published diagnostics gate or is refused. The persona, live and monitor commands are the individuality layer: a persona file, an individual's state and a turn's inputs give one stance with exact odds, and a strand logs a life that replays byte for byte.
+.PP
+Every command takes \-\-help (\-h): its usage, every flag with its default and its exit codes; probbit help COMMAND [SUBCOMMAND] prints the same. An unknown command or subcommand exits 2 and names the closest one.
+.PP
+Errors: one human line on stderr, always. A bad input document also gives one {"error": {"code", "path", "message"}} object on stdout when stdout is not a terminal, or with \-\-json. A bad command or flag prints nothing on stdout unless \-\-json is given (code "flag", or "command" with a "suggestion"). \-\-json is accepted by every command and changes no answer.
+.SH COMMANDS
+.SS persona
+the individuality layer: persona + state + inputs \-> one stance
+.PP
+.nf
+\fBprobbit\fR persona SUB PERSONA [flags]
+        (SUB: init turn replay explain diff lint fuzz prove check compile describe)
+.fi
+.PP
+The individuality layer (docs/persona.md): a persona file (YAML subset or JSON: traits with priors, moods with inertia, couplings, per\-turn inputs, history, habits = hard rules) + an individual's state + this turn's inputs \-> ONE probbit\-ir program, run in process (`probbit run \-\-op decide` at fixed work) \-> the stance: a level per trait with exact odds, the habits in force and the ones that bound, a refusal when the engine cannot vouch, a why and a short stance line for any model's prompt.
+.PP
+Documents are canonical JSON (keys sorted); a turn is a pure function of (persona, state, inputs, version).
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-pretty\fR
+indent a single JSON document on stdout (init, turn, diff, lint, check, compile, describe, fuzz, prove); fuzz/prove \-\-pretty implies \-\-json. State files stay canonical. Replay stays JSONL; explain stays plain text.
+.RE
+.PP
+Subcommands:
+.RS 4
+.TP
+\fBinit\fR PERSONA [\-\-seed N] [\-\-out STATE]
+a new individual (genes from the seed, resting stance); stdout or \-\-out
+.RS 4
+.TP
+\fB\-\-seed\fR \fIN\fR
+the individual: an integer seed from 0 to 2^53 (default: the persona's seed)
+.TP
+\fB\-\-out\fR \fISTATE\fR
+write the state to STATE instead of stdout
+.RE
+.TP
+\fBturn\fR PERSONA \-\-state STATE [\-\-inputs JSON|FILE] [\-\-out STATE2] [\-\-timing] [\-\-no\-inertia]
+the stance on stdout; the new state replaces STATE (or goes to \-\-out)
+.RS 4
+.TP
+\fB\-\-state\fR \fISTATE\fR
+the individual's stored state (`probbit persona init \-\-out` writes one)
+.TP
+\fB\-\-inputs\fR \fIJSON|FILE\fR
+this turn's inputs: a JSON object, inline or a file (default {})
+.TP
+\fB\-\-out\fR \fISTATE2\fR
+write the new state to STATE2 instead of replacing STATE
+.TP
+\fB\-\-timing\fR
+add a separate, non\-canonical `timing` object (compile, engine and decode ms)
+.TP
+\fB\-\-no\-inertia\fR
+moods carry nothing over from the previous turn (inertia 0)
+.RE
+.TP
+\fBreplay\fR PERSONA [\-\-seed N] \-\-script JSON|FILE [\-\-out TRACE] [\-\-no\-inertia] [\-\-timing]
+init, then every turn of the script: one stance per line (JSONL)
+.RS 4
+.TP
+\fB\-\-seed\fR \fIN\fR
+the individual: an integer seed from 0 to 2^53 (default: the persona's seed)
+.TP
+\fB\-\-script\fR \fIJSON|FILE\fR
+the turns: a JSON list of per\-turn input objects, or {"turns": [...]}; inline or a file
+.TP
+\fB\-\-out\fR \fITRACE\fR
+write the JSONL trace to TRACE instead of stdout
+.TP
+\fB\-\-no\-inertia\fR
+moods carry nothing over from the previous turn (inertia 0)
+.TP
+\fB\-\-timing\fR
+add a separate, non\-canonical `timing` object (compile, engine and decode ms)
+.RE
+.TP
+\fBexplain\fR PERSONA [\-\-seed N] \-\-script JSON|FILE \-\-turn K
+turn K in words: every contribution, the odds, the twin
+.RS 4
+.TP
+\fB\-\-seed\fR \fIN\fR
+the individual: an integer seed from 0 to 2^53 (default: the persona's seed)
+.TP
+\fB\-\-script\fR \fIJSON|FILE\fR
+the turns: a JSON list of per\-turn input objects, or {"turns": [...]}; inline or a file
+.TP
+\fB\-\-turn\fR \fIK\fR
+the turn to explain, counted from 0 (required)
+.RE
+.TP
+\fBdiff\fR PERSONA [\-\-seed A] [\-\-other PERSONA2] [\-\-seed2 B] \-\-script JSON|FILE
+distance between two individuals
+.RS 4
+.TP
+\fB\-\-seed\fR \fIA\fR
+the first individual's seed (default: the persona's seed)
+.TP
+\fB\-\-other\fR \fIPERSONA2\fR
+the second individual's persona (default: the same persona)
+.TP
+\fB\-\-seed2\fR \fIB\fR
+the second individual's seed (default: its persona's seed)
+.TP
+\fB\-\-script\fR \fIJSON|FILE\fR
+the turns: a JSON list of per\-turn input objects, or {"turns": [...]}; inline or a file
+.RE
+.TP
+\fBlint\fR PERSONA [\-\-never RULE | \-\-props FILE] [\-\-seeds 0\-99] [\-\-threads N]
+contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample, exit 3 when a rule stays unknown and the search finds none ("unproven": not broken, not proved either)
+.RS 4
+.TP
+\fB\-\-never\fR \fIRULE\fR
+a rule in habit syntax, {when: {...}, then: {...}}: JSON or one line of the YAML subset
+.TP
+\fB\-\-props\fR \fIFILE\fR
+rules from a file ({"props": [...]}, each with an optional id; YAML subset, or .json)
+.TP
+\fB\-\-seeds\fR \fILIST\fR
+the individuals: 0\-99 (default), 7, 1,4,9 or 0\-9,20\-29; seeds 0 to 2^53, at most 100000
+.TP
+\fB\-\-threads\fR \fIN\fR
+search threads, 1 to 1024 (default: the logical CPUs)
+.RE
+.TP
+\fBfuzz\fR PERSONA (\-\-never RULE | \-\-props FILE) [\-\-seeds 0\-99] [\-\-fuzz\-seed N] [\-\-scripts N] [\-\-depth N] [\-\-beam N] [\-\-grid LIST] [\-\-hours LIST] [\-\-threads N] [\-\-json] [\-\-fixture\-src env:synthetic|human:synthetic]
+search event scripts for the shortest one whose stance breaks a rule (habit syntax: {when: {...}, then: {...}}); shrunk (\[u00A7]5.6). \-\-fixture\-src explicitly authorizes synthetic\-source fixtures for strict replay; never use them to relabel production events. The persona must allow that source.
+.RS 4
+.TP
+\fB\-\-never\fR \fIRULE\fR
+a rule in habit syntax, {when: {...}, then: {...}}: JSON or one line of the YAML subset
+.TP
+\fB\-\-props\fR \fIFILE\fR
+rules from a file ({"props": [...]}, each with an optional id; YAML subset, or .json)
+.TP
+\fB\-\-seeds\fR \fILIST\fR
+the individuals: 0\-99 (default), 7, 1,4,9 or 0\-9,20\-29; seeds 0 to 2^53, at most 100000
+.TP
+\fB\-\-fuzz\-seed\fR \fIN\fR
+the search's own seed (default 0): the same inputs give the same report on any number of threads
+.TP
+\fB\-\-scripts\fR \fIN\fR
+random scripts per individual before the beam, 0 to 1000000 (default 60)
+.TP
+\fB\-\-depth\fR \fIN\fR
+events per script, 1 to 64 (default 8)
+.TP
+\fB\-\-beam\fR \fIN\fR
+width of the odds\-guided beam, 0 to 64 (default 4)
+.TP
+\fB\-\-grid\fR \fILIST\fR
+comma\-separated fractions of a number input's max to try, 0 to 1 (default 0,0.5,1)
+.TP
+\fB\-\-hours\fR \fILIST\fR
+comma\-separated idle hours to try between events (default 1,12,48)
+.TP
+\fB\-\-threads\fR \fIN\fR
+search threads, 1 to 1024 (default: the logical CPUs)
+.TP
+\fB\-\-json\fR
+the JSON document instead of the readable report
+.TP
+\fB\-\-fixture\-src\fR \fIenv:synthetic|human:synthetic\fR
+label exported counterexamples with that synthetic source so their replay commands run
+.RE
+.TP
+\fBprove\fR PERSONA (\-\-never RULE | \-\-props FILE) [\-\-seeds 0\-99] [\-\-threads N] [\-\-json]
+per rule: held by construction (a habit implies it), proved for every event sequence (a sound bound), or unknown (the cell it fails; fuzz it) (\[u00A7]5.6)
+.RS 4
+.TP
+\fB\-\-never\fR \fIRULE\fR
+a rule in habit syntax, {when: {...}, then: {...}}: JSON or one line of the YAML subset
+.TP
+\fB\-\-props\fR \fIFILE\fR
+rules from a file ({"props": [...]}, each with an optional id; YAML subset, or .json)
+.TP
+\fB\-\-seeds\fR \fILIST\fR
+the individuals: 0\-99 (default), 7, 1,4,9 or 0\-9,20\-29; seeds 0 to 2^53, at most 100000
+.TP
+\fB\-\-threads\fR \fIN\fR
+search threads, 1 to 1024 (default: the logical CPUs)
+.TP
+\fB\-\-json\fR
+the JSON document instead of the readable report
+.RE
+.TP
+\fBcheck\fR PERSONA
+valid? digest and sizes
+.TP
+\fBcompile\fR PERSONA \-\-state STATE [\-\-inputs JSON|FILE]
+the turn's probbit\-ir program (its sha256 = engine.program)
+.RS 4
+.TP
+\fB\-\-state\fR \fISTATE\fR
+the individual's stored state (`probbit persona init \-\-out` writes one)
+.TP
+\fB\-\-inputs\fR \fIJSON|FILE\fR
+this turn's inputs: a JSON object, inline or a file (default {})
+.RE
+.TP
+\fBdescribe\fR PERSONA
+traits, moods, inputs, habits, agenda
+.RE
+.PP
+\fIscripts\fR: a script is a JSON list of per\-turn input objects, or {"turns": [...]}. Resource controls as for run (PROBBIT_THREADS, ...).
+.PP
+\fIexit\fR: 0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {"error"} object on stdout, code "persona", when stdout is not a terminal or with \-\-json) or bad flag (stderr), 3 lint (with rules): a rule the bound leaves unknown and the search cannot break ("unproven", not broken).
+.PP
+Examples:
+.RS 4
+.nf
+probbit persona init examples/persona/tutor.yaml \-\-seed 2 \-\-out pip.json
+probbit persona turn examples/persona/tutor.yaml \-\-state pip.json \-\-inputs '{"loss": true}'
+probbit persona lint examples/persona/tutor.yaml
+.fi
+.RE
+.SS live
+a resident individual: JSONL events in, one stance per event out
+.PP
+.nf
+\fBprobbit\fR live PERSONA [\-\-seed N | \-\-state FILE] [\-\-strand FILE]
+        [\-\-events FILE [\-\-watch]] [\-\-clock real|fixed]
+        [\-\-checkpoint\-every K]
+\fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N] [\-\-strand FILE] [\-\-plain]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint]
+\fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
+        [\-\-at TIME]
+.fi
+.PP
+A resident individual (docs/persona.md \[u00A7]5.7): JSONL events (one object of inputs per line) from \-\-events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e\-6 h), so moods decay by their half\-lives between events; feedback moves the learned deltas of a persona with a learning block (\[u00A7]2.8).
+.PP
+\-\-strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-seed\fR \fIN\fR
+a new individual (default: the persona's seed)
+.TP
+\fB\-\-state\fR \fIFILE\fR
+a stored individual instead; rewritten after every event
+.TP
+\fB\-\-strand\fR \fIFILE\fR
+log the life to FILE: a new file gets the header; an existing strand is continued from \-\-state (the state after its last line); a strand is never rewritten, just appended to
+.TP
+\fB\-\-events\fR \fIFILE\fR
+read events from FILE (default stdin)
+.TP
+\fB\-\-watch\fR
+follow \-\-events FILE as lines are appended (tail \-f); stops when the file is removed
+.TP
+\fB\-\-clock\fR \fIreal|fixed\fR
+real (default): elapsed hours from a monotonic clock started with the run; fixed: each event carries its own elapsed_hours (default 0), so the run is a pure function of its events
+.TP
+\fB\-\-demo\fR \fIweek\fR
+one individual's scripted week on the fixed clock (7 days, events hourly 09:00\-15:00): praise for short answers moves the learned verbosity deltas to their cap, a quiet night relaxes the mood to its resting level, a campaign praising jokes raises humour while failure turns stay joke\-free; a persona without a learning block gets the demo's (said in the opening line). Bars on stderr at a terminal, paced 1 s per hour (nights fast\-forward in 2 s); otherwise one line per event on stdout, no waiting. With \-\-seed, \-\-strand
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.TP
+\fB\-\-checkpoint\-every\fR \fIK\fR
+with \-\-strand: a checkpoint line (the whole state) after every K\-th event (default 1000; 0: none); `verify \-\-from\-checkpoint` and `monitor` start at the last one
+.RE
+.PP
+Subcommands:
+.RS 4
+.TP
+\fBverify\fR STRAND [\-\-from\-checkpoint]
+replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint
+.RS 4
+.TP
+\fB\-\-from\-checkpoint\fR
+start at the last checkpoint instead of the header
+.RE
+.TP
+\fBcontrol\fR STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT [\-\-at TIME]
+pause, resume or retire an individual; appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status
+.RS 4
+.TP
+\fB\-\-by\fR \fIWHO\fR
+who decided it: human:ID or env:ID (required)
+.TP
+\fB\-\-reason\fR \fITEXT\fR
+why (required)
+.TP
+\fB\-\-at\fR \fITIME\fR
+when (default: now, UTC)
+.RE
+.RE
+.PP
+\fIthe safety kit\fR: (docs/persona.md \[u00A7]5.7) one writer per strand: `\-\-strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (\[u00A7]2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event.
+.PP
+\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what), 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written).
+.PP
+Examples:
+.RS 4
+.nf
+probbit live examples/persona/tutor.yaml \-\-seed 2 \-\-demo week
+probbit live examples/persona/tutor.yaml \-\-clock fixed \-\-strand pip.strand < events.jsonl
+probbit live verify pip.strand
+.fi
+.RE
+.SS monitor
+an individual's inner state, live: terminal bars or a page on 127.0.0.1
+.PP
+.nf
+\fBprobbit\fR monitor STRAND [\-\-follow] [\-\-once] [\-\-plain] [\-\-fps N] [\-\-serve]
+        [\-\-open] [\-\-port N]
+\fBprobbit\fR monitor \-\-demo [week|drives] [\-\-once] [\-\-plain] [\-\-serve]
+        [\-\-open] [\-\-port N]
+.fi
+.PP
+Watch an individual's inner state (docs/persona.md \[u00A7]5.8): replays the strand (`probbit live \-\-strand` writes it) with the rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as horizontal bars: the stance (each trait's levels with their reported odds, the level taken highlighted, the phrase it says), the moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line.
+.PP
+It changes no file (\-\-demo: its week goes through a temporary one, removed at once) and sends nothing anywhere.
+.PP
+\fImodes\fR: one frame on stdout, then exit (\-\-once; the default without \-\-follow) \[u00B7] the terminal, redrawn as the strand grows (\-\-follow) \[u00B7] a page in the browser (\-\-serve; \-\-open also opens it).
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-follow\fR
+keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl\-C quits
+.TP
+\fB\-\-once\fR
+one frame on stdout, then exit (the default without \-\-follow)
+.TP
+\fB\-\-plain\fR
+plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as \-\-plain)
+.TP
+\fB\-\-fps\fR \fIN\fR
+with \-\-follow, at most N redraws per second (1\-60, default 10)
+.TP
+\fB\-\-serve\fR
+the page instead of the terminal, following the strand (or looping the selected synthetic demo): its URL http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or scripts), /events its server\-sent events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It binds 127.0.0.1 and no other address (there is no \-\-host), answers requests addressed to 127.0.0.1 or localhost, and sends nothing anywhere; Ctrl\-C quits
+.TP
+\fB\-\-open\fR
+serve the page (as \-\-serve does) and open it in the default browser (BROWSER if set; else open on macOS, start on Windows, xdg\-open elsewhere); a browser that does not start fails nothing
+.TP
+\fB\-\-port\fR \fIN\fR
+with \-\-serve or \-\-open, the port (default 0: a free one)
+.TP
+\fB\-\-demo\fR \fI[week|drives]\fR
+synthetic data, never a live individual (default week); see demo below
+.RE
+.PP
+\fIdemo\fR: the tutor's week is the one `probbit live examples/persona/tutor.yaml \-\-seed 2 \-\-demo week` writes, replayed in memory: at a terminal or with \-\-serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or with \-\-once, its last frame. `\-\-demo drives` plays a short goal\-signal scenario with wanting, afterglow and prediction errors. The page labels each loop and its restart; Ctrl\-C quits.
+.PP
+\fIexit\fR: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that cannot be had, or a file that cannot be read or is not a strand.
+.PP
+Examples:
+.RS 4
+.nf
+probbit monitor \-\-demo \-\-open
+probbit monitor pip.strand \-\-follow
+probbit monitor pip.strand \-\-serve \-\-port 8080
+.fi
+.RE
+.SS decide
+route tasks to workers: a router document in, a JSON decision out
+.PP
+.nf
+\fBprobbit\fR decide [flags] < router.json
+.fi
+.PP
+Route tasks to workers: a router document (workers + caps, tasks + allowed + scores, affinity; README) on stdin, a JSON decision on stdout. Exact where structure allows, else sampled with the diagnostics gate.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-budget\-ms\fR \fIN\fR
+sampler wall\-clock budget, ms (default 200)
+.TP
+\fB\-\-seed\fR \fIN\fR
+random seed (default 7)
+.TP
+\fB\-\-exact\-limit\fR \fIN\fR
+plans the exact enumeration may count before it declines (default 2000000)
+.TP
+\fB\-\-exact\-ms\fR \fIN\fR
+wall\-clock cap on the exact tiers that run before the sampler (opt\-in; absent = no cap)
+.TP
+\fB\-\-frontier\-states\fR \fIN\fR
+state cap of the frontier DP and the components tier (default 4096; 0 = off)
+.TP
+\fB\-\-polish\-ms\fR \fIN\fR
+plan polish budget, ms (default 50; 0 = off)
+.TP
+\fB\-\-polish\-sweeps\fR \fIN\fR
+fixed\-work plan polish (deterministic)
+.TP
+\fB\-\-sweeps\fR \fIN\fR
+fixed work per chain instead of the wall\-clock budget (with \-\-polish\-ms 0: a pure function of input + seed)
+.TP
+\fB\-\-collective\fR \fIon|off\fR
+global two\-value flips + label swaps (default on)
+.TP
+\fB\-\-cluster\fR \fIon|off\fR
+Wolff cluster move (default on)
+.TP
+\fB\-\-cycles\fR \fIon|off\fR
+three\-cycle rotations (default on)
+.TP
+\fB\-\-chains\fR \fIN\fR
+sampler chains, 1..=100000 (default 4)
+.TP
+\fB\-\-threads\fR \fIN\fR
+worker threads for the chains, the gate and the polish, 1..=1024 (default min(cores, 4))
+.TP
+\fB\-\-cpu\-limit\fR \fIPCT\fR
+per\-thread duty cycle 1..100 (default 100)
+.TP
+\fB\-\-mem\-limit\-mb\fR \fIN\fR
+cap on stored samples (default 1024; 0 = none)
+.TP
+\fB\-\-priority\fR \fIlow|normal\fR
+OS scheduling priority (default normal)
+.TP
+\fB\-\-mode\fR \fIauto|exact|sample\fR
+which tiers may answer (default auto)
+.TP
+\fB\-\-max\-input\-mb\fR \fIN\fR
+largest stdin document read, MB (default 256; 0 = no limit)
+.TP
+\fB\-\-pretty\fR
+indented JSON
+.TP
+\fB\-\-progress\fR \fI[MS]\fR
+one JSONL telemetry line on stderr every MS ms (default 100)
+.TP
+\fB\-\-summary\fR
+compact answer: verdict, counts, gate, the 5 worst released and escalated items, telemetry (no per\-item tables); with \-\-pretty and a terminal on stderr, also a boxed summary there
+.TP
+\fB\-\-top\fR
+live monitor on stderr while it runs (tier, sweeps, updates/s, CPU, peak RSS, gate; 10 Hz), erased at exit; only with a terminal on stderr; stdout unchanged
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.RE
+.PP
+\fIcontrols\fR: flag > PROBBIT_* environment > probbit.json > default.
+.PP
+\fIexit\fR: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {"error"} object on stdout when stdout is not a terminal, or with \-\-json) or bad flag (stderr), 3 refused / declined / non\-finite result.
+.PP
+Examples:
+.RS 4
+.nf
+probbit demo \-\-tasks 300 | probbit decide \-\-summary \-\-pretty
+probbit decide \-\-sweeps 6400 \-\-polish\-ms 0 < router.json
+.fi
+.RE
+.SS run
+run a probbit\-ir program (docs/probbit\-ir\-json.md), a JSON answer out
+.PP
+.nf
+\fBprobbit\fR run [flags] < program.json
+.fi
+.PP
+Run a probbit\-ir program (variables, values, scores, rules; docs/probbit\-ir\-json.md) on stdin; JSON answer on stdout.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-budget\-ms\fR \fIN\fR
+sampler wall\-clock budget, ms (default 200)
+.TP
+\fB\-\-seed\fR \fIN\fR
+random seed (default 7)
+.TP
+\fB\-\-exact\-limit\fR \fIN\fR
+plans the exact enumeration may count before it declines (default 2000000)
+.TP
+\fB\-\-exact\-ms\fR \fIN\fR
+wall\-clock cap on the exact tiers that run before the sampler (opt\-in; absent = no cap)
+.TP
+\fB\-\-frontier\-states\fR \fIN\fR
+state cap of the frontier DP and the components tier (default 4096; 0 = off)
+.TP
+\fB\-\-polish\-ms\fR \fIN\fR
+plan polish budget, ms (default 50; 0 = off)
+.TP
+\fB\-\-polish\-sweeps\fR \fIN\fR
+fixed\-work plan polish (deterministic)
+.TP
+\fB\-\-sweeps\fR \fIN\fR
+fixed work per chain instead of the wall\-clock budget (with \-\-polish\-ms 0: a pure function of input + seed)
+.TP
+\fB\-\-collective\fR \fIon|off\fR
+global two\-value flips + label swaps (default on)
+.TP
+\fB\-\-cluster\fR \fIon|off\fR
+Wolff cluster move (default on)
+.TP
+\fB\-\-cycles\fR \fIon|off\fR
+three\-cycle rotations (default on)
+.TP
+\fB\-\-chains\fR \fIN\fR
+sampler chains, 1..=100000 (default 4)
+.TP
+\fB\-\-threads\fR \fIN\fR
+worker threads for the chains, the gate and the polish, 1..=1024 (default min(cores, 4))
+.TP
+\fB\-\-cpu\-limit\fR \fIPCT\fR
+per\-thread duty cycle 1..100 (default 100)
+.TP
+\fB\-\-mem\-limit\-mb\fR \fIN\fR
+cap on stored samples (default 1024; 0 = none)
+.TP
+\fB\-\-priority\fR \fIlow|normal\fR
+OS scheduling priority (default normal)
+.TP
+\fB\-\-op\fR \fIdecide|exact|sample\fR
+decide = exact tiers, then the sampler; exact / sample = only those (default decide)
+.TP
+\fB\-\-deadline\-ms\fR \fIN\fR
+whole\-call deadline (exact N/4, then sampler + polish); answer has `deadline` + `phases`
+.TP
+\fB\-\-max\-input\-mb\fR \fIN\fR
+largest stdin document read, MB (default 256; 0 = no limit)
+.TP
+\fB\-\-pretty\fR
+indented JSON
+.TP
+\fB\-\-progress\fR \fI[MS]\fR
+one JSONL telemetry line on stderr every MS ms (default 100)
+.TP
+\fB\-\-summary\fR
+compact answer: verdict, counts, gate, the 5 worst released and escalated items, telemetry (no per\-item tables); with \-\-pretty and a terminal on stderr, also a boxed summary there
+.TP
+\fB\-\-top\fR
+live monitor on stderr while it runs (tier, sweeps, updates/s, CPU, peak RSS, gate; 10 Hz), erased at exit; only with a terminal on stderr; stdout unchanged
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.RE
+.PP
+\fIcontrols\fR: flag > PROBBIT_* environment > probbit.json > default.
+.PP
+\fIexit\fR: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {"error"} object on stdout when stdout is not a terminal, or with \-\-json) or bad flag (stderr), 3 refused / declined / non\-finite result.
+.PP
+Examples:
+.RS 4
+.nf
+probbit run \-\-pretty < examples/knapsack\-20.json
+probbit run \-\-deadline\-ms 50 < program.json
+.fi
+.RE
+.SS evaluate
+the decision\-API adapter: request + judge's answers + rules \-> joint answer
+.PP
+.nf
+\fBprobbit\fR evaluate [flags] < request.json
+.fi
+.PP
+The decision\-API adapter: a System One request (questions noul | choice | score) plus a "probbit" block (the judge's answers, rules over question ids) on stdin; the rule\-abiding joint answer in the judge's response shape, odds per question and the gate's verdict on stdout. Every `probbit run` flag applies. docs/probbit\-ir\-json.md "Decision API".
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-budget\-ms\fR \fIN\fR
+sampler wall\-clock budget, ms (default 200)
+.TP
+\fB\-\-seed\fR \fIN\fR
+random seed (default 7)
+.TP
+\fB\-\-exact\-limit\fR \fIN\fR
+plans the exact enumeration may count before it declines (default 2000000)
+.TP
+\fB\-\-exact\-ms\fR \fIN\fR
+wall\-clock cap on the exact tiers that run before the sampler (opt\-in; absent = no cap)
+.TP
+\fB\-\-frontier\-states\fR \fIN\fR
+state cap of the frontier DP and the components tier (default 4096; 0 = off)
+.TP
+\fB\-\-polish\-ms\fR \fIN\fR
+plan polish budget, ms (default 50; 0 = off)
+.TP
+\fB\-\-polish\-sweeps\fR \fIN\fR
+fixed\-work plan polish (deterministic)
+.TP
+\fB\-\-sweeps\fR \fIN\fR
+fixed work per chain instead of the wall\-clock budget (with \-\-polish\-ms 0: a pure function of input + seed)
+.TP
+\fB\-\-collective\fR \fIon|off\fR
+global two\-value flips + label swaps (default on)
+.TP
+\fB\-\-cluster\fR \fIon|off\fR
+Wolff cluster move (default on)
+.TP
+\fB\-\-cycles\fR \fIon|off\fR
+three\-cycle rotations (default on)
+.TP
+\fB\-\-chains\fR \fIN\fR
+sampler chains, 1..=100000 (default 4)
+.TP
+\fB\-\-threads\fR \fIN\fR
+worker threads for the chains, the gate and the polish, 1..=1024 (default min(cores, 4))
+.TP
+\fB\-\-cpu\-limit\fR \fIPCT\fR
+per\-thread duty cycle 1..100 (default 100)
+.TP
+\fB\-\-mem\-limit\-mb\fR \fIN\fR
+cap on stored samples (default 1024; 0 = none)
+.TP
+\fB\-\-priority\fR \fIlow|normal\fR
+OS scheduling priority (default normal)
+.TP
+\fB\-\-op\fR \fIdecide|exact|sample\fR
+decide = exact tiers, then the sampler; exact / sample = only those (default decide)
+.TP
+\fB\-\-deadline\-ms\fR \fIN\fR
+whole\-call deadline (exact N/4, then sampler + polish); answer has `deadline` + `phases`
+.TP
+\fB\-\-max\-input\-mb\fR \fIN\fR
+largest stdin document read, MB (default 256; 0 = no limit)
+.TP
+\fB\-\-pretty\fR
+indented JSON
+.TP
+\fB\-\-progress\fR \fI[MS]\fR
+one JSONL telemetry line on stderr every MS ms (default 100)
+.TP
+\fB\-\-summary\fR
+compact answer: verdict, counts, gate, the 5 worst released and escalated items, telemetry (no per\-item tables); with \-\-pretty and a terminal on stderr, also a boxed summary there
+.TP
+\fB\-\-top\fR
+live monitor on stderr while it runs (tier, sweeps, updates/s, CPU, peak RSS, gate; 10 Hz), erased at exit; only with a terminal on stderr; stdout unchanged
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.TP
+\fB\-\-program\fR
+print the compiled probbit\-ir program instead of running it (`probbit evaluate \-\-program | probbit run` = the same answer)
+.RE
+.PP
+\fIcontrols\fR: flag > PROBBIT_* environment > probbit.json > default.
+.PP
+\fIexit\fR: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {"error"} object on stdout when stdout is not a terminal, or with \-\-json) or bad flag (stderr), 3 refused / declined / non\-finite result.
+.PP
+Examples:
+.RS 4
+.nf
+probbit evaluate \-\-pretty < examples/evaluate/support\-12.json
+.fi
+.RE
+.SS demo
+emit an agent\-routing problem as JSON (\-\-live: watch it get routed)
+.PP
+.nf
+\fBprobbit\fR demo [flags] > router.json
+.fi
+.PP
+Emit a synthetic agent\-routing document (JSON) for `probbit decide`.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-tasks\fR \fIN\fR
+tasks to generate, 1..3333333 (default 12)
+.TP
+\fB\-\-seed\fR \fIN\fR
+random seed (default 7)
+.TP
+\fB\-\-hard\fR
+tight quotas + strong affinity
+.TP
+\fB\-\-live\fR
+the router story on stderr: exact tiers, then a live field of p\-bits from the real chains, the gate, the verdict (default when stdout and stderr are both terminals; \-\-tasks defaults to 300; stdout, if not a terminal, gets the JSON problem)
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.RE
+.PP
+Examples:
+.RS 4
+.nf
+probbit demo \-\-tasks 300 \-\-hard > router.json
+probbit demo \-\-live
+.fi
+.RE
+.SS ir
+a router document as probbit\-ir v0 text (the hardware\-facing form)
+.PP
+.nf
+\fBprobbit\fR ir [\-\-max\-input\-mb N] [\-\-plain] < router.json
+.fi
+.PP
+Print a router document as probbit\-ir v0 text (the hardware\-facing form).
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-max\-input\-mb\fR \fIN\fR
+largest stdin document read, MB (default 256; 0 = no limit)
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.RE
+.PP
+Examples:
+.RS 4
+.nf
+probbit demo | probbit ir
+.fi
+.RE
+.SS mcp
+a Model Context Protocol server on stdio: the commands as agent tools
+.PP
+.nf
+\fBprobbit\fR mcp
+.fi
+.PP
+A Model Context Protocol server on stdio (JSON\-RPC 2.0, one message per line; logs on stderr). Tools probbit_decide, probbit_run, probbit_stats, probbit_demo, probbit_evaluate, probbit_persona_init, probbit_persona_turn, probbit_persona_fuzz, probbit_live_event, probbit_live_verify: the commands' own JSON in and out. Exits when stdin closes. docs/agents.md.
+.PP
+Examples:
+.RS 4
+.nf
+claude mcp add probbit \-\- probbit mcp
+.fi
+.RE
+.SS stats
+the spec sheet: machine, build, controls + source, measured updates/s
+.PP
+.nf
+\fBprobbit\fR stats [flags]
+.fi
+.PP
+The processor's spec sheet: machine, build, effective controls + their source, measured updates/s.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-chains\fR \fIN\fR
+sampler chains, 1..=100000 (default 4)
+.TP
+\fB\-\-threads\fR \fIN\fR
+worker threads for the chains, the gate and the polish, 1..=1024 (default min(cores, 4))
+.TP
+\fB\-\-cpu\-limit\fR \fIPCT\fR
+per\-thread duty cycle 1..100 (default 100)
+.TP
+\fB\-\-mem\-limit\-mb\fR \fIN\fR
+cap on stored samples (default 1024; 0 = none)
+.TP
+\fB\-\-priority\fR \fIlow|normal\fR
+OS scheduling priority (default normal)
+.TP
+\fB\-\-sweeps\fR \fIN\fR
+sweeps of the throughput measurement (default 2000)
+.TP
+\fB\-\-pretty\fR
+indented JSON
+.TP
+\fB\-\-plain\fR
+no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise unchanged
+.RE
+.PP
+\fIcontrols\fR: flag > PROBBIT_* environment > probbit.json > default.
+.PP
+Examples:
+.RS 4
+.nf
+probbit stats \-\-pretty
+.fi
+.RE
+.SS help
+this screen, or a command's or subcommand's help (as COMMAND \-\-help)
+.PP
+.nf
+\fBprobbit\fR help [COMMAND [SUBCOMMAND]]
+.fi
+.PP
+Print the help of a command or subcommand, the same text as `probbit COMMAND [SUBCOMMAND] \-\-help`; alone, the same as `probbit \-\-help`.
+.PP
+Examples:
+.RS 4
+.nf
+probbit help persona fuzz
+.fi
+.RE
+.SS completions
+a completion script for bash, zsh or fish: commands, subcommands, flags
+.PP
+.nf
+\fBprobbit\fR completions bash|zsh|fish
+.fi
+.PP
+Print a static completion script for the shell: the commands, subcommands and flags (with their help where the shell shows it), generated from the same table as this help, so it lists exactly what the parser accepts. Regenerate it after an upgrade.
+.PP
+\fIinstall\fR: bash: probbit completions bash > ~/.local/share/bash\-completion/completions/probbit zsh: probbit completions zsh > ~/.zfunc/_probbit, with fpath=(~/.zfunc $fpath) before compinit in ~/.zshrc fish: probbit completions fish > ~/.config/fish/completions/probbit.fish
+.PP
+\fIexit\fR: 0 the script, 2 no shell or an unknown one (the list of shells on stderr).
+.PP
+Examples:
+.RS 4
+.nf
+probbit completions zsh > ~/.zfunc/_probbit
+source <(probbit completions bash)
+.fi
+.RE
+.SS man
+the manual page (roff), generated from this table: probbit man | man \-l \-
+.PP
+.nf
+\fBprobbit\fR man
+.fi
+.PP
+Print the manual page in roff (man(7) macros): NAME, SYNOPSIS, DESCRIPTION, COMMANDS (every command, subcommand and flag of this help), EXIT STATUS, ENVIRONMENT, EXAMPLES, SEE ALSO. The release archives carry it as docs/probbit.1 and install.sh installs it to ~/.local/share/man/man1/.
+.PP
+Examples:
+.RS 4
+.nf
+probbit man | man \-l \-
+probbit man > ~/.local/share/man/man1/probbit.1
+.fi
+.RE
+.SS version
+print the version (also \-\-version, \-V)
+.PP
+.nf
+\fBprobbit\fR version
+.fi
+.PP
+Print the version.
+.SH EXIT STATUS
+0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input (a line on stderr; for bad input also one {"error"} object on stdout when stdout is not a terminal); 3 refused / declined / non\-finite (decide, run, evaluate), or a rule left unproven (persona lint); 4 refused by a lock, a pause or a retirement (live). Each command's \-\-help has its own list.
+.SH ENVIRONMENT
+PROBBIT_CHAINS, PROBBIT_THREADS, PROBBIT_CPU_LIMIT, PROBBIT_MEM_LIMIT_MB, PROBBIT_PRIORITY: the processor controls (flag > environment > probbit.json, or the file PROBBIT_CONFIG names > default). NO_COLOR=1 or PROBBIT_THEME=plain: no colour on a terminal.
+.SH EXAMPLES
+.nf
+probbit demo | probbit decide \-\-summary \-\-pretty
+probbit run \-\-pretty < examples/knapsack\-20.json
+probbit persona init examples/persona/tutor.yaml \-\-out pip.json
+probbit live examples/persona/tutor.yaml \-\-seed 2 \-\-demo week
+probbit monitor \-\-demo \-\-open
+claude mcp add probbit \-\- probbit mcp
+.fi
+.SH SEE ALSO
+README.md, docs/CHEATSHEET.md, docs/persona.md, docs/probbit\-ir\-json.md and docs/agents.md in the release archive or at https://github.com/BitmapAsset/probbit

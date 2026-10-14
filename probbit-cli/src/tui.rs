@@ -49,29 +49,30 @@ fn date(t: u64) -> String {
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 
 // ---------------- the hero screen ----------------
-/// `probbit` / `probbit --help` at a terminal: wordmark, the spec line (`spec_line`), the status line, three commands to try and
-/// the usage block, in 9 lines. Plain text without a theme (NO_COLOR, --plain, PROBBIT_THEME=plain).
+/// `probbit` / `probbit --help` at a terminal: wordmark, the status line, the spec lines (`spec_line`: the measured rate, then the
+/// machine), three commands to try and the usage block, in 10 lines of at most 100 columns. Plain text without a theme (NO_COLOR,
+/// --plain, PROBBIT_THEME=plain).
 pub fn hero(th: Option<Theme>) -> String {
     const MARK: [[&str; 7]; 2] = [["█▀█", "█▀▀", "█▀█", "█▀▄", "█▀▄", "█", "▀█▀"], ["█▀▀", "█  ", "█▄█", "█▄▀", "█▄▀", "█", " █ "]];
     let hues = [CYAN, CYAN, CYAN, CYAN, CYAN, MAGENTA, YELLOW];
     let mark = |r: usize| (0..7).map(|k| bold(th, hues[k], MARK[r][k])).collect::<Vec<_>>().join(" ");
     let dot = paint(th, DIM, "·");
-    let spec = spec_line().split(" · ").map(|x| paint(th, GREY, x)).collect::<Vec<_>>().join(&format!(" {dot} "));
+    let (machine, rate) = spec_line(); let machine = machine.split(" · ").map(|x| paint(th, GREY, x)).collect::<Vec<_>>().join(&format!(" {dot} "));
     let status = format!("{} {dot} {} {dot} {}", bold(th, GREEN, "PROCESSOR ONLINE"), bold(th, CYAN, VERSION), paint(th, YELLOW, "exact → sample → gate"));
     let tries = [("probbit demo", "watch 300 agent tasks get routed, live"), ("probbit demo | probbit decide --summary --pretty", "one JSON verdict + a boxed summary"),
-        ("claude mcp add probbit -- probbit mcp", "hand the processor to an agent (MCP over stdio)")];
-    let mut o = format!(" {}   {status}\n {}   {spec}\n\n", mark(0), mark(1));
+        ("claude mcp add probbit -- probbit mcp", "give an agent the processor (MCP, stdio)")];
+    let mut o = format!(" {}   {status}\n {}   {}\n{}{machine}\n\n", mark(0), mark(1), paint(th, GREY, &rate), " ".repeat(29));
     for (k, (cmd, what)) in tries.iter().enumerate() {
         o += &format!(" {}  {}{}{}\n", if k == 0 { bold(th, MAGENTA, "try") } else { "   ".into() }, bold(th, CYAN, cmd), " ".repeat(51 - cmd.len()), paint(th, GREY, what)); }
-    o += &format!("\n {} probbit decide|run [flags] < doc.json {dot} probbit demo [--live] {dot} probbit stats {dot} probbit ir {dot} probbit mcp {dot} probbit version\n", bold(th, MAGENTA, "usage"));
-    o += &format!("       probbit <command> --help: every flag, its default, the exit codes {dot} {}\n", paint(th, GREY, "no colour: NO_COLOR, --plain or PROBBIT_THEME=plain"));
+    o += &format!("\n {} probbit COMMAND [flags] {dot} probbit help [COMMAND] {dot} probbit completions bash|zsh|fish\n", bold(th, MAGENTA, "usage"));
+    o += &format!("       all commands: probbit --help | less {dot} {}\n", paint(th, GREY, "no colour: NO_COLOR, --plain or PROBBIT_THEME=plain"));
     o
 }
-/// os/arch · logical cpus · target features · the last measured site updates/s and its date (`self_test_cached`).
-fn spec_line() -> String {
+/// (os/arch · logical cpus · target features, the last measured site updates/s and its date (`self_test_cached`)).
+fn spec_line() -> (String, String) {
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()); let feats = crate::target_features();
     let rate = match self_test_cached() { Some((r, t)) => format!("{} site updates/s (self-test {} UTC)", si(r), date(t)), None => "updates/s not measured".into() };
-    format!("{}/{} · {cores} logical cpus · {} · {rate}", std::env::consts::OS, std::env::consts::ARCH, if feats.is_empty() { "baseline".into() } else { feats.join(" ") })
+    (format!("{}/{} · {cores} logical cpus · {}", std::env::consts::OS, std::env::consts::ARCH, if feats.is_empty() { "baseline".into() } else { feats.join(" ") }), rate)
 }
 /// `$XDG_CACHE_HOME/probbit/stats.json`, else `~/.cache/probbit/stats.json`, else `%LOCALAPPDATA%\probbit\stats.json`
 fn cache_file() -> Option<std::path::PathBuf> {

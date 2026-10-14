@@ -39,8 +39,6 @@ const KEEP: usize = 10_000;
 /// Connections served at once (more are refused with 503)
 const CONNS: usize = 64;
 
-const HELP: &str = "usage: probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N] | probbit monitor --demo [week|drives] [--once] [--plain] [--serve] [--open] [--port N]\n  Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the\n  rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as\n  horizontal bars: the stance (each trait's levels with their reported odds, the level taken highlighted, the phrase it says), the\n  moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and\n  the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line. In the terminal, or\n  with --serve as a page in the browser. It changes no file (--demo: its week goes through a temporary one, removed at\n  once) and sends nothing anywhere.\nflags:\n  --follow    keep watching: lines appended to the strand are replayed and drawn within a second (a line counts once its\n              newline is written); a truncated or rotated strand is replayed from the start, with a warning; Ctrl-C quits\n  --once      one frame on stdout, then exit (the default without --follow)\n  --plain     plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)\n  --fps N     with --follow, at most N redraws per second (1-60, default 10)\n  --serve     the page instead of the terminal, following the strand (or looping the selected synthetic demo): its URL\n              http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or\n              scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat\n              every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest\n              frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It\n              binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or\n              localhost, and sends nothing anywhere; Ctrl-C quits\n  --open      serve the page (as --serve does) and open it in the default browser (BROWSER if set; else open on macOS,\n              start on Windows, xdg-open elsewhere); a browser that does not start fails nothing\n  --port N    with --serve or --open, the port (default 0: a free one)\n  --demo [week|drives]  synthetic data, never a live individual (default week). The tutor's week is the one\n              `probbit live examples/persona/tutor.yaml --seed 2 --demo week` writes, replayed in memory: at a terminal or with --serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or\n              with --once, its last frame. `--demo drives` plays a short goal-signal scenario with wanting, afterglow and\n              prediction errors. The page labels each loop and its restart; Ctrl-C quits.\nexit: 0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that\n  cannot be had, or a file that cannot be read or is not a strand.\n";
-
 fn strs(j: Option<&Json>) -> Vec<String> { j.and_then(Json::as_arr).map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default() }
 
 /// A trait or a mood: its id, levels and per-level phrases, in the persona's order
@@ -420,7 +418,6 @@ fn ascii(args: &[String]) -> bool {
 
 /// `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]`
 pub fn cmd(args: &[String]) {
-    if args.iter().any(|a| a == "--help" || a == "-h") { crate::emit_raw(HELP); return; }
     if args.iter().any(|a| ["--host", "--bind", "--address"].iter().any(|f| a == f || a.starts_with(&format!("{f}=")))) { crate::fail("monitor --serve binds 127.0.0.1 and no other address, so the page stays on this machine: there is no --host") }
     let path = args.get(1).filter(|a| !a.starts_with("--")).cloned();
     let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(if path.is_some() { 2 } else { 1 }).cloned());
@@ -432,7 +429,7 @@ pub fn cmd(args: &[String]) {
             a.remove(i + 1);
         }
     }
-    crate::check_flags(&a, &["--fps", "--port"], &["--follow", "--once", "--plain", "--demo", "--serve", "--open"]);
+    let (v, w) = crate::flags_of("monitor"); crate::check_flags(&a, &v, &w);
     let has = |f: &str| args.iter().any(|a| a == f);
     // --open opens the page, so it serves it: `--open` is `--serve --open`
     let serve_ = has("--serve") || has("--open");

@@ -1275,8 +1275,9 @@ fn json_surrogate_pairs_decode_to_one_character() {
 /// missing command, which still does).
 #[test]
 fn bare_help_exits_0() {
-    for h in ["--help", "-h"] { let (c, out, err) = probbit(&[h], ""); assert_eq!(c, 0, "{h}: {err}"); assert!(out.starts_with("usage: probbit decide") && err.is_empty(), "{h}: {out}"); }
-    let (c, out, err) = probbit(&[], ""); assert_eq!(c, 2); assert!(out.is_empty() && err.starts_with("usage: probbit decide"), "{err}");
+    let top = concat!("probbit ", env!("CARGO_PKG_VERSION"), " · ");
+    for h in ["--help", "-h"] { let (c, out, err) = probbit(&[h], ""); assert_eq!(c, 0, "{h}: {err}"); assert!(out.starts_with(top) && out.contains("\nusage: probbit COMMAND") && err.is_empty(), "{h}: {out}"); }
+    let (c, out, err) = probbit(&[], ""); assert_eq!(c, 2); assert!(out.is_empty() && err.starts_with(top), "{err}");
 }
 
 /// P2-6: an unknown `probbit.json` key (`{"thread": 3}`) was ignored silently, and nothing in a decision said a config file was
@@ -1404,6 +1405,7 @@ fn hero_screen_at_a_terminal() {
         assert!(plain.contains(&format!("PROCESSOR ONLINE · {} · exact → sample → gate", env!("CARGO_PKG_VERSION"))) && plain.contains("logical cpus") && plain.contains("site updates/s (self-test"), "{plain}");
         assert!(plain.contains("probbit demo") && plain.contains("probbit mcp") && plain.contains("usage"), "{plain}");
         assert!(plain.trim().lines().count() <= 14, "{} lines: {plain}", plain.trim().lines().count()); assert!(screen.contains("\x1b[38;5;51m"), "the neon palette");
+        assert!(plain.lines().all(|l| l.trim_end().chars().count() <= 100), "a hero line over 100 columns: {plain}"); // R94
     }
     let j = json::parse(&std::fs::read_to_string(cache.join("probbit").join("stats.json")).unwrap()).unwrap(); let _ = std::fs::remove_dir_all(&cache);
     assert!(j.get("site_updates_per_s").and_then(|x| x.as_f64()).is_some_and(|r| r > 0.0), "{j:?}");

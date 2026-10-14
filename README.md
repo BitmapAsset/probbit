@@ -128,6 +128,20 @@ there are no external crates.
 
 At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes and the installer tests: [PORTABILITY.md](PORTABILITY.md).
 
+`install.sh` also installs the manual page (`man probbit`) to `~/.local/share/man/man1/` (`PROBBIT_MAN_DIR` to choose; a
+failure there installs the binary all the same); every archive carries it as `docs/probbit.1`, and `probbit man` prints it.
+Shell completions come from the binary itself:
+
+| shell | command |
+|---|---|
+| bash | `probbit completions bash > ~/.local/share/bash-completion/completions/probbit` |
+| zsh | `probbit completions zsh > ~/.zfunc/_probbit` (with `fpath=(~/.zfunc $fpath)` before `compinit` in `~/.zshrc`) |
+| fish | `probbit completions fish > ~/.config/fish/completions/probbit.fish` |
+
+`probbit --help` lists every command by group; `probbit help COMMAND [SUBCOMMAND]` (the same as `probbit COMMAND --help`)
+gives a command's flags with their defaults, its exit codes and examples. A mistyped command gets a suggestion:
+`probbit persna` -> `unknown command "persna"; did you mean "persona"?` (exit 2).
+
 ## 60-second tour
 
 ```
@@ -323,7 +337,8 @@ Problem:
 }
 ```
 - The document is checked strictly (types, unknown fields, duplicate ids, empty domains; finite numbers only): bad input exits 2
-  with one `{"error":{"code","path","message"}}` object on stdout ([docs/probbit-ir-json.md](docs/probbit-ir-json.md) "Input contract").
+  with one `{"error":{"code","path","message"}}` object on stdout ([docs/probbit-ir-json.md](docs/probbit-ir-json.md) "Input contract"),
+  whenever stdout is not a terminal (any program calling probbit) or with `--json`; at a terminal, only the stderr line.
 - `scores`: finite numbers with |x| <= 1e9 (natural-log odds; docs/probbit-ir-json.md "Numeric contract"), one per worker the task may go to (log-odds from your judge, an LLM, a heuristic, a price).
   A worker missing from `scores` is not allowed unless listed in `allowed` (then it enters with score 0).
 - `allowed` (optional): hard rule. `cap`: hard per-worker quota. `clamp` (optional): force this task to one worker (what-if).

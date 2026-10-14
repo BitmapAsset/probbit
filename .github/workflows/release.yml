@@ -102,6 +102,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          cp docs/probbit.1 dist/   # the manual page (`probbit man`), also inside every archive under docs/
           ls -la dist
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber

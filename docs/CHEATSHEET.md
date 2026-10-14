@@ -2,6 +2,17 @@
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 
+## Help, completions, the manual page
+| command | does |
+|---|---|
+| `probbit --help` | every command by group (persona, live, monitor, decide/run, mcp, other), the exit codes, six examples |
+| `probbit help COMMAND [SUBCOMMAND]` | the same text as `probbit COMMAND [SUBCOMMAND] --help`: usage, flags with defaults, exit codes |
+| `probbit completions bash\|zsh\|fish` | a completion script for the shell (commands, subcommands, flags); install lines in its `--help` |
+| `probbit man` | the manual page (roff); `install.sh` puts it in `~/.local/share/man/man1/`, so `man probbit` works |
+
+Help, completions and the man page all come from one command table, so they list exactly the flags the parser accepts. A
+mistyped command or subcommand exits 2 with the closest name: `did you mean "persona"?`.
+
 ## Verdicts (`decide`, `run`, `evaluate`; a persona turn's `engine.verdict`)
 | verdict | means | exit |
 |---|---|---|
@@ -32,11 +43,23 @@ The exact tiers run before the sampler:
 
 ## Exit codes
 - `decide`, `run`, `evaluate`: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one
-  `{"error"}` object on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.
+  `{"error"}` object on stdout, see Errors) or bad flag (stderr), 3 refused / declined / non-finite result.
 - `persona`: 0 done; 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or
   prove left a rule unknown; 2 bad persona / state / inputs / script / rule, or bad flag.
 - `live`: 0 done; 1 verify: a line differs; 2 a bad persona, state, event or flag.
 - `monitor`: 0 every line replays; 1 a line differs; 2 a bad flag, a port that cannot be had, or a file that is not a strand.
+
+## Errors
+One channel, the same for every command (0.8.2):
+- **stderr**: one human line, always: `probbit: bad JSON: expected string at byte 1`.
+- **stdout**, bad input (a document, persona, state, event; numeric failures; live refusals): one
+  `{"error": {"code", "path", "message"}}` object when stdout is **not a terminal** (a pipe, a file, every wrapper: Python, MCP,
+  npm, the examples), or with **`--json`**. At a terminal without `--json`: the line only, never both.
+- **stdout**, bad command or flag (unknown command, subcommand or flag; a bad flag value): nothing, so a piped caller tells it
+  from bad input by an empty stdout. With `--json`: `{"error": {"code": "flag", ...}}`, or for an unknown command or
+  subcommand `{"error": {"code": "command", ..., "suggestion": "persona"}}` (`null` when nothing is close).
+- `--json` is accepted by every command; it changes no answer (for `persona fuzz` / `prove` it also selects the JSON report).
+- An unknown command or subcommand names the closest one: `probbit: unknown command "persna"; did you mean "persona"?`
 
 ## `probbit persona <sub> PERSONA`
 | sub | does |

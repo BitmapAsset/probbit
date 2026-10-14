@@ -27,7 +27,7 @@ fn monitor_has_help() {
         assert!(out.starts_with("usage: probbit monitor STRAND"), "{out}");
         for f in ["--follow", "--once", "--plain", "--fps N", "--demo", "exit: 0", "live verify"] { assert!(out.contains(f), "monitor help lacks {f}: {out}"); }
     }
-    let (c, out, _) = probbit(&["--help"]); assert_eq!(c, 0); assert!(out.contains("probbit monitor STRAND"), "the usage lists monitor");
+    let (c, out, _) = probbit(&["--help"]); assert_eq!(c, 0); assert!(out.contains("\n  monitor STRAND "), "the usage lists monitor");
 }
 
 /// --once --plain: one frame in plain ASCII, byte for byte; the last event of the week and a failure turn (event 18: loss and
