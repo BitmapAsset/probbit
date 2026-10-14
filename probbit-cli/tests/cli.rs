@@ -1275,8 +1275,9 @@ fn json_surrogate_pairs_decode_to_one_character() {
 /// missing command, which still does).
 #[test]
 fn bare_help_exits_0() {
-    for h in ["--help", "-h"] { let (c, out, err) = probbit(&[h], ""); assert_eq!(c, 0, "{h}: {err}"); assert!(out.starts_with("usage: probbit decide") && err.is_empty(), "{h}: {out}"); }
-    let (c, out, err) = probbit(&[], ""); assert_eq!(c, 2); assert!(out.is_empty() && err.starts_with("usage: probbit decide"), "{err}");
+    let top = concat!("probbit ", env!("CARGO_PKG_VERSION"), " · ");
+    for h in ["--help", "-h"] { let (c, out, err) = probbit(&[h], ""); assert_eq!(c, 0, "{h}: {err}"); assert!(out.starts_with(top) && out.contains("\nusage: probbit COMMAND") && err.is_empty(), "{h}: {out}"); }
+    let (c, out, err) = probbit(&[], ""); assert_eq!(c, 2); assert!(out.is_empty() && err.starts_with(top), "{err}");
 }
 
 /// P2-6: an unknown `probbit.json` key (`{"thread": 3}`) was ignored silently, and nothing in a decision said a config file was
