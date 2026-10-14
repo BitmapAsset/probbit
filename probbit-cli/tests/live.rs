@@ -1,6 +1,8 @@
 //! `probbit live` with senses (docs/persona.md §2.11, §5.7): readings logged in the strand as used, `live verify` recomputing the
 //! normals (summary `normals` with `max_move_50`), a life split across runs equal to one run, the one stderr line for readings
-//! sent to a persona without the block, the refusal property P3s, and `probbit check` on a sensed persona.
+//! sent to a persona without the block, the refusal property P3s, and `probbit check` on a sensed persona. With action-addressed
+//! feedback (§2.8): the refusal property P3c with random payments, every refusal row byte for byte, control lines closing open
+//! decisions, and `probbit check` on a credit persona.
 use std::io::Write;
 use std::process::{Command, Stdio};
 #[allow(dead_code)]
@@ -152,6 +154,149 @@ fn p3s_a_refused_event_changes_nothing() {
         clean(&[&st, &strand, &st2, &strand2, &all, &kept]);
     }
     eprintln!("p3s: {refused} refused, {accepted} accepted"); assert!(refused >= 1000 && accepted >= 4000, "a mix of both: {refused} refused, {accepted} accepted");
+}
+
+const ADDRESSED: &str = "examples/agent-harness/addressed.json";
+fn lines_of(v: &[&str]) -> Vec<String> { v.iter().map(|x| x.to_string()).collect() }
+
+/// P3c's generator for the addressed policy (a credit block, max_open 8, half_life_events 32, `reward_from: [env]`): a model of
+/// the bookkeeping (RFC 0001 B.2: the next turn, the open decisions after expiry, eviction beyond max_open, which turns were
+/// awaited) picks mostly valid payments (late, reordered, the previous stance by name, unaddressed when unambiguous, cancels)
+/// and some that a row refuses (B-R1 ambiguous, B-R2 paid/cancelled/evicted/never opened/to come, B-R3, B-R4, B-R5, B-R6),
+/// and predicts whether the engine accepts each event
+struct Book { t: u64, open: Vec<u64>, awaited: Vec<u64> }
+impl Book {
+    fn event(&mut self, r: &mut Mix) -> (String, bool) {
+        let t = self.t; let prev = t.checked_sub(1); let live: Vec<u64> = self.open.iter().copied().filter(|n| t - n - 1 < 128).collect();
+        let gone: Vec<u64> = self.awaited.iter().copied().filter(|n| !live.contains(n) && Some(*n) != prev).collect();
+        let never: Vec<u64> = (0..t).filter(|n| !self.awaited.contains(n) && Some(*n) != prev).collect();
+        let pick = |r: &mut Mix, v: &[u64]| v[r.below(v.len())];
+        let ambiguous = live.iter().any(|n| Some(*n) != prev);
+        let (mut kv, mut ok, mut pays, mut cancels): (Vec<String>, bool, Option<u64>, Option<u64>) = (vec![], true, None, None);
+        match r.below(100) {
+            0..=39 => {} // a decision (when awaited) or an idle event
+            40..=74 => { kv.push(r#""praise":true,"src":"env:probe""#.into());
+                match r.below(20) {
+                    0..=8 if !live.is_empty() => { let n = pick(r, &live); kv.push(format!(r#""for":{n}"#)); pays = Some(n); } // late or reordered
+                    9 | 10 if prev.is_some() => { kv.push(format!(r#""for":{}"#, t - 1)); pays = prev; }                     // the previous stance by name
+                    13 | 14 if !gone.is_empty() => { kv.push(format!(r#""for":{}"#, pick(r, &gone))); ok = false; }       // paid, cancelled, evicted, expired
+                    15 if !never.is_empty() => { kv.push(format!(r#""for":{}"#, pick(r, &never))); ok = false; }           // never opened
+                    16 => { kv.push(format!(r#""for":{}"#, t + 2)); ok = false; }                                                // still to come
+                    17 if !live.is_empty() => { kv.push(format!(r#""for":{{"turn":{},"stance":"sha256:{}"}}"#, pick(r, &live), "0".repeat(64))); ok = false; } // B-R6
+                    18 => { kv.push(r#""for":1.5"#.into()); ok = false; }                                                         // B-R5
+                    _ => { if ambiguous { ok = false; } else { pays = prev; } } } }                                               // unaddressed: B-R1 when ambiguous
+            75..=86 => { kv.push(r#""src":"env:executor""#.into());
+                match r.below(10) { 0..=6 if !live.is_empty() => { let n = pick(r, &live); kv.push(format!(r#""cancel":[{n}]"#)); cancels = Some(n); }
+                    7 if !live.is_empty() => { let n = pick(r, &live); kv.push(format!(r#""cancel":[{n},{n}]"#)); ok = false; }  // B-R4 twice
+                    _ => { kv.push(format!(r#""cancel":[{}]"#, if gone.is_empty() { t + 5 } else { pick(r, &gone) })); ok = false; } } } // B-R4 not open
+            _ => { ok = false; kv.push(match r.below(5) { 0 => r#""await":"yes""#.to_string(), 1 => r#""praise":true,"src":"self""#.into(), 2 => r#""praise":true"#.into(),
+                3 => format!(r#""cancel":[{}],"src":"self""#, t.saturating_sub(1)), _ => format!(r#""for":{}"#, t.saturating_sub(1)) }); } }      // B-R5, provenance, B-R3
+        let wait = r.below(10) < 4 && !kv.iter().any(|k| k.contains("await")); if wait { kv.push(r#""await":true"#.into()); }
+        if r.below(5) == 0 { kv.push(r#""error":true"#.into()); }
+        if r.below(4) == 0 { kv.push(format!(r#""elapsed_hours":{}"#, r.below(4) as f64 * 0.5)); }
+        if ok { self.open = live.into_iter().filter(|n| Some(*n) != pays && Some(*n) != cancels).collect();
+            if wait { self.open.push(t); self.awaited.push(t); while self.open.len() > 8 { self.open.remove(0); } } self.t += 1; }
+        (format!("{{{}}}", kv.join(",")), ok)
+    }
+}
+
+/// P3c: a refused event changes nothing, with payments. 40 individuals x 300 random events with random `await`, `for` and
+/// `cancel` (late, reordered, duplicated, cancelled, unknown, mismatched, malformed): the run with the refused events equals the
+/// run without them, byte for byte (every stance, the strand with a checkpoint after each event, the final state)
+#[test]
+fn p3c_a_refused_payment_changes_nothing() {
+    let (mut refused, mut accepted, mut paid, mut late) = (0usize, 0usize, 0usize, 0usize);
+    for seed in 0..40u64 {
+        let (mut r, mut book) = (Mix(0xC4ED_17C0 + seed), Book { t: 0, open: vec![], awaited: vec![] });
+        let (evs, model): (Vec<String>, Vec<bool>) = (0..300).map(|_| book.event(&mut r)).unzip();
+        let all = events_file("p3c-all.jsonl", &evs);
+        let st = init(ADDRESSED, seed, "p3c-state.json"); let strand = tmp("p3c.strand"); clean(&[&strand]);
+        let (c, out, _) = live(ADDRESSED, &st, &all, &strand, "1");
+        let docs: Vec<&str> = out.lines().collect(); assert_eq!(docs.len(), 300, "seed {seed}: one line per event");
+        let ok: Vec<usize> = (0..300).filter(|&i| !docs[i].starts_with(r#"{"error""#)).collect();
+        for i in 0..300 { assert_eq!(ok.contains(&i), model[i], "seed {seed} event {i}: the model of B.2-B.3 and the engine disagree on {}: {}", evs[i], docs[i]); }
+        assert_eq!(c, if ok.len() < 300 { 2 } else { 0 }, "seed {seed}");
+        refused += 300 - ok.len(); accepted += ok.len();
+        for &i in &ok { let p = s(&parse(docs[i]), &["credit", "paid"]).clone(); if p != Json::Null { paid += 1; if s(&p, &["e"]).as_f64() != Some(1.0) { late += 1; } } }
+        let kept = events_file("p3c-kept.jsonl", &ok.iter().map(|&i| evs[i].clone()).collect::<Vec<_>>());
+        let st2 = init(ADDRESSED, seed, "p3c-state2.json"); let strand2 = tmp("p3c2.strand"); clean(&[&strand2]);
+        let (c, out2, e) = live(ADDRESSED, &st2, &kept, &strand2, "1"); assert_eq!(c, 0, "seed {seed}: {e}");
+        assert_eq!(out2, ok.iter().map(|&i| format!("{}\n", docs[i])).collect::<String>(), "seed {seed}: the stances");
+        assert_eq!(read(&strand2), read(&strand), "seed {seed}: the strand"); assert_eq!(read(&st2), read(&st), "seed {seed}: the state");
+        let (c, v, e) = probbit(&["live", "verify", &strand]); assert_eq!((c, s(&parse(&v), &["ok"])), (0, &Json::Bool(true)), "seed {seed}: {e}");
+        clean(&[&st, &strand, &st2, &strand2, &all, &kept]);
+    }
+    eprintln!("p3c: {refused} refused, {accepted} accepted, {paid} paid ({late} late)");
+    assert!(refused >= 1000 && accepted >= 4000 && late >= 200, "a mix: {refused} refused, {accepted} accepted, {paid} paid, {late} late");
+}
+
+/// Each refusal row (B-R1 to B-R6) refuses its event whole: one {"error"} at its path, exit 2, and the run equals the run without
+/// the event, byte for byte (stances, strand, state)
+#[test]
+fn every_refusal_row_changes_nothing() {
+    // turn 0 and 1 await, 2 pays 0, 3 awaits and 4 cancels it, 5 awaits: then turn 6 has 1 and 5 open, 5 the previous stance
+    let base = lines_of(&[r#"{"await":true}"#, r#"{"await":true,"error":true,"src":"env:probe"}"#, r#"{"praise":true,"for":0,"src":"env:probe"}"#, r#"{"await":true}"#,
+        r#"{"cancel":[3],"src":"env:executor"}"#, r#"{"await":true}"#]);
+    let tail = lines_of(&[r#"{"praise":true,"for":5,"src":"env:probe"}"#, r#"{"cancel":[1],"src":"env:executor"}"#, r#"{"praise":true,"src":"env:probe"}"#]);
+    let z = "0".repeat(64);
+    let rows: Vec<(&str, String, &str)> = vec![("B-R1", r#"{"praise":true,"src":"env:probe"}"#.into(), "inputs.for"), ("B-R2 paid", r#"{"praise":true,"for":0,"src":"env:probe"}"#.into(), "inputs.for"),
+        ("B-R2 cancelled", r#"{"praise":true,"for":3,"src":"env:probe"}"#.into(), "inputs.for"), ("B-R2 never opened", r#"{"praise":true,"for":2,"src":"env:probe"}"#.into(), "inputs.for"),
+        ("B-R2 to come", r#"{"praise":true,"for":9,"src":"env:probe"}"#.into(), "inputs.for"), ("B-R3", r#"{"for":1}"#.into(), "inputs.for"),
+        ("B-R4 not open", r#"{"cancel":[3],"src":"env:executor"}"#.into(), "inputs.cancel[0]"), ("B-R4 twice", r#"{"cancel":[1,1],"src":"env:executor"}"#.into(), "inputs.cancel[1]"),
+        ("B-R4 paid now", r#"{"praise":true,"for":1,"cancel":[1],"src":"env:probe"}"#.into(), "inputs.cancel[0]"), ("B-R5 await", r#"{"await":1}"#.into(), "inputs.await"),
+        ("B-R5 for", r#"{"praise":true,"for":-1,"src":"env:probe"}"#.into(), "inputs.for"), ("B-R5 cancel", r#"{"cancel":3,"src":"env:executor"}"#.into(), "inputs.cancel"),
+        ("B-R5 cancel src", r#"{"cancel":[1],"src":"self"}"#.into(), "inputs.src"),
+        ("B-R6", format!(r#"{{"praise":true,"for":{{"turn":1,"stance":"sha256:{z}"}},"src":"env:probe"}}"#), "inputs.for.stance")];
+    let without: Vec<String> = base.iter().chain(&tail).cloned().collect(); let ev0 = events_file("rows-without.jsonl", &without);
+    let st0 = init(ADDRESSED, 3, "rows-state0.json"); let strand0 = tmp("rows0.strand"); clean(&[&strand0]);
+    let (c, out0, e) = live(ADDRESSED, &st0, &ev0, &strand0, "1"); assert_eq!(c, 0, "{e}");
+    for (row, ev, path) in &rows {
+        let with: Vec<String> = base.iter().cloned().chain([ev.clone()]).chain(tail.iter().cloned()).collect(); let ev1 = events_file("rows-with.jsonl", &with);
+        let st = init(ADDRESSED, 3, "rows-state.json"); let strand = tmp("rows.strand"); clean(&[&strand]);
+        let (c, out, e) = live(ADDRESSED, &st, &ev1, &strand, "1"); assert_eq!(c, 2, "{row}: {e}");
+        let lines: Vec<&str> = out.lines().collect(); let err = parse(lines[6]);
+        assert!(err.get("error").is_some() && jw(&err).contains(&format!("\"events[6].{path}\"")), "{row}: {}", lines[6]);
+        assert_eq!(lines.iter().enumerate().filter(|(i, _)| *i != 6).map(|(_, l)| format!("{l}\n")).collect::<String>(), out0, "{row}: the stances");
+        assert_eq!((read(&strand), read(&st)), (read(&strand0), read(&st0)), "{row}: the strand and the state");
+        clean(&[&st, &strand, &ev1]);
+    }
+    clean(&[&st0, &strand0, &ev0]);
+}
+
+/// A control line closes every open decision (closed as control): `live verify` lists them in `open` before it and none after,
+/// the next stance lists them as closed, a payment naming one is refused (B-R2), and the strand replays
+#[test]
+fn control_lines_close_open_decisions() {
+    let st = init(ADDRESSED, 0, "ctl-state.json"); let strand = tmp("ctl.strand"); clean(&[&strand]);
+    let ev = events_file("ctl1.jsonl", &lines_of(&[r#"{"await":true}"#, r#"{"await":true}"#, "{}"]));
+    let (c, _, e) = live(ADDRESSED, &st, &ev, &strand, "1"); assert_eq!(c, 0, "{e}");
+    let open = |f: &str| { let (c, v, e) = probbit(&["live", "verify", f]); assert_eq!(c, 0, "{e}"); let v = parse(&v); assert_eq!(s(&v, &["ok"]), &Json::Bool(true)); jw(s(&v, &["open"])) };
+    assert_eq!(open(&strand), "[0,1]");
+    for what in ["pause", "resume"] { let (c, _, e) = probbit(&["live", "control", &strand, what, "--by", "human:ops", "--reason", "maintenance", "--at", "2026-10-14T09:00:00Z"]); assert_eq!(c, 0, "{e}"); }
+    assert_eq!(open(&strand), "[]");
+    let ev2 = events_file("ctl2.jsonl", &lines_of(&[r#"{"praise":true,"for":1,"src":"env:probe"}"#, r#"{"await":true}"#, r#"{"praise":true,"src":"env:probe"}"#]));
+    let (c, out, e) = live(ADDRESSED, &st, &ev2, &strand, "1"); assert_eq!(c, 2, "{e}");
+    let docs: Vec<Json> = out.lines().map(parse).collect(); assert_eq!(docs.len(), 3);
+    assert!(docs[0].get("error").is_some() && jw(&docs[0]).contains("inputs.for"), "{}", jw(&docs[0]));
+    assert_eq!((jw(s(&docs[1], &["credit", "closed"])), jw(s(&docs[1], &["credit", "open"]))), (r#"[{"as":"control","turn":0},{"as":"control","turn":1}]"#.into(), "[3]".into()));
+    assert_eq!((s(&docs[2], &["credit", "paid", "turn"]).as_f64(), s(&docs[2], &["credit", "paid", "e"]).as_f64()), (Some(3.0), Some(1.0)), "the previous stance, paid unaddressed");
+    assert_eq!(open(&strand), "[]");
+    clean(&[&st, &strand, &ev, &ev2]);
+}
+
+/// `probbit check` on a persona with a credit block: the retry rule held by its habit, and a strand with late, cancelled and
+/// digest-bound payments replays
+#[test]
+fn probbit_check_holds_a_credit_persona() {
+    let props = tmp("retry-props.json"); std::fs::write(&props, r#"{"props":[{"id":"ask_after_two_errors","when":{"error_streak":2},"then":{"action":["ask"]}}]}"#).unwrap();
+    let golden = parse(&read(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/agent-harness/golden/events.json")));
+    let ev = events_file("check-credit.jsonl", &golden.as_arr().unwrap().iter().map(jw).collect::<Vec<_>>());
+    let st = init(ADDRESSED, 0, "check-credit-state.json"); let strand = tmp("check-credit.strand"); clean(&[&strand]);
+    let (c, _, e) = live(ADDRESSED, &st, &ev, &strand, "4"); assert_eq!(c, 0, "{e}");
+    let (c, out, e) = probbit(&["check", ADDRESSED, "--props", &props, "--seeds", "0-9", "--strand", &strand]); assert_eq!(c, 0, "{out}\n{e}");
+    assert!(out.lines().any(|l| l.starts_with("rule    ") && l.contains("ask_after_two_errors") && l.contains("held")), "{out}");
+    assert!(out.ends_with("check: held 1 · broken 0 · unproven 0 · strands 1/1\n"), "{out}");
+    clean(&[&st, &strand, &ev, &props]);
 }
 
 /// `probbit check` reuses the lint pipeline: on the sensed persona both habit rules are held by construction, and a sensed

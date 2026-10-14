@@ -3338,4 +3338,122 @@ mod tests {
         let q = build(&json::parse(&BOX.replace("2.5", "6.5")).unwrap()).unwrap();
         assert_eq!(prove_seed(&q, &props(&q, &rule, "--never", "never").unwrap()[0], 0, &run).ok(), Some((1, 2)));
     }
+
+    // ------------------------------------------------------------- action-addressed feedback (§2.8, RFC 0001 B.2 and B.3)
+    const CREDIT: &str = r#","learning":{"from":["praise","criticism"],"traits":["verbosity","humour"],"rate":0.5,"step_cap":0.2,"total_cap":0.6,"credit":{"max_open":3,"half_life_events":32}}"#;
+    /// One turn on the event `ev`: (stance, new state), or the refusal as "path: message"
+    fn tn(p: &Persona, st: &State, ev: &str) -> Result<(Json, State), String> { turn(p, st, &json::parse(ev).unwrap(), false, &run, false).map_err(|e| format!("{}: {}", e.path, e.msg)) }
+    fn opened(st: &State) -> Vec<u64> { st.open.iter().map(|o| o.turn).collect() }
+
+    /// The RFC arithmetic: a payment `age` events late (age = t − n − 1) gets e = 0.5^(age / 32), 6 decimals (1, 0.937084, 0.805245,
+    /// 0.5 and 0.063869 at ages 0, 3, 10, 32 and 127) and moves the 0.8 step scaled by e; at age 128 the decision has expired
+    /// (closed as expired before anything is paid) and paying it is refused (B-R2)
+    #[test]
+    fn eligibility_halves_per_half_life_and_a_decision_expires_after_four() {
+        let p = persona(CREDIT).unwrap(); let l = p.learning.clone().unwrap();
+        for (age, e) in [(0u64, 1.0), (3, 0.937084), (10, 0.805245), (32, 0.5), (127, 0.063869)] {
+            let mut st = tn(&p, &init(&p, Some(1), true, &run), r#"{"await":true}"#).unwrap().1; let c0 = st.open[0].credit.clone();
+            assert!(c0.iter().any(|(_, v)| v.iter().any(|x| *x != 0.0)), "the awaited stance carries credit");
+            for _ in 0..age { st = tn(&p, &st, "{}").unwrap().1; }
+            let (doc, ns) = tn(&p, &st, r#"{"praise":true,"for":0}"#).unwrap();
+            assert_eq!(g(&doc, &["credit", "paid", "e"]).as_f64(), Some(e), "age {age}");
+            assert_eq!(canon(&table(&ns.learned)), canon(&table(&learn(&l, &c0, 1.0, e, &st.learned))), "age {age}: the step scaled by e");
+            assert_eq!((canon(g(&doc, &["credit", "closed"])), ns.open.len()), (r#"[{"as":"paid","turn":0}]"#.to_string(), 0), "age {age}");
+        }
+        let mut st = tn(&p, &init(&p, Some(1), true, &run), r#"{"await":true}"#).unwrap().1;
+        for _ in 0..128 { st = tn(&p, &st, "{}").unwrap().1; }
+        assert_eq!(opened(&st), [0], "open until an event 128 late");
+        let (doc, ns) = tn(&p, &st, "{}").unwrap(); assert_eq!(canon(g(&doc, &["credit", "closed"])), r#"[{"as":"expired","turn":0}]"#); assert!(ns.open.is_empty());
+        let e = tn(&p, &st, r#"{"praise":true,"for":0}"#).err().unwrap(); assert!(e.starts_with("inputs.for: turn 0 is neither open nor the previous stance (128)"), "{e}");
+    }
+
+    /// At most max_open decisions wait (a fourth `await` evicts the oldest, which can no longer be paid), and every refusal row
+    /// B-R1 to B-R6 refuses its event whole at its path; a payment of a habit-forced stance moves nothing and says `absorbed`
+    #[test]
+    fn eviction_every_refusal_row_and_absorbed() {
+        let p = persona(CREDIT).unwrap(); let mut st = init(&p, Some(2), true, &run); let mut docs = vec![];
+        for _ in 0..4 { let (d, s) = tn(&p, &st, r#"{"await":true}"#).unwrap(); docs.push(d); st = s; }
+        assert_eq!((canon(g(&docs[3], &["credit", "closed"])), canon(g(&docs[3], &["credit", "open"]))), (r#"[{"as":"evicted","turn":0}]"#.to_string(), "[1,2,3]".to_string()));
+        let st = tn(&p, &st, "{}").unwrap().1; // turn 5: open 1, 2, 3; the previous stance is 4
+        let s5 = tn(&p, &st, r#"{"praise":true,"for":1}"#).unwrap().1; let s6 = tn(&p, &s5, r#"{"cancel":[2],"src":"env:executor"}"#).unwrap().1; // turn 7: open 3
+        let z = "0".repeat(64); let d3 = g(&docs[3], &["credit", "stance"]).as_str().unwrap().to_string();
+        let rows: Vec<(&State, String, &str)> = vec![
+            (&st, r#"{"praise":true}"#.into(), "inputs.for: feedback without `for` while other decisions are open (1, 2, 3)"),          // B-R1
+            (&st, r#"{"praise":true,"for":0}"#.into(), "inputs.for: turn 0 is neither open nor the previous stance (4)"),               // B-R2 evicted
+            (&st, r#"{"praise":true,"for":9}"#.into(), "inputs.for: turn 9 is neither open"),                                           // B-R2 future
+            (&s6, r#"{"praise":true,"for":1}"#.into(), "inputs.for: turn 1 is neither open"),                                           // B-R2 paid
+            (&s6, r#"{"praise":true,"for":2}"#.into(), "inputs.for: turn 2 is neither open"),                                           // B-R2 cancelled
+            (&s6, r#"{"praise":true,"for":4}"#.into(), "inputs.for: turn 4 is neither open"),                                           // B-R2 never opened
+            (&st, r#"{"for":1}"#.into(), "inputs.for: this event carries no feedback"),                                                 // B-R3
+            (&st, r#"{"cancel":[0],"src":"env"}"#.into(), "inputs.cancel[0]: turn 0 is not open (open: 1, 2, 3)"),                      // B-R4 not open
+            (&st, r#"{"cancel":[1,1],"src":"env"}"#.into(), "inputs.cancel[1]: listed twice"),                                          // B-R4 twice
+            (&st, r#"{"praise":true,"for":1,"cancel":[1],"src":"env"}"#.into(), "inputs.cancel[0]: turn 1 is the decision this event's feedback pays"), // B-R4 paid now
+            (&st, r#"{"await":"yes"}"#.into(), "inputs.await: "), (&st, r#"{"await":1}"#.into(), "inputs.await: "),                     // B-R5
+            (&st, r#"{"praise":true,"for":1.5}"#.into(), "inputs.for: "), (&st, r#"{"praise":true,"for":-1}"#.into(), "inputs.for: "),
+            (&st, r#"{"praise":true,"for":"1"}"#.into(), "inputs.for: "), (&st, r#"{"praise":true,"for":{"turn":1}}"#.into(), "inputs.for"),
+            (&st, r#"{"praise":true,"for":{"turn":1,"stance":"1"}}"#.into(), "inputs.for.stance: "),
+            (&st, r#"{"cancel":1,"src":"env"}"#.into(), "inputs.cancel: "), (&st, r#"{"cancel":[1,2,3,4],"src":"env"}"#.into(), "inputs.cancel: "),
+            (&st, r#"{"cancel":[0.5],"src":"env"}"#.into(), "inputs.cancel[0]: "), (&st, r#"{"cancel":[1]}"#.into(), "inputs.src: a cancel needs a source"),
+            (&st, r#"{"cancel":[1],"src":"self"}"#.into(), "inputs.src: a cancel needs a source"), (&st, r#"{"cancel":[1],"src":"clock"}"#.into(), "inputs.src: a cancel needs a source"),
+            (&s6, format!(r#"{{"praise":true,"for":{{"turn":3,"stance":"sha256:{z}"}}}}"#), "inputs.for.stance: turn 3's stance is sha256:"), // B-R6
+        ];
+        for (s, ev, want) in &rows { let e = tn(&p, s, ev).map(|_| "accepted".to_string()).unwrap_or_else(|e| e); assert!(e.starts_with(want), "{ev}: {e}"); }
+        // the digest-bound payment of the stance it names is accepted and echoes it
+        let (doc, ns) = tn(&p, &s6, &format!(r#"{{"praise":true,"for":{{"turn":3,"stance":"{d3}"}}}}"#)).unwrap();
+        assert_eq!((g(&doc, &["credit", "paid", "stance"]).as_str(), g(&doc, &["credit", "paid", "turn"]).as_f64(), opened(&ns)), (Some(d3.as_str()), Some(3.0), vec![]));
+        // a habit-forced stance carries no credit: paying it moves nothing (absorbed), and learned_from does not count it
+        let q = persona(&CREDIT.replace(r#""traits":["verbosity","humour"]"#, r#""traits":["humour"]"#)).unwrap();
+        let s1 = tn(&q, &init(&q, Some(3), true, &run), r#"{"loss":true,"await":true}"#).unwrap().1; let s2 = tn(&q, &s1, "{}").unwrap().1;
+        let (doc, s3) = tn(&q, &s2, r#"{"praise":true,"for":0}"#).unwrap();
+        assert_eq!((g(&doc, &["credit", "paid", "absorbed"]), &s3.learned), (&Json::Bool(true), &s2.learned));
+    }
+
+    /// The credit state is read strictly: at most max_open open decisions, turns increasing and before the state's turn, credits
+    /// within ±1, stance digests; prev_stance a digest after the first turn; without the block the fields are refused
+    #[test]
+    fn the_credit_state_is_strict() {
+        let p = persona(CREDIT).unwrap(); let mut st = init(&p, Some(4), true, &run);
+        for ev in [r#"{"await":true}"#, r#"{"await":true}"#, "{}"] { st = tn(&p, &st, ev).unwrap().1; }
+        assert_eq!((opened(&st), State::read(&p, &st.to_json(&p)).is_ok()), (vec![0, 1], true));
+        let bad = |f: &dyn Fn(&mut State)| { let mut s = st.clone(); f(&mut s); s.seal(&p); err(State::read(&p, &s.to_json(&p))) };
+        let cases: Vec<(String, &str)> = vec![(bad(&|s| s.open[0].credit[0].1[0] = 1.5), "state.open_credit[0].credit"), (bad(&|s| s.open[1].turn = 0), "state.open_credit[1].turn"),
+            (bad(&|s| s.open[1].turn = 3), "state.open_credit[1].turn"), (bad(&|s| s.open[0].stance = "sha256:1".into()), "state.open_credit[0].stance"),
+            (bad(&|s| { let o = s.open[1].clone(); for k in 0..2 { s.open.push(Open { turn: o.turn + 1 + k, ..o.clone() }); } s.turn += 2; }), "state.open_credit"),
+            (bad(&|s| s.prev_stance = None), "state.prev_stance"), (bad(&|s| s.control_closed = vec![2, 1]), "state.control_closed[1]")];
+        for (e, want) in &cases { assert!(e.starts_with(want), "{want}: {e}"); }
+        // the same fields for a persona without the block are refused by name
+        let o = persona(LEARN).unwrap(); let Json::Obj(v) = st.to_json(&p) else { unreachable!() };
+        let mut v: Vec<(String, Json)> = v.into_iter().filter(|(k, _)| k != "digest").map(|(k, x)| if k == "persona" { (k, json::parse(&canon(&x).replace(&p.digest, &o.digest)).unwrap()) } else { (k, x) }).collect();
+        let d = sha(&Json::Obj(v.clone())); v.push(("digest".into(), Json::Str(d)));
+        let e = err(State::read(&o, &Json::Obj(v))); assert!(e.contains("this persona has no credit block (learning.credit)"), "{e}");
+    }
+
+    /// e = 1 is 0.8 (RFC 0001 B.2, B.4): on every shipped learning persona, a copy with a credit block whose feedback names the
+    /// previous stance (`for: t − 1`), and the same copy unaddressed, learn exactly what the persona without the block learns: the
+    /// same Δ and learned_from after every turn
+    #[test]
+    fn paying_the_previous_stance_by_name_learns_as_0_8() {
+        let ex = |f: &str| format!("{}/../examples/{f}", env!("CARGO_MANIFEST_DIR"));
+        let with = |doc: &Json, c: Option<Json>| { let Json::Obj(v) = doc else { unreachable!() };
+            build(&Json::Obj(v.iter().map(|(k, x)| (k.clone(), if k != "learning" { x.clone() } else {
+                let mut l: Vec<(String, Json)> = x.as_obj().unwrap().iter().filter(|(k, _)| k != "credit").cloned().collect();
+                if let Some(c) = &c { l.push(("credit".into(), c.clone())); } Json::Obj(l) })).collect())).unwrap() };
+        let go = |p: &Persona, st: &State, e: &[(String, Json)]| turn_any_source(p, st, &event_json(e), false, &run, false).unwrap().1;
+        for (i, f) in ["agent-harness/adaptive.json", "agent-harness/guarded.json", "agent-harness/addressed.json", "persona/sensed.yaml", "persona/dispatch-policy.yaml"].iter().enumerate() {
+            let doc = load(&ex(f)).unwrap().1; let (old, new) = (with(&doc, None), with(&doc, Some(json::parse(r#"{"max_open":8,"half_life_events":32}"#).unwrap())));
+            assert!(old.credit().is_none() && new.credit().is_some(), "{f}");
+            let alpha = alphabet(&old, &[0.5, 1.0], &[0.5, 6.0]); let mut r = Philox4x32::new(77, i as u64); let seed = Some(i as u64);
+            let (mut so, mut sa, mut sb) = (init(&old, seed, true, &run), init(&new, seed, true, &run), init(&new, seed, true, &run)); let mut moved = 0;
+            for t in 0..160u64 {
+                let mut e: Vec<(String, Json)> = vec![];
+                for (id, kind, vals) in &alpha { if r.f64() < if learning_flag(&old, id) { 0.5 } else if *kind == "flag" { 0.3 } else { 0.2 } { e.push((id.clone(), vals[r.below(vals.len())].clone())); } }
+                let mut named = e.clone();
+                if t > 0 && e.iter().any(|(k, x)| learning_flag(&old, k) && *x == Json::Bool(true)) { named.push(("for".into(), Json::Num((t - 1) as f64))); }
+                let (no, na, nb) = (go(&old, &so, &e), go(&new, &sa, &named), go(&new, &sb, &e));
+                for s in [&na, &nb] { assert_eq!((canon(&table(&s.learned)), &s.learned_from), (canon(&table(&no.learned)), &no.learned_from), "{f} turn {t}"); }
+                if no.learned != so.learned { moved += 1; }
+                (so, sa, sb) = (no, na, nb); }
+            assert!(moved >= 5, "{f}: feedback moved the deltas on {moved} turns"); // a one-sided learner reaches total_cap in 8 steps
+        }
+    }
 }
