@@ -10,9 +10,10 @@ PROBBIT_BIN=target/release/probbit python3 bench/individuality/run.py --only a,b
 PROBBIT_BIN=target/release/probbit python3 bench/individuality/p0.py check             # P0: byte-identical documents
 ```
 
-**This release** ships senses (RFC 0001 Design A) and metrics a, b, d and e. Metric c (credit) needs action-addressed feedback
-(Design B) and metric f a lineage budget (Design C); `run.py` skips both with a note. Without the credit block, rewards pay the
-stance just before them, so the streams below carry no `await` or `for` keys.
+**This release** ships senses (RFC 0001 Design A), action-addressed feedback (Design B) and metrics a, b, c, d and e. Metric f
+needs a lineage budget (Design C); `run.py` skips it with a note. Metric a's frozen streams carry no `await` or `for` keys (the
+fixture was frozen before Design B, so its rewards pay the stance just before them); `twins_addressed.py` re-measures it with
+the credit block and addressed feedback added at run time.
 
 **Freezing.** The fixtures, generators and bars are committed with their sha256 in `fixtures/MANIFEST` before any run.
 `run.py` checks every listed file before it measures anything (exit 2 when one differs). Any later change is logged at the end
