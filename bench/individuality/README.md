@@ -201,3 +201,8 @@ d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 sta
   metric c section above) were added to MANIFEST in their own section before their first run; `run.py` runs metric c.
   `fixtures/sensed-plain.yaml` (metric a's reported control: the senses replaced by plain 0.8 number inputs) was frozen in
   the same section. No earlier fixture, stream or bar changed.
+- `credit.py` after its first run (no fixture, bar or gated computation changed; every gated value was the same in each
+  run): the 50 runs go side by side (the host waits on each stance, so a run is latency-bound); a run that refused no
+  event is not re-run (without refused events it is the same run, and metric d replays every strand); the reported
+  eviction and expiry shares are given per run, with the age of the addressed payments. The first run's numbers stay in
+  the history: c1, c2, c3 and c4 1.0, 50/50 pairs identical.

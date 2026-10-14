@@ -29,7 +29,7 @@ P_GOOD = {"act": 0.8, "ask": 0.4}
 LEVELS = ["act", "ask"]
 RATE, STEP_CAP, TOTAL_CAP, HALF_LIFE, MAX_OPEN = 0.3, 0.05, 0.4, 32, 8
 TOL = 1e-6 + 1e-12
-WORKERS = 4
+WORKERS = 50  # the host waits on each stance: the runs are latency-bound, so all 50 run side by side
 
 
 def r6(x):
@@ -226,8 +226,10 @@ def evaluate(tmp, r):
     for m in r["msgs"]:
         m["open_on_arrival"] = m["n"] in at[m["step"]]["open"]
         m["ambiguous"] = any(n != at[m["step"]]["t"] - 1 for n in at[m["step"]]["open"])
-    s["identical"] = rerun_identical(tmp, r)
     s["refused_events"] = sum(1 for x in r["lines"] if x.startswith('{"error"'))
+    # without a refused event the run without them is the same run (metric d replays every strand)
+    s["identical"] = rerun_identical(tmp, r) if s["refused_events"] else True
+    s["reran"] = bool(s["refused_events"])
     return s
 
 
@@ -257,21 +259,26 @@ def metric(bars_c, tmp=None):
     wk = [m for r in by("workaround") for m in r["msgs"] if m["kind"] == "outcome"]
     act_rate = {run: common.r6(sum(r["level"][k] == "act" for r in by(run) for k in range(DECISIONS - 100, DECISIONS)) / (100 * len(SEEDS)))
                 for run in ("stream1", "addressed", "v08", "workaround")}
-    closed = {"evicted": 0, "expired": 0}
+    closed = {run: {"evicted": 0, "expired": 0} for run in ("stream1", "addressed", "unaddressed")}
+    ages = []
     for r in runs:
         if r["block"]:
             for line in r["lines"]:
-                for c in (json.loads(line).get("credit") or {}).get("closed", []):
-                    if c["as"] in closed:
-                        closed[c["as"]] += 1
+                c = json.loads(line).get("credit") or {}
+                for x in c.get("closed", []):
+                    if x["as"] in closed[r["run"]]:
+                        closed[r["run"]][x["as"]] += 1
+                if r["run"] == "addressed" and c.get("paid"):
+                    ages.append(json.loads(line)["turn"] - c["paid"]["turn"] - 1)
     decisions = len(SEEDS) * DECISIONS
+    ages.sort()
     kinds = {k: len(msgs("addressed", k)) for k in ("outcome", "cancel", "dup", "stray", "unknown")}
     res = {
         "scope": "fixtures/dispatch.yaml (dispatch-noblock.yaml for iii and iv), individuals 0-9, 300 decisions each, 5 runs; "
                  "stream 2: outcomes 0-6 events late, 10 % cancelled, 5 % sent twice, 2 % of events paying a turn never opened",
         "c1": common.r6(c1), "c2": common.r6(c2), "c3": common.r6(c3), "c4": common.r6(c4),
         "c1_payments": tot("payments"), "c2_events": tot("events"), "c3_outcomes_open_on_arrival": len(on_arrival),
-        "c4_refusable": len(bad), "c4_pairs_identical": "%d/%d" % (pairs, len(stats)),
+        "c4_refusable": len(bad), "c4_pairs_identical": "%d/%d" % (pairs, len(stats)), "c4_runs_rerun": tot("reran"),
         "open_set_mismatches": tot("open_mismatch"), "refused_events": tot("refused_events"),
         "addressed_messages": kinds,
         "reported": {
@@ -279,7 +286,10 @@ def metric(bars_c, tmp=None):
             "v08_duplicates_strays_unknowns_accepted": len(msgs("v08", "dup", "stray", "unknown")),
             "workaround_outcomes_kept": common.r6(sum(m["fate"] == "sent" for m in wk) / len(wk)) if wk else None,
             "act_rate_last_100": act_rate,
-            "evicted_share": common.r6(closed["evicted"] / (3 * decisions)), "expired_share": common.r6(closed["expired"] / (3 * decisions)),
+            "evicted_share": {k: common.r6(v["evicted"] / decisions) for k, v in closed.items()},
+            "expired_share": {k: common.r6(v["expired"] / decisions) for k, v in closed.items()},
+            "addressed_paid_age": {"max": ages[-1], "p50": ages[len(ages) // 2], "p95": ages[int(len(ages) * 0.95)],
+                                   "share_at_most_6": common.r6(sum(a <= 6 for a in ages) / len(ages))} if ages else None,
             "addressed_outcomes_not_open_on_arrival": sum(not m["open_on_arrival"] for m in msgs("addressed", "outcome")),
             "unsettled_at_end_addressed": sum(r["unsettled"] for r in by("addressed")),
         },
