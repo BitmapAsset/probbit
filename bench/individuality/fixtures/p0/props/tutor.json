@@ -1,0 +1,1 @@
+{"props": [{"id": "no_playful_when_upset", "when": {"sentiment": "negative"}, "then": {"humour": {"at_most": "light"}}}]}
