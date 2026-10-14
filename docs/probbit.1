@@ -12,6 +12,8 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
 \fBprobbit\fR live verify STRAND [\-\-from\-checkpoint]
 \fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
         [\-\-at TIME]
+\fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
+        [\-\-depth N] [\-\-hours LIST] [\-\-json]
 \fBprobbit\fR monitor STRAND [\-\-follow] [\-\-once] [\-\-plain] [\-\-fps N] [\-\-serve]
         [\-\-open] [\-\-port N]
 \fBprobbit\fR monitor \-\-demo [week|drives] [\-\-once] [\-\-plain] [\-\-serve]
@@ -331,6 +333,49 @@ Examples:
 probbit live examples/persona/tutor.yaml \-\-seed 2 \-\-demo week
 probbit live examples/persona/tutor.yaml \-\-clock fixed \-\-strand pip.strand < events.jsonl
 probbit live verify pip.strand
+.fi
+.RE
+.SS check
+one CI gate: prove + fuzz a persona's rules, replay its strands (exit 0 / 1 / 3)
+.PP
+.nf
+\fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
+        [\-\-depth N] [\-\-hours LIST] [\-\-json]
+.fi
+.PP
+The rule lock in one command, for CI: vet the rules a persona must keep before its first task and after every policy update, then replay the receipts. It runs `probbit persona lint`'s pipeline (contradicting habits; with \-\-props, prove each rule over the individuals, then fuzz the ones the bound leaves unknown, the rules' and habits' thresholds on the grid) and `probbit live verify` on every \-\-strand (each strand replays against the persona in its own header).
+.PP
+One line per rule (held = proved for every event sequence, held_by_construction = a habit implies it, broken seed N = the search found a counterexample, unproven = not proved and no counterexample found), one line per strand (ok N events, or FAIL and the first line that differs), then `check: held H \[u00B7] broken B \[u00B7] unproven U \[u00B7] strands S/T`.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-props\fR \fIFILE\fR
+rules from a file ({"props": [...]}, each with an optional id; YAML subset, or .json)
+.TP
+\fB\-\-strand\fR \fIFILE\fR
+a strand to replay (`probbit live \-\-strand` writes one); give it once per strand
+.TP
+\fB\-\-seeds\fR \fILIST\fR
+the individuals: 0\-99 (default), 7, 1,4,9 or 0\-9,20\-29; seeds 0 to 2^53, at most 100000
+.TP
+\fB\-\-depth\fR \fIN\fR
+events per fuzzed script, 1 to 64 (default 8)
+.TP
+\fB\-\-hours\fR \fILIST\fR
+comma\-separated idle hours the fuzzer tries between events (default 1,12,48)
+.TP
+\fB\-\-json\fR
+one document: {persona, props, seeds, depth, hours, rules (the persona lint document), strands [{path, ok, events, final_state, error?}], verdict {held, broken, unproven, conflicts, strands_ok, strands_total, exit}}
+.RE
+.PP
+\fIexit\fR: 0 every rule held and every strand replays; 1 a rule broken, an unresolved habit contradiction or a strand that fails (1 wins over 3); 2 a bad persona, rule file or flag (one {"error"} object on stdout, code "persona", when stdout is not a terminal or with \-\-json); 3 the only problem is an unproven rule.
+.PP
+Examples:
+.RS 4
+.nf
+probbit check examples/persona/dispatch\-policy.yaml \-\-props examples/persona/dispatch\-props.json
+probbit check agent.yaml \-\-props rules.yaml \-\-strand day1.strand \-\-strand day2.strand \-\-json > check.json
 .fi
 .RE
 .SS monitor

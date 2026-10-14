@@ -482,6 +482,26 @@ Python `probbit.persona_fuzz` / `persona_prove` give the same documents. Both co
 words a model writes; "none found" from `fuzz` is evidence over the scripts it searched, not a proof
 ([docs/persona.md](docs/persona.md) §5.6 has the bound and its limits).
 
+### Check in CI: `probbit check`
+
+`probbit check` is the rule lock in one command: vet the rules a persona must keep before its first task and after every
+policy update, then replay the receipts (the strands it wrote). It runs `persona lint`'s pipeline on `--props` (prove each
+rule, fuzz the unknown ones) and `live verify` on every `--strand`:
+
+```sh
+probbit check examples/persona/dispatch-policy.yaml --props examples/persona/dispatch-props.json --strand day1.strand
+#   rule    risky_work_asks        held_by_construction
+#   rule    repeated_failures_ask  held_by_construction
+#   rule    routine_work_acts      held_by_construction
+#   strand  day1.strand            ok 5 events
+#   check: held 3 · broken 0 · unproven 0 · strands 1/1
+```
+
+Exit 0 when every rule is held and every strand replays; 1 when a rule is broken, a habit contradiction is unresolved or a
+strand fails (1 wins); 3 when the only problem is an unproven rule (the bound cannot decide it and the search found no
+counterexample); 2 for a bad persona, rule file or flag. `--json` prints one document with the `persona lint` report under
+`rules`, one entry per strand and the verdict counts.
+
 ### Live: an individual on a clock, learning inside caps
 
 `probbit live` keeps one individual running: JSONL events in, one stance per event out. A clock stamps the hours between events,

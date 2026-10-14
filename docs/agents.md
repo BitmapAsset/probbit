@@ -191,6 +191,13 @@ const answer = call(2, JSON.stringify(request));   // flags go in a "flags" obje
 
 Agent runtimes with a decision-model slot (see the provider package).
 
+## Check in CI
+
+`probbit check PERSONA --props rules.json [--strand FILE]...` vets a persona's rules (prove, then fuzz the unknown ones) and
+replays its strands in one call: exit 0 all held and replayed, 1 a rule broken or a strand failing, 3 only unproven rules,
+2 bad input. `--json` gives one document for a script to read. In GitHub Actions the repository is itself an action
+(README, "Check in CI").
+
 ## For agents with a shell tool
 
 Coding agents with a shell tool call probbit the same way a script does: they run the command, read the JSON, and branch on

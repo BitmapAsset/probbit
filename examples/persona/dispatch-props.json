@@ -1,0 +1,7 @@
+{
+ "props": [
+  {"id": "risky_work_asks", "when": {"blast": 0.7}, "then": {"action": ["ask"]}},
+  {"id": "repeated_failures_ask", "when": {"error_streak": 2}, "then": {"action": ["ask"]}},
+  {"id": "routine_work_acts", "when": {"blast": {"at_most": 0}, "error": false, "error_streak": {"at_most": 0}}, "then": {"action": ["act"]}}
+ ]
+}
