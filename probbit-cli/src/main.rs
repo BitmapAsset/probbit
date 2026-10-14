@@ -43,16 +43,33 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// 2>&1 >/dev/null | true`, or `--progress` into `head -c 1`: exit 134 with panic = abort, the decision lost to a log line). A
 /// failed write to stderr is ignored: the command keeps its stdout and its exit code.
 fn err_line(s: &str) { let _ = writeln!(std::io::stderr(), "{s}"); }
-fn fail(msg: &str) -> ! { tui::top_stop(); err_line(&format!("probbit: {msg}")); exit(2) }
+/// The error channel (R94, docs/CHEATSHEET.md "Errors"): a human line on stderr, always. A bad input document also gets its
+/// `{"error"}` object on stdout when stdout is not a terminal (every wrapper reads it there: python/, mcp.rs, npm, the examples) or
+/// with `--json`; at a terminal without `--json`, only the line. Usage errors (`fail`: an unknown command, subcommand or flag, a bad
+/// flag value) stay off stdout unless `--json` is given, so a piped caller tells them from input errors by an empty stdout.
+static JSON_FLAG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn json_flag() -> bool { JSON_FLAG.load(std::sync::atomic::Ordering::Relaxed) }
+/// An input error's object goes to stdout (see `JSON_FLAG`)
+fn error_object(e: &Json) { if json_flag() || !theme::stdout_is_terminal() { emit(&json::write(e, false)); } }
+fn fail(msg: &str) -> ! { fail_as("flag", msg, None) }
+/// `fail` with the code of the `--json` object and, for an unknown command or subcommand, its `suggestion` (a name or null)
+fn fail_as(code: &str, msg: &str, suggestion: Option<Option<&str>>) -> ! {
+    tui::top_stop(); err_line(&format!("probbit: {msg}"));
+    if json_flag() {
+        let mut e = vec![("code", jstr(code)), ("path", jstr("")), ("message", jstr(msg))];
+        if let Some(s) = suggestion { e.push(("suggestion", s.map_or(Json::Null, jstr))); }
+        emit(&json::write(&obj(vec![("error", obj(e))]), false));
+    }
+    exit(2)
+}
 /// An unknown command (`sub` None) or subcommand of `cmd`: exit 2 with the closest name (`usage::suggest`) if there is one:
 /// `probbit: unknown command "persna"; did you mean "persona"? see `probbit --help``
 fn unknown(cmd: Option<&Command>, word: &str) -> ! {
     let (what, cands, see): (String, Vec<&str>, String) = match cmd {
         None => ("unknown command".into(), COMMANDS.iter().map(|c| c.name).collect(), "probbit --help".into()),
         Some(c) => (format!("unknown {} subcommand", c.name), c.subs.iter().map(|s| s.name).collect(), format!("probbit {} --help", c.name)) };
-    match usage::suggest(word, &cands) {
-        Some(s) => fail(&format!("{what} {word:?}; did you mean {s:?}? see `{see}`")),
-        None => fail(&format!("{what} {word:?}; see `{see}`")) }
+    let s = usage::suggest(word, &cands);
+    fail_as("command", &match s { Some(s) => format!("{what} {word:?}; did you mean {s:?}? see `{see}`"), None => format!("{what} {word:?}; see `{see}`") }, Some(s))
 }
 /// Exit with `code`, releasing a strand's writer lock this process holds first (live.rs `Lock`; `std::process::exit` skips `Drop`)
 fn exit(code: i32) -> ! { live::release_held(); std::process::exit(code) }
@@ -94,10 +111,10 @@ fn emit_raw(s: &str) {
 }
 fn emit(s: &str) { emit_raw(&format!("{s}\n")) }
 
-/// Bad input (JSON, schema, values): ONE structured error object on stdout, a human line on stderr, exit 2.
+/// Bad input (JSON, schema, values): a human line on stderr and ONE structured error object on stdout (`error_object`), exit 2.
 fn bad_input(what: &str, e: json::InErr) -> ! {
     err_line(&format!("probbit: {what}{}{}", if e.path.is_empty() { String::new() } else { format!("{}: ", e.path) }, e.msg));
-    emit(&json::write(&e.to_json(), false)); exit(2)
+    error_object(&e.to_json()); exit(2)
 }
 /// Emit a decision; returns its exit code. Every number in it must be finite (docs/probbit-ir-json.md "Numeric contract"). A
 /// gate diagnostic that could not be estimated (R-hat / bound infinite: too few samples, chains stuck at different values) is
@@ -164,7 +181,7 @@ fn finish(mut doc: Json, code: i32, view: &View, bars: &[f64]) -> i32 {
                 g.push(("non_finite".to_string(), Json::Arr(bad.iter().map(|p| jstr(&p["gate.".len()..])).collect()))); } }
         } else {
             let e = json::InErr { code: "numeric", path: bad[0].clone(), msg: format!("{} computed quantit{} not finite (first: {}); no answer is emitted", bad.len(), if bad.len() == 1 { "y is" } else { "ies are" }, bad[0]) };
-            err_line(&format!("probbit: numeric failure: {}", e.msg)); emit(&json::write(&e.to_json(), false)); return 3;
+            err_line(&format!("probbit: numeric failure: {}", e.msg)); error_object(&e.to_json()); return 3;
         }
     }
     if view.summary { doc = summary_doc(&doc, bars, view.cmd); }
@@ -215,7 +232,7 @@ const F_TOP: Flag = Flag { name: "--top", arg: "", help: "live monitor on stderr
 const F_OP: Flag = Flag { name: "--op", arg: "decide|exact|sample", help: "decide = exact tiers, then the sampler; exact / sample = only those (default decide)" };
 const F_DEADLINE: Flag = Flag { name: "--deadline-ms", arg: "N", help: "whole-call deadline (exact N/4, then sampler + polish); answer has `deadline` + `phases`" };
 const F_VIEW: &[Flag] = &[F_PRETTY, F_PROGRESS, F_SUMMARY, F_TOP, F_PLAIN];
-const EXIT_DECIDE: &str = "0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object on stdout) or bad flag (stderr), 3 refused / declined / non-finite result.";
+const EXIT_DECIDE: &str = "0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one {\"error\"} object on stdout when stdout is not a terminal, or with --json) or bad flag (stderr), 3 refused / declined / non-finite result.";
 const CONTROLS_NOTE: (&str, &str) = ("controls", "flag > PROBBIT_* environment > probbit.json > default.");
 const F_P_SEED: Flag = Flag { name: "--seed", arg: "N", help: "the individual: an integer seed from 0 to 2^53 (default: the persona's seed)" };
 const F_P_SCRIPT: Flag = Flag { name: "--script", arg: "JSON|FILE", help: "the turns: a JSON list of per-turn input objects, or {\"turns\": [...]}; inline or a file" };
@@ -228,8 +245,8 @@ const F_P_PROPS: Flag = Flag { name: "--props", arg: "FILE", help: "rules from a
 const F_P_SEEDS: Flag = Flag { name: "--seeds", arg: "LIST", help: "the individuals: 0-99 (default), 7, 1,4,9 or 0-9,20-29; seeds 0 to 2^53, at most 100000" };
 const F_P_THREADS: Flag = Flag { name: "--threads", arg: "N", help: "search threads, 1 to 1024 (default: the logical CPUs)" };
 const F_P_JSON: Flag = Flag { name: "--json", arg: "", help: "the JSON document instead of the readable report" };
-const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\") or bad flag (stderr).";
-const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what), 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event; nothing is written).";
+const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json) or bad flag (stderr).";
+const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what), 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written).";
 pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "persona", aliases: &[], group: "persona", summary: "the individuality layer: persona + state + inputs -> one stance",
         usage: &["persona SUB PERSONA [flags]   (SUB: init turn replay explain diff lint fuzz prove check compile describe)"],
@@ -435,7 +452,7 @@ fn check_flags(args: &[String], values: &[&str], switches: &[&str]) {
             if seen.contains(&a) { fail(&format!("{a} given twice")) } seen.push(a); i += 2; }
         else if a == "--progress" && switches.contains(&a) { if seen.contains(&a) { fail(&format!("{a} given twice")) } seen.push(a);
             i += if args.get(i + 1).is_some_and(|v| v.parse::<u64>().is_ok()) { 2 } else { 1 }; }
-        else if switches.contains(&a) { i += 1; }
+        else if switches.contains(&a) || a == "--json" { i += 1; } // --json: every command (the error channel, `JSON_FLAG`)
         else { fail(&format!("unknown argument {a:?} for `probbit {}` (see `probbit {} --help`)", args[0], args[0])) } }
 }
 /// Optional config file: `$PROBBIT_CONFIG`, else `./probbit.json` if present (keys chains, threads, cpu_limit, mem_limit_mb, priority).
@@ -735,7 +752,7 @@ fn live_cmd(args: &[String]) {
     let engine = persona_engine(); let eng: persona::Engine = &engine;
     let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
     // an error object on stdout, a line on stderr, then the exit: 4 for a lock held by another writer or a paused / retired individual
-    let refuse = |what: &str, e: json::InErr| -> ! { err_line(&format!("probbit: {what}{}: {}", e.path, e.msg)); emit(&json::write(&e.to_json(), false));
+    let refuse = |what: &str, e: json::InErr| -> ! { err_line(&format!("probbit: {what}{}: {}", e.path, e.msg)); error_object(&e.to_json());
         exit(if ["locked", "paused", "retired"].contains(&e.code) { 4 } else { 2 }) };
     if args.get(1).map(String::as_str) == Some("verify") {
         let mut a = vec!["live verify".to_string()]; a.extend(args.iter().skip(3).cloned()); let (v, w) = sub_flags("live", "verify").unwrap(); check_flags(&a, &v, &w);
@@ -798,7 +815,7 @@ fn live_cmd(args: &[String]) {
                 match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
                 if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
             Err(e) => { if ["paused", "retired"].contains(&e.code) { refused += 1 } else { bad += 1 }
-                let e = json::InErr { path: format!("events[{i}].{}", e.path), ..e }; err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); emit(&json::write(&e.to_json(), false)); } } };
+                let e = json::InErr { path: format!("events[{i}].{}", e.path), ..e }; err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); error_object(&e.to_json()); } } };
     match (opt("--events"), watch) {
         // --watch: follow the file as lines are appended (a line counts once its newline is written); stops when the file is removed
         (Some(f), true) => { let mut r = std::io::BufReader::new(std::fs::File::open(&f).unwrap_or_else(|e| fail(&format!("live: cannot read {f}: {e}"))));
@@ -925,6 +942,7 @@ fn help_cmd(args: &[String]) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    JSON_FLAG.store(args.iter().any(|a| a == "--json"), std::sync::atomic::Ordering::Relaxed);
     // `probbit CMD [SUB] ... --help`: the command's help, or the subcommand's when the word after the command is one of its subcommands
     if args.len() >= 2 && args[1..].iter().any(|a| a == "--help" || a == "-h") { if let Some(c) = command(&args[0]) {
         emit_raw(&match args.get(1).and_then(|s| c.sub(s)) { Some(s) => usage::sub_help(c, s), None => usage::command_help(c) }); return; } }

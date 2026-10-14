@@ -131,14 +131,15 @@ pub(crate) fn top_help(cmds: &[Command], version: &str) -> String {
     }
     h += "\nevery command\n";
     h += &item_at("  --help, -h", "usage, every flag with its default, the exit codes (= probbit help COMMAND)", TOP_COL);
-    h += &item_at("  --plain", "no colour, no animation where a command draws (as NO_COLOR=1 or PROBBIT_THEME=plain)", TOP_COL);
+    h += &item_at("  --json", "errors as one {\"error\"} object on stdout, at a terminal and for bad flags too", TOP_COL);
+    h += &item_at("  --plain", "no colour, no animation where it draws (as NO_COLOR=1, PROBBIT_THEME=plain)", TOP_COL);
     h += "\n"; h += &section("exit", EXIT);
     h += "\nexamples:\n";
     for e in TOP_EXAMPLES { h += &format!("  {e}\n"); }
     h
 }
 /// The exit codes of every command (the man page's EXIT STATUS, the top-level help)
-pub(crate) const EXIT: &str = "0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input; 3 refused / declined / non-finite (decide, run, evaluate); 4 refused by a lock, a pause or a retirement (live). Each command's --help has its own list.";
+pub(crate) const EXIT: &str = "0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input (a line on stderr; for bad input also one {\"error\"} object on stdout when stdout is not a terminal); 3 refused / declined / non-finite (decide, run, evaluate); 4 refused by a lock, a pause or a retirement (live). Each command's --help has its own list.";
 pub(crate) const TOP_EXAMPLES: [&str; 6] = [
     "probbit demo | probbit decide --summary --pretty",
     "probbit run --pretty < examples/knapsack-20.json",

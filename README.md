@@ -323,7 +323,8 @@ Problem:
 }
 ```
 - The document is checked strictly (types, unknown fields, duplicate ids, empty domains; finite numbers only): bad input exits 2
-  with one `{"error":{"code","path","message"}}` object on stdout ([docs/probbit-ir-json.md](docs/probbit-ir-json.md) "Input contract").
+  with one `{"error":{"code","path","message"}}` object on stdout ([docs/probbit-ir-json.md](docs/probbit-ir-json.md) "Input contract"),
+  whenever stdout is not a terminal (any program calling probbit) or with `--json`; at a terminal, only the stderr line.
 - `scores`: finite numbers with |x| <= 1e9 (natural-log odds; docs/probbit-ir-json.md "Numeric contract"), one per worker the task may go to (log-odds from your judge, an LLM, a heuristic, a price).
   A worker missing from `scores` is not allowed unless listed in `allowed` (then it enters with score 0).
 - `allowed` (optional): hard rule. `cap`: hard per-worker quota. `clamp` (optional): force this task to one worker (what-if).

@@ -11,10 +11,11 @@ fn help_flags(h: &str) -> Vec<String> {
     h.lines().skip_while(|l| *l != "flags:").skip(1).take_while(|l| l.starts_with(' ')).filter_map(|l| l.strip_prefix("  --"))
         .map(|l| format!("--{}", l.split_whitespace().next().unwrap())).collect()
 }
-/// The commands of the top-level help (piped): the first word of each two-space indented line, flags excluded
+/// The commands of the top-level help (piped): the first word of each two-space indented line of the groups
 fn listed() -> Vec<String> {
     let (c, out, err) = probbit(&["--help"]); assert_eq!(c, 0, "{err}");
-    let mut v: Vec<String> = out.lines().filter(|l| l.starts_with("  ") && !l.starts_with("   ") && !l.trim_start().starts_with('-'))
+    let groups = &out[..out.find("\nevery command\n").expect("the flags every command takes")];
+    let mut v: Vec<String> = groups.lines().filter(|l| l.starts_with("  ") && !l.starts_with("   ") && !l.trim_start().starts_with('-'))
         .filter_map(|l| l.split_whitespace().next()).filter(|w| w.chars().all(|c| c.is_ascii_lowercase())).map(String::from).collect();
     v.dedup(); v.retain(|w| w != "probbit" && w != "claude"); v
 }

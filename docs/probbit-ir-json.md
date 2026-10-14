@@ -121,7 +121,8 @@ number that is not a finite double, nesting deeper than 256, more than 65,535 va
 size limits in "Limits in v1", stdin above `--max-input-mb`). Unreadable stdin and invalid UTF-8 are `schema` errors too
 (0.2.1; they printed a stderr line only). `path` locates
 the offending field (`""` = the whole document, as for JSON syntax errors and non-finite numbers, whose message gives the byte
-offset). Flag errors keep their convention: exit 2, a message on stderr, nothing on stdout. The same strict reader parses
+offset). The object goes to stdout when stdout is not a terminal or with `--json` (0.8.2; at a terminal the stderr line alone). Flag
+errors keep their convention: exit 2, a message on stderr, nothing on stdout (with `--json`: one object, code `flag`). The same strict reader parses
 both front-ends (`probbit-cli/src/json.rs`; CLI test `input_contract_rejects_malformed_documents`, which includes the 2026-09-30 external
 review's cases: `"allowed": "A"` used to enable every scored worker and answer `exact`; a cap object where the caps array
 belongs was dropped; duplicate value names emitted duplicate keys).
