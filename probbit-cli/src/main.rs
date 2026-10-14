@@ -1027,7 +1027,8 @@ mod table_tests {
     /// The dispatcher accepts exactly the table: `main` dispatches through `command()`, and its own match names no command
     #[test]
     fn dispatcher_is_the_table() {
-        let src = include_str!("main.rs"); let body = &src[src.find("\nfn main() {").unwrap()..]; let body = &body[..body.find("\n}\n").unwrap()];
+        let src = include_str!("main.rs").replace("\r\n", "\n"); // a Windows checkout has CRLF
+        let body = &src[src.find("\nfn main() {").unwrap()..]; let body = &body[..body.find("\n}\n").unwrap()];
         let lits: Vec<&str> = body.match_indices("Some(\"").map(|(i, _)| { let r = &body[i + 6..]; &r[..r.find('"').unwrap()] }).collect();
         assert!(lits.iter().all(|l| ["--help", "-h"].contains(l)), "main dispatches {lits:?} outside the table");
         for (old, n) in [("decide", 0), ("demo", 0), ("ir", 0), ("run", 0), ("evaluate", 0), ("stats", 0), ("persona", 0), ("live", 0), ("monitor", 0), ("mcp", 0), ("version", 0), ("--version", 0), ("-V", 0)] {
