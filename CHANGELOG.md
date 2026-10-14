@@ -16,6 +16,11 @@ All notable changes to this project are documented here. The format follows
   them). A rule in force only between two default grid points (for example stakes 0.7 to 0.8) is now reached by the random
   search too. Personas whose rules and habits read no number thresholds off the grid get the same search, byte for byte.
 
+### Fixed
+- `install.sh`: when the install directory is not on `PATH`, the hint names the file the user's shell reads: `~/.zshrc` for
+  zsh, `~/.bash_profile` for bash on macOS and `~/.bashrc` elsewhere, `~/.profile` for any other shell (it said "your shell
+  profile"). The clean-prefix install test checks each case.
+
 ## 0.8.1 - 2026-10-10
 
 ### Fixed
