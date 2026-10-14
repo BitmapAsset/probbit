@@ -118,8 +118,8 @@ refused, each refused run byte-identical to the run without the refused events.
   of a turn never opened; the draws are committed as `fixtures/credit/draws-<seed>.jsonl`.
 - **Host.** `credit.py` drives one `probbit live --checkpoint-every 1` per run event by event: it reads each stance's action,
   decides the outcome (good when the draw is below 0.8 after `act`, 0.4 after `ask`) and queues it. One message rides on
-  an event; a second one due on the same event moves to the next (the older decision first). A second copy of an outcome
-  is due one event after the first; for a cancelled decision the second copy is an outcome sent after the cancel. A payment
+  an event; a second one due on the same event moves to the next (the older decision goes ahead). A second copy of an outcome
+  is due one event after the original; for a cancelled decision the second copy is an outcome sent after the cancel. A payment
   of a turn never opened names turn k + 1000. A refused event is followed by the same decision without its message, so
   each run makes 300 decisions. Five runs per individual: stream 1, and on stream 2 (i) addressed, (ii) unaddressed, (iii)
   0.8 semantics (cancels not sent), (iv) the 0.8 workaround.
@@ -208,11 +208,11 @@ plain-inputs control 0.155 and 0.0295. See BENCHMARKS.md §11.
   `stderr_warnings_only` (the key was `stderr_senses_warning_only`). EXPECTED, the scripts and the strands are
   unchanged; MANIFEST's p0.py line was updated.
 - Metric c (wave 2): its fixtures, the draws generator, the draws and its bars (`fixtures/bars-c.json`, the bars of the
-  metric c section above) were added to MANIFEST in their own section before their first run; `run.py` runs metric c.
+  metric c section above) were added to MANIFEST in their own section before they were ever run; `run.py` runs metric c.
   `fixtures/sensed-plain.yaml` (metric a's reported control: the senses replaced by plain 0.8 number inputs) was frozen in
   the same section. No earlier fixture, stream or bar changed.
-- `credit.py` after its first run (no fixture, bar or gated computation changed; every gated value was the same in each
+- `credit.py`, changed after it had run once (no fixture, bar or gated computation changed; every gated value was the same in each
   run): the 50 runs go side by side (the host waits on each stance, so a run is latency-bound); a run that refused no
   event is not re-run (without refused events it is the same run, and metric d replays every strand); the reported
-  eviction and expiry shares are given per run, with the age of the addressed payments. The first run's numbers stay in
+  eviction and expiry shares are given per run, with the age of the addressed payments. The numbers of the run before the change stay in
   the history: c1, c2, c3 and c4 1.0, 50/50 pairs identical.

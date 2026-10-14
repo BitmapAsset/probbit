@@ -1144,7 +1144,7 @@ removed. All 8 recorded strands verify, and the tutor's continues with the recor
 
 ## §11 Action-addressed feedback: credit accuracy, and the twins re-measured (`python3 bench/individuality/run.py --only c,d,e`, `python3 bench/individuality/twins_addressed.py`, stdlib; development build of 0.9.0)
 
-Metric c's fixtures, draws and bars were frozen in `bench/individuality/fixtures/MANIFEST` before its first run; three runs
+Metric c's fixtures, draws and bars were frozen in `bench/individuality/fixtures/MANIFEST` before it was ever run; three runs
 gave the same values. Ten individuals of an act-or-ask policy (`fixtures/dispatch.yaml`: the shipped dispatch policy with a
 credit block) make 300 decisions each; a host reads each stance's action, draws its outcome (good with probability 0.8 after
 act, 0.4 after ask) and sends it back, on time (stream 1) or 0 to 6 events late with cancels, duplicates and payments of

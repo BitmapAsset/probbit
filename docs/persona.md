@@ -320,7 +320,7 @@ state change; `persona turn` exits 2, `live` at the end of the run) when:
 | B-R5 | `for` not a whole number or `{turn, stance}`; `cancel` not a list of at most `max_open` whole numbers; `await` not true or false; a cancel without an env or human `src` | `inputs.for`, `inputs.cancel`, `inputs.await`, `inputs.src` |
 | B-R6 | `for: {turn, stance}` whose digest is not that turn's stance | `inputs.for.stance` |
 
-Reward provenance (section 2.10) is checked first. A stance's digest is the sha256 of its canonical JSON without `credit`,
+Reward provenance (section 2.10) is checked before these rows. A stance's digest is the sha256 of its canonical JSON without `credit`,
 `state_digest` and `timing`. Without the block, `await`, `for` and `cancel` are undeclared inputs (listed in `ignored`; `live`
 says so once on stderr) and every document is as before.
 
@@ -691,8 +691,8 @@ senses block, rule S4) a mean outside prior ± drift_cap, a variance outside [0,
 to 1e6, a sense set that differs from the persona's or sense genes that do not match the seed, even with a recomputed digest.
 Each normal starts at its prior with n = 0; a persona without the block refuses a state with a `senses` field. With a credit
 block (section 2.8) the state keeps `open_credit` (the decisions awaiting an outcome: at most `max_open`, turns increasing and
-before the state's turn, credits within ±1, a stance digest each), `prev_stance` (the previous stance's digest, null before the
-first turn) and `control_closed` (decisions a control line closed, listed by the next stance); a persona without the block
+before the state's turn, credits within ±1, a stance digest each), `prev_stance` (the previous stance's digest, null before any
+turn) and `control_closed` (decisions a control line closed, listed by the next stance); a persona without the block
 refuses a state with any of them.
 
 ### 5.2 Canonical JSON and the number rule

@@ -218,7 +218,7 @@ def evaluate(tmp, r):
             s["step_total"] += w
             s["step_equal"] += w if same else 0.0
         prev = eng
-    # the open decisions on arrival of each message: the oracle's row of the first event sent at its step (the one carrying it)
+    # the open decisions on arrival of each message: the oracle's row of the earliest event sent at its step (the one carrying it)
     at, step = {}, 0
     for row in o:
         at.setdefault(step, row)

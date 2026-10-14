@@ -30,7 +30,7 @@ pub fn grid(p: &Persona, props: &[Prop], given: &[f64]) -> Vec<f64> {
 pub struct Found { pub script: Vec<Event>, pub doc: Json, pub broken: Vec<Broken> }
 
 /// One turn of the search: (the stance, the new state, the event as it ran). A credit block's payments (§2.8) are resolved
-/// against the state first; the credit step may refuse the event (B-R1 to B-R6, at inputs.for / inputs.cancel): None, and it
+/// against the state before the turn runs; the credit step may refuse the event (B-R1 to B-R6, at inputs.for / inputs.cancel): None, and it
 /// changes nothing
 fn step(p: &Persona, st: &State, e: &Event, eng: persona::Engine, turns: &AtomicUsize) -> Option<(Json, State, Event)> {
     turns.fetch_add(1, Ordering::Relaxed);

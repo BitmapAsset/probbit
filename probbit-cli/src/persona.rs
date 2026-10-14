@@ -875,7 +875,7 @@ struct Settled { paid: Option<(u64, f64, f64, bool, String)>, closed: Vec<(u64, 
 fn credit_step(p: &Persona, st: &State, host: &[(String, Json)], k: &Pay, src: Option<&Json>, check: bool) -> R<(State, Settled)> {
     let (c, l) = (p.credit().unwrap(), p.learning.as_ref().unwrap()); let t = st.turn;
     if k.cancel.is_some() && check { cancel_src(src)?; }
-    // feedback, read as compile reads it (the inputs are checked first)
+    // feedback, read as compile reads it (the inputs are checked before it)
     let (vals, _, _, _) = resolve_inputs(p, st, host)?;
     let on = |id: &String| matches!(get(&vals, id), Some(Json::Bool(true)));
     let flags = l.from.iter().enumerate().fold(0.0, |s, (i, id)| if on(id) { s + if i == 0 { 1.0 } else { -1.0 } } else { s });
@@ -1519,7 +1519,7 @@ impl State {
                 let w = |k: &str| num(get(e, k), &at(&tp, k), Some(0.0), Some(9_007_199_254_740_992.0), true).map(|x| x as u64);
                 Ok((t.clone(), w("rewards")?, w("corrections")?)) }).collect::<R<Vec<_>>>()?) } };
         // a credit block (§2.8): at most max_open open decisions, turns increasing and before this state's turn, credits within ±1, a
-        // stance digest each; the previous stance's digest (null before the first turn); the decisions a control line closed
+        // stance digest each; the previous stance's digest (null before any turn); the decisions a control line closed
         let (mut open, mut prev_stance, mut control_closed) = (vec![], None, vec![]);
         if let (Some(c), Some(l)) = (p.credit(), &p.learning) {
             let turn_at = |x: &Json, path: &str, after: Option<u64>| -> R<u64> { let n = num(Some(x), path, Some(0.0), Some(9_007_199_254_740_992.0), true)? as u64;
@@ -1534,7 +1534,7 @@ impl State {
                 let stance = get(ok, "stance").and_then(Json::as_str).filter(|s| is_digest(s)).ok_or_else(|| perr(&at(&op, "stance"), "a stance digest (sha256:<64 hex>)"))?.to_string();
                 open.push(Open { turn: n, credit, stance }); }
             prev_stance = match get(kv, "prev_stance").unwrap() { Json::Null if turn == 0 => None, Json::Str(s) if turn > 0 && is_digest(s) => Some(s.clone()),
-                _ => return Err(perr("state.prev_stance", "the previous stance's digest (sha256:<64 hex>); null before the first turn")) };
+                _ => return Err(perr("state.prev_stance", "the previous stance's digest (sha256:<64 hex>); null before any turn")) };
             let ca = get(kv, "control_closed").and_then(Json::as_arr).filter(|a| a.len() <= c.max_open).ok_or_else(|| perr("state.control_closed", format!("a list of at most {} turns", c.max_open)))?;
             for (i, x) in ca.iter().enumerate() { let n = turn_at(x, &ix("state.control_closed", i), control_closed.last().copied())?; control_closed.push(n); } }
         Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, open, prev_stance, control_closed, elig: 1.0,
@@ -3409,7 +3409,7 @@ mod tests {
     }
 
     /// The credit state is read strictly: at most max_open open decisions, turns increasing and before the state's turn, credits
-    /// within ±1, stance digests; prev_stance a digest after the first turn; without the block the fields are refused
+    /// within ±1, stance digests; prev_stance a digest once a turn has run; without the block the fields are refused
     #[test]
     fn the_credit_state_is_strict() {
         let p = persona(CREDIT).unwrap(); let mut st = init(&p, Some(4), true, &run);
