@@ -131,7 +131,22 @@ pub fn utc_now() -> String {
 /// rules. `open` checks the header and rebuilds the individual; each `step` replays one event line on the fixed clock and
 /// checks it (`prev`, `n`, the stance and state digests, the bytes). After an error the replay is spent: the chain past the
 /// line that differs cannot be checked.
-pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool }
+pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool, norms: Normals }
+/// A senses block's normals over the replay (§2.11): per sense the means after the last 50 events, the largest move of a mean
+/// within 50 events so far, and the latest event's move (the monitor's alert: over drift_cap / 2)
+#[derive(Default)]
+pub struct Normals { window: Vec<std::collections::VecDeque<f64>>, pub max_move: Vec<f64>, pub moved: Vec<f64> }
+impl Normals {
+    fn start(p: &Persona, st: &State) -> Normals {
+        let n = persona::normals(p, st);
+        Normals { window: n.iter().map(|x| std::collections::VecDeque::from(vec![x.1])).collect(), max_move: vec![0.0; n.len()], moved: vec![0.0; n.len()] }
+    }
+    fn track(&mut self, p: &Persona, st: &State) {
+        for (k, (_, m, _, _)) in persona::normals(p, st).iter().enumerate() { let q = &mut self.window[k];
+            let mv = persona::r6(q.iter().fold(0.0f64, |a, x| a.max((m - x).abs())));
+            self.moved[k] = mv; self.max_move[k] = self.max_move[k].max(mv); q.push_back(*m); if q.len() > 50 { q.pop_front(); } }
+    }
+}
 impl Replay {
     /// The header line (without its line ending) -> the replay, ready for event lines; Err((1, what differs))
     pub fn open(head: &str) -> Result<Replay, (usize, String)> {
@@ -143,7 +158,8 @@ impl Replay {
         let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, format!("the initial state: {}: {}", e.path, e.msg)))?;
         let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
         if header != head { return Err((1, "the header is not as written".into())); }
-        Ok(Replay { live, header: h, doc, line: 1, from: None, last: None, checkpoint_ready: false })
+        let norms = Normals::start(&live.p, &live.st);
+        Ok(Replay { live, header: h, doc, line: 1, from: None, last: None, checkpoint_ready: false, norms })
     }
     /// The replay from a checkpoint line (`cp`, without its line ending, at 1-based line `at`; `before` = the event line before it)
     /// instead of the header: the header is read as by `open`; the checkpoint must follow `before` (prev), at its event count, with
@@ -168,10 +184,13 @@ impl Replay {
         let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, format!("the checkpoint's state: {}: {}", e.path, e.msg)))?;
         if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
         r.live.st = st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
+        r.norms = Normals::start(&r.live.p, &r.live.st);
         Ok(r)
     }
     /// The stance document of the last event replayed (or of the checkpoint the replay started from)
     pub fn last_stance(&self) -> Option<&Json> { self.last.as_ref() }
+    /// The senses' normals over the replay so far (§2.11)
+    pub fn normals(&self) -> &Normals { &self.norms }
     /// One line (without its line ending) -> the stance document an event line replays to (None for a control or checkpoint
     /// line); Err((its 1-based line number, what differs)). A control line must be a valid move of the status and the line its
     /// fields give; a checkpoint line must immediately follow an event while active and carry
@@ -201,7 +220,7 @@ impl Replay {
         if j.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
         if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
         if line != l { return Err((i, "the line differs".into())); }
-        self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true;
+        self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true; self.norms.track(&self.live.p, &self.live.st);
         Ok(Some(stance))
     }
     /// `verify`'s summary of the lines replayed so far
@@ -213,6 +232,10 @@ impl Replay {
         if live.controls > 0 { v.push(("controls".into(), Json::Num(live.controls as f64))); v.push(("status".into(), s(live.status.name()))); }
         if live.checkpoints > 0 { v.push(("checkpoints".into(), Json::Num(live.checkpoints as f64))); }
         if let Some(n) = self.from { v.push(("from_checkpoint".into(), Json::Num(n as f64))); }
+        // a senses block (§2.11): per sense the normal now and the largest move of its mean within 50 events
+        let nm = persona::normals(&live.p, &live.st);
+        if !nm.is_empty() { v.push(("normals".into(), Json::Obj(nm.iter().enumerate().map(|(k, (id, m, n, _))| (id.clone(), Json::Obj(vec![("mean".into(), Json::Num(*m)),
+            ("n".into(), Json::Num(*n as f64)), ("max_move_50".into(), Json::Num(self.norms.max_move.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
         Json::Obj(v)
     }
 }
@@ -1051,6 +1074,79 @@ mod tests {
         let selfish: Vec<Json> = (0..300).map(|_| json::parse(r#"{"elapsed_hours":0.5,"praise":true,"goals":{"fun":{"win":1}},"src":"self"}"#).unwrap()).collect();
         let st0 = persona::init(&p, Some(2), true, &run); let (mut lv, _) = Live::start(p.clone(), &doc, st0.clone(), Clock::Fixed, "t");
         assert!(selfish.iter().all(|e| lv.event(e, &run).is_err())); assert_eq!(persona::canon(&lv.st.to_json(&p)), persona::canon(&st0.to_json(&p)));
+    }
+
+    // ------------------------------------------------------------------ senses (docs/persona.md §2.11)
+    /// A sensed individual: a flag sense from env, a number sense from env or a person, learning and reward_from
+    const SENSED: &str = r#"{"probbit_persona":1,"identity":{"name":"Sensor","version":"0.1.0","seed":0},
+        "traits":[{"id":"caution","levels":["bold","measured","careful"],"prior":[0.4,0.4,0.2],"spread":0.4},{"id":"verbosity","levels":["terse","short","full"],"prior":[0.2,0.4,0.4],"spread":0.4}],
+        "moods":[{"id":"valence","levels":["down","even","up"],"inertia":0.5,"half_life_hours":6}],
+        "inputs":[{"id":"praise","kind":"flag","effects":{"valence":0.5}},{"id":"criticism","kind":"flag","effects":{"valence":-0.5}}],
+        "senses":[{"id":"tool_fail","kind":"flag","unit":"event","prior":{"mean":0.05,"var":0.05},"drift_cap":0.25,"effects":{"caution":0.8,"valence":-0.4},"gain_spread":0.3,"threshold_spread":0.3,"habituation_spread":0.3},
+            {"id":"tempo","kind":"number","unit":"messages","range":[0,200],"src":["env","human"],"prior":{"mean":1,"var":1},"drift_cap":2,"effects":{"verbosity":-0.4},"gain_spread":0.3}],
+        "habits":[{"id":"no_bold_after_failure","when":{"sense.tool_fail.raw":true},"then":{"caution":{"not":["bold"]}}}],
+        "learning":{"from":["praise","criticism"],"traits":["caution"],"rate":0.3,"step_cap":0.1,"total_cap":0.4},"reward_from":["human","env"]}"#;
+    fn sensed() -> (Persona, Json) { let doc = json::parse(SENSED).unwrap(); (persona::build(&doc).unwrap(), doc) }
+    /// A random event and whether the rules accept it: sources (env, a person, self, the clock, none, malformed), readings
+    /// (declared, from the event's source or their own, out of range, of an undeclared sense, of the wrong type), rewards, hours
+    fn sensed_rnd(r: &mut Philox4x32) -> (Json, bool) {
+        let srcs: [(Option<&str>, Option<&str>); 6] = [(Some("env:runner"), Some("env")), (Some("human:a"), Some("human")), (Some("self"), Some("self")), (Some("clock"), Some("clock")), (None, None), (Some("env:"), None)];
+        let (src, kind) = srcs[r.below(6) as usize];
+        let mut ok = !(src.is_some() && kind.is_none());
+        let mut e = vec![("elapsed_hours".to_string(), Json::Num([0.0, 0.25, 1.0, 30.0][r.below(4) as usize]))];
+        if r.below(4) == 0 { e.push(("praise".into(), Json::Bool(true))); ok &= matches!(kind, Some("env" | "human")); }
+        let env_only = |k: Option<&str>| k == Some("env"); let env_human = |k: Option<&str>| matches!(k, Some("env" | "human"));
+        let rd = match r.below(8) {
+            0 | 1 => None,
+            2 => { ok &= env_only(kind); Some(format!(r#"{{"tool_fail":{}}}"#, r.below(2) == 0)) }
+            3 => { ok &= env_human(kind); Some(format!(r#"{{"tempo":{}}}"#, r.below(41))) }
+            4 => { ok &= env_only(kind) && env_human(kind); Some(format!(r#"{{"tool_fail":true,"tempo":{}}}"#, 5 * r.below(9))) }
+            5 => Some(format!(r#"{{"tool_fail":{{"v":{},"src":"env:own"}}}}"#, r.below(2) == 0)),
+            6 => { ok = false; Some(["{\"tempo\":250}", "{\"latency\":3}", "{\"tool_fail\":1}", "{\"tempo\":{\"v\":3,\"src\":\"self\"}}"][r.below(4) as usize].to_string()) }
+            _ => Some(format!(r#"{{"tempo":{{"v":{},"src":"human:b"}},"tool_fail":{{"v":true,"src":"env"}}}}"#, r.below(30))) }; // each reading its own source
+        if let Some(x) = rd { e.push(("senses".into(), json::parse(&x).unwrap())); }
+        if let Some(s) = src { e.push(("src".into(), Json::Str(s.into()))); }
+        (Json::Obj(e), ok)
+    }
+
+    /// P3s, refusal invariance (RFC 0001): 40 individuals x 300 random events mixing sources, readings, `self`, the clock and
+    /// out-of-range or undeclared readings: every run equals, strand and final state byte for byte, the same run with its
+    /// refused events removed; the rules the generator labels by construction are the rules the engine applies
+    #[test]
+    fn p3s_a_run_equals_the_run_without_its_refused_readings() {
+        let (p, doc) = sensed(); let mut r = Philox4x32::new(97, 5); let (mut refused_all, mut events_all) = (0, 0);
+        for seed in 0..40u64 {
+            let evs: Vec<(Json, bool)> = (0..300).map(|_| sensed_rnd(&mut r)).collect();
+            let go = |seq: &[&Json]| { let (mut lv, h) = Live::start(p.clone(), &doc, persona::init(&p, Some(seed), true, &run), Clock::Fixed, "t"); let mut text = format!("{h}\n"); let mut refused = vec![];
+                for (i, e) in seq.iter().enumerate() { match lv.event(e, &run) { Ok((_, l)) => { text += &l; text.push('\n'); } Err(_) => refused.push(i) } } (text, persona::canon(&lv.st.to_json(&lv.p)), refused) };
+            let all: Vec<&Json> = evs.iter().map(|x| &x.0).collect(); let kept: Vec<&Json> = evs.iter().filter(|x| x.1).map(|x| &x.0).collect();
+            let (a, b) = (go(&all), go(&kept));
+            let want: Vec<usize> = evs.iter().enumerate().filter(|(_, x)| !x.1).map(|(i, _)| i).collect();
+            assert_eq!(a.2, want, "individual {seed}: the refused events are the ones the rules refuse");
+            assert_eq!((&a.0, &a.1), (&b.0, &b.1), "individual {seed}"); assert!(b.2.is_empty());
+            refused_all += a.2.len(); events_all += evs.len(); }
+        assert!(refused_all > 2000 && refused_all < 10000, "{refused_all} of {events_all} refused");
+        eprintln!("p3s: 40 individuals x 300 events: {refused_all} of {events_all} refused, every run equal to its run without them");
+    }
+
+    /// `verify` recomputes the normals: its summary gains `normals` (mean, count, the largest move of a mean within 50 events)
+    /// with a senses block and not without; a life split over two runs (state + strand continuation) is the strand of one run
+    #[test]
+    fn verify_recomputes_the_normals_and_a_split_life_is_one_life() {
+        let (p, doc) = sensed(); let mut r = Philox4x32::new(11, 2);
+        let evs: Vec<Json> = (0..120).map(|_| sensed_rnd(&mut r)).filter(|x| x.1).map(|x| x.0).collect();
+        let one = |seq: &[Json], st: State| { let (mut lv, h) = Live::start(p.clone(), &doc, st, Clock::Fixed, "t"); let mut text = format!("{h}\n");
+            for e in seq { let (_, l) = lv.event(e, &run).unwrap(); text += &l; text.push('\n'); } (text, lv) };
+        let (text, lv) = one(&evs, persona::init(&p, Some(3), true, &run));
+        let v = verify(&text, &run).unwrap(); let nm = v.get("normals").unwrap();
+        let fail = nm.get("tool_fail").unwrap(); assert!(fail.get("max_move_50").and_then(Json::as_f64).unwrap() > 0.0 && fail.get("n").and_then(Json::as_f64).unwrap() > 10.0, "{}", persona::canon(nm));
+        assert_eq!(fail.get("mean"), lv.st.to_json(&p).get("senses").and_then(|s| s.get("norm")).and_then(|n| n.get("tool_fail")).and_then(|t| t.get("mean")));
+        assert!(verify(&strand(5).0, &run).unwrap().get("normals").is_none(), "no block, the summary of before");
+        // split at event 37: the first run's state, then the rest on the same strand
+        let k = 37; let (head, lv1) = one(&evs[..k], persona::init(&p, Some(3), true, &run));
+        let mut lv2 = resume(&head, &p, lv1.st.clone(), Clock::Fixed).unwrap(); let mut text2 = head.clone();
+        for e in &evs[k..] { let (_, l) = lv2.event(e, &run).unwrap(); text2 += &l; text2.push('\n'); }
+        assert_eq!(text2, text, "a life continued over two runs is the strand of one run");
     }
 
     /// The writer lock: a second take is refused (code `locked`, naming the holder's pid) until the first is dropped; a lock whose

@@ -831,9 +831,13 @@ fn live_cmd(args: &[String]) {
         if !lock.as_ref().is_some_and(live::Lock::held) { refuse("live: ", json::InErr { code: "locked", path: "strand".into(), msg: format!("the writer lock {f}.lock is no longer this run's (removed or taken over): stopped before writing") }) }
         live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
     if let Some(h) = &header { log(&[h]); }
-    let (mut bad, mut refused) = (0, 0);
+    let (mut bad, mut refused, mut warned) = (0, 0, false);
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
-        let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| lv.event(&ev, eng));
+        let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| {
+            // readings sent to a persona without a senses block are an undeclared input (listed in `ignored`): say so once
+            if !warned && !lv.p.has_senses() && ev.get("senses").is_some() { warned = true;
+                err_line(&format!("probbit: live: events[{i}]: this persona has no senses block: `senses` is an undeclared input (listed in ignored), no reading is judged")); }
+            lv.event(&ev, eng) });
         match res {
             Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
                 match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
