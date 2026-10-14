@@ -131,7 +131,7 @@ pub(crate) fn top_help(cmds: &[Command], version: &str) -> String {
     }
     h += "\nevery command\n";
     h += &item_at("  --help, -h", "usage, every flag with its default, the exit codes (= probbit help COMMAND)", TOP_COL);
-    h += &item_at("  --plain", "no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain)", TOP_COL);
+    h += &item_at("  --plain", "no colour, no animation where a command draws (as NO_COLOR=1 or PROBBIT_THEME=plain)", TOP_COL);
     h += "\n"; h += &section("exit", EXIT);
     h += "\nexamples:\n";
     for e in TOP_EXAMPLES { h += &format!("  {e}\n"); }
