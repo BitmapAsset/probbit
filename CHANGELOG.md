@@ -3,6 +3,29 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.3 - unreleased
+
+### Added
+- `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds LIST] [--depth N] [--hours LIST] [--json]`: one gate for
+  CI. It runs `persona lint`'s pipeline on the rules (prove each one, then fuzz the ones the bound leaves unknown, the rules'
+  and habits' thresholds on the grid) and `live verify` on every strand, then prints one line per rule (`held`,
+  `held_by_construction`, `broken seed N`, `unproven`), one per strand (`ok N events` / `FAIL line K: ...`) and
+  `check: held H · broken B · unproven U · strands S/T`. Exit 0 all held and replayed; 1 a rule broken, an unresolved habit
+  contradiction or a failing strand (1 wins over 3); 3 only unproven rules; 2 bad input. `--json`: one document with the
+  `persona lint` report under `rules`, the strands and the verdict counts. No engine change.
+- `action.yml`: the repository is a composite GitHub Action (`uses: BitmapAsset/probbit@<ref>`) that installs probbit with
+  `install.sh` (input `version`, or `binary` for a prebuilt one), runs `probbit check --json`, annotates broken rules and
+  failing strands as errors and unproven rules as warnings with their seeds, uploads `probbit-check.json`
+  (`actions/upload-artifact@v4`) and passes exit 3 with a warning when `allow-unproven` is true. Linux and macOS runners;
+  Windows runners stop with one error. `.github/workflows/check.yml` runs it on every push and pull request.
+- `examples/persona/dispatch-policy.yaml` + `dispatch-props.json`: the rule lock on an agent that learns whether to act or
+  ask first. Every rule is held by construction for seeds 0-99; without its routine habit, `check` finds the broken seeds
+  (README, "Check in CI").
+
+### Fixed
+- `cargo +1.78.0 test --workspace --locked` compiles again: a CLI test used `std::io::pipe()` (Rust 1.87); it now gets a
+  readerless pipe from a child process's stdin. The build MSRV was unaffected.
+
 ## 0.8.2 - 2026-10-14
 
 ### Added
