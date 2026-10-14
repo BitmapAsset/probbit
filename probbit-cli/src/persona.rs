@@ -2887,7 +2887,7 @@ mod tests {
         (ss, out)
     }
 
-    /// RFC 0001 A.3 against the lab arithmetic (ARITH-CHECK.json): habituation (zd 3.378359 -> 1.027525 from reading 6 on, the
+    /// RFC 0001 A.3 against its arithmetic, computed independently in Python: habituation (zd 3.378359 -> 1.027525 from reading 6 on, the
     /// ratio 0.304 at reading 20), surprise (6.0 vs 1.75286 after 40 quiet / 40 readings at rate 0.3: 3.42 at zcap 6, 1.71 at zcap
     /// 3), the closed form of n identical readings within 1e-5 over 12 readings, the variance cap after alternating range ends
     #[test]

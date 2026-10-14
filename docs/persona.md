@@ -501,7 +501,7 @@ For turn t of an individual (seed s), with inputs x_t:
               + sum over history features f of min(value_f, cap_f) x effect_f(v,l)`,
    with `scale` = 1 for a true flag or the matching level, the value for a number input, 0 otherwise, and Δ_v the learned
    weights after this turn's feedback (section 2.8; 0 for a trait that does not learn). With a senses block (section 2.11)
-   the sense step runs first and its lowering joins the inputs: `sense_<id>_up` and `sense_<id>_down` are number inputs with
+   the sense step runs before this one and its lowering joins the inputs: `sense_<id>_up` and `sense_<id>_down` are number inputs with
    gain g_gain and the sense's effects (negated for `down`); a sense not read this turn adds nothing.
    2b. **`pursue`** (a drives block, section 2.9): one more trait variable over the goal ids, after the declared traits. Its
    field per goal g is step 2's (prior from `interest`, learned weights if `pursue` learns, input and history effects on
