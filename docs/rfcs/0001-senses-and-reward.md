@@ -164,8 +164,10 @@ keeps 0.94 of its step, 10 events late 0.81. A decision expires after 4 half-liv
 most 1/16 of `step_cap`.
 
 Event keys: `await: true` (the host will act on this turn's stance and report its outcome); `for: n` (this feedback pays the
-decision whose stance has `turn` n); `cancel: [n, …]` (no outcome will come; needs an env or human `src`). They are read, not
-compiled, and echoed in `inputs`.
+decision whose stance has `turn` n) or `for: {turn: n, stance: "sha256:…"}` (the same, bound to that stance's digest, see
+question 2); `cancel: [n, …]` (no outcome will come; needs an env or human `src`). They are read, not compiled, and echoed in
+`inputs`. A stance's digest is the sha256 of its canonical JSON without `credit`, `state_digest` and `timing` (so the state
+can remember it without hashing itself); each stance carries its own as `credit.stance`.
 
 ### B.2 The credit step
 
@@ -192,8 +194,9 @@ if await: open[t] = {credit, stance digest}; beyond max_open close the oldest  (
 Eligibility scales the capped step, so a stale reward always moves less than a fresh one, and at e = 1 the step is 0.8's
 exactly. Paying a stance a habit forced moves nothing and is marked `absorbed`. A control line closes every open decision
 (closed: control): in 0.8 no credit crosses one. State: `open_credit: [{turn, credit, stance}]` (turns increasing, at most
-`max_open`, credits within ±1). Stance: `credit: {paid: {turn, e, sign, absorbed, stance} | null, closed: [{turn, as}],
-open: [turns]}`.
+`max_open`, credits within ±1), `prev_stance` (the previous stance's digest) and `control_closed` (the decisions a control line
+closed, listed by the next stance). Stance: `credit: {paid: {turn, e, sign, absorbed, stance} | null, closed: [{turn, as}],
+open: [turns], stance}`.
 
 ### B.3 Refusals
 
@@ -202,9 +205,12 @@ Refused whole (one `{"error"}` at its path, no turn, no state change; exit 2 for
 - **B-R1** feedback without `for` while a decision other than t − 1 is open;
 - **B-R2** `for` naming a decision neither open nor t − 1 (paid, cancelled, expired, evicted, never opened, future);
 - **B-R3** `for` on an event without feedback;
-- **B-R4** `cancel` naming a decision not open, twice, or the one `for` pays;
-- **B-R5** malformed: `for` not a whole number, `cancel` not a list of at most `max_open` whole numbers, `await` not
-  true/false, a `cancel` without an env or human `src`.
+- **B-R4** `cancel` naming a decision not open, twice, or the one this event's feedback pays (named by `for`, or t − 1
+  when unaddressed);
+- **B-R5** malformed: `for` not a whole number or `{turn, stance}` (a whole number and a sha256 digest), `cancel` not a list
+  of at most `max_open` whole numbers, `await` not true/false, a `cancel` without an env or human `src`;
+- **B-R6** `for: {turn: n, stance: d}` where d is not the digest of decision n's stance (the open decision's, or the previous
+  stance's for t − 1): a restored or forked state cannot pay another decision under the same turn number.
 
 `reward_from` checks run before these, unchanged.
 
@@ -280,7 +286,7 @@ with `live control retire`). A 0.8 binary refuses the new blocks as unknown fiel
 | Outcomes never settled | `max_open`, expiry, `open` in every stance |
 | A duplicated or replayed payment | the decision is closed: B-R2 |
 | The agent cancels to dodge a correction | `cancel` needs env or human; MCP refuses it |
-| A restored state repeats turn numbers | `paid.stance` names the paid stance's digest for the host to compare |
+| A restored state repeats turn numbers | `for: {turn, stance}` binds the paid stance's digest (B-R6); with a bare `for` the paid digest comes back in `paid.stance` for the host to compare |
 
 ## Alternatives considered
 
@@ -296,6 +302,9 @@ with `live control retire`). A 0.8 binary refuses the new blocks as unknown fiel
 
 1. Should open decisions survive pause and resume? Closing them matches 0.8, but outcomes landing during a pause are lost.
 2. Should `for` carry the stance digest (`for: {turn, stance}`) so a restored state cannot pay a different decision?
+   **Decided for 0.9.0: yes.** `for: {turn, stance}` binds the digest from the start, and a digest that is not the named
+   turn's stance is refused (B-R6). A bare `for: n` stays accepted (the turn is unambiguous within the open set), and the
+   paid stance's digest is echoed in the stance's `credit.paid.stance`.
 3. Should eligibility decay by events, by clock hours, or not at all until expiry?
 4. Should `human` readings teach a normal, or only move the stance?
 5. Should 0.9.0 ship `persona migrate OLD NEW --state S` to carry moods, history and learned weights into a persona that only

@@ -42,6 +42,9 @@ The exact tiers run before the sampler:
   `drives`: per goal the wanting, afterglow, expectation, last prediction error, deadline and turns since it was pursued.
 - `senses` (a persona with a `senses:` block, docs/persona.md §2.11): per sense read this turn its `raw` reading, `src`, `z`
   and `zd`, and the `mean` and `n` of the normal it was judged against; `noticed`: the sense `why` names.
+- `credit` (a persona with a `learning.credit` block, docs/persona.md §2.8): `paid` (`turn`, `e`, `sign`, `absorbed`,
+  `stance`) or null, `closed` (`turn`, `as`: control, expired, cancelled, paid, evicted), `open` (turns), `stance` (this
+  stance's digest).
 
 ## Senses (0.9.0, docs/persona.md §2.11)
 - Event: `{"senses": {"tool_fail": true, "tool_latency": {"v": 2.4, "src": "env:runner"}}, "src": "env:host"}`: a bare
@@ -53,6 +56,18 @@ The exact tiers run before the sampler:
   through the MCP turn tools. A refused event changes nothing.
 - `live verify` summary: `normals` per sense (`mean`, `n`, `max_move_50`); `monitor`: a row per sense and an alert when a
   normal moved over `drift_cap / 2` within 50 events.
+
+## Action-addressed feedback (0.9.0, docs/persona.md §2.8)
+- Block: `learning: {..., credit: {max_open: 8, half_life_events: 32}}`.
+- Events: `{"await": true}` (the host will report this decision's outcome); `{"praise": true, "for": 3, "src": "env:ci"}` or
+  `"for": {"turn": 3, "stance": "sha256:..."}` (pays decision 3; the digest binds it); `{"cancel": [4], "src": "env:executor"}`.
+- Eligibility e = 0.5^((t − n − 1) / half_life_events), 6 decimals: 1, 0.937084, 0.805245, 0.5 at 0, 3, 10, 32 events late;
+  a decision expires 128 events after it was made; beyond `max_open` the oldest is evicted. e scales the capped 0.8 step.
+- Refused whole: ambiguous unaddressed feedback (B-R1), a decision not open (B-R2: paid, cancelled, expired, evicted, never
+  opened, to come), `for` without feedback (B-R3), a bad cancel (B-R4), malformed keys or a cancel from `self` (B-R5), a
+  digest that is not the turn's stance (B-R6). A control line closes every open decision; MCP refuses `cancel`.
+- `live verify` summary: `open`; `live verify STRAND --actions FILE`: lines `{"turn": T, "action": {trait: level}}`, the
+  earliest one that differs from the released level (exit 1).
 
 ## Exit codes
 - `decide`, `run`, `evaluate`: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one
@@ -96,7 +111,7 @@ One channel, the same for every command (0.8.2):
 |---|---|
 | `live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE]` | JSONL events in, one stance per event out |
 | `live PERSONA --demo week [--seed N] [--plain]` | a scripted week: learning to a cap, a night, rules that hold |
-| `live verify STRAND` | replay a strand; the earliest line that differs |
+| `live verify STRAND [--actions FILE]` | replay a strand; the earliest line that differs (and host action, with `--actions`) |
 | `monitor STRAND [--follow] [--once] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars in the terminal, or the Activity Monitor page on 127.0.0.1 (channel table, event-history traces, inspector) |
 | `monitor --demo [week\|drives] [--open]` | synthetic data: the tutor's week, paced, in under a minute; `drives`: a short goal-signal scenario |
 
