@@ -514,6 +514,34 @@ fn fuzz_is_deterministic_and_never_breaks_a_habit() {
     }
 }
 
+/// 0.8.2: the search's grid gains every threshold the rule and the habits read on a number input. "No jokes at stakes 0.7 to
+/// 0.8" sits between the default grid points (0, 0.5, 1): the random search alone (`--beam 0`) never put it in force and found
+/// nothing; now the grid reports [0, 0.5, 1, 0.7, 0.8] and the single event {"stakes": 0.7} breaks it. The thresholds go on the
+/// grid's scale (a fraction of the input's max), from habits too, each once, after the given points.
+#[test]
+fn fuzz_grid_includes_the_thresholds_of_the_rule_and_the_habits() {
+    let rule = "{when: {stakes: {at_least: 0.7, at_most: 0.8}}, then: {humour: [none]}}";
+    for grid in [None, Some("0,0.5,1")] {
+        let mut args = vec!["persona", "fuzz", "examples/persona/tutor.yaml", "--never", rule, "--seeds", "0-4", "--beam", "0", "--scripts", "40", "--json"];
+        if let Some(g) = grid { args.extend(["--grid", g]); }
+        let (c, out, e) = probbit_at_root(&args); assert_eq!(c, 1, "{e}");
+        let d = parse(&out); assert_eq!(jw(s(&d, &["search", "grid"])), "[0,0.5,1,0.7,0.8]");
+        assert_eq!(jw(s(&d, &["properties"]).as_arr().unwrap()[0].get("shortest").and_then(|x| x.get("script")).unwrap()), r#"[{"stakes":0.7}]"#);
+    }
+    // a threshold already on the grid is not added twice
+    let (_, out, _) = probbit_at_root(&["persona", "fuzz", "examples/persona/tutor.yaml", "--never", "{when: {stakes: 0.5}, then: {humour: [none]}}", "--seeds", "0", "--scripts", "1", "--beam", "0", "--json"]);
+    assert_eq!(jw(s(&parse(&out), &["search", "grid"])), "[0,0.5,1]");
+    // max 100: a habit's 65 and the rule's 42 become 0.65 and 0.42 (sorted, after the given points)
+    let file = tmp("grid-thresholds.json");
+    std::fs::write(&file, r#"{"probbit_persona":1,"identity":{"name":"Fixture","version":"1"},
+        "traits":[{"id":"tone","levels":["calm","sharp"],"prior":[0.6,0.4]}],
+        "inputs":[{"id":"pressure","kind":"number","max":100,"effects":{"tone":1}}],
+        "habits":[{"id":"calm_under_pressure","when":{"pressure":{"at_least":65}},"then":{"tone":["calm"]}}]}"#).unwrap();
+    let (_, out, e) = probbit(&["persona", "fuzz", &file, "--never", r#"{"when":{"pressure":42},"then":{"tone":["calm"]}}"#, "--seeds", "0", "--scripts", "1", "--beam", "0", "--json"], "");
+    assert_eq!(jw(s(&parse(&out), &["search", "grid"])), "[0,0.5,1,0.42,0.65]", "{e}");
+    let _ = std::fs::remove_file(&file);
+}
+
 /// A bad rule is one error object at its path (exit 2), like a bad habit; a missing rule or a bad flag is a stderr line (exit 2)
 #[test]
 fn fuzz_refuses_bad_rules_and_flags() {
@@ -565,7 +593,35 @@ fn lint_with_rules_proves_then_fuzzes_the_unknown_ones() {
     assert_eq!((s(&p[1], &["verdict"]).as_str(), s(&p[1], &["fuzz", "verdict"]).as_str()), (Some("unknown"), Some("counterexample")));
     assert_eq!(jw(s(&p[1], &["fuzz", "shortest", "script"])), r#"[{"sentiment":"negative"}]"#);
     let (c, out, e) = probbit_at_root(&["persona", "lint", TUTOR_050, "--never", "{when: {sentiment: negative}, then: {directness: {at_most: balanced}}}", "--seeds", "0-2"]); assert_eq!(c, 0, "{e}");
-    assert_eq!(s(&parse(&out), &["ok"]), &Json::Bool(true));
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), jw(s(&l, &["unproven"]))), (&Json::Bool(true), "[]".to_string()));
+    let _ = std::fs::remove_file(&props);
+}
+
+/// 0.8.2: a rule the bound leaves unknown and the search cannot break is not green. On the shipped tutor, "a loss makes it warm"
+/// is unknown for seeds 0-2 and fuzz finds no counterexample: exit 3, `ok` false, `broken` 0, one `unproven` entry naming the
+/// undecided seeds and what was searched, and "unproven, not broken" on stderr. A proved rule stays exit 0; a broken rule next to
+/// an unproven one exits 1 and still lists the unproven one.
+#[test]
+fn lint_reports_an_unknown_unbroken_rule_as_unproven() {
+    let tutor = "examples/persona/tutor.yaml";
+    let (c, out, e) = probbit_at_root(&["persona", "lint", tutor, "--never", "{when: {loss: true}, then: {warmth: [warm]}}", "--seeds", "0-2"]);
+    assert_eq!(c, 3, "{e}"); assert!(e.contains("1 rule unproven, not broken: never"), "{e}");
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), s(&l, &["broken"]).as_f64()), (&Json::Bool(false), Some(0.0)));
+    let p = s(&l, &["props"]).as_arr().unwrap(); assert_eq!((s(&p[0], &["verdict"]).as_str(), s(&p[0], &["fuzz", "verdict"]).as_str()), (Some("unknown"), Some("none_found")));
+    let u = s(&l, &["unproven"]).as_arr().unwrap(); assert_eq!(u.len(), 1, "{out}");
+    assert_eq!((s(&u[0], &["id"]).as_str(), jw(s(&u[0], &["rule"])), jw(s(&u[0], &["seeds_unknown"]))),
+        (Some("never"), r#"{"then":{"warmth":["warm"]},"when":{"loss":true}}"#.to_string(), "[0,1,2]".to_string()));
+    assert_eq!(jw(s(&u[0], &["searched"])), r#"{"beam":4,"depth":8,"grid":[0,0.5,1],"hours":[1,12,48],"individuals":3,"scripts":60}"#);
+    // proved: exit 0, nothing unproven, nothing on stderr about it
+    let (c, out, e) = probbit_at_root(&["persona", "lint", tutor, "--never", "{when: {error: true}, then: {caution: {at_least: measured}}}", "--seeds", "0-2"]);
+    assert_eq!(c, 0, "{e}"); assert_eq!(jw(s(&parse(&out), &["unproven"])), "[]"); assert!(!e.contains("unproven"), "{e}");
+    // broken next to unproven: exit 1, both reported
+    let props = tmp("lint-unproven.json");
+    std::fs::write(&props, r#"{"props": [{"id": "praise_lifts", "when": {"praise": true}, "then": {"valence": {"at_least": "even"}}},
+        {"id": "loss_warm", "when": {"loss": true}, "then": {"warmth": ["warm"]}}]}"#).unwrap();
+    let (c, out, e) = probbit_at_root(&["persona", "lint", tutor, "--props", &props, "--seeds", "0-2"]); assert_eq!(c, 1, "{e}");
+    let l = parse(&out); assert_eq!((s(&l, &["ok"]), s(&l, &["broken"]).as_f64()), (&Json::Bool(false), Some(1.0)));
+    assert_eq!(s(&l, &["unproven"]).as_arr().unwrap().iter().map(|u| s(u, &["id"]).as_str().unwrap()).collect::<Vec<_>>(), ["loss_warm"]);
     let _ = std::fs::remove_file(&props);
 }
 

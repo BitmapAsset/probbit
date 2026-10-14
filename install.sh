@@ -136,7 +136,13 @@ main() {
         *)
             cmd="$dir/probbit"
             say ""
-            case "${SHELL:-}" in */zsh) profile='~/.zshrc' ;; */bash) profile='~/.bashrc (or ~/.bash_profile for login shells)' ;; *) profile='your shell profile' ;; esac
+            # the file the user's shell reads: zsh ~/.zshrc; bash ~/.bash_profile on macOS (Terminal opens login shells),
+            # ~/.bashrc elsewhere; any other shell ~/.profile
+            case "${SHELL:-}" in
+                */zsh) profile='~/.zshrc' ;;
+                */bash) if [ "$(uname -s 2> /dev/null)" = Darwin ]; then profile='~/.bash_profile'; else profile='~/.bashrc'; fi ;;
+                *) profile='~/.profile' ;;
+            esac
             say "$dir is not on your PATH. Add it in $profile:"
             say "  export PATH=\"$dir:\$PATH\""
             ;;

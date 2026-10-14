@@ -567,6 +567,15 @@ tie, the later-declared one), the turn is re-solved, and `habits.yielded` and `e
 previous level their `prev` restrictions read) for an empty stance, and reports each contradiction with its resolution.
 Run it before shipping a persona.
 
+**Exit codes.** `lint` exits 0 when every contradiction is resolved and, with rules (`--never RULE` / `--props FILE`, section
+5.6), every rule is held by construction or proved; 1 when a contradiction is
+unresolved or a rule has a counterexample; 2 on a bad persona, rule or flag; 3 (since 0.8.2) when nothing is broken but some
+rule is **unproven**: `prove` left it `unknown` and the default `fuzz` search found no counterexample. Unproven is not broken,
+and it is not green either: the JSON's `ok` is false and `unproven` lists each such rule as `{id, rule, seeds_unknown,
+searched}` (`seeds_unknown`: the individuals the bound could not decide; `searched`: `individuals`, `scripts`, `depth`, `beam`,
+`grid`, `hours`), and stderr says "unproven, not broken". Exit 1 wins over 3. A CI gate that should accept unproven rules
+checks for exit 3 explicitly; up to 0.8.1 the same case exited 0 with `ok: true`.
+
 **Plan and mode.** A stance level is the joint plan's, so on coupled traits it can differ from the trait's own most likely level
 (section 4): the 0.5.0 tutor's seed 1, told the learner is upset, planned humour `playful` (odds 0.411) while `light` had 0.425,
 and valence `up` (0.386) while `even` had 0.457; the two are coupled (`align: 1.0`) and the plan took their high levels
@@ -586,7 +595,10 @@ writes. Two commands test it over a population of individuals (`--seeds 0-99`); 
 line of YAML), `--props FILE` several (`{"props": [...]}`, each with an optional `id`).
 
 **`fuzz`** searches event scripts built from the persona's declared inputs (flags, levels, numbers on `--grid` x their max,
-idle hours on `--hours`): random scripts, then a beam guided by the exact odds (the next events that put the most odds on a
+idle hours on `--hours`). The grid (default 0, 0.5, 1) also gets, after the given points and each once, every threshold the
+rule's `when` and the habits' `when` read on a number input, as a fraction of that input's max (since 0.8.2): a rule in force
+only at stakes 0.7 to 0.8 is searched at 0.7 and 0.8; `search.grid` in the JSON lists the grid used. The search runs random
+scripts, then a beam guided by the exact odds (the next events that put the most odds on a
 level the rule forbids). Each individual's shortest counterexample is shrunk (drop events, then single inputs) and printed with
 the breaking turn's levels, odds, why and line, and the `replay` / `explain` commands that reproduce it. The search is Philox
 keyed by `--fuzz-seed` and the seed: the same inputs give the same report, byte for byte, on any number of threads. "None
@@ -635,7 +647,8 @@ every turn in that range. On the drives fixture of the tests: "a chore due withi
 
 **`lint --props FILE`** (or `--never RULE`) runs both for CI: `prove` on every rule, then `fuzz` (the default search) on the
 ones it leaves unknown; the lint document gets `props` (each rule's `prove` entry, with a `fuzz` entry when it was unknown) and
-`broken`; exit 1 when a contradiction is unresolved or a rule breaks.
+`broken` and `unproven`; exit 1 when a contradiction is unresolved or a rule breaks, exit 3 when a rule stays unknown and the
+search finds no counterexample (section 5.5).
 
 Exit codes: `fuzz` 0 nothing found, 1 a counterexample; `prove` 0 every rule held or proved, 1 some rule unknown; both 2 bad
 input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); timing goes to stderr.
@@ -801,19 +814,19 @@ invalid move, 4 when the lock is held or the individual is retired.
 
 ### 5.8 Monitor: watch an individual's inner state
 
-`probbit monitor STRAND` draws an individual's inner state as live horizontal bars, in the terminal or as a page in the browser.
+`probbit monitor STRAND` draws an individual's declared state as live terminal bars, or as a compact browser Activity Monitor.
 It replays the strand with the rules of `live verify` (the two share one replay), recomputing every stance document from the
 strand alone: it needs no other log, works for any strand on any machine, and says "replay verified" while every line checks,
 or names the line that differs.
 
 ```sh
 probbit monitor pip.strand --follow              # bars in the terminal, redrawn as the strand grows
-probbit monitor pip.strand --open                # the same board as a page at http://127.0.0.1:PORT/, in the browser
+probbit monitor pip.strand --open                # a channel table and inspector at http://127.0.0.1:PORT/, in the browser
 probbit monitor --demo --open                    # the tutor's week, paced, for someone without a strand yet
 probbit monitor --demo drives --open             # eight synthetic events with goals and drives
 ```
 
-**What it shows.** The latest event. A header: persona and version, seed, the individual's digest, the event number, the hours
+**What it shows.** The latest event (or a selected historical event in the browser). In the terminal, a header: persona and version, seed, the individual's digest, the event number, the hours
 since the event before, the replay badge. The stance: one row per trait, its levels as segments sized by their odds, the level
 taken in colour and the phrase it says. The moods, with a sparkline of the last 50 events. The senses: the event's inputs as the
 turn used them (flags lit, numbers as bars, levels by name, the clock) and the history features against their caps. The habits
@@ -840,12 +853,61 @@ cannot read the documents:
 
 | route | answer |
 |---|---|
-| `/` | the page: one file embedded in the binary (about 21 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
+| `/` | the page: one file embedded in the binary (under 64 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
 | `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}`, that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
 
-The page draws the terminal's board in a dark theme, the bars moving as the odds do (`prefers-reduced-motion` respected), from
-360 px wide up. No file is changed, and nothing leaves the machine.
+The browser opens a compact **Activity Monitor for one individual**, not a fleet dashboard. Its utility-style toolbar,
+channel table and inspector use system fonts and an automatic light/dark appearance (also selectable in the toolbar).
+The desktop list scrolls inside the utility; at narrow widths the inspector sits below it. This is a browser-rendered CLI
+surface, not a native Swift, WinUI or Electron app. For a native terminal snapshot, use `probbit monitor STRAND --once`;
+`--plain` adds a portable text-only form. No separate application installation is needed.
+
+**Channels.** Every declared trait and mood gets a row; when present, `pursue` and each goal's wanting, afterglow and
+prediction error become drive rows. All/Traits/Moods/Drives filters, a text filter, sortable columns and keyboard selection
+work for arbitrary persona names and channel declarations. A persona-confidence hold is marked **held**, with pre-hold odds in the inspector; an engine-unreleased trait is separately marked **unreleased**. Missing
+values are unreported, not zero. A channel's inspector shows its actual selected level/value, each reported probability,
+units, declared range, source field, optional supplied phrase and the engine's event-level `why`. That `why` is not a
+per-channel causal attribution or a model's thoughts.
+
+**Reading the graphs.** The table trace for a discrete channel follows the *currently selected level's probability* through
+past documents; the inspector plots each declared level's probability separately. No semantic ordering is assumed for the
+level names. Drive traces show the reported numeric values in engine units (wanting/afterglow) or reward error (prediction
+error), against the declared cap (including `expectation.pe_cap` for prediction error). `Δ event` compares the same quantity to the immediately preceding
+event, when its document is available; probabilities use percentage points. Unknown history is a gap, not a connecting line or fabricated zero.
+Both chart axes and timeline refer to **event numbers**, not wall-clock timestamps. Quiet connections never create state,
+mood decay or graph samples; SSE heartbeat comments are not events.
+
+**Inspecting history.** The timeline loads at most the latest 50 documents from `/doc/N`, with at most four concurrent
+requests. Equal-sized marks represent recorded events, not workload. Select a mark, use previous/next, or use the
+keyboard-accessible scrubber to hold an event. **Hold view** freezes only the browser's inspected event; the individual
+and stream continue. **Follow latest (+N)** returns to the newest event. If a held event ages out of that 50-document
+window, its displayed state is retained, the out-of-window condition is named, and the scrubber is hidden until a recent
+event is selected. A checkpoint bounds available history. Demo restarts, changed metadata or observed strand resets clear
+the cache; metadata arriving without a following frame immediately clears the prior individual's visible state.
+
+`/doc/N` contains a stance document, not a complete monitor frame. Historical documents therefore have no invented raw
+clock inputs or learned deltas. These appear in the expandable event-evidence area only when that event's full frame was
+actually received. Document inputs, history features and rules remain available. The JSON link follows the inspected event.
+
+**Status is separate from the graph.** Live/awaiting-event, synthetic replay, held view, paused/frozen strand, permanently
+retired strand, replay divergence and disconnected/retrying are distinct. After 60 seconds without a newly numbered event
+received in this browser, an otherwise connected active strand is labelled **stale event**. This is *receiver age*, not an
+engine timestamp and not evidence that the host or agent is idle. Disconnects retain the last received state without claiming
+live activity. The replay badge describes the current stream and its checkpoint scope, even while an older event is held.
+
+**Scope.** One endpoint has one individual. No agent fleet, thoughts, CPU, GPU, memory, token use or task activity is inferred.
+To add multiple agents, a host adapter would need an explicit registry of endpoint/individual identities and independently
+measured lifecycle and work telemetry, each with its own timestamp/source. Those are not supplied by the current strand or
+monitor API. A future fleet surface must keep per-individual replay/history and source attribution separate; a list of
+channels is not a list of agents.
+
+The page works from 360 px wide, respects `prefers-reduced-motion`, and loads no external assets or dependencies.
+No strand is changed, and nothing leaves the machine. Real Chrome/Chromium regressions (Node 22+, no npm dependencies):
+`cargo build --release -p probbit-cli`, then `node probbit-cli/tests/monitor_browser.mjs`. Only authored synthetic fixtures are
+used, visibly labelled in screenshots. Generated evidence defaults to a temporary directory, not the repository. The checks
+cover sorting/filtering/keyboard selection, arbitrary and traits-only personas, unreleased levels, append/hold/backfill,
+missing history gaps, checkpoint bounds, 50 documents/four fetches, stale/frozen/retired/disconnected states and metadata reset.
 
 **Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
 5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:
@@ -887,7 +949,7 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona replay PERSONA [--seed N] --script JSON\|FILE [--out TRACE] [--no-inertia] [--timing]` | `init`, then every turn of a script: one stance per line; stderr: the trace's sha256 and the final state digest |
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
-| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; exit 1 if a contradiction is unresolved or a rule breaks |
+| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |

@@ -3,6 +3,34 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.2 - unreleased
+
+### Added
+- `probbit monitor STRAND --open` (and `--serve`) shows an Activity Monitor for one individual: a sortable, filterable table of
+  the persona's declared traits, moods and, when present, drive channels, with each channel's reported level or value, a trace
+  over recorded events and a change against exactly the preceding event (a gap when that document is missing); an inspector
+  with the full distribution, units, declared range, source field and the event's `why`; holding a past event while new ones
+  arrive; and separate states for replay divergence, stale receiver age, a held view, a paused or retired strand, a
+  persona-confidence hold, an engine-unreleased trait and a lost connection. It works for any persona read from the strand.
+  The page is embedded in the binary with no external assets; the terminal view (`--once`, `--follow`, `--plain`) is unchanged.
+  The monitor's layout gains `caps.prediction_error` from the persona's `expectation.pe_cap`. docs/persona.md §5.8.
+
+### Changed
+- `persona lint` with rules (`--never RULE` / `--props FILE`) no longer reports green on a rule it could not settle. When
+  `prove` leaves a rule `unknown` and the default `fuzz` search finds no counterexample, the rule is **unproven**: the lint
+  document gains `"unproven": [{id, rule, seeds_unknown, searched}]`, `ok` is false, stderr says "unproven, not broken", and the
+  exit code is the new **3** (0: every rule held or proved; 1: an unresolved contradiction or a counterexample, which wins over
+  3; 2: bad input, as before). Up to 0.8.1 the same case exited 0 with `ok: true`. docs/persona.md §5.5.
+- `persona fuzz`, MCP `probbit_persona_fuzz` and `lint`'s search add every threshold the rule's `when` and the habits' `when`
+  read on a number input to the grid (as a fraction of that input's max, after the given points, each once; `search.grid` lists
+  them). A rule in force only between two default grid points (for example stakes 0.7 to 0.8) is now reached by the random
+  search too. Personas whose rules and habits read no number thresholds off the grid get the same search, byte for byte.
+
+### Fixed
+- `install.sh`: when the install directory is not on `PATH`, the hint names the file the user's shell reads: `~/.zshrc` for
+  zsh, `~/.bash_profile` for bash on macOS and `~/.bashrc` elsewhere, `~/.profile` for any other shell (it said "your shell
+  profile"). The clean-prefix install test checks each case.
+
 ## 0.8.1 - 2026-10-10
 
 ### Fixed

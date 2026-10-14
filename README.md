@@ -461,7 +461,8 @@ probbit persona prove examples/persona/tutor.yaml --seeds 0-99 \
 #   held by construction  (habit no_play_when_upset)      (exit 0; the tutor now ships with that one habit)
 ```
 
-`probbit persona lint PERSONA --props rules.json` runs both in CI (exit 1 when a rule breaks); MCP `probbit_persona_fuzz` and
+`probbit persona lint PERSONA --props rules.json` runs both in CI (exit 1 when a rule breaks, exit 3 when a rule is
+unproven: unknown to the bound and unbroken by the search); MCP `probbit_persona_fuzz` and
 Python `probbit.persona_fuzz` / `persona_prove` give the same documents. Both commands test the stance the host gets, not the
 words a model writes; "none found" from `fuzz` is evidence over the scripts it searched, not a proof
 ([docs/persona.md](docs/persona.md) §5.6 has the bound and its limits).
@@ -524,19 +525,25 @@ A persona without the block gives the same documents as before, byte for byte. M
 cues, rewards and praises fun on this persona, 100 individuals x 10,000 turns: 0 habit breaks, all 6,743 must-do turns pursued
 the due chore, and the safety floor (0.1) held on every turn its habits allowed (least odds 0.141), while fun took 85 % of turns.
 
-### Watch it live: `probbit monitor` (0.8.0)
+### Watch it live: `probbit monitor` (0.8.0; Activity Monitor page 0.8.2)
 
-`probbit monitor pip.strand` replays a strand with the rules of `live verify` and draws the individual's inner state as live bars:
-each trait's levels with their odds, the moods, the event's inputs, the habits that bound, the learned weights and the line, in the
-terminal (`--follow` redraws as the strand grows) or as a page on 127.0.0.1 (`--serve`). It reads the strand and sends nothing
-anywhere ([docs/persona.md](docs/persona.md) §5.8). No strand yet? The tutor's week, in under a minute:
+`probbit monitor pip.strand --open` opens a compact, read-only **Activity Monitor** for one individual: a sortable,
+searchable table of declared traits, moods and drives, with reported probabilities, event-history traces, and a selected-channel
+inspector. It reads any compatible persona from the strand; no preset character or agent integration is required.
 
 ```sh
-probbit monitor --demo --open
-probbit monitor --demo drives --open  # synthetic goals/drive demo (0.8.1)
+probbit monitor pip.strand --once --plain   # native CLI snapshot; no browser or server
+probbit monitor pip.strand --follow        # live terminal bars
+probbit monitor pip.strand --open          # browser-rendered utility on 127.0.0.1
+probbit monitor --demo --open              # no strand yet: the tutor's synthetic week, in under a minute
+probbit monitor --demo drives --open       # synthetic goals/drive scenario
 ```
 
-![probbit monitor: the tutor's week in the browser, the bars moving with every event](docs/probbit-monitor.gif)
+Select a channel to inspect its units, range, distribution, source and the engine's `why`. Hold an event while new ones
+arrive, or follow latest. History means **recorded events, not seconds**. This is declared engine state, not thoughts or
+CPU/GPU/memory usage. Replay verification, stale event age, held view, paused/retired strand and lost connection are distinct.
+Everything is embedded in the CLI: no dependencies, external assets, telemetry or Electron installation.
+See [the monitor guide](docs/persona.md#58-monitor-watch-an-individuals-inner-state) for the data and replay boundaries.
 
 ## After any judge: `probbit evaluate`
 
