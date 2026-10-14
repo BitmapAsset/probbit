@@ -44,6 +44,16 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// failed write to stderr is ignored: the command keeps its stdout and its exit code.
 fn err_line(s: &str) { let _ = writeln!(std::io::stderr(), "{s}"); }
 fn fail(msg: &str) -> ! { tui::top_stop(); err_line(&format!("probbit: {msg}")); exit(2) }
+/// An unknown command (`sub` None) or subcommand of `cmd`: exit 2 with the closest name (`usage::suggest`) if there is one:
+/// `probbit: unknown command "persna"; did you mean "persona"? see `probbit --help``
+fn unknown(cmd: Option<&Command>, word: &str) -> ! {
+    let (what, cands, see): (String, Vec<&str>, String) = match cmd {
+        None => ("unknown command".into(), COMMANDS.iter().map(|c| c.name).collect(), "probbit --help".into()),
+        Some(c) => (format!("unknown {} subcommand", c.name), c.subs.iter().map(|s| s.name).collect(), format!("probbit {} --help", c.name)) };
+    match usage::suggest(word, &cands) {
+        Some(s) => fail(&format!("{what} {word:?}; did you mean {s:?}? see `{see}`")),
+        None => fail(&format!("{what} {word:?}; see `{see}`")) }
+}
 /// Exit with `code`, releasing a strand's writer lock this process holds first (live.rs `Lock`; `std::process::exit` skips `Drop`)
 fn exit(code: i32) -> ! { live::release_held(); std::process::exit(code) }
 /// `--budget-ms inf` / `1e300` aborted (exit 134: the deadline Duration overflowed) and `NaN` never stopped sampling
@@ -738,6 +748,8 @@ fn live_cmd(args: &[String]) {
         return;
     }
     let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else { fail("live: the persona file goes before the flags: probbit live PERSONA [flags] (or probbit live verify STRAND, probbit live control STRAND ...)") };
+    // `probbit live verfy x.strand`: no persona file of that name, and a subcommand close to it
+    if !std::path::Path::new(path).exists() { let c = command("live").unwrap(); if usage::suggest(path, &c.subs.iter().map(|s| s.name).collect::<Vec<_>>()).is_some() { unknown(Some(c), path) } }
     let mut a = vec!["live".to_string()]; a.extend(args.iter().skip(2).cloned()); let (v, w) = flags_of("live"); check_flags(&a, &v, &w);
     let (p, doc) = persona::load(path).unwrap_or_else(|e| bad_input("live: ", e));
     if let Some(d) = opt("--demo") {
@@ -799,7 +811,9 @@ fn live_cmd(args: &[String]) {
 /// `probbit persona <sub> PERSONA [flags]` (docs/persona.md)
 fn persona_cmd(args: &[String]) {
     let sub = args.get(1).map_or("", String::as_str);
-    let Some((vals, switches)) = sub_flags("persona", sub) else { fail("persona: a subcommand: init, turn, replay, explain, diff, lint, fuzz, prove, check, compile or describe (probbit persona --help)") };
+    let Some((vals, switches)) = sub_flags("persona", sub) else {
+        if sub.is_empty() || sub.starts_with('-') { fail("persona: a subcommand: init, turn, replay, explain, diff, lint, fuzz, prove, check, compile or describe (probbit persona --help)") }
+        unknown(command("persona"), sub) };
     let pretty = args.iter().any(|a| a == "--pretty");
     if pretty && sub == "replay" { fail("persona replay emits one canonical JSON object per line (JSONL); --pretty is for single-document commands such as persona turn") }
     if pretty && sub == "explain" { fail("persona explain already emits readable text; --pretty is for JSON commands") }
@@ -884,11 +898,11 @@ fn help_cmd(args: &[String]) {
     match words[..] {
         [] => if theme::stdout_is_terminal() { emit_raw(&tui::hero(theme::stdout(args))) } else { emit_raw(&top_help()) },
         [name, ..] if words.len() <= 2 => {
-            let Some(c) = command(name) else { fail(&format!("unknown command {name:?}; see `probbit --help`")) };
+            let Some(c) = command(name) else { unknown(None, name) };
             match words.get(1) {
                 None => emit_raw(&usage::command_help(c)),
                 Some(s) => match c.sub(s) { Some(s) => emit_raw(&usage::sub_help(c, s)),
-                    None => fail(&format!("unknown subcommand {s:?} for `probbit {}`; see `probbit {} --help`", c.name, c.name)) } }
+                    None => unknown(Some(c), s) } }
         }
         _ => fail("help: at most a command and a subcommand: probbit help [COMMAND [SUBCOMMAND]]"),
     }
@@ -906,7 +920,7 @@ fn main() {
     match args.first().map(|s| s.as_str()) {
         // `probbit --help` / `-h` asked for the usage: stdout, exit 0 (it went to stderr with exit 2, as for a missing command)
         Some("--help") | Some("-h") => { check_flags(&args, &[], &["--plain"]); emit_raw(&top_help()); }
-        Some(name) => match command(name) { Some(c) => (c.run)(&args), None => fail(&format!("unknown command {name:?}; see `probbit --help`")) },
+        Some(name) => match command(name) { Some(c) => (c.run)(&args), None => unknown(None, name) },
         None => { let _ = std::io::stderr().write_all(top_help().as_bytes()); std::process::exit(2) }
     }
 }
@@ -959,6 +973,15 @@ mod table_tests {
         assert!(sub_flags("persona", "lnt").is_none());
         assert_eq!(sub_flags("live", "verify").unwrap(), (vec![], vec!["--from-checkpoint"]), "live's own flags are not verify's");
         for c in COMMANDS { let (v, w) = flags_of(c.name); assert_eq!(v.len() + w.len(), c.flags().count(), "{}", c.name); }
+    }
+    #[test]
+    fn did_you_mean() {
+        assert_eq!([usage::distance("persna", "persona"), usage::distance("rnu", "run"), usage::distance("lnt", "lint"), usage::distance("", "ir"), usage::distance("abc", "abc")], [1, 1, 1, 2, 0]);
+        let names: Vec<&str> = COMMANDS.iter().map(|c| c.name).collect();
+        for (typo, want) in [("persna", Some("persona")), ("dcide", Some("decide")), ("rnu", Some("run")), ("pers", Some("persona")), ("monitr", Some("monitor")),
+            ("evalute", Some("evaluate")), ("verison", Some("version")), ("x", None), ("frobnicate", None), ("ab", None), ("helpme", Some("help")), ("statistics", None)] {
+            assert_eq!(usage::suggest(typo, &names), want, "{typo}");
+        }
     }
     /// The dispatcher accepts exactly the table: `main` dispatches through `command()`, and its own match names no command
     #[test]

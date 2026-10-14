@@ -1,4 +1,5 @@
-//! What the command table (`COMMANDS`, main.rs) renders: every `--help` screen. The parser reads the same table (`flags_of`,
+//! What the command table (`COMMANDS`, main.rs) renders: every `--help` / `probbit help` screen and the did-you-mean of an
+//! unknown command or subcommand. The parser reads the same table (`flags_of`,
 //! `sub_flags`), so the help, the completions and the man page list exactly what is accepted and cannot drift from it.
 
 /// A flag. `arg`: "" = a switch; "[X]" = an optional value (parsed as a switch: `--progress [MS]`, `--demo [week|drives]`);
@@ -148,3 +149,24 @@ pub(crate) const TOP_EXAMPLES: [&str; 6] = [
 ];
 fn first_sentence(s: &str) -> &str { s.split(['\n', ';']).next().unwrap_or(s).trim() }
 
+/// Optimal-string-alignment (restricted Damerau-Levenshtein) distance: insertions, deletions, substitutions and swaps of two
+/// neighbouring characters, 1 each
+pub(crate) fn distance(a: &str, b: &str) -> usize {
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, r) in d.iter_mut().enumerate() { r[0] = i; } for j in 0..=b.len() { d[0][j] = j; }
+    for i in 1..=a.len() { for j in 1..=b.len() {
+        let c = usize::from(a[i - 1] != b[j - 1]);
+        d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + c);
+        if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] { d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1); }
+    } }
+    d[a.len()][b.len()]
+}
+/// The candidate an unknown `word` most likely meant: the only one it is a prefix of (2 characters at least), else the closest
+/// within distance 2 (1 for a word of 3 characters or fewer, so `x` does not become `ir`); ties go to the earlier candidate.
+pub(crate) fn suggest<'a>(word: &str, cands: &[&'a str]) -> Option<&'a str> {
+    let pre: Vec<&&str> = cands.iter().filter(|c| word.chars().count() >= 2 && c.starts_with(word)).collect();
+    if pre.len() == 1 { return Some(pre[0]); }
+    let max = if word.chars().count() <= 3 { 1 } else { 2 };
+    cands.iter().map(|c| (distance(word, c), *c)).filter(|(d, _)| *d <= max).min_by_key(|(d, _)| *d).map(|(_, c)| c)
+}
