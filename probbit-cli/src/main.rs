@@ -383,6 +383,14 @@ pub(crate) static COMMANDS: &[Command] = &[
         about: "Print the help of a command or subcommand, the same text as `probbit COMMAND [SUBCOMMAND] --help`; alone, the same as `probbit --help`.",
         before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[], examples: &["probbit help persona fuzz"],
         run: help_cmd },
+    Command { name: "completions", aliases: &[], group: "other", summary: "a completion script for bash, zsh or fish: commands, subcommands, flags",
+        usage: &["completions bash|zsh|fish"],
+        about: "Print a static completion script for the shell: the commands, subcommands and flags (with their help where the shell shows it), generated from the same table as this help, so it lists exactly what the parser accepts. Regenerate it after an upgrade.",
+        before: &[], flags: &[], subs: &[], list_subs: false, shared: false,
+        after: &[("install", "bash: probbit completions bash > ~/.local/share/bash-completion/completions/probbit\nzsh: probbit completions zsh > ~/.zfunc/_probbit, with fpath=(~/.zfunc $fpath) before compinit in ~/.zshrc\nfish: probbit completions fish > ~/.config/fish/completions/probbit.fish"),
+            ("exit", "0 the script, 2 no shell or an unknown one (the list of shells on stderr).")],
+        examples: &["probbit completions zsh > ~/.zfunc/_probbit", "source <(probbit completions bash)"],
+        run: completions_cmd },
     Command { name: "version", aliases: &["--version", "-V"], group: "other", summary: "print the version (also --version, -V)",
         usage: &["version"], about: "Print the version.",
         before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[], examples: &[],
@@ -891,6 +899,13 @@ fn mcp_cmd(args: &[String]) { check_flags(args, &[], &[]); mcp::serve() }
 fn version_cmd(args: &[String]) { check_flags(args, &[], &[]); emit(&format!("probbit {VERSION}")) }
 /// `probbit --help` piped (and `probbit help`): the grouped usage; at a terminal the hero screen
 fn top_help() -> String { usage::top_help(COMMANDS, VERSION) }
+/// `probbit completions bash|zsh|fish` (usage::completions)
+fn completions_cmd(args: &[String]) {
+    let shells = usage::SHELLS.join(", ");
+    let Some(sh) = args.get(1).filter(|a| !a.starts_with('-')) else { fail(&format!("completions: a shell: {shells} (probbit completions zsh)")) };
+    let mut a = vec!["completions".to_string()]; a.extend(args[2..].iter().cloned()); check_flags(&a, &[], &[]);
+    match usage::completions(sh, COMMANDS) { Some(s) => emit_raw(&s), None => fail(&format!("completions: unknown shell {sh:?}; one of {shells}")) }
+}
 /// `probbit help [COMMAND [SUBCOMMAND]]`: the same text as `probbit COMMAND [SUBCOMMAND] --help`; alone, as `probbit --help`
 /// (the hero screen at a terminal, else the usage). Exit 0; an unknown command or subcommand exits 2.
 fn help_cmd(args: &[String]) {
