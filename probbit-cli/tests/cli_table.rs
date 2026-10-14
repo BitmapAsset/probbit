@@ -23,7 +23,7 @@ fn listed() -> Vec<String> {
 #[test]
 fn every_listed_command_runs_and_every_old_command_is_listed() {
     let cmds = listed();
-    for old in ["persona", "live", "monitor", "decide", "run", "evaluate", "demo", "ir", "mcp", "stats", "version"] { assert!(cmds.iter().any(|c| c == old), "{old} missing from {cmds:?}"); }
+    for old in ["persona", "live", "check", "monitor", "decide", "run", "evaluate", "demo", "ir", "mcp", "stats", "version"] { assert!(cmds.iter().any(|c| c == old), "{old} missing from {cmds:?}"); }
     for c in &cmds {
         let (code, out, err) = probbit(&[c, "--help"]);
         assert_eq!(code, 0, "{c}: {err}"); assert!(out.starts_with(&format!("usage: probbit {c}")), "{c}: {out}"); assert!(err.is_empty(), "{c}: {err}");
@@ -47,7 +47,7 @@ fn every_listed_subcommand_has_help_and_every_listed_flag_parses() {
             }
         }
     }
-    for cmd in ["decide", "run", "evaluate", "demo", "ir", "stats", "monitor"] {
+    for cmd in ["decide", "run", "evaluate", "demo", "ir", "stats", "monitor", "check"] {
         let (_, h, _) = probbit(&[cmd, "--help"]);
         let fl = help_flags(&h); assert!(!fl.is_empty(), "{cmd}: no flags listed");
         for f in fl {

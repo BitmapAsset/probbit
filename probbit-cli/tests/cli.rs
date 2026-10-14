@@ -1195,8 +1195,12 @@ fn chains_and_threads_have_upper_bounds() {
 /// flag lost its exit code 2, bad input its error object, and `--progress` into `head -c 1` the whole decision. Now ignored.
 #[test]
 fn closed_stderr_pipe_keeps_stdout_and_exit_code() {
-    let run = |args: &[&str], input: &str| { let (r, w) = std::io::pipe().unwrap(); drop(r); // no reader: every stderr write fails
-        let mut c = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(w).spawn().unwrap();
+    let run = |args: &[&str], input: &str| {
+        // a pipe with no reader, so every stderr write fails: the write end of a process's stdin once that process has exited
+        // (`std::io::pipe` would do it directly, but is stable only since Rust 1.87; the MSRV is 1.78)
+        let mut gone = Command::new(env!("CARGO_BIN_EXE_probbit")).arg("version").stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        let w = gone.stdin.take().unwrap(); gone.wait().unwrap();
+        let mut c = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::from(w)).spawn().unwrap();
         let _ = c.stdin.take().unwrap().write_all(input.as_bytes()); let o = c.wait_with_output().unwrap(); (o.status.code(), String::from_utf8_lossy(&o.stdout).into_owned()) };
     assert_eq!(run(&["decide", "--bogus"], ""), (Some(2), String::new()));
     let (c, out) = run(&["decide"], "not json"); assert_eq!(c, Some(2)); one_error(&out, "schema", "");

@@ -47,6 +47,8 @@ The exact tiers run before the sampler:
 - `persona`: 0 done; 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or
   prove left a rule unknown; 2 bad persona / state / inputs / script / rule, or bad flag.
 - `live`: 0 done; 1 verify: a line differs; 2 a bad persona, state, event or flag.
+- `check`: 0 every rule held and every strand replays; 1 a rule broken, an unresolved contradiction or a strand that fails
+  (1 wins); 2 a bad persona, rule file or flag; 3 the only problem is an unproven rule.
 - `monitor`: 0 every line replays; 1 a line differs; 2 a bad flag, a port that cannot be had, or a file that is not a strand.
 
 ## Errors
@@ -84,6 +86,14 @@ One channel, the same for every command (0.8.2):
 | `live verify STRAND` | replay a strand; the earliest line that differs |
 | `monitor STRAND [--follow] [--once] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars in the terminal, or the Activity Monitor page on 127.0.0.1 (channel table, event-history traces, inspector) |
 | `monitor --demo [week\|drives] [--open]` | synthetic data: the tutor's week, paced, in under a minute; `drives`: a short goal-signal scenario |
+
+## `probbit check PERSONA` (0.8.3): one gate for CI
+`probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds 0-99] [--depth 8] [--hours 1,12,48] [--json]` runs `persona
+lint`'s pipeline on the rules (prove, then fuzz the unknown ones) and `live verify` on every strand. One line per rule
+(`held`, `held_by_construction`, `broken seed N`, `unproven`), one per strand (`ok N events` / `FAIL line K: ...`), then
+`check: held H · broken B · unproven U · strands S/T`. `--json`: `{persona, props, seeds, depth, hours, rules, strands,
+verdict}`, where `rules` is the `persona lint` document. In GitHub Actions: `uses: BitmapAsset/probbit@<ref>` (README,
+"Check in CI").
 
 ## Testing a character
 - `lint`: contradicting habits; with `--props`, every rule proved or fuzzed;

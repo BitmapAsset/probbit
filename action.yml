@@ -1,0 +1,151 @@
+name: probbit check
+description: Vet a persona's rules (prove, then fuzz the unknown ones) and replay its strands; fail the job on a broken rule or strand.
+author: BitmapAsset
+branding:
+  icon: check-circle
+  color: green
+inputs:
+  persona:
+    description: The persona file (YAML subset or JSON), relative to the workspace.
+    required: true
+  props:
+    description: 'The rules file ({"props": [...]}; YAML subset or .json). Empty = only the habit contradictions and the strands are checked.'
+    default: ''
+  strands:
+    description: Strands to replay, one path or glob per line (relative to the workspace). A glob that matches nothing fails the check.
+    default: ''
+  seeds:
+    description: The individuals, e.g. 0-99, 7, 1,4,9 or 0-9,20-29.
+    default: '0-99'
+  depth:
+    description: Events per fuzzed script, 1 to 64 (empty = probbit's default, 8).
+    default: ''
+  version:
+    description: The probbit release to install with install.sh (latest, or a tag such as v0.8.3). probbit check needs 0.8.3 or later.
+    default: latest
+  binary:
+    description: Path to a probbit binary to use instead of installing one (for example one built earlier in the job). Overrides version.
+    default: ''
+  allow-unproven:
+    description: "false: an unproven rule (exit 3) fails the job. true: it is a warning and the job passes."
+    default: 'false'
+  json-artifact:
+    description: "true: upload the --json document as an artifact (probbit-check.json)."
+    default: 'true'
+outputs:
+  exit-code:
+    description: probbit check's exit code (0 held, 1 broken or a failing strand, 2 bad input, 3 unproven).
+    value: ${{ steps.check.outputs.exit-code }}
+  json:
+    description: Path of the --json document.
+    value: ${{ steps.check.outputs.json }}
+runs:
+  using: composite
+  steps:
+    - name: install probbit
+      id: install
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_BINARY: ${{ inputs.binary }}
+      run: |
+        set -euo pipefail
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          echo "::error title=probbit check::Windows runners are not supported by this action yet; run the job on ubuntu-latest or macos-latest"
+          exit 1
+        fi
+        if [ -n "$INPUT_BINARY" ]; then
+          bin="$INPUT_BINARY"
+          [ -f "$bin" ] && [ -x "$bin" ] || { echo "::error title=probbit check::binary: $bin is not an executable file"; exit 1; }
+        else
+          dir="$RUNNER_TEMP/probbit-bin"
+          version="$INPUT_VERSION"; [ "$version" = "latest" ] && version=""
+          PROBBIT_VERSION="$version" PROBBIT_INSTALL_DIR="$dir" PROBBIT_MAN_DIR="$RUNNER_TEMP/probbit-man" sh "$GITHUB_ACTION_PATH/install.sh"
+          bin="$dir/probbit"
+        fi
+        bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
+        if ! "$bin" check --help > /dev/null 2>&1; then
+          echo "::error title=probbit check::$("$bin" version 2>&1) has no check command: it needs probbit 0.8.3 or later (set the version input)"
+          exit 1
+        fi
+        command -v jq > /dev/null || { echo "::error title=probbit check::jq is not on this runner (it reads the --json document)"; exit 1; }
+        echo "$("$bin" version)"
+        echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+    - name: probbit check
+      id: check
+      shell: bash
+      env:
+        PROBBIT: ${{ steps.install.outputs.bin }}
+        INPUT_PERSONA: ${{ inputs.persona }}
+        INPUT_PROPS: ${{ inputs.props }}
+        INPUT_STRANDS: ${{ inputs.strands }}
+        INPUT_SEEDS: ${{ inputs.seeds }}
+        INPUT_DEPTH: ${{ inputs.depth }}
+        JOB: ${{ github.job }}
+      run: |
+        set +e -uo pipefail   # GitHub runs bash with -e: the exit code is read below
+        args=(check "$INPUT_PERSONA" --seeds "$INPUT_SEEDS" --json)
+        [ -n "$INPUT_PROPS" ] && args+=(--props "$INPUT_PROPS")
+        [ -n "$INPUT_DEPTH" ] && args+=(--depth "$INPUT_DEPTH")
+        nomatch=0
+        shopt -s nullglob
+        while IFS= read -r pat || [ -n "$pat" ]; do
+          pat="${pat#"${pat%%[![:space:]]*}"}"; pat="${pat%"${pat##*[![:space:]]}"}"
+          [ -z "$pat" ] && continue
+          IFS=$'\n'; matches=($pat); unset IFS
+          if [ "${#matches[@]}" -eq 0 ]; then echo "::error title=probbit check::strands: no file matches $pat"; nomatch=1; continue; fi
+          for f in "${matches[@]}"; do args+=(--strand "$f"); done
+        done <<< "$INPUT_STRANDS"
+        shopt -u nullglob
+        out="$(mktemp -d "$RUNNER_TEMP/probbit-check.XXXXXX")/probbit-check.json"   # one directory per call: a job may run several
+        echo "probbit ${args[*]}"
+        "$PROBBIT" "${args[@]}" > "$out"; code=$?
+        name="probbit-check-$JOB-$RUNNER_OS-$(printf '%s' "$INPUT_PERSONA" | tr -c 'A-Za-z0-9._-' '-')"
+        echo "json=$out" >> "$GITHUB_OUTPUT"; echo "artifact=$name" >> "$GITHUB_OUTPUT"
+        if [ "$code" -eq 2 ] || ! jq -e '.verdict' "$out" > /dev/null 2>&1; then
+          msg=$(jq -r '.error.message // empty' "$out" 2>/dev/null)
+          echo "::error title=probbit check::${msg:-probbit check exited $code without a report}"
+          echo "exit-code=$code" >> "$GITHUB_OUTPUT"; exit 0
+        fi
+        props_file="$INPUT_PROPS"; [ -n "$props_file" ] || props_file="$INPUT_PERSONA"
+        # one line per rule and strand (as probbit check prints them), and an annotation per broken / unproven rule and failed strand
+        jq -r --arg props "$props_file" '
+          def seeds: [.[] | tostring] | join(",");
+          (.rules.unproven // []) as $un
+          | (.rules.props // [])[]
+          | if .verdict == "held_by_construction" then "rule    \(.id)  held_by_construction"
+            elif .verdict == "proved" then "rule    \(.id)  held"
+            elif .fuzz.verdict == "counterexample" then
+              "::error file=\($props),title=probbit check: rule broken::\(.id) is broken on seeds \(.fuzz.failing_seeds | seeds) (shortest counterexample: seed \(.fuzz.shortest.seed), \(.fuzz.shortest.script | length | if . == 1 then "1 event" else "\(.) events" end))\nrule    \(.id)  broken seeds \(.fuzz.failing_seeds | seeds)"
+            else (.id as $id | ($un | map(select(.id == $id)) | .[0].seeds_unknown // []) as $s
+              | "::warning file=\($props),title=probbit check: rule unproven::\(.id) is not proved for seeds \($s | seeds) and the search found no counterexample\nrule    \(.id)  unproven seeds \($s | seeds)")
+            end' "$out"
+        jq -r '.strands[] | if .ok then "strand  \(.path)  ok \(.events) events"
+          else "::error file=\(.path),title=probbit check: strand fails::\(.path): \(.error)\nstrand  \(.path)  FAIL \(.error)" end' "$out"
+        jq -r 'if .verdict.conflicts > 0 then "::error title=probbit check::\(.verdict.conflicts) unresolved habit contradiction(s): run probbit persona lint \(.persona)" else empty end' "$out"
+        line=$(jq -r '.verdict | "check: held \(.held) · broken \(.broken) · unproven \(.unproven) · strands \(.strands_ok)/\(.strands_total)"' "$out")
+        echo "$line"; echo "**probbit check** \`$INPUT_PERSONA\`: $line (exit $code)" >> "$GITHUB_STEP_SUMMARY"
+        [ "$nomatch" -eq 1 ] && [ "$code" -ne 2 ] && code=1
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+
+    - name: upload probbit-check.json
+      if: inputs.json-artifact == 'true' && steps.check.outputs.json != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.check.outputs.artifact }}
+        path: ${{ steps.check.outputs.json }}
+        if-no-files-found: ignore
+
+    - name: verdict
+      shell: bash
+      env:
+        CODE: ${{ steps.check.outputs.exit-code }}
+        ALLOW_UNPROVEN: ${{ inputs.allow-unproven }}
+      run: |
+        case "$CODE" in
+          0) echo "probbit check: every rule held, every strand replays" ;;
+          3) if [ "$ALLOW_UNPROVEN" = "true" ]; then echo "::warning title=probbit check::unproven rules (allow-unproven: true, so the job passes)"
+             else echo "::error title=probbit check::unproven rules: not proved and not broken (set allow-unproven: true to pass with a warning)"; exit 3; fi ;;
+          *) echo "probbit check failed (exit ${CODE:-none})"; exit 1 ;;
+        esac

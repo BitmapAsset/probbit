@@ -1,0 +1,69 @@
+name: check
+# Dogfood the root action (action.yml): `uses: ./` with the probbit built from this commit, on Linux and macOS.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  dogfood:
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build probbit
+        run: cargo build --release --locked -p probbit-cli
+      - name: a strand of the dispatch policy (the receipts the check replays)
+        shell: bash
+        run: |
+          mkdir -p receipts
+          printf '%s\n' '{"blast":0.2}' '{"error":true}' '{"error":true,"criticism":true,"src":"human"}' '{"praise":true,"src":"env"}' '{"blast":0.9}' \
+            | target/release/probbit live examples/persona/dispatch-policy.yaml --seed 2 --clock fixed --strand receipts/day1.strand > /dev/null
+      - name: the rule lock on the dispatch example
+        id: dispatch
+        uses: ./
+        with:
+          persona: examples/persona/dispatch-policy.yaml
+          props: examples/persona/dispatch-props.json
+          strands: |
+            receipts/*.strand
+          binary: target/release/probbit
+      - name: the shipped tutor (habit contradictions)
+        uses: ./
+        with:
+          persona: examples/persona/tutor.yaml
+          binary: target/release/probbit
+      - name: the outputs
+        shell: bash
+        run: |
+          test "${{ steps.dispatch.outputs.exit-code }}" = 0
+          jq -e '.verdict == {"broken":0,"conflicts":0,"exit":0,"held":3,"strands_ok":1,"strands_total":1,"unproven":0}' "${{ steps.dispatch.outputs.json }}"
+  install-gate:
+    # the install path: install.sh fetches a release; probbit 0.8.2 has no check command, so the action must stop with one error
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: the action with probbit 0.8.2
+        id: old
+        continue-on-error: true
+        uses: ./
+        with:
+          persona: examples/persona/tutor.yaml
+          version: v0.8.2
+          json-artifact: 'false'
+      - name: it stopped at the version gate
+        shell: bash
+        run: |
+          test "${{ steps.old.outcome }}" = failure
+          "$RUNNER_TEMP/probbit-bin/probbit" version | grep -qx 'probbit 0.8.2'

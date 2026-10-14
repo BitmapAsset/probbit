@@ -482,6 +482,76 @@ Python `probbit.persona_fuzz` / `persona_prove` give the same documents. Both co
 words a model writes; "none found" from `fuzz` is evidence over the scripts it searched, not a proof
 ([docs/persona.md](docs/persona.md) §5.6 has the bound and its limits).
 
+### Check in CI: `probbit check`
+
+`probbit check` is the rule lock in one command: vet the rules a persona must keep before its first task and after every
+policy update, then replay the receipts (the strands it wrote). It runs `persona lint`'s pipeline on `--props` (prove each
+rule, fuzz the unknown ones) and `live verify` on every `--strand`:
+
+```sh
+probbit check examples/persona/dispatch-policy.yaml --props examples/persona/dispatch-props.json --strand day1.strand
+#   rule    risky_work_asks        held_by_construction
+#   rule    repeated_failures_ask  held_by_construction
+#   rule    routine_work_acts      held_by_construction
+#   strand  day1.strand            ok 5 events
+#   check: held 3 · broken 0 · unproven 0 · strands 1/1
+```
+
+Exit 0 when every rule is held and every strand replays; 1 when a rule is broken, a habit contradiction is unresolved or a
+strand fails (1 wins); 3 when the only problem is an unproven rule (the bound cannot decide it and the search found no
+counterexample); 2 for a bad persona, rule file or flag. `--json` prints one document with the `persona lint` report under
+`rules`, one entry per strand and the verdict counts.
+
+**The rule lock, on the shipped example.** `examples/persona/dispatch-policy.yaml` is an agent that learns from feedback
+whether to act on a request or ask a person first; `dispatch-props.json` holds the three rules it must keep (ask before
+risky work, ask after two failures in a row, act on routine work). With its `routine_acts` habit, every rule is
+`held_by_construction` for seeds 0-99 (exit 0, 0.02 s on an Apple M4). Delete that habit, as a policy update might, and the
+same command catches it before the first task:
+
+```sh
+probbit check dispatch-without-routine-habit.yaml --props examples/persona/dispatch-props.json
+#   rule    risky_work_asks        held_by_construction
+#   rule    repeated_failures_ask  held_by_construction
+#   rule    routine_work_acts      broken seeds 3,6,11,15-17,21,36-37,46,49,57,77,83,85
+#   check: held 2 · broken 1 · unproven 0 · strands 0/0      (exit 1, 0.67 s)
+```
+
+The bound proves `routine_work_acts` for 76 of the 100 individuals and leaves 24 unknown; the search breaks it on 15 of
+those 24 (9 of them with a single event, so before any learning). The other 9 it cannot break at depth 8: checked alone
+(`--seeds 18,20,28,30-31,79,87,92,96`) they report `unproven` and exit 3, which fails the job unless you allow it. Measured
+on this file with probbit 0.8.3 (unreleased), seeds 0-99, default depth.
+
+**As a GitHub Action.** The repository root is a composite action that installs probbit with `install.sh`, runs `probbit
+check --json`, annotates each broken rule and failing strand as an error and each unproven rule as a warning (with the seed
+numbers), and uploads the JSON report as an artifact:
+
+```yaml
+- uses: actions/checkout@v7
+- uses: BitmapAsset/probbit@v0.8.3     # the action needs probbit 0.8.3 or later
+  with:
+    persona: agent/policy.yaml
+    props: agent/rules.json
+    strands: |
+      receipts/*.strand
+    seeds: 0-99
+```
+
+| input | default | |
+|---|---|---|
+| `persona` | (required) | the persona file |
+| `props` | | the rules file; empty = habit contradictions and strands only |
+| `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
+| `seeds` | `0-99` | the individuals |
+| `depth` | probbit's (8) | events per fuzzed script |
+| `version` | `latest` | the release `install.sh` installs (`v0.8.3`, ...) |
+| `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
+| `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
+| `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |
+
+Outputs: `exit-code` and `json` (the report's path). Linux and macOS runners work (this repository runs it on `ubuntu-latest`
+and `macos-latest`); jq, which the action uses, is on GitHub's images. Windows runners stop at once with one error line: use `ubuntu-latest` or `macos-latest` for this step
+(`install.ps1` installs probbit on Windows for running `probbit check` by hand).
+
 ### Live: an individual on a clock, learning inside caps
 
 `probbit live` keeps one individual running: JSONL events in, one stance per event out. A clock stamps the hours between events,
