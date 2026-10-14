@@ -47,10 +47,12 @@ fn breaking_turn(p: &Persona, pr: &Prop, st0: &State, script: &[Event], eng: per
         if let Some(b) = persona::breaks(p, pr, &st, &doc) { return Some((k, doc, b)); } st = ns; }
     None
 }
-/// A script as it ran: payments resolved, refused events left out (they change nothing), so it replays as is
-fn concrete(p: &Persona, st0: &State, script: &[Event], eng: persona::Engine, turns: &AtomicUsize) -> Vec<Event> {
-    let (mut st, mut out) = (st0.clone(), vec![]);
-    for e in script { if let Some((_, ns, ev)) = step(p, &st, e, eng, turns) { out.push(ev); st = ns; } }
+/// A script as it ran: payments resolved, refused events left out (they change nothing), so it replays as is. Without a credit
+/// block the script is already concrete; the re-run is not a searched turn either way.
+fn concrete(p: &Persona, st0: &State, script: &[Event], eng: persona::Engine) -> Vec<Event> {
+    if !p.has_credit() { return script.to_vec(); }
+    let (mut st, mut out, rerun) = (st0.clone(), vec![], AtomicUsize::new(0));
+    for e in script { if let Some((_, ns, ev)) = step(p, &st, e, eng, &rerun) { out.push(ev); st = ns; } }
     out
 }
 /// A random event: each input takes one of its non-default values with a fixed chance (flag 1/4, level 1/2, number 2/5, idle
@@ -105,7 +107,7 @@ fn shrink(p: &Persona, pr: &Prop, st0: &State, script: Vec<Event>, eng: persona:
         if !changed { break; }
     }
     let (k, doc, broken) = breaking_turn(p, pr, st0, &cur, eng, turns).expect("a shrunk counterexample still breaks the property");
-    cur.truncate(k + 1); Found { script: concrete(p, st0, &cur, eng, turns), doc, broken }
+    cur.truncate(k + 1); Found { script: concrete(p, st0, &cur, eng), doc, broken }
 }
 /// One individual: random scripts (shared by the properties), then per property the beam up to one event shorter than the
 /// shortest found, then shrinking
