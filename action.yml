@@ -98,7 +98,7 @@ runs:
           for f in "${matches[@]}"; do args+=(--strand "$f"); done
         done <<< "$INPUT_STRANDS"
         shopt -u nullglob
-        out="$RUNNER_TEMP/probbit-check/probbit-check.json"; mkdir -p "$(dirname "$out")"
+        out="$(mktemp -d "$RUNNER_TEMP/probbit-check.XXXXXX")/probbit-check.json"   # one directory per call: a job may run several
         echo "probbit ${args[*]}"
         "$PROBBIT" "${args[@]}" > "$out"; code=$?
         name="probbit-check-$JOB-$RUNNER_OS-$(printf '%s' "$INPUT_PERSONA" | tr -c 'A-Za-z0-9._-' '-')"
