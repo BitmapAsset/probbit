@@ -128,6 +128,20 @@ there are no external crates.
 
 At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes and the installer tests: [PORTABILITY.md](PORTABILITY.md).
 
+`install.sh` also installs the manual page (`man probbit`) to `~/.local/share/man/man1/` (`PROBBIT_MAN_DIR` to choose; a
+failure there installs the binary all the same); every archive carries it as `docs/probbit.1`, and `probbit man` prints it.
+Shell completions come from the binary itself:
+
+| shell | command |
+|---|---|
+| bash | `probbit completions bash > ~/.local/share/bash-completion/completions/probbit` |
+| zsh | `probbit completions zsh > ~/.zfunc/_probbit` (with `fpath=(~/.zfunc $fpath)` before `compinit` in `~/.zshrc`) |
+| fish | `probbit completions fish > ~/.config/fish/completions/probbit.fish` |
+
+`probbit --help` lists every command by group; `probbit help COMMAND [SUBCOMMAND]` (the same as `probbit COMMAND --help`)
+gives a command's flags with their defaults, its exit codes and examples. A mistyped command gets a suggestion:
+`probbit persna` -> `unknown command "persna"; did you mean "persona"?` (exit 2).
+
 ## 60-second tour
 
 ```

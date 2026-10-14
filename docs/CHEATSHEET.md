@@ -2,6 +2,17 @@
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 
+## Help, completions, the manual page
+| command | does |
+|---|---|
+| `probbit --help` | every command by group (persona, live, monitor, decide/run, mcp, other), the exit codes, six examples |
+| `probbit help COMMAND [SUBCOMMAND]` | the same text as `probbit COMMAND [SUBCOMMAND] --help`: usage, flags with defaults, exit codes |
+| `probbit completions bash\|zsh\|fish` | a completion script for the shell (commands, subcommands, flags); install lines in its `--help` |
+| `probbit man` | the manual page (roff); `install.sh` puts it in `~/.local/share/man/man1/`, so `man probbit` works |
+
+Help, completions and the man page all come from one command table, so they list exactly the flags the parser accepts. A
+mistyped command or subcommand exits 2 with the closest name: `did you mean "persona"?`.
+
 ## Verdicts (`decide`, `run`, `evaluate`; a persona turn's `engine.verdict`)
 | verdict | means | exit |
 |---|---|---|

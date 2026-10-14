@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.2 - unreleased
+
+### Added
+- `probbit help [COMMAND [SUBCOMMAND]]`: the same text as `COMMAND [SUBCOMMAND] --help`; `probbit help` alone is
+  `probbit --help`. The persona and live subcommands have their own help (usage, flags, exit codes).
+- Did-you-mean: an unknown command or subcommand names the closest one (`unknown command "persna"; did you mean
+  "persona"?`, Damerau-Levenshtein distance up to 2, or a unique prefix). The exit code stays 2.
+- `probbit completions bash|zsh|fish`: a static completion script with every command, subcommand and flag.
+- `probbit man` and `docs/probbit.1`: the manual page. Releases attach it; `install.sh` installs it to
+  `~/.local/share/man/man1/` (`PROBBIT_MAN_DIR` to choose), never failing the install over it.
+- `--json` on every command: errors as one JSON object on stdout even at a terminal, for a bad command or flag too
+  (code `flag`, or `command` with a `suggestion`).
+
+### Changed
+- One command table in the CLI renders every help screen, the completions and the man page, and the parser reads its flags
+  from it: what is documented is what is accepted.
+- Help fits 100 columns: `probbit --help` starts with the version, groups the commands and ends with examples;
+  `monitor --help` has usage, modes, flags and demo sections; the terminal hero screen fits 100 columns.
+- Errors: one human line on stderr, always. A bad input's `{"error"}` object goes to stdout when stdout is not a terminal (as
+  before for every program and wrapper) or with `--json`; at a terminal without `--json` only the line is printed, no longer
+  both (docs/CHEATSHEET.md "Errors").
+
 ## 0.8.1 - 2026-10-10
 
 ### Fixed
