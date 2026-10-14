@@ -105,7 +105,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.8.1.
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.8.2.
 
 | how | command |
 |---|---|

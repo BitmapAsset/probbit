@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.8.2 - unreleased
+## 0.8.2 - 2026-10-14
 
 ### Added
 - `probbit monitor STRAND --open` (and `--serve`) shows an Activity Monitor for one individual: a sortable, filterable table of
@@ -30,6 +30,8 @@ All notable changes to this project are documented here. The format follows
   document gains `"unproven": [{id, rule, seeds_unknown, searched}]`, `ok` is false, stderr says "unproven, not broken", and the
   exit code is the new **3** (0: every rule held or proved; 1: an unresolved contradiction or a counterexample, which wins over
   3; 2: bad input, as before). Up to 0.8.1 the same case exited 0 with `ok: true`. docs/persona.md §5.5.
+  **Upgrade note:** `persona lint` now exits 3 on unproven rules, so a CI gate that treats any non-zero exit as a failure goes
+  red on rules that passed silently before. Accept exit 3 explicitly if unproven rules are acceptable to you.
 - `persona fuzz`, MCP `probbit_persona_fuzz` and `lint`'s search add every threshold the rule's `when` and the habits' `when`
   read on a number input to the grid (as a fraction of that input's max, after the given points, each once; `search.grid` lists
   them). A rule in force only between two default grid points (for example stakes 0.7 to 0.8) is now reached by the random
