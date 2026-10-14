@@ -203,6 +203,23 @@ class Mcp(unittest.TestCase):
             e = self.call("probbit_persona_turn", args)
             self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
 
+    def test_readings_never_come_through_the_agents_channel(self):
+        # senses (docs/persona.md 2.11, S7): both turn tools refuse an event that carries readings for a persona with a senses
+        # block; the same event without readings is answered; a persona without the block lists `senses` in ignored, as before
+        self.legacy("2025-11-25")
+        path = os.path.join(EX, "persona", "sensed.yaml")
+        state = self.call("probbit_persona_init", {"persona_path": path, "seed": 3})["structuredContent"]
+        for tool, key in (("probbit_persona_turn", "inputs"), ("probbit_live_event", "event")):
+            args = {"persona_path": path, "state": state, key: {"senses": {"tool_fail": True}, "src": "env:runner"}}
+            e = self.call(tool, args)
+            self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], "arguments.%s.senses" % key)
+            ok = self.call(tool, dict(args, **{key: {"praise": True, "src": "human:ana"}}))
+            self.assertFalse(ok["isError"])
+        tutor = os.path.join(EX, "persona", "tutor.yaml")
+        t0 = self.call("probbit_persona_init", {"persona_path": tutor, "seed": 3})["structuredContent"]
+        r = self.call("probbit_persona_turn", {"persona_path": tutor, "state": t0, "inputs": {"senses": {"tool_fail": True}}})
+        self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["stance"]["ignored"], ["senses"])
+
     def test_persona_fuzz_answers_exactly_as_the_cli(self):
         self.legacy("2025-11-25")
         tutor = os.path.join(EX, "..", "probbit-cli", "tests", "fixtures", "persona", "tutor-0.5.0.yaml")

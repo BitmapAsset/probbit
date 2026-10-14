@@ -119,6 +119,32 @@ fn stdout_matches_the_persona_goldens() {
     assert!(first[0] != first[1] && first[1] != first[2]);
 }
 
+/// The sensed example (docs/persona.md §2.11) driven as a host drives it, as above: `init`, `compile` of turn 0, 24 `turn --state
+/// FILE` calls with readings (bare and with their own source, a busy stretch, repeated tool failures, a 9 h silence, a 720 h gap,
+/// feedback from a person and from CI), the state after them, `replay` of the same script, `lint` and `describe`. CI runs it on
+/// Linux, macOS and Windows: the same bytes on each.
+#[test]
+fn stdout_matches_the_sensed_golden() {
+    let p = ex("sensed.yaml"); let g = |f: &str| read(&ex(&format!("golden/sensed/{f}")));
+    let script = parse(&g("day.json")); let turns = script.as_arr().unwrap(); assert_eq!(turns.len(), 24);
+    let (c, s0, e) = probbit(&["persona", "init", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(s0, g("state0.json"), "state0");
+    let st = tmp("sensed-state.json"); std::fs::write(&st, &s0).unwrap();
+    let (c, prog, e) = probbit(&["persona", "compile", &p, "--state", &st, "--inputs", &jw(&turns[0])], ""); assert_eq!(c, 0, "{e}");
+    assert_eq!(prog, g("program-turn0.json"), "program of turn 0");
+    let gold = g("day.jsonl"); let lines: Vec<&str> = gold.lines().collect(); assert_eq!(lines.len(), 24);
+    for (i, t) in turns.iter().enumerate() {
+        let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", &jw(t)], ""); assert_eq!(c, 0, "{e}");
+        assert_eq!(out.trim_end(), lines[i], "sensed turn {i}"); }
+    assert_eq!(read(&st), g("final-state.json"), "final state");
+    let (c, rep, e) = probbit(&["persona", "replay", &p, "--script", &ex("golden/sensed/day.json")], ""); assert_eq!(c, 0, "{e}"); assert_eq!(rep, gold, "replay");
+    let (c, lint, e) = probbit(&["persona", "lint", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(lint, g("lint.json"), "lint");
+    let (c, d, e) = probbit(&["persona", "describe", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(d, g("describe.json"), "describe");
+    // the past is named: the normal clause on the turns with readings, the learned clause once feedback moved a weight
+    assert!(lines[2].contains(r#""noticed":"tool_fail""#) && lines[2].contains("tool failures far above its normal (z +4.0 over 2 readings)"), "{}", lines[2]);
+    assert!(lines[13].contains("learned: caution -0.17 on careful (1 reward, 2 corrections)"), "{}", lines[13]);
+    let _ = std::fs::remove_file(&st);
+}
+
 /// `probbit persona --help` documents every subcommand and the exit codes; bad flags and subcommands exit 2.
 #[test]
 fn persona_help_and_flags() {
