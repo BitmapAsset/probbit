@@ -98,13 +98,31 @@ Measures whether the same reading lands differently after a learned normal, and 
   b4 ≥ 95 %; b5 ≥ 95 %.
 - **Script.** `habituation.py`.
 
-## Metric c: credit accuracy (with RFC Design B; skipped in this release)
+## Metric c: credit accuracy (with RFC Design B)
 
 Measures whether a late, reordered or cancelled outcome credits the decision it was for: an act-or-ask policy, 10 individuals
 × 300 events, outcomes delivered on time and up to 6 events late (10 % cancelled, 5 % sent twice, 2 % paying a turn never
 opened), against an independent Python learner. Bars: c1 ≥ 99 % of the applied step equal to the oracle's, c2 = 100 % of
 events with the oracle's Δ, c3 ≥ 99 % of open outcomes accepted, c4 = 100 % of duplicates, late payments and unknown turns
 refused, each refused run byte-identical to the run without the refused events.
+
+- **Fixture.** `fixtures/dispatch.yaml` is the shipped dispatch policy (`examples/persona/dispatch-policy.yaml`) with a credit
+  block (`max_open` 8, `half_life_events` 32); `fixtures/dispatch-noblock.yaml` is the same without it, for variants (iii)
+  and (iv). `fixtures/credit_draws.py` draws, per individual from `random.Random(1000 + seed)`, each decision's blast radius
+  (0.05 to 0.65: no habit binds), its outcome draw, its delay, and whether it is cancelled, sent twice or joined by a payment
+  of a turn never opened; the draws are committed as `fixtures/credit/draws-<seed>.jsonl`.
+- **Host.** `credit.py` drives one `probbit live --checkpoint-every 1` per run event by event: it reads each stance's action,
+  decides the outcome (good when the draw is below 0.8 after `act`, 0.4 after `ask`) and queues it. One message rides on
+  an event; a second one due on the same event moves to the next (the older decision first). A second copy of an outcome
+  is due one event after the first; for a cancelled decision the second copy is an outcome sent after the cancel. A payment
+  of a turn never opened names turn k + 1000. A refused event is followed by the same decision without its message, so
+  each run makes 300 decisions. Five runs per individual: stream 1, and on stream 2 (i) addressed, (ii) unaddressed, (iii)
+  0.8 semantics (cancels not sent), (iv) the 0.8 workaround.
+- **Statistics.** The oracle replays RFC section B.2 from the stance documents and the events, over all five runs: c1 weighs
+  each accepted payment by the oracle's applied step (and requires the engine's `paid` turn and `e` to match), c2 compares Δ
+  after every accepted event, c3 counts the outcomes of runs stream 1 and (i) whose decision was open on arrival, c4 the
+  duplicates, outcomes after a cancel and unknown turns of (i) and the ambiguous unaddressed feedback of (ii), and every run
+  is re-run without its refused events.
 
 ## Metric d: replay
 
@@ -179,3 +197,7 @@ d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 sta
   each mandated line present exactly once. The outputs equal but for these lines are reported apart as
   `stderr_warnings_only` (the key was `stderr_senses_warning_only`). EXPECTED, the scripts and the strands are
   unchanged; MANIFEST's p0.py line was updated.
+- Metric c (wave 2): its fixtures, the draws generator, the draws and its bars (`fixtures/bars-c.json`, the bars of the
+  metric c section above) were added to MANIFEST in their own section before their first run; `run.py` runs metric c.
+  `fixtures/sensed-plain.yaml` (metric a's reported control: the senses replaced by plain 0.8 number inputs) was frozen in
+  the same section. No earlier fixture, stream or bar changed.
