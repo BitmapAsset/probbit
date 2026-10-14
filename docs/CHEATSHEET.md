@@ -40,6 +40,19 @@ The exact tiers run before the sampler:
 - `status`: `ok` (exact or diagnostics_passed), `partial`, `refused` (the line: just the habits), `fallback`.
 - `pursue` (a persona with a `drives:` block): the goal that gets the next unit of effort, with exact odds under the habits;
   `drives`: per goal the wanting, afterglow, expectation, last prediction error, deadline and turns since it was pursued.
+- `senses` (a persona with a `senses:` block, docs/persona.md §2.11): per sense read this turn its `raw` reading, `src`, `z`
+  and `zd`, and the `mean` and `n` of the normal it was judged against; `noticed`: the sense `why` names.
+
+## Senses (0.9.0, docs/persona.md §2.11)
+- Event: `{"senses": {"tool_fail": true, "tool_latency": {"v": 2.4, "src": "env:runner"}}, "src": "env:host"}`: a bare
+  reading takes the event's `src`; each sense lists its sources (`env`, `human`; never `self` or `clock`).
+- Per reading: z against the learned normal (mean, variance, count), capped at `zcap`; beyond the `dead_zone` it moves the
+  sense's `effects`. The mean stays within `prior.mean ± drift_cap`, the variance within `[0, var_cap]`.
+- Rules read `sense.<id>.raw` (holds whatever the history) or `sense.<id>.z`, never the normal.
+- Refused: undeclared senses, out-of-range numbers, flags that are not true/false, a source the sense does not list, readings
+  through the MCP turn tools. A refused event changes nothing.
+- `live verify` summary: `normals` per sense (`mean`, `n`, `max_move_50`); `monitor`: a row per sense and an alert when a
+  normal moved over `drift_cap / 2` within 50 events.
 
 ## Exit codes
 - `decide`, `run`, `evaluate`: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one

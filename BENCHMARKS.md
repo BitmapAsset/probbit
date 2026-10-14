@@ -1114,3 +1114,30 @@ fun (85 % of turns); the engine and the Python prototype end every individual in
 adversaries or floors (a floor holds by construction under the soundness condition of docs/persona.md §2.9 and `prove` reports
 it; this run measures it once); a bound on gaps when higher-priority habits preempt; anything about the words a model writes;
 the times on another machine or an idle one.
+
+## §10 Senses: individuality, habituation, replay and habits (`python3 bench/individuality/run.py --only a,b,d,e`, stdlib, 10.0 s; development build of 0.9.0)
+
+The benchmark's spec, fixtures and bars are in [bench/individuality/README.md](bench/individuality/README.md); the fixtures and
+bars were frozen with their sha256 (`bench/individuality/fixtures/MANIFEST`) before any run. One run on an Apple M4:
+
+| metric | measured | bar | |
+|---|---|---|---|
+| a1 twins: share of 20 probes whose host action differs between an individual's two lives (40 individuals) | 0.145 (95 % interval 0.096 to 0.199) | >= 0.30, interval low >= 0.20 | fails |
+| a2 twins: mean odds distance between two lives vs between two individuals in one room | 0.1307 vs 0.1329 (room A), 0.1411 (room B) | >= the smaller | fails |
+| b1 habituation: zd at reading 20 / reading 1 (no genes); values against an independent Python sense step | 0.304149; 4,522 compared, 0 differ | <= 0.35; 0 | passes |
+| b2 surprise: z after 40 quiet readings / after 40 at rate 0.3 | 6 / 1.75286 = 3.422977 | >= 2 | passes |
+| b3 genes: individuals 0-99 whose zd at reading 20 is below reading 1 | 100 % | 100 % | passes |
+| b4 named past: divergent decisions whose `why` clause equals its template rendered from the document | 100 % of 232 | >= 95 % | passes |
+| b5 named past: divergent probes where a cited value differs between the two lives | 100 % of 116 | >= 95 % | passes |
+| d replay: differing bytes, third and split copies of 80 lives; `live verify` failures (240 strands); the 0.8.2 strand | 0; 0; verifies, 20 events append the recorded bytes | 0; 0; equal | passes |
+| e habits: violations and independent breaks over 9,442 stances; stances where a habit bound | 0 and 0; 72 | 0 and 0; >= 50 | passes |
+
+Reading it. Habituation, surprise, the named past, replay and habits hold as specified. The twins bar does not: in this release
+rewards pay the previous stance, and at these settings a different individual (another seed in the same room: 0.25 and 0.345
+of probes) moves the host action more than a different life does (0.145). The bars are not changed after the fact; metric a is
+re-measured when action-addressed feedback (RFC 0001 Design B, metric c) lands.
+
+**P0** (`bench/individuality/p0.py check`, 77 s): 653 outputs of the released 0.8.2 binary over 8 personas without a senses
+block (9,600 live turns and as many replayed, `describe`, `lint --seeds 0-99`, `fuzz` and `prove` documents): 0 differ. 629 are
+byte-identical; 24 are the stderr of `live` runs whose scripts send a `senses` key, identical once the one line naming it is
+removed. All 8 recorded strands verify, and the tutor's continues with the recorded bytes.

@@ -384,6 +384,111 @@ the agent's own reply as its evidence of success. `fuzz` and `prove` search over
 events of an accepted source. A persona without the key reads `src` as any undeclared input (listed in `ignored`), and every
 document it produces is the same, byte for byte, as before the key existed.
 
+### 2.11 Senses (optional)
+
+A sense is a reading the host measures (a tool failure, a latency, a message tempo, a silence) in declared units, from a named
+source. The engine keeps a learned **normal** per sense (mean, variance, count) and turns each reading into a capped z-score
+against it, which moves moods and traits as any input does. The same reading moves two individuals differently once their
+normals differ, and `why` names the normal a reading was judged against. Design notes and arithmetic:
+[docs/rfcs/0001-senses-and-reward.md](rfcs/0001-senses-and-reward.md).
+
+```yaml
+senses:                          # 1-24 senses; with the block, `src` is read on every event
+  - id: tool_fail                # at most 32 characters; reserves the input ids sense_tool_fail_*
+    kind: flag                   # flag (the normal is a rate) | number (then `range: [lo, hi]` is required)
+    unit: event                  # 1-24 characters, in the digest: two units are two personas
+    scale: linear                # linear | log1p (the normal is kept on ln(1 + reading); a number with range low >= 0)
+    src: [env]                   # env and/or human; default [env]
+    prior: {mean: 0.05, var: 0.05}   # required: the normal at init, anchor of both caps (on the scale)
+    drift_cap: 0.25              # required: the mean stays within prior.mean ± drift_cap
+    var_cap: 0.2                 # default 4 × prior.var: the variance stays within [0, var_cap]
+    half_life_events: 10         # default 10 (1-10000)
+    zcap: 6                      # default 6 (1-20)
+    dead_zone: 0.5               # default 0.5 (0 <= dead_zone < zcap)
+    var_floor: 0.01              # default 0.01 (> 0)
+    say: tool failures           # default: the id, _ as spaces
+    effects: {caution: 0.8, valence: -0.4}   # ordinal shift per unit of z beyond the dead zone; negative z pushes back
+    gain_spread: 0.3             # gene: gain exp(N(0, s²)) on effects; default 0, range 0..3 (all three)
+    threshold_spread: 0.3        # gene: offset N(0, s²) on dead_zone; default 0
+    habituation_spread: 0.3      # gene: multiplier exp(N(0, s²)) on half_life_events; default 0
+```
+
+Why these defaults: a reading 10 events old counts half, so the normal follows a changed rate halfway within 10 readings; at
+`zcap` 6 a failure after 40 quiet readings scores 3.4× the same failure after 40 readings at rate 0.3 (1.7× at `zcap` 3);
+readings within half a standard deviation move nothing; `var_floor` keeps z finite when the variance collapses; at `var_cap`
+4 × prior.var the spread at most doubles. `prior` and `drift_cap` have no default: no unit-free anchor is safe.
+
+**Refused when the persona is read** (exit 2, at the field's path): a taken `sense_` id (an input, history feature or goal
+whose id starts with a sense's `sense_<id>_`), an effect on an unknown trait or mood, `src` naming `self` or `clock`,
+`prior.mean` outside the scaled range, `prior.var` <= 0, `drift_cap` <= 0, `var_cap` < `prior.var`, `dead_zone` >= `zcap`,
+`log1p` on a flag or on a range low below 0, a cap with more than 6 decimals, an unknown field, a number sense without a range,
+two senses with one id, an empty block or more than 24 senses.
+
+**Events.** `{"senses": {"tool_fail": true, "tool_latency": {"v": 2.4, "src": "env:runner"}}, "src": "env:host"}`: a bare value
+takes the event's `src`, `{v, src}` carries its own. `senses` is read, not compiled: it is not listed in `ignored` and comes back
+in the stance's `inputs`.
+
+**The sense step**, after validation and before the drive step, per declared sense with a reading, in declared order (genes
+g_gain, g_thr, g_hab; each line rounded to 6 decimals):
+
+```
+x     = the reading (a flag: 1 or 0), or ln(1 + reading) for log1p
+h     = clip(half_life_events × g_hab, 1, 10000)
+a     = 1 − 0.5^(1/h)
+z     = clip((x − mean) / sqrt(var + var_floor), −zcap, +zcap)        # against the past, before the update
+d     = clip(dead_zone + g_thr, 0, zcap − 0.000001)
+zd    = sign(z) × max(|z| − d, 0)
+mean' = clip(mean + a × (x − mean), prior.mean − drift_cap, prior.mean + drift_cap)
+var'  = clip((1 − a) × (var + a × (x − mean)²), 0, var_cap)              # with the mean before the update
+n'    = min(n + 1, 1000000)
+```
+
+The turn adds g_gain × zd times each effect (an ordinal shift, section 2.3) to its target's field or mood evidence (section 3),
+as a number input does. It is lowered as drives' surprise is: two reserved number inputs, `sense_<id>_up` = max(zd, 0) carrying
+the effects and `sense_<id>_down` = max(−zd, 0) carrying them negated, both in [0, zcap], gain g_gain. Genes follow section
+5.4's z: `round(exp(gain_spread × z(name, seed, "sense", id, "gain")), 4)`, `round(threshold_spread × z(…, "threshold"), 4)`,
+`round(exp(habituation_spread × z(…, "habituation")), 4)`; a spread of 0 means gain 1, offset 0, multiplier 1 and no stored
+gene. At the defaults (a flag with prior 0.05/0.05) the same failure every event gives zd 3.38, then 1.03 from reading 6 on:
+the push falls to 0.30× and stays there, because the drift cap keeps a chronic failure from becoming normal.
+
+**Rules the engine enforces.**
+
+| rule | what it means |
+|---|---|
+| S1 declared, in range | a reading for an undeclared sense, a number outside its range or a flag that is not true/false refuses the event at `inputs.senses.<id>`; nothing is clipped |
+| S2 provenance | each reading's source kind must be in its `src`; a missing or malformed source, `self` and `clock` refuse the event whole, and a refused event changes nothing |
+| S3 the engine owns the normal | hosts send raw readings; `sense_<id>_*` inputs and a pre-judged z are refused; z, normals and genes come from logged readings only |
+| S4 anchored | a state is refused, even with a recomputed digest, if a mean leaves prior ± drift_cap, a variance leaves [0, var_cap], n is not a whole number up to 1e6, the sense set differs from the persona's or a gene misses its seed |
+| S5 no rule reads the normal | `when` takes `sense.<id>.raw` (true/false for a flag, declared units for a number) and `sense.<id>.z` (the z above, before dead zone and gain), never the mean or variance; a condition on a sense not read this event is false |
+| S6 no clock decay | normals move only on readings; silence, idle hours and control lines leave them |
+| S7 not through the agent's channel | the MCP turn tools refuse an event that carries readings (section 7) |
+
+A rule that must hold whatever the history reads `raw`: `prove` reads `sense_<id>_up/down` as boxes [0, zcap] × gain and each
+sense condition both ways, so a habit on `sense.tool_fail.raw` holds by construction for a rule with the same condition.
+`fuzz` adds readings: flags both ways, numbers on `--grid` × range, one reading repeated 1, 5 and 20 times, and the range ends
+alternating.
+
+**The stance and `why`.** The stance gains `senses` (per sense read: `raw`, `src`, `z`, `zd`, and the `mean` and `n` it was
+judged against) and `noticed` (the sense of the normal clause, or null). `why` becomes: the bound habits; the normal clause;
+up to two other live inputs (sense inputs excluded); the learned clause; the engine status if not ok.
+
+- **Normal clause**, at most one: the read sense with the largest |g_gain × zd| > 0 (ties: declared order),
+  `tool failures far above its normal (z +6.0 over 40 readings)`: "far" at |z| >= 2, above or below by sign. Failing that, the
+  read sense with the largest |z0| − |z| >= 1, z0 being the reading judged against the prior:
+  `tool latency usual for it now (z +0.9 over 40 readings, +3.9 against its prior)`.
+- **Learned clause**, at most one, with a learning block and `line.why_past` (default true with senses, false without, so
+  existing documents keep their bytes): the released learned trait with the largest |Δ| at its taken level, if >= 0.05,
+  `learned: caution +0.31 on careful (0 rewards, 4 corrections)`. The counts are state: `learned_from`, per learned trait, the
+  feedback turns that moved it, by sign.
+
+z prints with one signed decimal and Δ with two, rounded half to even from the stored value.
+
+What it guarantees, and what it does not. A persona without the block reads `senses` as any undeclared input (listed in
+`ignored`; `live` says so once on stderr) and every document it produces is the same, byte for byte, as before the block
+existed. A refused reading changes nothing (P3 holds with readings: 40 individuals × 300 random events mixing sources,
+readings, `self`, `clock` and out-of-range values). A source is the host's word: a forged `env` label passes every check;
+readings are logged and replayed, not shown true.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -395,7 +500,9 @@ For turn t of an individual (seed s), with inputs x_t:
    `h(v,l) = ln prior(l) + gene_v x c(l) + Δ_v(l) + sum over inputs i of gain_i x scale_i(x_t) x effect_i(v,l)
               + sum over history features f of min(value_f, cap_f) x effect_f(v,l)`,
    with `scale` = 1 for a true flag or the matching level, the value for a number input, 0 otherwise, and Δ_v the learned
-   weights after this turn's feedback (section 2.8; 0 for a trait that does not learn).
+   weights after this turn's feedback (section 2.8; 0 for a trait that does not learn). With a senses block (section 2.11)
+   the sense step runs first and its lowering joins the inputs: `sense_<id>_up` and `sense_<id>_down` are number inputs with
+   gain g_gain and the sense's effects (negated for `down`); a sense not read this turn adds nothing.
    2b. **`pursue`** (a drives block, section 2.9): one more trait variable over the goal ids, after the declared traits. Its
    field per goal g is step 2's (prior from `interest`, learned weights if `pursue` learns, input and history effects on
    `pursue`) plus `interest gene_g + want x W_g + glow x A_g + deadline / (1 + D_g / tau)` (each term rounded to 6 decimals,
@@ -478,7 +585,11 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
   this individual's resting level, (5) traits at rest, (6) agenda order — cut from the lowest priority until it fits
   `max_tokens`. Unconditional habits that did not bind are not repeated (the trait phrases already carry them).
 - `why`: the bound habits, then the two strongest live inputs with the two traits each pushes hardest, by direction
-  (`learner upset -> valence down, humour down`): a push is evidence, not the level the stance took.
+  (`learner upset -> valence down, humour down`): a push is evidence, not the level the stance took. With a senses block the
+  normal clause comes before the inputs and the learned clause after them (section 2.11).
+- With a senses block (section 2.11): `"senses": {"tool_fail": {"raw": true, "src": "env:runner", "z": 3.878359, "zd":
+  3.378359, "mean": 0.05, "n": 0}}` per sense read this turn (the `mean` and `n` it was judged against) and `"noticed":
+  "tool_fail"` (the normal clause's sense, or null); `inputs` echoes `senses` as given.
 - `held`: the unsure traits held at their `hold` level; such a trait also carries `odds_unheld`, its odds before the hold.
 - With a drives block (section 2.9), `pursue` leaves `stance` for its own object and the turn's drive values follow it:
   `"pursue": {"goal": "fun", "p": 0.44, "odds": {"chores": 0.10, "craft": 0.26, "fun": 0.44, "safety": 0.20}, "released": true,
@@ -505,6 +616,9 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "drives": {"genes": {"interest": {"fun": 0.12}, "gain": {"fun": 1.08}},   # with a drives block (section 2.9), per goal:
             "want": {"fun": 0.61}, "glow": {"fun": 0}, "expect": {"fun": 0},   # wanting, afterglow, expectation, the last
             "surprise": {"fun": 0}, "deadline": {"fun": null}, "since": {"fun": 0}},   # error, deadline hours, turns since
+ "senses": {"genes": {"gain": {"tool_fail": 1.19}, "threshold": {"tool_fail": -0.17}, "habituation": {"tool_fail": 1.46}},
+            "norm": {"tool_fail": {"mean": 0.3, "var": 0.2, "n": 10}}},  # with a senses block (section 2.11): per sense
+ "learned_from": {"caution": {"rewards": 3, "corrections": 2}},     # with learning and line.why_past: feedback turns by sign
  "digest": "sha256:..."}
 ```
 
@@ -512,8 +626,10 @@ The state is plain JSON the host stores between turns (a file, a database row, a
 whose persona digest differs from the persona file, whose own digest does not match, or whose genes do not match its seed, and
 (with a learning block) learned weights outside ±total_cap or credits outside ±1, (with a drives block) drive genes that do not
 match the seed, a drive value outside its box (wanting, afterglow and expectation within their caps, the error within ±pe_cap,
-deadlines 0 to 1e6 hours or null, `since` a whole number >= 0) or a goal set that differs from the persona's, even with a
-recomputed digest.
+deadlines 0 to 1e6 hours or null, `since` a whole number >= 0) or a goal set that differs from the persona's, and (with a
+senses block, rule S4) a mean outside prior ± drift_cap, a variance outside [0, var_cap], a count that is not a whole number up
+to 1e6, a sense set that differs from the persona's or sense genes that do not match the seed, even with a recomputed digest.
+Each normal starts at its prior with n = 0; a persona without the block refuses a state with a `senses` field.
 
 ### 5.2 Canonical JSON and the number rule
 
@@ -657,6 +773,12 @@ input. JSON: `--json` (`probbit_persona_fuzz: 1`, `probbit_persona_prove: 1`); t
 `replay` or `explain` command unless a synthetic source is explicitly authorized with
 `--fixture-src env:synthetic` (or `human:synthetic`, where allowed). The exporter strictly replays that labelled script;
 it rejects incompatible source rules, records `fixture_provenance`, and never bypasses the production source check.
+With a senses block the labels cover readings too (a bare reading takes the event's synthetic `src`).
+
+**Senses in fuzz and prove** (section 2.11). `fuzz` adds readings to its events (nested in `senses`): flags both ways,
+numbers on `--grid` × the range, one reading repeated 1, 5 and 20 times, and the range ends alternating. `prove` reads each
+`sense_<id>_up/down` input as a box [0, zcap] × gain and each sense condition both ways, so a habit on `sense.<id>.raw` holds
+by construction for a rule with the same condition. A rule reads the sense conditions the persona's habits use.
 The Python `persona_fuzz` and MCP fuzz tool accept `fixture_src` too. See the
 [host regression example](../examples/agent-harness/README.md). Synthetic observations are not production evidence.
 
@@ -794,6 +916,12 @@ and the whole state after it, chained like the others. A full `verify` replays f
 against the replay (its `"checkpoints": N` is in the summary); `verify --from-checkpoint` reads the header, checks the last
 checkpoint against the event line before it (prev, the stance digest, the state digest, the state read as any state is) and
 replays only what follows (`"from_checkpoint": n`); the lines before it are trusted, so run a full `verify` to check them.
+
+**Senses in live** (section 2.11). An event carries `senses` as `persona turn` does; the strand logs each reading as used, with
+its source, and `verify` recomputes the normals from the logged readings: its summary adds `"normals": {"<id>": {"mean", "n",
+"max_move_50"}}`, the normal now and the largest move of its mean within 50 events (the monitor alerts above drift_cap / 2). A
+persona without the block lists `senses` in `ignored`, as before, and `live` says so once on stderr, at the earliest event
+that carries it: `probbit: live: events[i]: this persona has no senses block: ...`. The documents and the strand are unchanged.
 `monitor` starts at the last checkpoint and draws its event at once. A strand that ends in a checkpoint line is continued from
 the state it carries. Before continuation or a control append, the stored chain and lifecycle are checked from the header:
 a checkpoint cannot hide a retired status, an invalid transition or a broken preceding hash link. This structural scan
@@ -828,8 +956,10 @@ probbit monitor --demo drives --open             # eight synthetic events with g
 
 **What it shows.** The latest event (or a selected historical event in the browser). In the terminal, a header: persona and version, seed, the individual's digest, the event number, the hours
 since the event before, the replay badge. The stance: one row per trait, its levels as segments sized by their odds, the level
-taken in colour and the phrase it says. The moods, with a sparkline of the last 50 events. The senses: the event's inputs as the
-turn used them (flags lit, numbers as bars, levels by name, the clock) and the history features against their caps. The habits
+taken in colour and the phrase it says. The moods, with a sparkline of the last 50 events. The inputs: the event's inputs as the
+turn used them (flags lit, numbers as bars, levels by name, the clock) and the history features against their caps. The senses,
+with a senses block (section 2.11): one row per sense, its normal as a tick over the range, this event's reading, z and n (a
+sense not read keeps its normal), and an alert when a normal moved over drift_cap / 2 within 50 events. The habits
 in force, the ones that bound in colour, and the violations counter (0 by construction, section 2.5). The learned deltas per
 level as centred bars within ±total_cap (with a learning block, section 2.8). The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
@@ -933,6 +1063,9 @@ flag, a port that cannot be had, or a file that cannot be read or is not a stran
   and the stance reads. They see what the host labels (a wrong `win` gives a confidently wrong afterglow), their magnitudes are
   the author's scale, not measured value, and `pursue` says where the next unit of effort should go: the host decides whether
   to act on it, and a goal floor is not a safety gate.
+- A sense is arithmetic, not an inner state: a normal is a mean, a variance and a count, kept by fixed arithmetic from the
+  readings the host logs. A reading is the host's word (a forged `env` label passes every check), and a normal follows what it is shown:
+  the drift cap bounds how far, it does not make the readings true. No test can see an inner state, and none is claimed.
 - It does not guarantee the model follows the line. Whether a given model writes in the stance it is given has to be
   measured per model (the stance is model-independent; the obedience is not).
 
@@ -952,7 +1085,7 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
-| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda |
+| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids) |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
@@ -974,6 +1107,9 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
   individual (`event` is its inputs, `elapsed_hours` from the host's clock, quantised to 1e-6 h; with `strand_path` the event is
   logged to that strand on the server's disk, a new file getting the header, and the answer gets `strand: {path, events, head}`);
   `probbit_live_verify {strand | strand_path}` -> `live verify`'s document (section 5.7; a divergence is an answer).
+  For a persona with a senses block, `probbit_persona_turn` and `probbit_live_event` refuse an event that carries readings
+  (rule S7, section 2.11: readings come from the host's instruments, never through the agent's channel); a persona without
+  the block lists `senses` in `ignored`, as before.
   A persona with a drives block takes `goals` in `inputs` / `event` (section 2.9); the schemas declare it.
   Stateless; the documents are the CLI's. A refusal, a fallback, a counterexample or a divergent strand is an answer; a bad
   persona, state, input, event or rule is a tool error carrying the error object.

@@ -52,7 +52,7 @@ def masked_err(err):
 
 # The one line 0.9.0 adds to a corpus output: `live` says once per run, on stderr, that a persona without a senses block
 # got a `senses` key (an undeclared input, listed in `ignored` as before). Only the scripts that carry `senses` (k=1) get
-# it, at their first such event; it is not a document: stdout, states and strands stay byte-identical.
+# it, at the earliest such event; it is not a document: stdout, states and strands stay byte-identical.
 SENSES_WARNING = ("probbit: live: events[%d]: this persona has no senses block: `senses` is an undeclared input "
                   "(listed in ignored), no reading is judged\n")
 
