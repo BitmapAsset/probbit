@@ -173,3 +173,9 @@ d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 sta
   binary (sha256 in MANIFEST) using relative paths: one line changed (`fuzz/adaptive-fixture`, now 43,646 bytes); every
   other output, the scripts and the strands are unchanged. MANIFEST's EXPECTED and p0.py lines were updated with the
   change.
+- `p0.py` (wave 2): `check` also accepts the one stderr line `live` writes when a script sends `await`, `for` or
+  `cancel` to a persona without a credit block (RFC 0001 B.4: undeclared inputs, listed in `ignored`, and `live` says
+  so), on the same terms as the senses line: only where the script carries those keys, once, at its earliest such event,
+  each mandated line present exactly once. The outputs equal but for these lines are reported apart as
+  `stderr_warnings_only` (the key was `stderr_senses_warning_only`). EXPECTED, the scripts and the strands are
+  unchanged; MANIFEST's p0.py line was updated.

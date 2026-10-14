@@ -53,7 +53,7 @@ a88d3b20b41e9843f2b9ac9b117d5b462ec6b1095c762da531cb98481ff48432 43389 p0/strand
 615978432a80e6b8be7fdf6e2382438516dc67acae56c562221c89654cae479e 6815 p0/strands/tutor-s0-0.appended
 cf9073507dad98bedc4f09ca2e49f34862919240c64c548b7a1dcf58fda4804b 1160 p0/strands/tutor-s0-0.state.json
 4db5f3d83a0e6df0ea632c35957cdb0970665422af9054fa50e5468e13a888ab 55008 p0/strands/tutor-s0-0.strand
-e2ffc0667ba2b5ccb6061c9bee43b4474a6568924404a14fe39f94c8e1018272 12841 ../p0.py
+344a54d4cb6bc9318caf82af6eeb776d774ef7ff1a4548bf9fb67a6061bf00e4 13470 ../p0.py
 #
 # Metrics a, b, d and e: frozen 2026-10-14 before their first run (personas, generator, streams, bars).
 # Re-generate the streams: python3 lives.py (gives these bytes).
