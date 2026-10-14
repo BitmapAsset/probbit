@@ -44,7 +44,7 @@ fn breaking_turn(p: &Persona, pr: &Prop, st0: &State, script: &[Event], eng: per
 /// hours 3/10, a goal signal 3/20), else stays at its default (left out of the event)
 fn random_event(r: &mut Philox4x32, alpha: &[(String, &'static str, Vec<Json>)]) -> Event {
     let mut e = vec![];
-    for (id, kind, vals) in alpha { let chance = match *kind { "flag" => 0.25, "level" => 0.5, "number" => 0.4, "goal" => 0.15, _ => 0.3 };
+    for (id, kind, vals) in alpha { let chance = match *kind { "flag" => 0.25, "level" => 0.5, "number" => 0.4, "goal" => 0.15, "sense" => 0.4, _ => 0.3 };
         if r.f64() < chance { e.push((id.clone(), vals[r.below(vals.len())].clone())); } }
     e
 }
@@ -95,14 +95,21 @@ fn individual(p: &Persona, props: &[Prop], seed: u64, s: &Search, eng: persona::
     let st0 = persona::init(p, Some(seed), true, eng); let alpha = persona::alphabet(p, &s.grid, &s.hours);
     let mut best: Vec<Option<Vec<Event>>> = vec![None; props.len()];
     let mut r = Philox4x32::new(s.fuzz_seed, seed);
-    for _ in 0..s.scripts {
-        let n = 1 + r.below(s.depth); let script: Vec<Event> = (0..n).map(|_| random_event(&mut r, &alpha)).collect();
+    let search = |script: &[Event], best: &mut Vec<Option<Vec<Event>>>| {
         let mut st = st0.clone();
         for (k, e) in script.iter().enumerate() {
             if best.iter().all(|b| b.as_ref().is_some_and(|b| b.len() <= k + 1)) { break; }
             let (doc, ns) = step(p, &st, e, eng, turns);
             for (i, pr) in props.iter().enumerate() { if best[i].as_ref().map_or(true, |b| b.len() > k + 1) && persona::breaks(p, pr, &st, &doc).is_some() { best[i] = Some(script[..=k].to_vec()); } }
-            st = ns; } }
+            st = ns; } };
+    for _ in 0..s.scripts {
+        let n = 1 + r.below(s.depth); let script: Vec<Event> = (0..n).map(|_| random_event(&mut r, &alpha)).collect();
+        search(&script, &mut best); }
+    // senses (docs/persona.md §2.11): each reading repeated 1, 5 and 20 times (a normal learnt), and the range ends alternating
+    // over 20 events (a spread inflated)
+    for (id, vals, (lo, hi)) in persona::sense_patterns(p, &s.grid) {
+        for v in &vals { for k in [1usize, 5, 20] { search(&vec![vec![(id.clone(), v.clone())]; k], &mut best); } }
+        search(&(0..20).map(|i| vec![(id.clone(), if i % 2 == 0 { lo.clone() } else { hi.clone() })]).collect::<Vec<Event>>(), &mut best); }
     if s.beam > 0 { for (i, pr) in props.iter().enumerate() { let limit = best[i].as_ref().map_or(s.depth, |b| b.len() - 1);
         if let Some(sc) = beam(p, pr, &st0, limit, s, eng, turns) { best[i] = Some(sc); } } }
     props.iter().zip(best).map(|(pr, b)| b.map(|sc| shrink(p, pr, &st0, sc, eng, turns))).collect()
@@ -121,7 +128,7 @@ pub fn authorize_fixtures(p: &Persona, seeds: &[u64], res: &mut [Vec<Option<Foun
     if !matches!(source, "env:synthetic" | "human:synthetic") {
         return Err(persona::perr("fixture_src", "env:synthetic | human:synthetic; an explicit test-source assumption, never production provenance"));
     }
-    if !persona::has_reward_sources(p) { return Err(persona::perr("fixture_src", "requires a persona with reward_from")); }
+    if !persona::has_reward_sources(p) { return Err(persona::perr("fixture_src", "requires a persona with reward_from or senses")); }
     for per in res {
         for (seed, f) in seeds.iter().zip(per) {
             let Some(f) = f else { continue };
