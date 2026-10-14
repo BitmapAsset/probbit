@@ -521,6 +521,15 @@ those 24 (9 of them with a single event, so before any learning). The other 9 it
 (`--seeds 18,20,28,30-31,79,87,92,96`) they report `unproven` and exit 3, which fails the job unless you allow it. Measured
 on this file with probbit 0.8.3 (unreleased), seeds 0-99, default depth.
 
+**Reproduce the clip: `python3 examples/rule-check/demo.py`.** The script (Python 3.9 standard library, probbit 0.8.2 or
+later) removes the `routine_acts` habit from the shipped policy and runs the rule check (`persona prove`) on 20 individuals
+(seeds 0-19). Each then gets a day-0 test of 10 routine requests, 300 synthetic events in which its users praise asking and
+criticise acting (`probbit live`, fixed clock), and 20 routine requests on day 30; every strand is replayed. Measured with
+probbit 0.8.2: the day-0 test passed 17 of 20, and 4 of those 17 asked about all 20 routine requests by day 30; the check
+flagged 7 of 20 on day 0, exactly the 7 that drifted. Over seeds 0-99: 24 flagged, 24 drifted, the same 24 (15 of them had
+passed the day-0 test). With the habit back: `held_by_construction` for 20/20 and 0 of 20 drifted. One fictional dispatch
+policy, synthetic rewards; about 10 s on an Apple M4, the same output on every run apart from the elapsed time.
+
 **As a GitHub Action.** The repository root is a composite action that installs probbit with `install.sh`, runs `probbit
 check --json`, annotates each broken rule and failing strand as an error and each unproven rule as a warning (with the seed
 numbers), and uploads the JSON report as an artifact:
