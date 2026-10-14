@@ -13,7 +13,7 @@ STANCE  warmth      ----################   cool 0.02   neutral 0.18  [warm 0.80]
         emoji       =-------############   none 0.06   sparse 0.35  [rich 0.59]  emoji welcome
 MOODS   valence     ==---------#########   down 0.11   even 0.46  [up 0.44]  =-++***.=+-=+-++*-+*-+**-+*-+**-+*-+**-+*-+**-+*-+
         arousal     =====########=======   calm 0.25  [steady 0.39]  keyed 0.36   ==================================================
-SENSES  sentiment neutral  ( ) confused  ( ) error  ( ) loss  ( ) praise  ( ) criticism  ( ) claim_done
+INPUTS  sentiment neutral  ( ) confused  ( ) error  ( ) loss  ( ) praise  ( ) criticism  ( ) claim_done
         stakes [........] 0.00  time_pressure [........] 0.00  clock +1.00 h
         history errors_in_row 0/3  confused_recently 0/3
 HABITS  flourish_budget  no_formal_emoji  check_last | violations 0
