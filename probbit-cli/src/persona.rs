@@ -2010,6 +2010,17 @@ pub fn mcp_refuses_readings(args: &[(String, Json)], key: &str) -> R<()> {
         return Err(perr(&format!("arguments.{key}.senses"), "readings come from the host's instruments, never through the agent's channel: MCP refuses an event that carries readings (the host sends them with probbit live or persona turn)")); }
     Ok(())
 }
+/// §2.8: a cancel says no outcome will come for a decision, so an agent could cancel to dodge a correction: through the MCP tools
+/// (the agent's own channel) an event that carries `cancel` is refused for a persona with a credit block; a persona without one
+/// lists it in stance.ignored
+pub fn mcp_refuses_cancel(args: &[(String, Json)], key: &str) -> R<()> {
+    let get = |k: &str| args.iter().find(|(x, _)| x == k).map(|(_, v)| v).filter(|v| !v.is_null());
+    if get(key).and_then(|e| e.get("cancel")).is_none() { return Ok(()); }
+    let p = match (get("persona"), get("persona_path")) { (Some(d), None) => build(d).ok(), (None, Some(Json::Str(f))) => load(f).ok().map(|x| x.0), _ => None };
+    if p.is_some_and(|p| p.credit().is_some()) {
+        return Err(perr(&format!("arguments.{key}.cancel"), "a cancel comes from the host or a person, never through the agent's channel: MCP refuses an event that carries cancel (the host sends it with probbit live or persona turn)")); }
+    Ok(())
+}
 /// `init` at `seed`, then every turn of the script -> (the stance documents, the final state)
 pub fn replay(p: &Persona, seed: Option<u64>, turns: &[Json], no_inertia: bool, eng: Engine, timing: bool) -> R<(Vec<Json>, State)> {
     let mut st = init(p, seed, true, eng); let mut out = vec![];

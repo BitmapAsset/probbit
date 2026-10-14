@@ -236,6 +236,8 @@ impl Replay {
         let nm = persona::normals(&live.p, &live.st);
         if !nm.is_empty() { v.push(("normals".into(), Json::Obj(nm.iter().enumerate().map(|(k, (id, m, n, _))| (id.clone(), Json::Obj(vec![("mean".into(), Json::Num(*m)),
             ("n".into(), Json::Num(*n as f64)), ("max_move_50".into(), Json::Num(self.norms.max_move.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
+        // a credit block (§2.8): the decisions still awaiting an outcome
+        if let Some(o) = persona::open_decisions(&live.p, &live.st) { v.push(("open".into(), Json::Arr(o.iter().map(|(t, _)| Json::Num(*t as f64)).collect()))); }
         Json::Obj(v)
     }
 }
@@ -264,6 +266,48 @@ pub fn verify_from_checkpoint(text: &str, eng: Engine) -> Result<Json, (usize, S
     let mut r = Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1)?;
     for l in lines.iter().skip(k + 1) { r.step(l, eng)?; }
     Ok(r.summary())
+}
+/// `verify` from the header, keeping the stance documents of the given turns (what `--actions` compares with)
+pub fn verify_keep(text: &str, eng: Engine, keep: &[u64]) -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
+    let lines = lines(text);
+    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut kept = vec![];
+    for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? {
+        if let Some(t) = doc.get("turn").and_then(Json::as_f64).map(|x| x as u64).filter(|t| keep.contains(t)) { kept.push((t, doc)); } } }
+    Ok((r.summary(), kept, r.live.p.clone()))
+}
+/// One line of a host's action log (`live verify --actions FILE`, §5.7): the decision's turn and, per trait the host acted on,
+/// the level it acted on
+pub struct Action { pub line: usize, pub turn: u64, pub levels: Vec<(String, String)> }
+/// A host's action log: one JSON object per line, {"turn": T, "action": {trait: level, ...}} (blank lines skipped)
+pub fn read_actions(text: &str) -> Result<Vec<Action>, InErr> {
+    let mut out = vec![];
+    for (i, l) in text.split('\n').map(bare).enumerate() { if l.trim().is_empty() { continue; } let path = format!("actions.line{}", i + 1);
+        let bad = |m: &str| perr(&path, m.to_string());
+        let j = json::parse(l).map_err(|e| perr(&path, format!("not JSON: {}", e.msg)))?;
+        let kv = j.as_obj().filter(|kv| kv.len() == 2 && kv.iter().all(|(k, _)| k == "turn" || k == "action")).ok_or_else(|| bad("an object {\"turn\": T, \"action\": {trait: level}}"))?;
+        let turn = kv.iter().find(|(k, _)| k == "turn").and_then(|(_, x)| x.as_f64()).filter(|x| *x >= 0.0 && x.fract() == 0.0 && *x <= 9_007_199_254_740_992.0)
+            .ok_or_else(|| bad("turn: a whole number >= 0 (the stance's turn)"))? as u64;
+        let act = kv.iter().find(|(k, _)| k == "action").and_then(|(_, x)| x.as_obj()).filter(|a| !a.is_empty()).ok_or_else(|| bad("action: an object trait -> level"))?;
+        let levels = act.iter().map(|(t, x)| x.as_str().map(|l| (t.clone(), l.to_string())).ok_or_else(|| bad("action: each level a string"))).collect::<Result<Vec<_>, InErr>>()?;
+        out.push(Action { line: i + 1, turn, levels }); }
+    Ok(out)
+}
+/// The earliest turn (then the earliest line) whose host action differs from the level its stance released -> (actions
+/// checked, the difference: {turn, line, trait, action, released (null: not released or no such turn), why}); an action on a
+/// trait the persona does not have is an input error
+pub fn first_difference(p: &Persona, actions: &[Action], stances: &[(u64, Json)]) -> Result<(usize, Option<Json>), InErr> {
+    let mut order: Vec<&Action> = actions.iter().collect(); order.sort_by_key(|a| (a.turn, a.line));
+    let s = |x: &str| Json::Str(x.to_string()); let mut checked = 0;
+    for a in order { checked += 1; let doc = stances.iter().find(|(t, _)| *t == a.turn).map(|x| &x.1);
+        for (t, level) in &a.levels {
+            let e = match doc { Some(d) => persona::doc_entry(p, d, t), None => None };
+            if doc.is_some() && e.is_none() { return Err(perr(&format!("actions.line{}.action.{t}", a.line), "not a trait of the persona")); }
+            let released = e.as_ref().filter(|e| e.get("released") == Some(&Json::Bool(true))).and_then(|e| e.get("level")).and_then(Json::as_str).map(str::to_string);
+            let why = match (doc, &released) { (None, _) => "the strand has no stance with this turn", (_, None) => "the stance did not release this trait",
+                (_, Some(r)) if r != level => "the host acted on another level", _ => continue };
+            return Ok((checked, Some(Json::Obj(vec![("turn".into(), Json::Num(a.turn as f64)), ("line".into(), Json::Num(a.line as f64)), ("trait".into(), s(t)), ("action".into(), s(level)),
+                ("released".into(), released.map_or(Json::Null, |r| s(&r))), ("why".into(), s(why))])))); } }
+    Ok((checked, None))
 }
 /// `verify` as one document: the summary, or {ok: false, line, diverges}
 pub fn verify_doc(text: &str, eng: Engine) -> Json {

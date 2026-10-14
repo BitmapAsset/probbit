@@ -2,8 +2,8 @@
 
     python3 p0.py record   # with a released binary: writes fixtures/p0/EXPECTED, the strands and fixtures/MANIFEST
     python3 p0.py check    # with the binary under test: every output equals its recorded sha256 (exit 1 if not); a
-                           # `live` stderr may also carry the one senses warning line (SENSES_WARNING) where its script
-                           # sends `senses`, and is reported apart
+                           # `live` stderr may also carry the senses and credit warning lines (WARNINGS) where its script
+                           # sends those keys, and is reported apart
 
 The corpus: every persona of fixtures/gen.py's P0 list x seeds 0-2 x its committed random scripts, through `persona replay`
 and `live --clock fixed` (stances, error objects, final state, strand), plus `init`, `check`, `describe`, `compile`, `lint
@@ -51,26 +51,38 @@ def masked_err(err):
     return re.sub(r"strand head sha256:[0-9a-f]{64}", "strand head *", err).encode("utf-8")
 
 
-# The one line 0.9.0 adds to a corpus output: `live` says once per run, on stderr, that a persona without a senses block
-# got a `senses` key (an undeclared input, listed in `ignored` as before). Only the scripts that carry `senses` (k=1) get
-# it, at the earliest such event; it is not a document: stdout, states and strands stay byte-identical.
+# The lines 0.9.0 adds to a corpus output: `live` says once per run, on stderr, that a persona without a senses block got
+# a `senses` key, and once that a persona without a credit block got `await`, `for` or `cancel` (undeclared inputs, listed
+# in `ignored` as before). Only the scripts that carry those keys (k=1) get them, each at its earliest such event; they are
+# not documents: stdout, states and strands stay byte-identical.
 SENSES_WARNING = ("probbit: live: events[%d]: this persona has no senses block: `senses` is an undeclared input "
                   "(listed in ignored), no reading is judged\n")
+CREDIT_WARNING = ("probbit: live: events[%d]: this persona has no credit block: `await`, `for` and `cancel` are undeclared "
+                  "inputs (listed in ignored), feedback pays the previous stance\n")
+WARNINGS = [(SENSES_WARNING, ("senses",)), (CREDIT_WARNING, ("await", "for", "cancel"))]
 
 
-def first_senses_event(key, k):
+def first_event_with(key, k, names):
     events = common.read_jsonl(os.path.join(P0, "scripts", "%s-%d.jsonl" % (key, k)))
-    return next((i for i, e in enumerate(events) if "senses" in e), None)
+    return next((i for i, e in enumerate(events) if any(n in e for n in names)), None)
 
 
-def without_senses_warning(name, data):
-    """For a `live` stderr whose script carries `senses`: the bytes without the warning line, else None."""
+def without_warnings(name, data):
+    """For a `live` stderr whose script carries `senses` or the credit keys: the bytes without each such warning line (each
+    present exactly once), else None."""
     m = re.match(r"live/([^/]+)/s\d+/(\d+)/stderr$", name)
-    i = m and first_senses_event(m.group(1), int(m.group(2)))
-    if i is None:
+    if not m:
         return None
-    line = (SENSES_WARNING % i).encode("utf-8")
-    return data.replace(line, b"", 1) if data.count(line) == 1 else None
+    rest, removed = data, 0
+    for text, names in WARNINGS:
+        i = first_event_with(m.group(1), int(m.group(2)), names)
+        if i is None:
+            continue
+        line = (text % i).encode("utf-8")
+        if rest.count(line) != 1:
+            return None
+        rest, removed = rest.replace(line, b"", 1), removed + 1
+    return rest if removed else None
 
 
 def rel(path):
@@ -197,8 +209,8 @@ def record():
 
 
 def check(verbose=False):
-    """Returns (outputs checked, differing names, stderr outputs equal but for the senses warning, strands verified,
-    strand failures, seconds)."""
+    """Returns (outputs checked, differing names, stderr outputs equal but for the warning lines, strands verified, strand
+    failures, seconds)."""
     t0 = time.time()
     expected = {}
     with open(os.path.join(P0, "EXPECTED"), encoding="utf-8") as f:
@@ -217,7 +229,7 @@ def check(verbose=False):
         e = expected.get(name)
         got = (common.sha256_bytes(data), len(data), code)
         if e != got:
-            rest = without_senses_warning(name, data)
+            rest = without_warnings(name, data)
             if rest is not None and e == (common.sha256_bytes(rest), len(rest), code):
                 warned.append(name)
                 continue
@@ -250,7 +262,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
         n, diffs, warned, nv, vfail, secs = check(verbose=True)
         print(json.dumps({"outputs": n, "differ": len(diffs), "identical": n - len(diffs) - len(warned),
-                          "stderr_senses_warning_only": len(warned), "strands_verified": nv, "verify_failed": vfail,
+                          "stderr_warnings_only": len(warned), "strands_verified": nv, "verify_failed": vfail,
                           "seconds": round(secs, 1)}))
         sys.exit(1 if diffs or vfail else 0)
     else:
