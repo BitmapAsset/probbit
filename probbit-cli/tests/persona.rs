@@ -145,6 +145,33 @@ fn stdout_matches_the_sensed_golden() {
     let _ = std::fs::remove_file(&st);
 }
 
+/// The addressed-outcome golden (examples/agent-harness/addressed.json, docs/persona.md §2.8): 16 events with decisions awaiting
+/// their outcome, late payments (`for`, one bound to its stance's digest), a cancel, an unaddressed payment of the previous stance
+/// and a payment of a habit-forced stance (absorbed): `init`, `compile` of turn 0, every turn, the final state, `replay` and
+/// `describe`. CI runs it on Linux, macOS and Windows: the same bytes on each.
+#[test]
+fn stdout_matches_the_addressed_golden() {
+    let ah = |f: &str| format!("{}/../examples/agent-harness/{f}", env!("CARGO_MANIFEST_DIR")); let p = ah("addressed.json");
+    let g = |f: &str| read(&ah(&format!("golden/{f}")));
+    let script = parse(&g("events.json")); let turns = script.as_arr().unwrap(); assert_eq!(turns.len(), 16);
+    let (c, s0, e) = probbit(&["persona", "init", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(s0, g("state0.json"), "state0");
+    let st = tmp("addressed-state.json"); std::fs::write(&st, &s0).unwrap();
+    let (c, prog, e) = probbit(&["persona", "compile", &p, "--state", &st, "--inputs", &jw(&turns[0])], ""); assert_eq!(c, 0, "{e}");
+    assert_eq!(prog, g("program-turn0.json"), "program of turn 0");
+    let gold = g("turns.jsonl"); let lines: Vec<&str> = gold.lines().collect(); assert_eq!(lines.len(), 16);
+    for (i, t) in turns.iter().enumerate() {
+        let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", &jw(t)], ""); assert_eq!(c, 0, "{e}");
+        assert_eq!(out.trim_end(), lines[i], "addressed turn {i}"); }
+    assert_eq!(read(&st), g("final-state.json"), "final state");
+    let (c, rep, e) = probbit(&["persona", "replay", &p, "--script", &ah("golden/events.json")], ""); assert_eq!(c, 0, "{e}"); assert_eq!(rep, gold, "replay");
+    let (c, d, e) = probbit(&["persona", "describe", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(d, g("describe.json"), "describe");
+    // a late payment carries its eligibility; the digest-bound one pays the habit-forced stance, which moves nothing
+    assert!(lines[2].contains(r#""paid":{"absorbed":false,"e":0.978572,"sign":1,"stance":"#), "{}", lines[2]);
+    assert!(lines[10].contains(r#""paid":{"absorbed":true,"e":1,"sign":1,"stance":"#), "{}", lines[10]);
+    assert!(lines[4].contains(r#""closed":[{"as":"cancelled","turn":1}]"#), "{}", lines[4]);
+    let _ = std::fs::remove_file(&st);
+}
+
 /// `probbit persona --help` documents every subcommand and the exit codes; bad flags and subcommands exit 2.
 #[test]
 fn persona_help_and_flags() {

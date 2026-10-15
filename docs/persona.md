@@ -270,6 +270,60 @@ step 2), so the feedback turn's own stance already uses it. What learning can an
 - A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
   as before the block existed.
 
+**Action-addressed feedback (`learning.credit`, optional).** Without it, feedback pays the previous stance. With it, the host
+can name the decision an outcome is about, so a late or out-of-order outcome credits the stance the host acted on:
+
+```yaml
+learning:
+  # ... the fields above, unchanged
+  credit:
+    max_open: 8                # decisions awaiting an outcome at once (1-64; default 8)
+    half_life_events: 32       # eligibility halves per 32 events of delay (1-10000; default 32)
+```
+
+Three event keys are read (not compiled, so not in `ignored`) and come back in the stance's `inputs` as given:
+
+- `await: true`: the host will act on this turn's stance and report its outcome. The decision stays open with its credit and
+  its stance's digest (`credit.stance` in the stance document).
+- `for: T` or `for: {turn: T, stance: "sha256:..."}`: this feedback pays the decision of turn T. The second form binds the paid
+  stance's digest, so a restored state can never pay another decision under the same turn number (B-R6); with `for: T` the
+  paid digest comes back in `credit.paid.stance` for the host to compare.
+- `cancel: [T, ...]`: no outcome will come for these open decisions. A cancel needs `src` env or human (never the individual).
+
+The credit step runs after the drive step and before compile, at turn t. Feedback is a learning flag on (or, with drives, a
+non-zero surprise term), with the sign above:
+
+    expire   each open n with t - n - 1 >= 4 x half_life_events            (closed as expired)
+    close    each n in cancel                                               (closed as cancelled)
+    if feedback:
+      paid   = for if given, else t - 1
+      c      = the open decision's credit, or the state's credit when paid = t - 1 is not open
+      e      = 0.5^((t - paid - 1) / half_life_events), 6 decimals         (1 for t - 1)
+      step(l) = e x clip(sign x rate x c(l), -step_cap, +step_cap), recentred and added as above
+      close  paid                                                           (closed as paid)
+    -- compile and solve --
+    if await: open[t] = {credit, stance digest}; beyond max_open the oldest is closed (closed as evicted)
+
+Eligibility scales the capped step, so a stale outcome always moves less than a fresh one: 3 events late it keeps 0.937084 of
+the step, 10 late 0.805245, 32 late 0.5, 127 late 0.063869; 128 events after it was made a decision expires. At e = 1 the step
+is the one above exactly: feedback that names the previous stance, or names nothing while no other decision is open, learns
+what a persona without the block learns, Δ for Δ. Paying a stance a habit forced moves nothing and is marked `absorbed`. A
+control line closes every open decision (section 5.7). An event is **refused whole** (one `{"error"}` at its path, no turn, no
+state change; `persona turn` exits 2, `live` at the end of the run) when:
+
+| row | refused | path |
+|---|---|---|
+| B-R1 | feedback without `for` while a decision other than t − 1 is open (ambiguous) | `inputs.for` |
+| B-R2 | `for` naming a decision neither open nor t − 1: paid, cancelled, expired, evicted, never opened or still to come | `inputs.for` |
+| B-R3 | `for` on an event without feedback | `inputs.for` |
+| B-R4 | `cancel` naming a decision not open, the same turn twice, or the decision this event's feedback pays | `inputs.cancel[i]` |
+| B-R5 | `for` not a whole number or `{turn, stance}`; `cancel` not a list of at most `max_open` whole numbers; `await` not true or false; a cancel without an env or human `src` | `inputs.for`, `inputs.cancel`, `inputs.await`, `inputs.src` |
+| B-R6 | `for: {turn, stance}` whose digest is not that turn's stance | `inputs.for.stance` |
+
+Reward provenance (section 2.10) is checked before these rows. A stance's digest is the sha256 of its canonical JSON without `credit`,
+`state_digest` and `timing`. Without the block, `await`, `for` and `cancel` are undeclared inputs (listed in `ignored`; `live`
+says so once on stderr) and every document is as before.
+
 ### 2.9 Drives (optional)
 
 ```yaml
@@ -590,6 +644,10 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
 - With a senses block (section 2.11): `"senses": {"tool_fail": {"raw": true, "src": "env:runner", "z": 3.878359, "zd":
   3.378359, "mean": 0.05, "n": 0}}` per sense read this turn (the `mean` and `n` it was judged against) and `"noticed":
   "tool_fail"` (the normal clause's sense, or null); `inputs` echoes `senses` as given.
+- With a credit block (section 2.8): `"credit": {"paid": {"turn": 3, "e": 0.937084, "sign": 1, "absorbed": false, "stance":
+  "sha256:..."}, "closed": [{"turn": 3, "as": "paid"}], "open": [5, 6], "stance": "sha256:..."}`: the payment this turn made
+  (null when none), the decisions it closed (by a control line, expired, cancelled, paid, evicted, in that order), the turns
+  still open, and this stance's own digest (what `for: {turn, stance}` names); `inputs` echoes `await`, `for` and `cancel`.
 - `held`: the unsure traits held at their `hold` level; such a trait also carries `odds_unheld`, its odds before the hold.
 - With a drives block (section 2.9), `pursue` leaves `stance` for its own object and the turn's drive values follow it:
   `"pursue": {"goal": "fun", "p": 0.44, "odds": {"chores": 0.10, "craft": 0.26, "fun": 0.44, "safety": 0.20}, "released": true,
@@ -619,6 +677,8 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "senses": {"genes": {"gain": {"tool_fail": 1.19}, "threshold": {"tool_fail": -0.17}, "habituation": {"tool_fail": 1.46}},
             "norm": {"tool_fail": {"mean": 0.3, "var": 0.2, "n": 10}}},  # with a senses block (section 2.11): per sense
  "learned_from": {"caution": {"rewards": 3, "corrections": 2}},     # with learning and line.why_past: feedback turns by sign
+ "open_credit": [{"turn": 5, "credit": {"verbosity": [0.1, -0.4, 0.3]}, "stance": "sha256:..."}],   # with a credit block
+ "prev_stance": "sha256:...", "control_closed": [],                 # (section 2.8): open decisions, digests, control closures
  "digest": "sha256:..."}
 ```
 
@@ -629,7 +689,11 @@ match the seed, a drive value outside its box (wanting, afterglow and expectatio
 deadlines 0 to 1e6 hours or null, `since` a whole number >= 0) or a goal set that differs from the persona's, and (with a
 senses block, rule S4) a mean outside prior ± drift_cap, a variance outside [0, var_cap], a count that is not a whole number up
 to 1e6, a sense set that differs from the persona's or sense genes that do not match the seed, even with a recomputed digest.
-Each normal starts at its prior with n = 0; a persona without the block refuses a state with a `senses` field.
+Each normal starts at its prior with n = 0; a persona without the block refuses a state with a `senses` field. With a credit
+block (section 2.8) the state keeps `open_credit` (the decisions awaiting an outcome: at most `max_open`, turns increasing and
+before the state's turn, credits within ±1, a stance digest each), `prev_stance` (the previous stance's digest, null before any
+turn) and `control_closed` (decisions a control line closed, listed by the next stance); a persona without the block
+refuses a state with any of them.
 
 ### 5.2 Canonical JSON and the number rule
 
@@ -779,6 +843,13 @@ With a senses block the labels cover readings too (a bare reading takes the even
 numbers on `--grid` × the range, one reading repeated 1, 5 and 20 times, and the range ends alternating. `prove` reads each
 `sense_<id>_up/down` input as a box [0, zcap] × gain and each sense condition both ways, so a habit on `sense.<id>.raw` holds
 by construction for a rule with the same condition. A rule reads the sense conditions the persona's habits use.
+
+**Payments in fuzz** (section 2.8, with a credit block). `fuzz` adds `await` to its events and payments resolved against the
+state each event runs on: `for` the oldest open decision (late), the newest (reordered), the previous stance, a past turn no
+longer open (a duplicate, or a payment after a cancel or an expiry), a turn still to come (unknown), or an open decision bound
+to another stance's digest; `cancel` the oldest open decision or a turn still to come. A refused payment changes nothing, so
+the search goes on from the same state, and a reported counterexample's script holds only the events that ran, with every
+payment as a concrete turn, so it replays as printed. A persona without the block is searched exactly as before.
 The Python `persona_fuzz` and MCP fuzz tool accept `fixture_src` too. See the
 [host regression example](../examples/agent-harness/README.md). Synthetic observations are not production evidence.
 
@@ -896,7 +967,9 @@ characters. Pause moves an active individual to paused, resume a paused one back
 retire. While paused or retired every event is refused: one `{"error"}` object with code `paused` or `retired` per event,
 nothing written, exit 4 at the end of the run. **No credit crosses a control line**: the credit of the stance before it is
 cleared (section 2.8), so feedback after a resume credits no stance from before the pause, and learning cannot tie a reward to
-an interruption. Nothing else moves: moods, drives, learned weights, history and the turn count are the individual's as before,
+an interruption. With a credit block (section 2.8) a control line also closes every open decision: the next stance lists them
+as closed `control`, and a payment that names one is refused (B-R2), so no outcome is paid across an interruption either.
+Nothing else moves: moods, drives, learned weights, history and the turn count are the individual's as before,
 and the clock goes on (with `--clock fixed` the host's hours of the next event include the pause). The individual has no input
 that names a control line or unsets one: an event's `control` key is an undeclared input like any other, and the stance never
 mentions the status. Control lines are not an MCP tool: keep `live control` out of the agent's own reach.
@@ -922,6 +995,16 @@ its source, and `verify` recomputes the normals from the logged readings: its su
 "max_move_50"}}`, the normal now and the largest move of its mean within 50 events (the monitor alerts above drift_cap / 2). A
 persona without the block lists `senses` in `ignored`, as before, and `live` says so once on stderr, at the earliest event
 that carries it: `probbit: live: events[i]: this persona has no senses block: ...`. The documents and the strand are unchanged.
+
+**Credit in live** (section 2.8). Events carry `await`, `for` and `cancel` as `persona turn` does, and the strand logs them as
+given; `verify` recomputes the open decisions with everything else and adds `"open": [turns]` (the decisions still awaiting
+an outcome) to its summary. `live verify STRAND --actions FILE` also reads the host's action log, one `{"turn": T, "action":
+{"<trait>": "<level>"}}` per line, and compares each action with the level its turn's stance released: the summary adds
+`"actions": {"checked": N, "differs": null}`, or the earliest turn (then line) where the host acted otherwise, as
+`{"turn", "line", "trait", "action", "released", "why"}` (another level, a trait the stance did not release, or no such turn),
+and exits 1. A trait the persona does not have is an input error (exit 2); `--actions` replays from the header, so it does not
+combine with `--from-checkpoint`. A persona without a credit block lists `await`, `for` and `cancel` in `ignored`, as before,
+and `live` says so once on stderr: `probbit: live: events[i]: this persona has no credit block: ...`.
 `monitor` starts at the last checkpoint and draws its event at once. A strand that ends in a checkpoint line is continued from
 the state it carries. Before continuation or a control append, the stored chain and lifecycle are checked from the header:
 a checkpoint cannot hide a retired status, an invalid transition or a broken preceding hash link. This structural scan
@@ -961,7 +1044,9 @@ turn used them (flags lit, numbers as bars, levels by name, the clock) and the h
 with a senses block (section 2.11): one row per sense, its normal as a tick over the range, this event's reading, z and n (a
 sense not read keeps its normal), and an alert when a normal moved over drift_cap / 2 within 50 events. The habits
 in force, the ones that bound in colour, and the violations counter (0 by construction, section 2.5). The learned deltas per
-level as centred bars within ±total_cap (with a learning block, section 2.8). The drives, when a document carries `pursue` or
+level as centred bars within ±total_cap (with a learning block, section 2.8), and with a credit block a CREDIT row: the open
+decisions with the eligibility a payment at the next event would get, this event's payment (turn, e, sign, absorbed) and the
+decisions it closed. The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
 
 **Checkpoints and control lines.** A strand with checkpoint lines (section 5.7) is replayed from its last checkpoint, not from
@@ -1085,11 +1170,11 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
-| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids) |
+| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids; the learning block with its credit block) |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
-| `probbit live verify STRAND` | replay a strand from its header alone: ok, or the earliest line that differs (exit 1) |
+| `probbit live verify STRAND [--from-checkpoint] [--actions FILE]` | replay a strand from its header alone: ok, or the earliest line that differs (exit 1); with `--actions`, also the earliest turn whose host action differs from the level its stance released (section 5.7) |
 | `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N]`, `probbit monitor --demo [...]` | watch an individual's inner state: the strand replayed as live bars in the terminal, or as a page on 127.0.0.1 (section 5.8) |
 
 A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes
@@ -1109,7 +1194,9 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
   `probbit_live_verify {strand | strand_path}` -> `live verify`'s document (section 5.7; a divergence is an answer).
   For a persona with a senses block, `probbit_persona_turn` and `probbit_live_event` refuse an event that carries readings
   (rule S7, section 2.11: readings come from the host's instruments, never through the agent's channel); a persona without
-  the block lists `senses` in `ignored`, as before.
+  the block lists `senses` in `ignored`, as before. For a persona with a credit block they refuse an event that carries
+  `cancel` (section 2.8: a cancel comes from the executor or a person, never through the agent's channel, so the agent cannot
+  cancel a decision to dodge its correction); `await` and `for` pass.
   A persona with a drives block takes `goals` in `inputs` / `event` (section 2.9); the schemas declare it.
   Stateless; the documents are the CLI's. A refusal, a fallback, a counterexample or a divergent strand is an answer; a bad
   persona, state, input, event or rule is a tool error carrying the error object.

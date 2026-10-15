@@ -49,6 +49,21 @@ A plain circuit breaker can enforce this single static retry rule. The additiona
 shown here is history-dependent reproduction, bounded learning, deterministic replay and a
 scoped rule check.
 
+## Late outcomes, addressed
+
+`addressed.json` is the retry policy with a `learning.credit` block (docs/persona.md §2.8). The host marks each decision
+it acts on with `await: true` and reports its outcome later, naming the decision: `for: {turn, stance}` with the stance's
+turn and digest (`credit.stance`). `late.py` makes four decisions and then reports their outcomes in another order: each one
+credits the stance it was about, scaled by how late it came, and a duplicate is refused without changing anything. `live
+verify --actions` then compares the host's action log with the levels the strand released.
+
+```sh
+python3 examples/agent-harness/late.py
+```
+
+`golden/` holds the addressed policy's documents for a fixed 16-event script; CI checks them byte for byte on Linux, macOS
+and Windows.
+
 ## Replaying generated counterexamples
 
 When `reward_from` requires a source, fuzz searches an abstract accepted-source history.

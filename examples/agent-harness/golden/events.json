@@ -1,0 +1,75 @@
+[
+ {
+  "await": true
+ },
+ {
+  "await": true,
+  "error": true,
+  "src": "env:probe"
+ },
+ {
+  "praise": true,
+  "for": 0,
+  "src": "env:probe"
+ },
+ {
+  "await": true,
+  "elapsed_hours": 0.5
+ },
+ {
+  "cancel": [
+   1
+  ],
+  "src": "env:executor"
+ },
+ {
+  "praise": true,
+  "for": 3,
+  "src": "env:probe"
+ },
+ {
+  "await": true
+ },
+ {
+  "praise": true,
+  "src": "env:probe"
+ },
+ {
+  "await": true,
+  "error": true,
+  "src": "env:probe"
+ },
+ {
+  "await": true,
+  "error": true,
+  "src": "env:probe"
+ },
+ {
+  "praise": true,
+  "for": {
+   "turn": 9,
+   "stance": "sha256:34fd9fe56a28a65a4503f64ed192b0bfa873b453efb5df2eaae9ddd43f20f426"
+  },
+  "src": "env:probe"
+ },
+ {
+  "praise": true,
+  "for": 8,
+  "src": "env:probe"
+ },
+ {
+  "await": true,
+  "elapsed_hours": 1
+ },
+ {
+  "await": true
+ },
+ {
+  "elapsed_hours": 2
+ },
+ {
+  "praise": true,
+  "for": 12,
+  "src": "env:probe"
+ }
+]

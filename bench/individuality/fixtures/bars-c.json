@@ -1,0 +1,6 @@
+{
+ "c1": {"share_min": 0.99},
+ "c2": {"share_min": 1.0},
+ "c3": {"share_min": 0.99},
+ "c4": {"share_min": 1.0, "pairs_identical": true}
+}

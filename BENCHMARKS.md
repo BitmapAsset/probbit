@@ -1141,3 +1141,47 @@ re-measured when action-addressed feedback (RFC 0001 Design B, metric c) lands.
 block (9,600 live turns and as many replayed, `describe`, `lint --seeds 0-99`, `fuzz` and `prove` documents): 0 differ. 629 are
 byte-identical; 24 are the stderr of `live` runs whose scripts send a `senses` key, identical once the one line naming it is
 removed. All 8 recorded strands verify, and the tutor's continues with the recorded bytes.
+
+## §11 Action-addressed feedback: credit accuracy, and the twins re-measured (`python3 bench/individuality/run.py --only c,d,e`, `python3 bench/individuality/twins_addressed.py`, stdlib; development build of 0.9.0)
+
+Metric c's fixtures, draws and bars were frozen in `bench/individuality/fixtures/MANIFEST` before it was ever run; three runs
+gave the same values. Ten individuals of an act-or-ask policy (`fixtures/dispatch.yaml`: the shipped dispatch policy with a
+credit block) make 300 decisions each; a host reads each stance's action, draws its outcome (good with probability 0.8 after
+act, 0.4 after ask) and sends it back, on time (stream 1) or 0 to 6 events late with cancels, duplicates and payments of
+turns never opened (stream 2). An independent Python learner replays RFC 0001 B.2 from the stance documents and the events.
+
+| metric | measured | bar | |
+|---|---|---|---|
+| c1 share of the applied step equal to the learner's (and the same paid turn and eligibility), over 8,393 accepted payments in 50 runs | 100 % | >= 99 % | passes |
+| c2 events whose Δ equals the learner's, after every one of 15,000 accepted events | 100 % | 100 % | passes |
+| c3 outcomes accepted, of the 3,802 whose decision was open on arrival (streams 1 and 2, addressed) | 100 % | >= 99 % | passes |
+| c4 duplicates, outcomes after a cancel and unknown turns (addressed) and ambiguous unaddressed feedback refused; runs equal to the run without their refused events | 100 % of 2,793; 50 of 50 byte-identical | 100 %; all | passes |
+
+Also measured (not gated): the learner's open decisions equal the engine's `open_credit` after every event. Without the block
+(0.8 semantics) 27 % of the outcomes credit a stance that took another level than the decision they were about, and all 138
+duplicates and unknown payments move the weights; the 0.8 workaround (keep an outcome only when the previous stance took the
+paid level) keeps 72 % of them. Act rate in the last 100 decisions: 0.655 on time, 0.628 addressed, 0.424 under 0.8
+semantics, 0.657 with the workaround.
+
+Reading it. Every accepted payment moved exactly the step RFC 0001 B.2 gives for the decision it named, and every duplicate,
+cancelled or unknown payment was refused without changing anything. The stream is busier than its design intended: each
+decision yields a message and an event carries at most one, so messages queue (254 still undelivered at the end over the
+ten individuals) and with every event awaiting, 67 % of the addressed decisions were evicted at `max_open` 8 before their
+outcome arrived (1,710 such outcomes refused, B-R2); paid outcomes were 0 to 7 events late. The fixture is not changed after
+the fact.
+
+**The twins re-measured with Design B** (`twins_addressed.py`, the frozen metric a fixture, streams, probes and bars; the
+credit block and the addressed feedback added at run time: room A's praise names the decision 2 events earlier, room B's
+criticism the one 3 events earlier):
+
+| run | a1 mean d_life (95 % interval) | a2 tv_life vs min(tv_seed_A, tv_seed_B) | |
+|---|---|---|---|
+| as frozen (rewards pay the previous stance) | 0.145 (0.096 to 0.199) | 0.1307 vs 0.1329 | fails |
+| addressed (Design B) | 0.1725 (0.1175 to 0.235) | 0.1223 vs 0.1366 | fails |
+| control: readings as plain 0.8 number inputs against a fixed prior, rewards unaddressed (reported) | 0.155 (0.099 to 0.219) | 0.0295 vs 0.1296 | — |
+
+Reading it. Addressing the rewards raises the share of probes whose action differs between two lives from 0.145 to 0.1725,
+below the 0.30 bar. In both rooms the feedback still moves the learned caution weights away from `careful` (mean Δ careful
+−0.32 after room A, −0.11 after room B), so the two lives drift the same way, and on the 10 probes with a tool failure the
+habit and the failure's push make both lives careful or measured (23 of 400 actions differ). The control shows what the
+normals add: with plain inputs the odds distance between two lives falls from 0.13 to 0.03.

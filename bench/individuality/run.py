@@ -1,10 +1,10 @@
 """bench/individuality: run the metrics, check every gated bar (Python 3.9, standard library only).
 
-    python3 run.py [--only a,b,d,e] [--out result.json]
+    python3 run.py [--only a,b,c,d,e] [--out result.json]
 
 The binary is PROBBIT_BIN, else `probbit` on PATH. Exit 0: every gated bar of the metrics run passes; 1: one fails (or the
-wall time is over its bar); 2: a setup error (no binary, a fixture that differs from fixtures/MANIFEST). Metric c (credit)
-and f (lineage) need blocks this release does not have and are skipped with a note.
+wall time is over its bar); 2: a setup error (no binary, a fixture that differs from fixtures/MANIFEST). Metric f (lineage)
+needs blocks this release does not have and is skipped with a note.
 """
 import json
 import os
@@ -19,8 +19,7 @@ sys.path.insert(0, HERE)
 import common  # noqa: E402
 
 KNOWN = ["a", "b", "c", "d", "e", "f"]
-LATER = {"c": "credit accuracy needs the learning.credit block (not in this release)",
-         "f": "lineage drift needs signed rewards and a lineage block (not in this release)"}
+LATER = {"f": "lineage drift needs signed rewards and a lineage block (not in this release)"}
 
 
 def manifest():
@@ -52,7 +51,7 @@ def main(argv):
         elif a == "--out" and args:
             out = args.pop(0)
         else:
-            common.fail("usage: python3 run.py [--only a,b,d,e] [--out FILE]")
+            common.fail("usage: python3 run.py [--only a,b,c,d,e] [--out FILE]")
     unknown = [m for m in only if m not in KNOWN]
     if unknown:
         common.fail("unknown metric(s): " + ", ".join(unknown))
@@ -64,6 +63,9 @@ def main(argv):
             raise common.SetupError("fixtures differ from fixtures/MANIFEST: " + ", ".join(bad))
         with open(os.path.join(common.FIXTURES, "bars.json"), encoding="utf-8") as f:
             bars = json.load(f)
+        with open(os.path.join(common.FIXTURES, "bars-c.json"), encoding="utf-8") as f:
+            bars_c = json.load(f)
+        import credit
         import habits
         import habituation
         import replay
@@ -83,6 +85,8 @@ def main(argv):
                 result["metrics"]["d"] = replay.metric(lv, tmp, bars)
             if "e" in only:
                 result["metrics"]["e"] = habits.metric(stances, bars)
+            if "c" in only:
+                result["metrics"]["c"] = credit.metric(bars_c, tmp)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
         for m in only:

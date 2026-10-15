@@ -5,7 +5,8 @@
 //! with a sparkline of the last 50 events, the inputs (the event's inputs and the history features), the senses when the
 //! persona declares them (§2.11: per sense its normal as a tick over the range, the reading, z and n, and an alert when a
 //! normal moved over drift_cap / 2 within 50 events), the habits in force and the ones that bound, the learned deltas, the
-//! drives when the documents carry them (feature-detected), and the stance line.
+//! decisions awaiting an outcome with their eligibility (§2.8, with a credit block), the drives when the documents carry them
+//! (feature-detected), and the stance line.
 //! `--serve` draws the same in a browser: one page embedded in the binary, fed by server-sent events from a server on
 //! 127.0.0.1. It changes no file (the demo's week goes through a temporary one, removed at once) and sends nothing anywhere.
 use crate::json::{self, Json};
@@ -310,6 +311,18 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
             out.push(format!("{}{t:<idw$}  {}{}", lab(if k == 0 { "LEARNED" } else { "" }), cellsx.join("  "), if k == 0 { s.paint(GREY, &format!("  (cap {}{})", s.g("±", "+/-"), whole(*cap))) } else { String::new() }));
         }
     }
+    // 5b. action-addressed feedback (§2.8), when the document carries it: the open decisions with the eligibility a payment at
+    // the next event would get, then this event's payment and the decisions it closed
+    if let Some(c) = doc.get("credit") {
+        let open = persona::open_decisions(&w.rep.live.p, &w.rep.live.st).unwrap_or_default();
+        let ol = if open.is_empty() { s.paint(GREY, "none") } else { open.iter().map(|(t, e)| format!("{t} {}", s.paint(GREY, &format!("e {e:.2}")))).collect::<Vec<_>>().join("  ") };
+        let mut row = format!("{}{} {ol}", lab("CREDIT"), s.paint(GREY, "open"));
+        if let Some(pd) = c.get("paid").filter(|x| !x.is_null()) { let g = |k: &str| pd.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+            row += &format!(" {dot} {}", s.bold(CYAN, &format!("paid {} e {:.2} sign {}{}", whole(g("turn")), g("e"), whole(g("sign")), if pd.get("absorbed") == Some(&Json::Bool(true)) { " absorbed" } else { "" }))); }
+        let closed: Vec<String> = c.get("closed").and_then(Json::as_arr).map_or(vec![], |a| a.iter().map(|x| format!("{} {}", x.get("turn").and_then(Json::as_f64).map_or(String::new(), whole), x.get("as").and_then(Json::as_str).unwrap_or(""))).collect());
+        if !closed.is_empty() { row += &format!(" {dot} {} {}", s.paint(GREY, "closed"), closed.join(", ")); }
+        out.push(row);
+    }
     // 6. the drives, when the document carries them (feature-detected: documents without them draw no row)
     out.extend(drives(doc, m, s, idw, &lab));
     // 7. the line, and why
@@ -406,6 +419,10 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
         let moved = &w.rep.normals().moved;
         kv.push(("normals", Json::Arr(persona::normals(&w.rep.live.p, &w.rep.live.st).iter().enumerate().map(|(k, (id, mean, n, _))| json::obj(vec![("id", json::str(id)),
             ("mean", json::num(*mean)), ("n", json::num(*n as f64)), ("moved", json::num(moved.get(k).copied().unwrap_or(0.0)))])).collect())));
+    }
+    // the open decisions now (§2.8), only with a credit block: each turn and the eligibility a payment at the next event would get
+    if let Some(o) = w.and_then(|w| persona::open_decisions(&w.rep.live.p, &w.rep.live.st)) {
+        kv.push(("open", Json::Arr(o.iter().map(|(t, e)| json::obj(vec![("turn", json::num(*t as f64)), ("e", json::num(*e))])).collect())));
     }
     json::obj(kv)
 }

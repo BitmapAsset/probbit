@@ -10,9 +10,10 @@ PROBBIT_BIN=target/release/probbit python3 bench/individuality/run.py --only a,b
 PROBBIT_BIN=target/release/probbit python3 bench/individuality/p0.py check             # P0: byte-identical documents
 ```
 
-**This release** ships senses (RFC 0001 Design A) and metrics a, b, d and e. Metric c (credit) needs action-addressed feedback
-(Design B) and metric f a lineage budget (Design C); `run.py` skips both with a note. Without the credit block, rewards pay the
-stance just before them, so the streams below carry no `await` or `for` keys.
+**This release** ships senses (RFC 0001 Design A), action-addressed feedback (Design B) and metrics a, b, c, d and e. Metric f
+needs a lineage budget (Design C); `run.py` skips it with a note. Metric a's frozen streams carry no `await` or `for` keys (the
+fixture was frozen before Design B, so its rewards pay the stance just before them); `twins_addressed.py` re-measures it with
+the credit block and addressed feedback added at run time.
 
 **Freezing.** The fixtures, generators and bars are committed with their sha256 in `fixtures/MANIFEST` before any run.
 `run.py` checks every listed file before it measures anything (exit 2 when one differs). Any later change is logged at the end
@@ -32,7 +33,12 @@ bench/individuality/
     lives.py             the seeded generator of the streams; its outputs are committed in lives/ and checked against MANIFEST
     bars.json            the gated bars
     gen.py, p0/          the P0 corpus: personas, scripts, the recorded outputs and strands
-  twins.py  habituation.py  replay.py  habits.py
+    dispatch.yaml        metric c: the shipped dispatch policy with a credit block; dispatch-noblock.yaml without it
+    credit_draws.py      metric c's seeded draws per decision, committed in credit/ and checked against MANIFEST
+    bars-c.json          metric c's gated bars
+    sensed-plain.yaml    metric a's reported control: the senses as plain 0.8 number inputs
+  twins.py  habituation.py  credit.py  replay.py  habits.py
+  twins_addressed.py   metric a re-measured with Design B (and the control), on the frozen fixture and bars
 ```
 
 ## Shared fixtures
@@ -98,13 +104,31 @@ Measures whether the same reading lands differently after a learned normal, and 
   b4 ≥ 95 %; b5 ≥ 95 %.
 - **Script.** `habituation.py`.
 
-## Metric c: credit accuracy (with RFC Design B; skipped in this release)
+## Metric c: credit accuracy (with RFC Design B)
 
 Measures whether a late, reordered or cancelled outcome credits the decision it was for: an act-or-ask policy, 10 individuals
 × 300 events, outcomes delivered on time and up to 6 events late (10 % cancelled, 5 % sent twice, 2 % paying a turn never
 opened), against an independent Python learner. Bars: c1 ≥ 99 % of the applied step equal to the oracle's, c2 = 100 % of
 events with the oracle's Δ, c3 ≥ 99 % of open outcomes accepted, c4 = 100 % of duplicates, late payments and unknown turns
 refused, each refused run byte-identical to the run without the refused events.
+
+- **Fixture.** `fixtures/dispatch.yaml` is the shipped dispatch policy (`examples/persona/dispatch-policy.yaml`) with a credit
+  block (`max_open` 8, `half_life_events` 32); `fixtures/dispatch-noblock.yaml` is the same without it, for variants (iii)
+  and (iv). `fixtures/credit_draws.py` draws, per individual from `random.Random(1000 + seed)`, each decision's blast radius
+  (0.05 to 0.65: no habit binds), its outcome draw, its delay, and whether it is cancelled, sent twice or joined by a payment
+  of a turn never opened; the draws are committed as `fixtures/credit/draws-<seed>.jsonl`.
+- **Host.** `credit.py` drives one `probbit live --checkpoint-every 1` per run event by event: it reads each stance's action,
+  decides the outcome (good when the draw is below 0.8 after `act`, 0.4 after `ask`) and queues it. One message rides on
+  an event; a second one due on the same event moves to the next (the older decision goes ahead). A second copy of an outcome
+  is due one event after the original; for a cancelled decision the second copy is an outcome sent after the cancel. A payment
+  of a turn never opened names turn k + 1000. A refused event is followed by the same decision without its message, so
+  each run makes 300 decisions. Five runs per individual: stream 1, and on stream 2 (i) addressed, (ii) unaddressed, (iii)
+  0.8 semantics (cancels not sent), (iv) the 0.8 workaround.
+- **Statistics.** The oracle replays RFC section B.2 from the stance documents and the events, over all five runs: c1 weighs
+  each accepted payment by the oracle's applied step (and requires the engine's `paid` turn and `e` to match), c2 compares Δ
+  after every accepted event, c3 counts the outcomes of runs stream 1 and (i) whose decision was open on arrival, c4 the
+  duplicates, outcomes after a cancel and unknown turns of (i) and the ambiguous unaddressed feedback of (ii), and every run
+  is re-run without its refused events.
 
 ## Metric d: replay
 
@@ -159,6 +183,17 @@ One run on an Apple M4 (development build, 10.0 s): a1 0.145 (interval 0.096–0
 bars; b1 0.304149 with 0 of 4,522 values differing, b2 3.422977, b3 100 %, b4 100 % of 232 decisions, b5 100 % of 116 probes,
 d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 stances with 72 bound pass. See BENCHMARKS.md §10.
 
+With action-addressed feedback (development build): c1, c2, c3 and c4 100 % (8,393 payments, 15,000 events, 3,802 open
+outcomes, 2,793 refusable, 50 of 50 runs byte-identical without their refused events); metric a re-measured with Design B
+(`twins_addressed.py`): a1 0.1725 (interval 0.1175–0.235), a2 0.1223 against 0.1366, both still below their bars; the
+plain-inputs control 0.155 and 0.0295. See BENCHMARKS.md §11.
+
+Metric a fails its bars on this release: a1 0.1725 (interval 0.1175–0.235) against ≥ 0.30, a2 0.1223 against 0.1366.
+The bars and the fixtures stay frozen and unchanged. Why they fail: the frozen fixture's readings and its feedback push the
+same probes in opposite directions, so the two mechanisms cancel; and at the fixture's gene spread, two individuals differ in
+odds more than one individual's two lives do. A pre-registered revision of the fixture is planned for 0.9.1; nothing will be
+relabelled.
+
 ## Changes after freezing
 
 - `p0.py` (listed in MANIFEST since the P0 record): `check` accepts the one stderr line `live` writes when a script sends a
@@ -166,3 +201,25 @@ d 0 differing bytes over 240 strands, e 0 violations and 0 breaks over 9,442 sta
   outputs apart (`stderr_senses_warning_only`). The recorded outputs, scripts and strands are unchanged. Reason: the line is
   part of the senses release (an undeclared key is named once); it is not a document, and every document stays
   byte-identical. MANIFEST's p0.py line was updated with the change.
+- `p0.py` and `fixtures/p0/EXPECTED`: the corpus now passes personas and rules by their paths relative to the repository
+  root, where every command runs. Reason: a fuzz document that finds a counterexample names the persona path as given in
+  its `explain` and `replay` strings, so `fuzz/adaptive-fixture` (43,726 bytes recorded from one clone) differed from a
+  clone at another path while the engine's bytes were the same. EXPECTED was re-recorded with the same released 0.8.2
+  binary (sha256 in MANIFEST) using relative paths: one line changed (`fuzz/adaptive-fixture`, now 43,646 bytes); every
+  other output, the scripts and the strands are unchanged. MANIFEST's EXPECTED and p0.py lines were updated with the
+  change.
+- `p0.py` (wave 2): `check` also accepts the one stderr line `live` writes when a script sends `await`, `for` or
+  `cancel` to a persona without a credit block (RFC 0001 B.4: undeclared inputs, listed in `ignored`, and `live` says
+  so), on the same terms as the senses line: only where the script carries those keys, once, at its earliest such event,
+  each mandated line present exactly once. The outputs equal but for these lines are reported apart as
+  `stderr_warnings_only` (the key was `stderr_senses_warning_only`). EXPECTED, the scripts and the strands are
+  unchanged; MANIFEST's p0.py line was updated.
+- Metric c (wave 2): its fixtures, the draws generator, the draws and its bars (`fixtures/bars-c.json`, the bars of the
+  metric c section above) were added to MANIFEST in their own section before they were ever run; `run.py` runs metric c.
+  `fixtures/sensed-plain.yaml` (metric a's reported control: the senses replaced by plain 0.8 number inputs) was frozen in
+  the same section. No earlier fixture, stream or bar changed.
+- `credit.py`, changed after it had run once (no fixture, bar or gated computation changed; every gated value was the same in each
+  run): the 50 runs go side by side (the host waits on each stance, so a run is latency-bound); a run that refused no
+  event is not re-run (without refused events it is the same run, and metric d replays every strand); the reported
+  eviction and expiry shares are given per run, with the age of the addressed payments. The numbers of the run before the change stay in
+  the history: c1, c2, c3 and c4 1.0, 50/50 pairs identical.

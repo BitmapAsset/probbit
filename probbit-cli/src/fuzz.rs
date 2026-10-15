@@ -29,22 +29,38 @@ pub fn grid(p: &Persona, props: &[Prop], given: &[f64]) -> Vec<f64> {
 /// One individual's shortest counterexample to one property, shrunk: the script, the breaking turn's stance document, what broke
 pub struct Found { pub script: Vec<Event>, pub doc: Json, pub broken: Vec<Broken> }
 
-fn step(p: &Persona, st: &State, e: &Event, eng: persona::Engine, turns: &AtomicUsize) -> (Json, State) {
+/// One turn of the search: (the stance, the new state, the event as it ran). A credit block's payments (§2.8) are resolved
+/// against the state before the turn runs; the credit step may refuse the event (B-R1 to B-R6, at inputs.for / inputs.cancel): None, and it
+/// changes nothing
+fn step(p: &Persona, st: &State, e: &Event, eng: persona::Engine, turns: &AtomicUsize) -> Option<(Json, State, Event)> {
     turns.fetch_add(1, Ordering::Relaxed);
-    persona::turn_any_source(p, st, &persona::event_json(e), false, eng, false).expect("the fuzzer's inputs are valid")
+    let ev = persona::resolve_payments(p, st, e);
+    match persona::turn_any_source(p, st, &persona::event_json(&ev), false, eng, false) {
+        Ok((doc, ns)) => Some((doc, ns, ev)),
+        Err(x) if p.has_credit() && ["inputs.for", "inputs.cancel"].iter().any(|k| x.path.starts_with(k)) => None,
+        Err(x) => panic!("the fuzzer's inputs are valid: {}: {}", x.path, x.msg) }
 }
 /// The earliest turn of `script` (run from `st0`) whose stance breaks the property
 fn breaking_turn(p: &Persona, pr: &Prop, st0: &State, script: &[Event], eng: persona::Engine, turns: &AtomicUsize) -> Option<(usize, Json, Vec<Broken>)> {
     let mut st = st0.clone();
-    for (k, e) in script.iter().enumerate() { let (doc, ns) = step(p, &st, e, eng, turns);
+    for (k, e) in script.iter().enumerate() { let Some((doc, ns, _)) = step(p, &st, e, eng, turns) else { continue };
         if let Some(b) = persona::breaks(p, pr, &st, &doc) { return Some((k, doc, b)); } st = ns; }
     None
+}
+/// A script as it ran: payments resolved, refused events left out (they change nothing), so it replays as is. Without a credit
+/// block the script is already concrete; the re-run is not a searched turn either way.
+fn concrete(p: &Persona, st0: &State, script: &[Event], eng: persona::Engine) -> Vec<Event> {
+    if !p.has_credit() { return script.to_vec(); }
+    let (mut st, mut out, rerun) = (st0.clone(), vec![], AtomicUsize::new(0));
+    for e in script { if let Some((_, ns, ev)) = step(p, &st, e, eng, &rerun) { out.push(ev); st = ns; } }
+    out
 }
 /// A random event: each input takes one of its non-default values with a fixed chance (flag 1/4, level 1/2, number 2/5, idle
 /// hours 3/10, a goal signal 3/20), else stays at its default (left out of the event)
 fn random_event(r: &mut Philox4x32, alpha: &[(String, &'static str, Vec<Json>)]) -> Event {
     let mut e = vec![];
-    for (id, kind, vals) in alpha { let chance = match *kind { "flag" => 0.25, "level" => 0.5, "number" => 0.4, "goal" => 0.15, "sense" => 0.4, _ => 0.3 };
+    for (id, kind, vals) in alpha { let chance = match *kind { "flag" => 0.25, "level" => 0.5, "number" => 0.4, "goal" => 0.15, "sense" => 0.4,
+            "pay" => match id.as_str() { "await" => 0.5, "for" => 0.3, _ => 0.1 }, _ => 0.3 };
         if r.f64() < chance { e.push((id.clone(), vals[r.below(vals.len())].clone())); } }
     e
 }
@@ -55,6 +71,10 @@ fn moves(p: &Persona, pr: &Prop, s: &Search) -> Vec<Event> {
     let mut out: Vec<Event> = vec![vec![]]; out.extend(atoms.iter().cloned());
     for b in persona::forcing(p, pr, &s.grid) { if !out.contains(&b) { out.push(b.clone()); }
         for a in &atoms { if b.iter().any(|(k, _)| *k == a[0].0) { continue; } let mut e = b.clone(); e.extend(a.iter().cloned()); if !out.contains(&e) { out.push(e); } } }
+    // a credit block (§2.8): each payment kind alone and with each learning flag (so `for` has feedback to carry)
+    let flags: Vec<Event> = atoms.iter().filter(|a| persona::learning_flag(p, &a[0].0)).cloned().collect();
+    for (id, vals) in persona::payment_alphabet(p) { for v in vals { let e = vec![(id.clone(), v)];
+        for f in &flags { let mut fe = f.clone(); fe.extend(e.iter().cloned()); out.push(fe); } out.push(e); } }
     out
 }
 /// Breadth by depth, `s.beam` states kept per depth (distinct states, the most pressure first): the earliest script whose last
@@ -64,7 +84,7 @@ fn beam(p: &Persona, pr: &Prop, st0: &State, limit: usize, s: &Search, eng: pers
     for _ in 0..limit {
         let mut next: Vec<(f64, Vec<Event>, State)> = vec![];
         for (script, st) in &kept { for e in &mv {
-            let (doc, ns) = step(p, st, e, eng, turns); let mut sc = script.clone(); sc.push(e.clone());
+            let Some((doc, ns, _)) = step(p, st, e, eng, turns) else { continue }; let mut sc = script.clone(); sc.push(e.clone());
             if persona::breaks(p, pr, st, &doc).is_some() { return Some(sc); }
             next.push((persona::pressure(p, pr, st, &doc), sc, ns)); } }
         next.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // stable: ties keep the move order
@@ -87,19 +107,20 @@ fn shrink(p: &Persona, pr: &Prop, st0: &State, script: Vec<Event>, eng: persona:
         if !changed { break; }
     }
     let (k, doc, broken) = breaking_turn(p, pr, st0, &cur, eng, turns).expect("a shrunk counterexample still breaks the property");
-    cur.truncate(k + 1); Found { script: cur, doc, broken }
+    cur.truncate(k + 1); Found { script: concrete(p, st0, &cur, eng), doc, broken }
 }
 /// One individual: random scripts (shared by the properties), then per property the beam up to one event shorter than the
 /// shortest found, then shrinking
 fn individual(p: &Persona, props: &[Prop], seed: u64, s: &Search, eng: persona::Engine, turns: &AtomicUsize) -> Vec<Option<Found>> {
-    let st0 = persona::init(p, Some(seed), true, eng); let alpha = persona::alphabet(p, &s.grid, &s.hours);
+    let st0 = persona::init(p, Some(seed), true, eng);
+    let mut alpha = persona::alphabet(p, &s.grid, &s.hours); alpha.extend(persona::payment_alphabet(p).into_iter().map(|(id, v)| (id, "pay", v)));
     let mut best: Vec<Option<Vec<Event>>> = vec![None; props.len()];
     let mut r = Philox4x32::new(s.fuzz_seed, seed);
     let search = |script: &[Event], best: &mut Vec<Option<Vec<Event>>>| {
         let mut st = st0.clone();
         for (k, e) in script.iter().enumerate() {
             if best.iter().all(|b| b.as_ref().is_some_and(|b| b.len() <= k + 1)) { break; }
-            let (doc, ns) = step(p, &st, e, eng, turns);
+            let Some((doc, ns, _)) = step(p, &st, e, eng, turns) else { continue };
             for (i, pr) in props.iter().enumerate() { if best[i].as_ref().map_or(true, |b| b.len() > k + 1) && persona::breaks(p, pr, &st, &doc).is_some() { best[i] = Some(script[..=k].to_vec()); } }
             st = ns; } };
     for _ in 0..s.scripts {

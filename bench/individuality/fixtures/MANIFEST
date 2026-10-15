@@ -6,7 +6,7 @@
 binary probbit-0.8.2 2c3455ef93092fd5036be766b19e96954cc4d164c15773f1411759fc26b93669
 # Re-record: PROBBIT_BIN=<0.8.2 binary> python3 ../p0.py record (gives these bytes); check: python3 ../p0.py check
 82bb5b3d140739addac6dcde8e3d31e70d15e46bdb7ece9bb48e2a712286f744 7029 gen.py
-c68f9d2dff98e57cf43ebaa91d6737b497e6c04d67d1efc04e5503e529f08d16 65059 p0/EXPECTED
+ac483b0746c79c4b1cebca2f357b8b85a97c37c5de961d700bff6a4c8033ddcd 65059 p0/EXPECTED
 82e6748f463f6ab7f93a1959176fcf2c7a1cc709d271dd20cae14e0eb731f783 1300 p0/personas/scout.json
 d7b6541670ac26f143c757f5bcf4ef3151db3452fb80d7a2d604497394f13875 102 p0/props/retry.json
 c4b513d05a1e0273e8e865104ac8185fcc0648f60319129fc9f49f6a3751f5ee 122 p0/props/tutor.json
@@ -53,7 +53,7 @@ a88d3b20b41e9843f2b9ac9b117d5b462ec6b1095c762da531cb98481ff48432 43389 p0/strand
 615978432a80e6b8be7fdf6e2382438516dc67acae56c562221c89654cae479e 6815 p0/strands/tutor-s0-0.appended
 cf9073507dad98bedc4f09ca2e49f34862919240c64c548b7a1dcf58fda4804b 1160 p0/strands/tutor-s0-0.state.json
 4db5f3d83a0e6df0ea632c35957cdb0970665422af9054fa50e5468e13a888ab 55008 p0/strands/tutor-s0-0.strand
-81b67a8364ac4aa3a884ca1ff8222ac4904e3493cc66cb6d8c8246e8760dcf14 12370 ../p0.py
+344a54d4cb6bc9318caf82af6eeb776d774ef7ff1a4548bf9fb67a6061bf00e4 13470 ../p0.py
 #
 # Metrics a, b, d and e: frozen 2026-10-14 before their first run (personas, generator, streams, bars).
 # Re-generate the streams: python3 lives.py (gives these bytes).
@@ -68,3 +68,21 @@ a61143fbc343b16ab4fc3a588417c726d3f02747b10f4a0fc3badd141eae1a63 7823 lives/room
 4776a2f10511d3366070c3de96b6544ef188404d08855523dcde178684276b41 2787 lives/surprise-quiet.jsonl
 b27c8ecd32390c74442b6a6269b78df150dbef8f20e37101943f33e189ef1894 2775 lives/surprise-rate.jsonl
 63e68a2e9d3ae7b084fc0d627a3a39387550639071f063f5b96e9927eeb4c478 910 lives/tail.jsonl
+#
+# Metric c, and metric a's re-measure control: frozen 2026-10-14 before their first run (personas, the draws generator, the
+# draws, the bars). Re-generate the draws: python3 credit_draws.py (gives these bytes).
+4ff28296970b96f4692bfee0ad5d47d156129894394a95c1bdf6080bee75d4cd 2188 dispatch.yaml
+8ed7ba7c53ad5fcce38d59e89e39c2e174b84f88741acf62867267d43f53a4c1 2047 dispatch-noblock.yaml
+a870ced67bb749e7f9a9ab89f200d050c46fb138fe767bb06df2c62a395e217a 1710 credit_draws.py
+54dd7acc30e5a5f7c7b8bc097dd84b7b35940269642465e86a7d8dfcc89ab22b 33847 credit/draws-0.jsonl
+73367908c1263e159a3bf69479859717f9ab29cbbaa33f0de016b4b954438fdf 33831 credit/draws-1.jsonl
+6dd03598ed4e78477143b2efcb0d1ca935b0042eba838594c4ef001b926aa7c1 33828 credit/draws-2.jsonl
+26e2f74b5dfe91a83b9ca5cdc0f2f466f9cfa604dedb4ee3a0e60047d8292047 33808 credit/draws-3.jsonl
+bdf289dd7ac017bca7ca24e9a61aa03b9ec18aefc9c17ff31af2c0c2cdb827c6 33813 credit/draws-4.jsonl
+9e5163de163f8288d9e960c422873ebe337870acd300b90b1059ed35ca98a36a 33845 credit/draws-5.jsonl
+6612ff8b06fee52bf4e1a9498a5d9a5fdac4ff8efb02ec578289d68b4547b5d3 33844 credit/draws-6.jsonl
+34991b43085bfc89285f55b3e92449be242bd6bf9de0ee3716286a169186af3e 33806 credit/draws-7.jsonl
+4b010ef3db7076da72d610694b3ab43aff78ce3b52b1b8757896981d8869064a 33838 credit/draws-8.jsonl
+69de4cbc7f383cee6cb03db47c735f8af2ab567a76562622e284b013cbd200ad 33799 credit/draws-9.jsonl
+8dba56c14fcdde61398f52eedfb692b9bd1a07fc4ef0170fa44c6569172f0dab 138 bars-c.json
+3033259caa5e227a14180124d88fe602715613a16316f3ab82a4c25bfaae1d0e 3992 sensed-plain.yaml
