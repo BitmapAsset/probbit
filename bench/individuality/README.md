@@ -188,6 +188,12 @@ outcomes, 2,793 refusable, 50 of 50 runs byte-identical without their refused ev
 (`twins_addressed.py`): a1 0.1725 (interval 0.1175–0.235), a2 0.1223 against 0.1366, both still below their bars; the
 plain-inputs control 0.155 and 0.0295. See BENCHMARKS.md §11.
 
+Metric a fails its bars on this release: a1 0.1725 (interval 0.1175–0.235) against ≥ 0.30, a2 0.1223 against 0.1366.
+The bars and the fixtures stay frozen and unchanged. Why they fail: the frozen fixture's readings and its feedback push the
+same probes in opposite directions, so the two mechanisms cancel; and at the fixture's gene spread, two individuals differ in
+odds more than one individual's two lives do. A pre-registered revision of the fixture is planned for 0.9.1; nothing will be
+relabelled.
+
 ## Changes after freezing
 
 - `p0.py` (listed in MANIFEST since the P0 record): `check` accepts the one stderr line `live` writes when a script sends a
