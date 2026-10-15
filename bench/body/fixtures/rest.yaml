@@ -1,0 +1,45 @@
+# bench/body fixture (RFC 0002 part 2, rest), bars r0-r5: the gate fixture's trait and learner without `surprise`, and rest
+# (downscale 0.5, prune 0.05, threshold 0.5, gap_hours 4, rise 0.055 and fall 0.238 per hour: the human rates, an example,
+# not a default). The habit `locked` binds on the reversal stream's lock turns, which carry no feedback (rule 2). The no-rest
+# twin is variants/rest-norest.yaml. Frozen with its sha256 in MANIFEST before any engine measurement.
+probbit_persona: 1
+identity:
+  name: Body rest
+  version: 1.0.0
+  seed: 0
+  summary: one learned trait scaled down in proportion at rest lines
+traits:
+  - id: approach
+    levels: [low, mid, high]
+inputs:
+  - id: praise
+    kind: flag
+    say: the outcome was confirmed good
+  - id: criticism
+    kind: flag
+    say: the outcome was judged bad
+  - id: lock
+    kind: flag
+    say: the host locks the low approach
+learning:
+  from: [praise, criticism]
+  traits: [approach]
+  rate: 0.5
+  step_cap: 0.2
+  total_cap: 1
+  credit:
+    max_open: 8
+    half_life_events: 32
+reward_from: [human, env]
+habits:
+  - id: locked
+    when: {lock: true}
+    then: {approach: [low]}
+    say: locked to the low approach
+rest:
+  rise_per_hour: 0.055
+  fall_per_hour: 0.238
+  gap_hours: 4
+  threshold: 0.5
+  downscale: 0.5
+  prune: 0.05

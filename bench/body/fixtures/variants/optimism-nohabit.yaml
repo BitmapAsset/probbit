@@ -1,0 +1,22 @@
+# optimism.yaml without the habit busy_other (the null of o4).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body optimism
+  version: 1.0.0
+  seed: 0
+  summary: per-individual rates for better- and worse-than-expected wins
+traits:
+  - id: tone
+    levels: [plain, warm]
+inputs:
+  - id: busy
+    kind: flag
+    say: the principal is busy
+drives:
+  goals:
+    - id: task
+    - id: other
+  expectation: {rate: 0.2, half_life_hours: 48}
+dispositions:
+  optimism_spread: 0.3

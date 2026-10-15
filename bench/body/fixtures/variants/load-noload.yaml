@@ -1,0 +1,40 @@
+# load.yaml without the load block (the null of l1; P0 copy).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body load
+  version: 1.0.0
+  seed: 0
+  summary: repeated aversive events raise a slow load
+traits:
+  - id: caution
+    levels: [measured, careful]
+moods:
+  - id: strain
+    levels: [calm, strained]
+inputs:
+  - id: praise
+    kind: flag
+    say: the outcome was confirmed good
+  - id: criticism
+    kind: flag
+    say: the outcome was judged bad
+  - id: strain_cue
+    kind: flag
+    say: a straining situation continues
+    effects: {strain: 1.5}
+senses:
+  - id: fail
+    kind: flag
+    unit: event
+    src: [env]
+    prior: {mean: 0.05, var: 0.05}
+    drift_cap: 0.25
+    say: tool failures
+learning:
+  from: [praise, criticism]
+  traits: [caution]
+  rate: 0.3
+  step_cap: 0.1
+  total_cap: 0.4
+reward_from: [human, env]

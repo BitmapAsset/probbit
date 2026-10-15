@@ -1,0 +1,38 @@
+# rest.yaml without the habit locked (the null of r4).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body rest
+  version: 1.0.0
+  seed: 0
+  summary: one learned trait scaled down in proportion at rest lines
+traits:
+  - id: approach
+    levels: [low, mid, high]
+inputs:
+  - id: praise
+    kind: flag
+    say: the outcome was confirmed good
+  - id: criticism
+    kind: flag
+    say: the outcome was judged bad
+  - id: lock
+    kind: flag
+    say: the host locks the low approach
+learning:
+  from: [praise, criticism]
+  traits: [approach]
+  rate: 0.5
+  step_cap: 0.2
+  total_cap: 1
+  credit:
+    max_open: 8
+    half_life_events: 32
+reward_from: [human, env]
+rest:
+  rise_per_hour: 0.055
+  fall_per_hour: 0.238
+  gap_hours: 4
+  threshold: 0.5
+  downscale: 0.5
+  prune: 0.05

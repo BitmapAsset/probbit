@@ -1,0 +1,35 @@
+# bench/body fixture (RFC 0002 Design B), bars s1-s5: one 3-level trait with a uniform prior, learning rate 0.5, step_cap
+# 0.2, total_cap 1, a credit block, and `surprise` at its defaults. The fixed-rate twin is variants/gate-nosurprise.yaml.
+# Frozen with its sha256 in MANIFEST before any engine measurement.
+probbit_persona: 1
+identity:
+  name: Body gate
+  version: 1.0.0
+  seed: 0
+  summary: one learned trait with a volatility-gated step size
+traits:
+  - id: approach
+    levels: [low, mid, high]
+inputs:
+  - id: praise
+    kind: flag
+    say: the outcome was confirmed good
+  - id: criticism
+    kind: flag
+    say: the outcome was judged bad
+learning:
+  from: [praise, criticism]
+  traits: [approach]
+  rate: 0.5
+  step_cap: 0.2
+  total_cap: 1
+  credit:
+    max_open: 8
+    half_life_events: 32
+reward_from: [human, env]
+surprise:
+  volatility_rate: 0.3
+  v0: 0.45
+  r_ref: 4
+  r_max: 20
+  g_max: 3

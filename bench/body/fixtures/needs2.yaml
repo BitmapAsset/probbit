@@ -1,0 +1,71 @@
+# bench/body fixture (RFC 0002 Design A), bars n3, n5, n8, n9, n10 and n11: two needs. `context` grows per reading of the
+# number sense `tokens` (amount 0.6, forecast_per_hour 0.06) and is satisfied by `env`; `contact` grows 0.04 an hour
+# (amount 0.8) and is satisfied by `human`. Goals: work (interest 1.0), compact and report (interest 0.6 each,
+# `expect_by_hours: 1`); want 2, pursue.cap 3, success {rate 0.2, init 1}. Rule 2: `pursue.glow: 0` and no wanting signals
+# in any stream, so afterglow never opposes the need term. The habit `quiet_hours` keeps reports out of quiet hours.
+# The sense has no effects: it only feeds the need. Frozen with its sha256 in MANIFEST before any engine measurement.
+probbit_persona: 1
+identity:
+  name: Body needs2
+  version: 1.0.0
+  seed: 0
+  summary: two needs, context and contact, bound to compact and report
+traits:
+  - id: tone
+    levels: [plain, warm]
+inputs:
+  - id: quiet
+    kind: flag
+    say: quiet hours
+senses:
+  - id: tokens
+    kind: number
+    unit: token_share
+    range: [0, 1]
+    src: [env]
+    prior: {mean: 0.06, var: 0.01}
+    drift_cap: 0.5
+    say: context used this hour
+drives:
+  goals:
+    - id: work
+      interest: 1.0
+    - id: compact
+      interest: 0.6
+      expect_by_hours: 1
+    - id: report
+      interest: 0.6
+      expect_by_hours: 1
+  pursue: {glow: 0}
+needs:
+  drive: {"n": 4, "m": 3}       # quoted: the YAML reader refuses a bare n (YAML 1.1 reads it as false)
+  pursue: {want: 2, cap: 3}
+  success: {rate: 0.2, init: 1}
+  r_cap: 1
+  items:
+    - id: context
+      say: context budget
+      unit: token_share
+      cap: 1
+      weight: 1
+      per_hour: 0
+      per_reading: {sense: tokens, rate: 1}
+      satisfy_from: [env]
+      amount: 0.6
+      bind: compact
+      horizon_hours: 0
+      forecast_per_hour: 0.06
+    - id: contact
+      unit: share
+      cap: 1
+      weight: 1
+      per_hour: 0.04
+      satisfy_from: [human]
+      amount: 0.8
+      bind: report
+      horizon_hours: 0
+habits:
+  - id: quiet_hours
+    when: {quiet: true}
+    then: {pursue: {not: [report]}}
+    say: no reports in quiet hours
