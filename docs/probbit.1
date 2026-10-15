@@ -9,7 +9,7 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         [\-\-events FILE [\-\-watch]] [\-\-clock real|fixed]
         [\-\-checkpoint\-every K]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N] [\-\-strand FILE] [\-\-plain]
-\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
         [\-\-at TIME]
 \fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
@@ -257,7 +257,7 @@ a resident individual: JSONL events in, one stance per event out
         [\-\-events FILE [\-\-watch]] [\-\-clock real|fixed]
         [\-\-checkpoint\-every K]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N] [\-\-strand FILE] [\-\-plain]
-\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
         [\-\-at TIME]
 .fi
@@ -300,12 +300,15 @@ with \-\-strand: a checkpoint line (the whole state) after every K\-th event (de
 Subcommands:
 .RS 4
 .TP
-\fBverify\fR STRAND [\-\-from\-checkpoint]
-replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint
+\fBverify\fR STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
+replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint; with \-\-actions, also the earliest turn whose host action differs from the level its stance released
 .RS 4
 .TP
 \fB\-\-from\-checkpoint\fR
 start at the last checkpoint instead of the header
+.TP
+\fB\-\-actions\fR \fIFILE\fR
+the host's action log, one {"turn": T, "action": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs
 .RE
 .TP
 \fBcontrol\fR STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT [\-\-at TIME]
@@ -325,7 +328,7 @@ when (default: now, UTC)
 .PP
 \fIthe safety kit\fR: (docs/persona.md \[u00A7]5.7) one writer per strand: `\-\-strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (\[u00A7]2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event.
 .PP
-\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what), 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written).
+\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written).
 .PP
 Examples:
 .RS 4

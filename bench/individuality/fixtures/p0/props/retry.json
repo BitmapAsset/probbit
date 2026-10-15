@@ -1,0 +1,1 @@
+{"props": [{"id": "ask_after_two_errors", "when": {"error_streak": 2}, "then": {"action": ["ask"]}}]}

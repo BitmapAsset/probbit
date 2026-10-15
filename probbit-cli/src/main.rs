@@ -247,7 +247,7 @@ const F_P_SEEDS: Flag = Flag { name: "--seeds", arg: "LIST", help: "the individu
 const F_P_THREADS: Flag = Flag { name: "--threads", arg: "N", help: "search threads, 1 to 1024 (default: the logical CPUs)" };
 const F_P_JSON: Flag = Flag { name: "--json", arg: "", help: "the JSON document instead of the readable report" };
 const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json) or bad flag (stderr), 3 lint (with rules): a rule the bound leaves unknown and the search cannot break (\"unproven\", not broken).";
-const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what), 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written).";
+const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with --actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written).";
 pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "persona", aliases: &[], group: "persona", summary: "the individuality layer: persona + state + inputs -> one stance",
         usage: &["persona SUB PERSONA [flags]   (SUB: init turn replay explain diff lint fuzz prove check compile describe)"],
@@ -297,7 +297,7 @@ pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "live", aliases: &[], group: "live", summary: "a resident individual: JSONL events in, one stance per event out",
         usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]",
             "live PERSONA --demo week [--seed N] [--strand FILE] [--plain]",
-            "live verify STRAND [--from-checkpoint]",
+            "live verify STRAND [--from-checkpoint] [--actions FILE]",
             "live control STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]"],
         about: "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n--strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.",
         before: &[],
@@ -313,8 +313,9 @@ pub(crate) static COMMANDS: &[Command] = &[
             Flag { name: "--checkpoint-every", arg: "K", help: "with --strand: a checkpoint line (the whole state) after every K-th event (default 1000; 0: none); `verify --from-checkpoint` and `monitor` start at the last one" },
         ]],
         subs: &[
-            Sub { name: "verify", args: "STRAND [--from-checkpoint]", help: "replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint",
-                flags: &[Flag { name: "--from-checkpoint", arg: "", help: "start at the last checkpoint instead of the header" }] },
+            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE]", help: "replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
+                flags: &[Flag { name: "--from-checkpoint", arg: "", help: "start at the last checkpoint instead of the header" },
+                    Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" }] },
             Sub { name: "control", args: "STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]",
                 help: "pause, resume or retire an individual; appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status",
                 flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required)" },
@@ -771,7 +772,7 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
     if res.iter().any(|per| per.iter().any(Option::is_some)) { std::process::exit(1) }
 }
 /// `probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]`;
-/// `probbit live PERSONA --demo week`; `probbit live verify STRAND [--from-checkpoint]`; `probbit live control STRAND pause|resume|retire --by WHO --reason TEXT`
+/// `probbit live PERSONA --demo week`; `probbit live verify STRAND [--from-checkpoint] [--actions FILE]`; `probbit live control STRAND pause|resume|retire --by WHO --reason TEXT`
 fn live_cmd(args: &[String]) {
     let engine = persona_engine(); let eng: persona::Engine = &engine;
     let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
@@ -782,6 +783,19 @@ fn live_cmd(args: &[String]) {
         let mut a = vec!["live verify".to_string()]; a.extend(args.iter().skip(3).cloned()); let (v, w) = sub_flags("live", "verify").unwrap(); check_flags(&a, &v, &w);
         let Some(path) = args.get(2).filter(|a| !a.starts_with("--")) else { fail("live verify: the strand file: probbit live verify STRAND") };
         let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("live verify: cannot read {path}: {e}")));
+        // --actions (docs/persona.md §5.7): the host's action log against the released levels, replayed from the header
+        if let Some(af) = opt("--actions") {
+            if args.iter().any(|a| a == "--from-checkpoint") { fail("live verify: --actions replays from the header: drop --from-checkpoint") }
+            let at = std::fs::read_to_string(&af).unwrap_or_else(|e| fail(&format!("live verify: cannot read {af}: {e}")));
+            let acts = live::read_actions(&at).unwrap_or_else(|e| bad_input("live verify: ", e));
+            let turns: Vec<u64> = acts.iter().map(|a| a.turn).collect();
+            match live::verify_keep(&text, eng, &turns) {
+                Ok((mut doc, kept, p)) => { let (checked, d) = live::first_difference(&p, &acts, &kept).unwrap_or_else(|e| bad_input("live verify: ", e)); let differs = d.is_some();
+                    if let Json::Obj(v) = &mut doc { v.push(("actions".into(), obj(vec![("checked", num(checked as f64)), ("differs", d.unwrap_or(Json::Null))]))); }
+                    emit(&persona::canon(&doc)); if differs { std::process::exit(1) } }
+                Err((line, why)) => { emit(&persona::canon(&obj(vec![("ok", Json::Bool(false)), ("line", num(line as f64)), ("diverges", jstr(&why))]))); std::process::exit(1) } }
+            return;
+        }
         let res = if args.iter().any(|a| a == "--from-checkpoint") { live::verify_from_checkpoint(&text, eng) } else { live::verify(&text, eng) };
         match res {
             Ok(doc) => emit(&persona::canon(&doc)),
@@ -831,9 +845,16 @@ fn live_cmd(args: &[String]) {
         if !lock.as_ref().is_some_and(live::Lock::held) { refuse("live: ", json::InErr { code: "locked", path: "strand".into(), msg: format!("the writer lock {f}.lock is no longer this run's (removed or taken over): stopped before writing") }) }
         live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
     if let Some(h) = &header { log(&[h]); }
-    let (mut bad, mut refused) = (0, 0);
+    let (mut bad, mut refused, mut warned, mut warned_credit) = (0, 0, false, false);
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
-        let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| lv.event(&ev, eng));
+        let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| {
+            // readings sent to a persona without a senses block are an undeclared input (listed in `ignored`): say so once
+            if !warned && !lv.p.has_senses() && ev.get("senses").is_some() { warned = true;
+                err_line(&format!("probbit: live: events[{i}]: this persona has no senses block: `senses` is an undeclared input (listed in ignored), no reading is judged")); }
+            // so are `await`, `for` and `cancel` without a credit block (docs/persona.md §2.8): say so once
+            if !warned_credit && !lv.p.has_credit() && ["await", "for", "cancel"].iter().any(|k| ev.get(k).is_some()) { warned_credit = true;
+                err_line(&format!("probbit: live: events[{i}]: this persona has no credit block: `await`, `for` and `cancel` are undeclared inputs (listed in ignored), feedback pays the previous stance")); }
+            lv.event(&ev, eng) });
         match res {
             Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
                 match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
@@ -1111,7 +1132,7 @@ mod table_tests {
         let (v, w) = sub_flags("persona", "fuzz").unwrap(); assert!(v.contains(&"--fixture-src") && w.contains(&"--json") && w.contains(&"--pretty"));
         let (v, w) = flags_of("monitor"); assert!(v.contains(&"--port") && w.contains(&"--demo"), "--demo takes an optional value: parsed as a switch");
         assert!(sub_flags("persona", "lnt").is_none());
-        assert_eq!(sub_flags("live", "verify").unwrap(), (vec![], vec!["--from-checkpoint"]), "live's own flags are not verify's");
+        assert_eq!(sub_flags("live", "verify").unwrap(), (vec!["--actions"], vec!["--from-checkpoint"]), "live's own flags are not verify's");
         for c in COMMANDS { let (v, w) = flags_of(c.name); assert_eq!(v.len() + w.len(), c.flags().count(), "{}", c.name); }
     }
     #[test]

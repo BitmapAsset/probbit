@@ -3,6 +3,36 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.9.0 - unreleased
+
+### Added
+- **Senses** (docs/persona.md §2.11): an optional `senses` block. The host sends measured readings in declared units with
+  a named source; each is judged against a learned normal per sense (mean, variance, count; half-life in events; drift and
+  variance caps anchored to a declared prior) and moves moods and traits by its capped z-score; `why` names the normal and
+  what the learned weights came from. Readings from `self` or through MCP are refused. A persona without the block gives
+  byte-identical documents.
+- `live verify` summarises the normals (`normals`: mean, count and the largest move within 50 events); `monitor` draws a row
+  per sense and an alert when a normal moved over `drift_cap / 2` within 50 events. `examples/persona/sensed.yaml` (with its
+  golden and rules) and `bench/individuality/` (benchmark metrics a, b, d and e; the P0 corpus) are new. Design notes:
+  `docs/rfcs/0001-senses-and-reward.md`.
+- **Action-addressed feedback** (docs/persona.md §2.8): an optional `learning.credit` block. An event can mark its decision
+  as awaiting an outcome (`await`), a reward can name the decision it pays for (`for: <turn>`), and decisions can be
+  cancelled (`cancel`). Credit goes to the paid decision's own odds, scaled by an eligibility that halves per
+  `half_life_events` of delay; at most `max_open` decisions wait; ambiguous, duplicate, cancelled and unknown payments are
+  refused whole. Without `for`, feedback pays the previous stance as before.
+- `for: {turn, stance}` binds the paid stance's digest (a mismatch is refused); every stance with a credit block carries
+  `credit` (the payment, the decisions closed, the ones still open, its own digest). A control line closes the open
+  decisions. `live verify` adds `open` to its summary, and `live verify --actions FILE` compares a host's action log with
+  the released levels; `monitor` draws the open decisions with their eligibility; `fuzz` adds late, reordered, duplicated,
+  cancelled and unknown payments; the MCP turn tools refuse `cancel`. `examples/agent-harness/addressed.json` (with
+  `late.py` and its golden) and benchmark metric c are new.
+
+### Changed
+- `live` says once on stderr when a persona without a senses block receives a `senses` key (still an undeclared input,
+  listed in `ignored`). The monitor's panel of the event's inputs is labelled INPUTS (it was SENSES).
+- `live` says once on stderr when a persona without a credit block receives `await`, `for` or `cancel` (still undeclared
+  inputs, listed in `ignored`; feedback pays the previous stance).
+
 ## 0.8.3 - unreleased
 
 ### Added

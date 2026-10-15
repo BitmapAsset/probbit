@@ -150,7 +150,10 @@ fn call(name: &str, args: Option<&Json>) -> Result<(String, Option<Json>, bool),
 /// `probbit_persona_init` / `probbit_persona_turn`, in process -> (text, structured JSON, isError)
 fn persona_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, bool) {
     let t0 = std::time::Instant::now();
-    let eng = crate::persona_engine(); let r = crate::persona::tool(name, args, &eng, true);
+    let eng = crate::persona_engine();
+    // readings (docs/persona.md §2.11, S7) and cancels (§2.8) never come through the agent's channel
+    let r = if name == "probbit_persona_turn" { crate::persona::mcp_refuses_readings(args, "inputs").and_then(|_| crate::persona::mcp_refuses_cancel(args, "inputs")) } else { Ok(()) }
+        .and_then(|_| crate::persona::tool(name, args, &eng, true));
     let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
     log(&format!("tools/call {name} -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
     (crate::persona::canon(&doc), Some(doc), is_error)
@@ -168,7 +171,9 @@ fn fuzz_tool(args: &[(String, Json)]) -> (String, Option<Json>, bool) {
 /// `probbit_live_event` / `probbit_live_verify`, in process -> (text, structured JSON, isError); a divergence is an answer
 fn live_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, bool) {
     let t0 = std::time::Instant::now();
-    let eng = crate::persona_engine(); let r = crate::live::tool(name, args, &eng);
+    let eng = crate::persona_engine();
+    let r = if name == "probbit_live_event" { crate::persona::mcp_refuses_readings(args, "event").and_then(|_| crate::persona::mcp_refuses_cancel(args, "event")) } else { Ok(()) }
+        .and_then(|_| crate::live::tool(name, args, &eng));
     let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
     log(&format!("tools/call {name} -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
     (crate::persona::canon(&doc), Some(doc), is_error)
@@ -222,7 +227,7 @@ fn tools() -> Json {
         tool("probbit_persona_turn", "This turn's stance from a persona", "probbit persona turn: a persona (inline document or a file path), the individual's state and this turn's inputs (the persona's evidence: sentiment, error, loss, praise, criticism, stakes, time_pressure, claim_done, elapsed_hours, and the persona's own; `goals` for a persona with a drives block) -> {stance, state}. The stance has a level for every trait with exact odds, the mood, the habits in force and the ones that changed the stance (habits are hard rules: 0 violations by construction), status ok | partial | refused | fallback with an escalate reason, a one-line why, and `line`: a short stance line to put into the model's prompt (after any cached prefix). Pass the returned state back on the next turn. The persona never writes the reply; it decides how the reply is written.",
             p(&format!(r#"{{"type": "object", "additionalProperties": false, "required": ["state"], "properties": {{{PERSONA_ARG},
               "state": {{"type": "object", "description": "the state returned by probbit_persona_init or by the previous probbit_persona_turn"}},
-              "inputs": {{"type": "object", "description": "this turn's evidence, keyed by input id; flags true/false, level inputs a level name, numbers 0..max; inputs the persona does not declare are listed in stance.ignored", "properties": {{{GOALS_ARG}}}, "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
+              "inputs": {{"type": "object", "description": "this turn's evidence, keyed by input id; flags true/false, level inputs a level name, numbers 0..max; inputs the persona does not declare are listed in stance.ignored", "properties": {{{GOALS_ARG}, {SENSES_ARG}, {CREDIT_ARG}}}, "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
               "flags": {{"type": "object", "additionalProperties": false, "properties": {{"timing": {{"type": "boolean", "description": "add a non-canonical timing object to the stance"}}, "no_inertia": {{"type": "boolean", "description": "ignore mood inertia for this turn (diagnostics)"}}}}}}}}}}"#))),
         tool("probbit_persona_fuzz", "Test a persona's character", "probbit persona fuzz: a persona (inline document or a file path) and a character property in habit syntax (never: {when, then}; or props: a list of them) -> for each individual (seeds, default 0-99) the shortest event script whose stance breaks it, shrunk, with the replay command; `found` says whether any did. It tests the stance a host gets, not the words a model writes; none found is evidence, not a proof. The document of probbit persona fuzz --json.",
             p(&format!(r#"{{"type": "object", "additionalProperties": false, "properties": {{{PERSONA_ARG},
@@ -237,7 +242,7 @@ fn tools() -> Json {
             p(&format!(r#"{{"type": "object", "additionalProperties": false, "properties": {{{PERSONA_ARG},
               "state": {{"type": "object", "description": "the state returned by the previous event (or by probbit_persona_init); give this or seed"}},
               "seed": {{"type": "integer", "minimum": 0, "description": "a new individual (default: the persona's identity.seed)"}},
-              "event": {{"type": "object", "description": "the event's inputs keyed by input id, plus elapsed_hours (hours since the previous event, >= 0; default 0)", "properties": {{{GOALS_ARG}}}, "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
+              "event": {{"type": "object", "description": "the event's inputs keyed by input id, plus elapsed_hours (hours since the previous event, >= 0; default 0)", "properties": {{{GOALS_ARG}, {SENSES_ARG}, {CREDIT_ARG}}}, "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
               "strand_path": {{"type": "string", "description": "a strand file on the server's disk to append the event's line to (created with its header if missing)"}}}}}}"#))),
         tool("probbit_live_verify", "Replay a strand", "probbit live verify: a strand (its text, or a file path on the server's disk) -> {ok: true, events, persona, seed, engine, final_state, last_line} when every line replays byte for byte from the header alone, else {ok: false, line, diverges} with the earliest line that differs and what (a changed input, a removed or reordered line, a changed header). A divergence is an answer, not a tool error.",
             p(r#"{"type": "object", "additionalProperties": false, "properties": {"strand": {"type": "string", "description": "the strand's text (header line, then one line per event)"}, "strand_path": {"type": "string", "description": "a strand file on the server's disk"}}}"#)),
@@ -252,6 +257,15 @@ const GOALS_ARG: &str = r#""goals": {"type": "object", "description": "a persona
                 "cue": {"type": "boolean"}, "progress": {"type": "number", "minimum": 0, "maximum": 1}, "novelty": {"type": ["boolean", "number"], "minimum": 0, "maximum": 1},
                 "setback": {"type": "number", "minimum": 0, "maximum": 1}, "win": {"type": "number", "minimum": 0, "description": "a win's size, at most the persona's expectation.win_max"},
                 "deadline_hours": {"type": ["number", "null"], "minimum": 0, "description": "hours to the goal's deadline; null clears it"}}}}"#;
+/// `senses` in a turn's inputs or a live event: refused here for a persona with a senses block (readings come from the host's
+/// instruments, docs/persona.md 2.11, S7); a persona without one lists it in stance.ignored
+const SENSES_ARG: &str = r#""senses": {"type": "object", "description": "readings: refused through MCP for a persona with a senses block (the host sends them with probbit live or persona turn); a persona without one lists senses in stance.ignored"}"#;
+/// `await`, `for` and `cancel` in a turn's inputs or a live event: a persona with a credit block reads them (docs/persona.md 2.8);
+/// `cancel` is refused here for such a persona (the host or a person says no outcome will come, never the agent); a persona
+/// without the block lists them in stance.ignored
+const CREDIT_ARG: &str = r#""await": {"type": "boolean", "description": "a persona with a credit block: the host will report this decision's outcome"},
+              "for": {"oneOf": [{"type": "integer", "minimum": 0}, {"type": "object", "additionalProperties": false, "required": ["turn", "stance"], "properties": {"turn": {"type": "integer", "minimum": 0}, "stance": {"type": "string", "description": "the paid stance's digest (its credit.stance)"}}}], "description": "a persona with a credit block: the turn of the decision this reward or correction pays"},
+              "cancel": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "refused through MCP for a persona with a credit block (the host sends it with probbit live or persona turn)"}"#;
 fn get_mut<'a>(j: &'a mut Json, k: &str) -> Option<&'a mut Json> { match j { Json::Obj(v) => v.iter_mut().find(|(x, _)| x == k).map(|(_, x)| x), _ => None } }
 /// `probbit_evaluate`'s input schema: the System One request (TypeSafe OpenAPI 0.2.0 and the Workers AI clef schema: `model`,
 /// `state`, `questions`, `images`) plus the `probbit` block, whose `rules` are the probbit-ir schema's own rule definitions.

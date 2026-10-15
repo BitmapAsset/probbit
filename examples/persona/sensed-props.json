@@ -1,0 +1,6 @@
+{
+ "props": [
+  {"id": "no_bold_after_failure", "when": {"sense.tool_fail.raw": true}, "then": {"caution": {"not": ["bold"]}}},
+  {"id": "short_when_busy", "when": {"sense.tempo.raw": {"at_least": 20}}, "then": {"verbosity": {"at_most": "short"}}}
+ ]
+}

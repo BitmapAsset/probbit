@@ -2,8 +2,11 @@
 //! replays the strand with `live::Replay`, the rules `probbit live verify` uses, so it recomputes every stance document from
 //! the strand alone (no other log, any strand, any machine) and says whether the replay checks. It draws the latest event: the
 //! stance (each trait's levels as segments with their exact odds, the level taken highlighted, the phrase it says), the moods
-//! with a sparkline of the last 50 events, the senses (the event's inputs and the history features), the habits in force and
-//! the ones that bound, the learned deltas, the drives when the documents carry them (feature-detected), and the stance line.
+//! with a sparkline of the last 50 events, the inputs (the event's inputs and the history features), the senses when the
+//! persona declares them (§2.11: per sense its normal as a tick over the range, the reading, z and n, and an alert when a
+//! normal moved over drift_cap / 2 within 50 events), the habits in force and the ones that bound, the learned deltas, the
+//! decisions awaiting an outcome with their eligibility (§2.8, with a credit block), the drives when the documents carry them
+//! (feature-detected), and the stance line.
 //! `--serve` draws the same in a browser: one page embedded in the binary, fed by server-sent events from a server on
 //! 127.0.0.1. It changes no file (the demo's week goes through a temporary one, removed at once) and sends nothing anywhere.
 use crate::json::{self, Json};
@@ -45,9 +48,15 @@ fn strs(j: Option<&Json>) -> Vec<String> { j.and_then(Json::as_arr).map(|a| a.it
 struct Var { id: String, levels: Vec<String>, say: Vec<String> }
 /// A declared input: its id, kind (flag | level | number) and, for a number, its max
 struct Input { id: String, kind: String, max: f64 }
+/// A declared sense (§2.11), in declared order: its range on the scale its normal is kept on (a flag's is [0, 1])
+struct SenseRow { id: String, say: String, unit: String, flag: bool, log1p: bool, lo: f64, hi: f64, drift_cap: f64 }
+impl SenseRow {
+    /// A reading or a range end on the normal's scale
+    fn scaled(&self, x: f64) -> f64 { if self.log1p { x.ln_1p() } else { x } }
+}
 /// What the layout reads from the strand's header
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
-    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String> }
+    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow> }
 impl Meta {
     fn of(r: &Replay) -> Meta {
         let d = persona::describe(&r.live.p);
@@ -65,7 +74,14 @@ impl Meta {
             learning: d.get("learning").map(|l| (strs(l.get("traits")), l.get("total_cap").and_then(Json::as_f64).unwrap_or(1.0))),
             caps: (cap("wanting", "cap", 3.0), cap("afterglow", "cap", 2.0), cap("expectation", "pe_cap", 1.0)),
             // a drives block's goals, in the order of the levels of `pursue` (describe hides that trait; its learned row needs them)
-            goals: strs(d.get("drives").and_then(|x| x.get("goals"))) }
+            goals: strs(d.get("drives").and_then(|x| x.get("goals"))),
+            senses: persona::normals(&r.live.p, &r.live.st).into_iter().map(|(id, _, _, drift_cap)| {
+                let x = d.get("senses").and_then(|o| o.get(&id)); let f = |k: &str| x.and_then(|x| x.get(k));
+                let range = f("range").and_then(Json::as_arr).map(|a| (a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(1.0)));
+                let txt = |k: &str| f(k).and_then(Json::as_str).unwrap_or("").to_string();
+                let (flag, log1p) = (txt("kind") == "flag", txt("scale") == "log1p");
+                let (lo, hi) = range.unwrap_or((0.0, 1.0)); let sc = |v: f64| if log1p { v.ln_1p() } else { v };
+                SenseRow { say: txt("say"), unit: txt("unit"), flag, log1p, lo: sc(lo), hi: sc(hi), drift_cap, id } }).collect() }
     }
 }
 
@@ -150,6 +166,13 @@ fn nbar(s: &Style, v: f64, max: f64, hue: Col) -> String {
     let k = ((v / max.max(1e-12)).clamp(0.0, 1.0) * NBAR as f64).round() as usize;
     format!("{}{}{}{}", s.paint(DIM, s.g("▕", "[")), s.paint(hue, &s.g("█", "#").repeat(k)), s.paint(DIM, &s.g("░", ".").repeat(NBAR - k)), s.paint(DIM, s.g("▏", "]")))
 }
+/// A sense's range as `NBAR` cells with its normal as a tick and this event's reading as a dot (both on the normal's scale)
+fn tick(s: &Style, lo: f64, hi: f64, mean: f64, at: Option<f64>) -> String {
+    let cell = |v: f64| (((v - lo) / (hi - lo).max(1e-12)).clamp(0.0, 1.0) * (NBAR - 1) as f64).round() as usize;
+    let (t, r) = (cell(mean), at.map(cell));
+    let cells: String = (0..NBAR).map(|i| if Some(i) == r { s.bold(CYAN, s.g("●", "o")) } else if i == t { s.bold(AMBER, s.g("┃", "|")) } else { s.paint(DIM, s.g("─", "-")) }).collect();
+    format!("{}{cells}{}", s.paint(DIM, s.g("▕", "[")), s.paint(DIM, s.g("▏", "]")))
+}
 /// A centred bar for a signed value within ±cap: `h` cells each side of the centre mark
 fn centred(s: &Style, v: f64, cap: f64, h: usize) -> String {
     let k = ((v.abs() / cap.max(1e-12)).clamp(0.0, 1.0) * h as f64).round() as usize;
@@ -233,7 +256,7 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         let pick = v.levels.iter().position(|l| l == level);
         out.push(format!("{}{:<idw$}  {}  {}  {}", lab(if k == 0 { "MOODS" } else { "" }), v.id, stack(s, &ps, pick, AMBER), labels(s, &v.levels, &ps, pick, AMBER), s.paint(AMBER, &spark(s, &w.spark[k]))));
     }
-    // 3. the senses: the event's inputs as the turn used them, then the history features
+    // 3. the inputs: the event's inputs as the turn used them, then the history features
     let ins = doc.get("inputs");
     let val = |id: &str| ins.and_then(|i| i.get(id));
     let mut chips = vec![]; let mut nums = vec![];
@@ -244,12 +267,32 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
             (_, v) => { let l = v.and_then(Json::as_str).unwrap_or(""); chips.push(format!("{} {}", s.paint(GREY, &x.id), s.bold(CYAN, l))); } }
     }
     if let Some(g) = val("goals").filter(|g| !g.is_null()) { chips.push(format!("{} {}", s.paint(GREY, "goals"), persona::canon(g))); }
-    out.push(format!("{}{}", lab("SENSES"), chips.join("  ")));
+    out.push(format!("{}{}", lab("INPUTS"), chips.join("  ")));
     if let Some(h) = f.given.get("elapsed_hours").and_then(Json::as_f64) { nums.push(format!("clock {}", hours(h))); }
     if !nums.is_empty() { out.push(format!("{}{}", lab(""), nums.join("  "))); }
     let hist: Vec<String> = m.history.iter().map(|(id, cap)| { let n = val(id).and_then(Json::as_f64).unwrap_or(0.0); format!("{id} {}/{}", whole(n), whole(*cap)) }).collect();
     if !hist.is_empty() { out.push(format!("{}{} {}", lab(""), s.paint(GREY, "history"), hist.join("  "))); }
     if let Some(ig) = doc.get("ignored").and_then(Json::as_arr).filter(|a| !a.is_empty()) { out.push(format!("{}{} {}", lab(""), s.paint(GREY, "ignored"), strs(Some(&Json::Arr(ig.to_vec()))).join(" "))); }
+    // 3b. the senses (§2.11): per sense the normal as a tick over the range, this event's reading, z and n (the normal it was
+    // judged against); a sense not read keeps its normal; an alert when a normal moved over drift_cap / 2 within 50 events
+    let now = persona::normals(&w.rep.live.p, &w.rep.live.st);
+    let sw = m.senses.iter().map(|x| x.id.chars().count()).max().unwrap_or(4).clamp(4, 14);
+    for (k, x) in m.senses.iter().enumerate() {
+        let read = doc.get("senses").and_then(|r| r.get(&x.id));
+        let g = |key: &str| read.and_then(|r| r.get(key)).and_then(Json::as_f64);
+        let (mean, n) = match read { Some(_) => (g("mean").unwrap_or(0.0), g("n").unwrap_or(0.0)), None => now.get(k).map_or((0.0, 0.0), |v| (v.1, v.2 as f64)) };
+        let raw = read.and_then(|r| r.get("raw"));
+        let at = raw.and_then(|v| match v { Json::Bool(b) => Some(if *b { 1.0 } else { 0.0 }), _ => v.as_f64() }).map(|v| x.scaled(v));
+        let norm = if x.flag { format!("normal rate {mean:.2}") } else if x.log1p { format!("normal {:.2} {}", mean.exp_m1(), x.unit) } else { format!("normal {mean:.2} {}", x.unit) };
+        let what = match (raw, g("z")) {
+            (Some(v), Some(z)) => s.bold(CYAN, &format!("read {}  z {z:+.1}", persona::canon(v))),
+            _ => s.paint(GREY, "not read"),
+        };
+        out.push(format!("{}{:<sw$}  {}  {what}  {}", lab(if k == 0 { "SENSES" } else { "" }), x.id, tick(s, x.lo, x.hi, mean, at), s.paint(GREY, &format!("{norm} over {} readings", whole(n)))));
+        if let Some(mv) = w.rep.normals().moved.get(k).copied().filter(|mv| *mv > x.drift_cap / 2.0) {
+            let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
+            out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} {say}: the normal moved {mv} within 50 events (over drift_cap / 2 = {})", s.g("⚠", "!"), persona::r6(x.drift_cap / 2.0))))); }
+    }
     // 4. the habits: in force, the ones that bound highlighted, the violations counter (0 by construction)
     let hb = doc.get("habits");
     let list = |k: &str| strs(hb.and_then(|h| h.get(k)));
@@ -267,6 +310,18 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
             let cellsx: Vec<String> = levels.iter().zip(&ds).map(|(l, d)| format!("{l} {} {d:+.2}", centred(s, *d, *cap, 5))).collect();
             out.push(format!("{}{t:<idw$}  {}{}", lab(if k == 0 { "LEARNED" } else { "" }), cellsx.join("  "), if k == 0 { s.paint(GREY, &format!("  (cap {}{})", s.g("±", "+/-"), whole(*cap))) } else { String::new() }));
         }
+    }
+    // 5b. action-addressed feedback (§2.8), when the document carries it: the open decisions with the eligibility a payment at
+    // the next event would get, then this event's payment and the decisions it closed
+    if let Some(c) = doc.get("credit") {
+        let open = persona::open_decisions(&w.rep.live.p, &w.rep.live.st).unwrap_or_default();
+        let ol = if open.is_empty() { s.paint(GREY, "none") } else { open.iter().map(|(t, e)| format!("{t} {}", s.paint(GREY, &format!("e {e:.2}")))).collect::<Vec<_>>().join("  ") };
+        let mut row = format!("{}{} {ol}", lab("CREDIT"), s.paint(GREY, "open"));
+        if let Some(pd) = c.get("paid").filter(|x| !x.is_null()) { let g = |k: &str| pd.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+            row += &format!(" {dot} {}", s.bold(CYAN, &format!("paid {} e {:.2} sign {}{}", whole(g("turn")), g("e"), whole(g("sign")), if pd.get("absorbed") == Some(&Json::Bool(true)) { " absorbed" } else { "" }))); }
+        let closed: Vec<String> = c.get("closed").and_then(Json::as_arr).map_or(vec![], |a| a.iter().map(|x| format!("{} {}", x.get("turn").and_then(Json::as_f64).map_or(String::new(), whole), x.get("as").and_then(Json::as_str).unwrap_or(""))).collect());
+        if !closed.is_empty() { row += &format!(" {dot} {} {}", s.paint(GREY, "closed"), closed.join(", ")); }
+        out.push(row);
     }
     // 6. the drives, when the document carries them (feature-detected: documents without them draw no row)
     out.extend(drives(doc, m, s, idw, &lab));
@@ -340,6 +395,11 @@ fn meta_json(w: Option<&Watch>, path: &str) -> Json {
             ("history", Json::Arr(m.history.iter().map(|(id, cap)| o(vec![("id", s(id)), ("cap", Json::Num(*cap))])).collect())),
             ("learning", m.learning.as_ref().map_or(Json::Null, |(t, cap)| o(vec![("traits", strs(t)), ("total_cap", Json::Num(*cap))]))),
             ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1)), ("prediction_error", Json::Num(m.caps.2))])), ("goals", strs(&m.goals))]);
+        // the senses (§2.11), only when the persona declares them: their range on the normal's scale and the alert's cap
+        if !m.senses.is_empty() {
+            kv.push(("senses", Json::Arr(m.senses.iter().map(|x| o(vec![("id", s(&x.id)), ("say", s(&x.say)), ("unit", s(&x.unit)), ("kind", s(if x.flag { "flag" } else { "number" })),
+                ("scale", s(if x.log1p { "log1p" } else { "linear" })), ("lo", json::num(persona::r6(x.lo))), ("hi", json::num(persona::r6(x.hi))), ("drift_cap", Json::Num(x.drift_cap))])).collect())));
+        }
     }
     o(kv)
 }
@@ -350,10 +410,21 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
     let bad = bad_head.or_else(|| w.and_then(|w| w.bad.as_ref()));
     let spark = w.map_or(Json::Obj(vec![]), |w| Json::Obj(w.meta.moods.iter().zip(&w.spark).map(|(m, xs)| (m.id.clone(), Json::Arr(xs.iter().map(|x| Json::Num(persona::r6(*x))).collect()))).collect()));
     let of = |g: fn(&Frame) -> &Json| f.map_or(Json::Null, |f| g(f).clone());
-    json::obj(vec![("n", Json::Num(f.map_or(0, |f| f.n) as f64)), ("doc", of(|f| &f.doc)), ("given", of(|f| &f.given)), ("learned", of(|f| &f.learned)), ("spark", spark),
+    let mut kv = vec![("n", Json::Num(f.map_or(0, |f| f.n) as f64)), ("doc", of(|f| &f.doc)), ("given", of(|f| &f.given)), ("learned", of(|f| &f.learned)), ("spark", spark),
         ("diverges", bad.map_or(Json::Null, |(l, why)| json::obj(vec![("line", Json::Num(*l as f64)), ("why", json::str(why))]))), ("note", note.map_or(Json::Null, json::str)),
         ("from_checkpoint", w.and_then(|w| w.rep.from).map_or(Json::Null, |n| json::num(n as f64))),
-        ("status", w.map_or(Json::Null, |w| json::str(w.rep.live.status.name())))])
+        ("status", w.map_or(Json::Null, |w| json::str(w.rep.live.status.name())))];
+    // the senses' normals now (§2.11), only when the persona declares them: mean, count and the largest move within 50 events
+    if let Some(w) = w.filter(|w| !w.meta.senses.is_empty()) {
+        let moved = &w.rep.normals().moved;
+        kv.push(("normals", Json::Arr(persona::normals(&w.rep.live.p, &w.rep.live.st).iter().enumerate().map(|(k, (id, mean, n, _))| json::obj(vec![("id", json::str(id)),
+            ("mean", json::num(*mean)), ("n", json::num(*n as f64)), ("moved", json::num(moved.get(k).copied().unwrap_or(0.0)))])).collect())));
+    }
+    // the open decisions now (§2.8), only with a credit block: each turn and the eligibility a payment at the next event would get
+    if let Some(o) = w.and_then(|w| persona::open_decisions(&w.rep.live.p, &w.rep.live.st)) {
+        kv.push(("open", Json::Arr(o.iter().map(|(t, e)| json::obj(vec![("turn", json::num(*t as f64)), ("e", json::num(*e))])).collect())));
+    }
+    json::obj(kv)
 }
 
 /// A strand file read as it grows: whole lines (a line counts once its newline is written). It starts over when the

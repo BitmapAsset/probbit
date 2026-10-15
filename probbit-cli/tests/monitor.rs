@@ -30,6 +30,23 @@ fn monitor_has_help() {
     let (c, out, _) = probbit(&["--help"]); assert_eq!(c, 0); assert!(out.contains("\n  monitor STRAND "), "the usage lists monitor");
 }
 
+/// docs/persona.md §2.11: one row per declared sense (the normal as a tick over the range, the reading, z, n) under SENSES, the
+/// event's inputs under INPUTS, and an alert when a normal moved over drift_cap / 2 within 50 events: a harsh room moves the
+/// failure rate's normal from 0.05 to 0.26
+#[test]
+fn senses_rows_and_the_moved_normal_alert() {
+    let f = tmp("sensed"); let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
+    let (c, _, err) = probbit(&["live", "../examples/persona/sensed.yaml", "--seed", "0", "--clock", "fixed", "--events", "../bench/individuality/fixtures/lives/room-b.jsonl", "--strand", &f]);
+    assert_eq!(c, 0, "{err}");
+    let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
+    let (i, k) = (out.lines().position(|l| l.starts_with("INPUTS  ")).expect(&out), out.lines().position(|l| l.starts_with("SENSES  ")).expect(&out)); assert!(i < k, "{out}");
+    let rows: Vec<&str> = out.lines().skip(k).collect();
+    assert!(rows[0].starts_with("SENSES  tool_fail     [") && rows[0].ends_with("read false  z -0.6  normal rate 0.26 over 59 readings"), "{out}");
+    assert_eq!(rows[1].trim_start(), "! tool failures: the normal moved 0.173294 within 50 events (over drift_cap / 2 = 0.125)", "{out}");
+    for id in ["tool_latency", "tempo", "silence"] { assert!(rows.iter().any(|l| l.trim_start().starts_with(id) && l.contains("  z ")), "{id}: {out}"); }
+    let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
+}
+
 /// --once --plain: one frame in plain ASCII, byte for byte; the last event of the week and a failure turn (event 18: loss and
 /// praise lit, the bound habit in brackets, humour held at none)
 #[test]

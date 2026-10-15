@@ -1,0 +1,88 @@
+# bench/individuality fixtures: sha256, bytes and path (relative to this directory) of every frozen file.
+# Frozen: a later change is logged in ../README.md with its reason. run.py checks this file before any metric.
+#
+# P0 corpus, recorded 2026-10-14 before any 0.9.0 code change, with the released probbit 0.8.2 binary
+# (aarch64-apple-darwin release archive) whose sha256 is:
+binary probbit-0.8.2 2c3455ef93092fd5036be766b19e96954cc4d164c15773f1411759fc26b93669
+# Re-record: PROBBIT_BIN=<0.8.2 binary> python3 ../p0.py record (gives these bytes); check: python3 ../p0.py check
+82bb5b3d140739addac6dcde8e3d31e70d15e46bdb7ece9bb48e2a712286f744 7029 gen.py
+ac483b0746c79c4b1cebca2f357b8b85a97c37c5de961d700bff6a4c8033ddcd 65059 p0/EXPECTED
+82e6748f463f6ab7f93a1959176fcf2c7a1cc709d271dd20cae14e0eb731f783 1300 p0/personas/scout.json
+d7b6541670ac26f143c757f5bcf4ef3151db3452fb80d7a2d604497394f13875 102 p0/props/retry.json
+c4b513d05a1e0273e8e865104ac8185fcc0648f60319129fc9f49f6a3751f5ee 122 p0/props/tutor.json
+7d1b88e0759b8251752bb0b3c7dd7ed97fd313200b5b8e3f838ab101b2e141c8 3568 p0/scripts/adaptive-0.jsonl
+238c0a8157becc11e1199ff2d83215b2bd5f9e0ed3953b29708edf3e1d790f67 6997 p0/scripts/adaptive-1.jsonl
+bfd0a743af0d7b66ab609aa72f66e6e233b9ac9527de4593ed1c8dc6b0e245c3 3921 p0/scripts/adaptive-2.jsonl
+4b0ddf34887d5cd9464df46f96557d83d4e502dc94f23e8ff28b5b20444becf0 3431 p0/scripts/adaptive-3.jsonl
+5c7611d44119fa4cc7218b6d8e126867f628f4089bbc3e30ff1fb2c729574749 7171 p0/scripts/drifter-0.jsonl
+4027c6a65f04129b3cf3a11dcfae1be175c5dd50b7d407d26df9b1484488cb93 10265 p0/scripts/drifter-1.jsonl
+2eba66ca3bc484dc79df88456dbcf6f289e3f8dfaedf07a6ea081a9acaf7b89f 7930 p0/scripts/drifter-2.jsonl
+9264e0b97b6ae1967d3734f841cd11ef7fd7cac6f15cbd78a1d090c31fbdd629 6274 p0/scripts/drifter-3.jsonl
+3bc6e6f446ed032d2c573ef42f9e4a6a0407f110453b3e57cef21d17b28e8a36 3248 p0/scripts/guarded-0.jsonl
+fd8f28282ff30b492c629a481da19b89bd73decba12d7aa42db98579a9edaa27 7155 p0/scripts/guarded-1.jsonl
+a532afe0634ad9777ebf1b47565658274db1390739c421c44708c7095b95ecc6 4091 p0/scripts/guarded-2.jsonl
+0d88a58c33346bc274fad765883c5af48f2b35eb45b15e348008f874febe85ec 3351 p0/scripts/guarded-3.jsonl
+b2de6f68547b2384863d018902fefbe3ae2459b5e79e5bad0e0ed4613004914d 7382 p0/scripts/ops-engineer-0.jsonl
+01d0e99877a9b4135cef0f2290b37d1a961dcec0a45a29271e2ce89131844f57 11090 p0/scripts/ops-engineer-1.jsonl
+e57a6e7b70309c4897eb2d0cd3cedf60da9a96248eb95a7241eba0eff2fc43ff 8636 p0/scripts/ops-engineer-2.jsonl
+9a3892c02d0ee78ed25a8529233b5644db49ccccf461ebf880fa01a92a672b8c 7137 p0/scripts/ops-engineer-3.jsonl
+cf2eec060a1cce9468aacd6949f2eae504078015799edd39ee3244a78c9e8ce6 4196 p0/scripts/scout-0.jsonl
+7a07126fa61a9ec3f1b0521dc742eae837f5e1aad938956f59107bc7762fef5d 7589 p0/scripts/scout-1.jsonl
+666dd5cefb81bb236f21c1761449c74fb3ce00ce1cf3b1a2ac36aebcaba345e9 4201 p0/scripts/scout-2.jsonl
+decae76811f86a1bc78ebb19f490228b605bda5ecb01737be31148f683bce0fc 3982 p0/scripts/scout-3.jsonl
+48e6308dbab99892c64678d22d7d92b503423bcff02cf6f740050bf2774a95d9 6162 p0/scripts/trader-assistant-0.jsonl
+fcce0f599ed004242aaa2aba1db2bcd4e6086f4b83bde36d5e5569d257b84eac 9585 p0/scripts/trader-assistant-1.jsonl
+1a3ede0cc74f3ae6dd2bc0f13d876730d9068d6be08ac6b06824ad938d68909c 7119 p0/scripts/trader-assistant-2.jsonl
+8c3f02a80122a96370cf0cede574e1d9331d60dda3d201257ad597c8e37dfdaf 5946 p0/scripts/trader-assistant-3.jsonl
+fd8944ce971f1ea4c4ee5413c5b11a247515098306cf520a9f1004bcaa5f4e91 6422 p0/scripts/tutor-0.5.0-0.jsonl
+47fcb09c24546ff12c328984885e3f986aa75186d6276b11f0265829a7f9b972 11241 p0/scripts/tutor-0.5.0-1.jsonl
+63d6f81ad31955700c9cedc1bd7d4e9fb71431be9ab088695c6e56512b6a6fec 8463 p0/scripts/tutor-0.5.0-2.jsonl
+baa2868af66564326e55718fe33f4f19aaab4cda3ddfdaae17116736af504a5e 7206 p0/scripts/tutor-0.5.0-3.jsonl
+d03f19415cee190444aeb8f159e196d8620583ffbf471ebe5af4888b78ec7be6 6561 p0/scripts/tutor-0.jsonl
+c2ba8570cfdbf7939fd3a3866af0136e4a41be4a515e527aa5c956862c5f5c46 10513 p0/scripts/tutor-1.jsonl
+12a29a2d83a7616d80f0048cdca73649cd3111d86c6ea7555991b01f95d08506 8735 p0/scripts/tutor-2.jsonl
+f7eaafcd29bb41e3fda7c371c5947ce88c30e9359aa10434a04bd5d313534cfa 7023 p0/scripts/tutor-3.jsonl
+24a476b77b90a3427a3b1142028ec851a65768ae34950fa15a6c06d7906fe8ed 34841 p0/strands/adaptive-s0-0.strand
+bca21358807f251145324902049ae6c49df021b6462fe82292e7309c4de060e2 52132 p0/strands/drifter-s0-0.strand
+6a1f88b0b38a1e6f82c3cf5dbd1effc5f00cffed83cb7fa36159569d2ab478ee 33827 p0/strands/guarded-s0-0.strand
+c6ee7faef7e62c599029a312f5322da4a6b9b98b40ab84fa64a1baed2637573b 54478 p0/strands/ops-engineer-s0-0.strand
+a88d3b20b41e9843f2b9ac9b117d5b462ec6b1095c762da531cb98481ff48432 43389 p0/strands/scout-s0-0.strand
+8e5927a3036c7925e06ef0be99dc1a44fc8fd9ad25cc5347510070567df9110c 52377 p0/strands/trader-assistant-s0-0.strand
+639250f4b06f3cadca29136720ac90fb48072be850cf84692efa0e3ef6708158 54709 p0/strands/tutor-0.5.0-s0-0.strand
+0419480b5c2e13a2567e26188f2142bb7c2c8a269a3adcc282be1747f63d8242 1390 p0/strands/tutor-continue.jsonl
+615978432a80e6b8be7fdf6e2382438516dc67acae56c562221c89654cae479e 6815 p0/strands/tutor-s0-0.appended
+cf9073507dad98bedc4f09ca2e49f34862919240c64c548b7a1dcf58fda4804b 1160 p0/strands/tutor-s0-0.state.json
+4db5f3d83a0e6df0ea632c35957cdb0970665422af9054fa50e5468e13a888ab 55008 p0/strands/tutor-s0-0.strand
+344a54d4cb6bc9318caf82af6eeb776d774ef7ff1a4548bf9fb67a6061bf00e4 13470 ../p0.py
+#
+# Metrics a, b, d and e: frozen 2026-10-14 before their first run (personas, generator, streams, bars).
+# Re-generate the streams: python3 lives.py (gives these bytes).
+ea8f287f5eb06399327ff2ed0e8b6e9b0cfdacb60d0c32602246c3bae66ebef9 3760 sensed.yaml
+1ae70f910a6ada21c027da4ed29307a6308360abaeb5f5df7db8c76564f4d44d 3452 sensed-nogenes.yaml
+e56170eac63fc40995e265f15f3e3f44952111251877fc8a5e5f436d82f9c4e7 3748 lives.py
+8799f915fd0fedad71186a84b2ff87f93663f4b02fc6f4165b5b19ef2d143c51 467 bars.json
+d1cef4fa406b4185ce271969e0804bfbb125245ae821101a14394489972e80e5 1340 lives/habituation.jsonl
+a688e820a401bf474e69569579fc36587ceb929d9057eeb9b45adbef523ddbf0 2178 lives/probes.jsonl
+a61143fbc343b16ab4fc3a588417c726d3f02747b10f4a0fc3badd141eae1a63 7823 lives/room-a.jsonl
+5d03ee082433ffe374f17d2cbe94447d8fcd0cb2d80c8a79d125cfc4f2c20350 7652 lives/room-b.jsonl
+4776a2f10511d3366070c3de96b6544ef188404d08855523dcde178684276b41 2787 lives/surprise-quiet.jsonl
+b27c8ecd32390c74442b6a6269b78df150dbef8f20e37101943f33e189ef1894 2775 lives/surprise-rate.jsonl
+63e68a2e9d3ae7b084fc0d627a3a39387550639071f063f5b96e9927eeb4c478 910 lives/tail.jsonl
+#
+# Metric c, and metric a's re-measure control: frozen 2026-10-14 before their first run (personas, the draws generator, the
+# draws, the bars). Re-generate the draws: python3 credit_draws.py (gives these bytes).
+4ff28296970b96f4692bfee0ad5d47d156129894394a95c1bdf6080bee75d4cd 2188 dispatch.yaml
+8ed7ba7c53ad5fcce38d59e89e39c2e174b84f88741acf62867267d43f53a4c1 2047 dispatch-noblock.yaml
+a870ced67bb749e7f9a9ab89f200d050c46fb138fe767bb06df2c62a395e217a 1710 credit_draws.py
+54dd7acc30e5a5f7c7b8bc097dd84b7b35940269642465e86a7d8dfcc89ab22b 33847 credit/draws-0.jsonl
+73367908c1263e159a3bf69479859717f9ab29cbbaa33f0de016b4b954438fdf 33831 credit/draws-1.jsonl
+6dd03598ed4e78477143b2efcb0d1ca935b0042eba838594c4ef001b926aa7c1 33828 credit/draws-2.jsonl
+26e2f74b5dfe91a83b9ca5cdc0f2f466f9cfa604dedb4ee3a0e60047d8292047 33808 credit/draws-3.jsonl
+bdf289dd7ac017bca7ca24e9a61aa03b9ec18aefc9c17ff31af2c0c2cdb827c6 33813 credit/draws-4.jsonl
+9e5163de163f8288d9e960c422873ebe337870acd300b90b1059ed35ca98a36a 33845 credit/draws-5.jsonl
+6612ff8b06fee52bf4e1a9498a5d9a5fdac4ff8efb02ec578289d68b4547b5d3 33844 credit/draws-6.jsonl
+34991b43085bfc89285f55b3e92449be242bd6bf9de0ee3716286a169186af3e 33806 credit/draws-7.jsonl
+4b010ef3db7076da72d610694b3ab43aff78ce3b52b1b8757896981d8869064a 33838 credit/draws-8.jsonl
+69de4cbc7f383cee6cb03db47c735f8af2ab567a76562622e284b013cbd200ad 33799 credit/draws-9.jsonl
+8dba56c14fcdde61398f52eedfb692b9bd1a07fc4ef0170fa44c6569172f0dab 138 bars-c.json
+3033259caa5e227a14180124d88fe602715613a16316f3ab82a4c25bfaae1d0e 3992 sensed-plain.yaml

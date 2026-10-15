@@ -170,6 +170,15 @@ function diagnostics(f) {
   const d=f.doc,inputs=$('input-facts');inputs.replaceChildren();
   for(const [k,v] of Object.entries(obj(d.inputs)||{}))fact(inputs,k,typeof v==='object'?JSON.stringify(v):String(v));
   const h=get(f.given,'elapsed_hours');fact(inputs,'Raw clock',num(h)?hours(h)+' since previous event':'Not captured in this frame');
+  for(const x of M?.senses||[]){const r=obj(get(d.senses,x.id)),nm=(f.normals||[]).find(v=>v.id===x.id)||{},mean=r?r.mean:nm.mean,n=r?r.n:nm.n;
+    const sc=v=>x.scale==='log1p'?Math.log1p(v):v,cell=v=>Math.round(Math.max(0,Math.min(1,(v-x.lo)/((x.hi-x.lo)||1)))*11);
+    const at=r?(typeof r.raw==='boolean'?(r.raw?1:0):sc(r.raw)):null,t=num(mean)?cell(mean):-1,c=at===null?-1:cell(at);
+    const bar=Array.from({length:12},(_,i)=>i===c?'●':i===t?'┃':'─').join(''),norm=x.kind==='flag'?'rate '+f2(mean):(x.scale==='log1p'?f2(Math.expm1(mean)):f2(mean))+' '+x.unit;
+    fact(inputs,'Sense · '+(x.say||x.id),bar+'  '+(r?'read '+JSON.stringify(r.raw)+' · z '+(r.z<0?'−':'+')+Math.abs(r.z).toFixed(1):'not read')+' · normal '+norm+' over '+(num(n)?n:0)+' readings');
+    if(num(nm.moved)&&nm.moved>x.drift_cap/2)fact(inputs,'⚠ Normal moved',(x.say||x.id)+': '+nm.moved+' within 50 events (over drift_cap / 2 = '+(x.drift_cap/2)+')');}
+  const cr=obj(d.credit);if(f.open)fact(inputs,'Open decisions',f.open.length?f.open.map(o=>o.turn+' (e '+f2(o.e)+')').join(' · '):'None');
+  if(cr&&cr.paid)fact(inputs,'Paid',`turn ${cr.paid.turn} · e ${f2(cr.paid.e)} · sign ${cr.paid.sign}`+(cr.paid.absorbed?' · absorbed':''));
+  if(cr&&cr.closed?.length)fact(inputs,'Closed',cr.closed.map(x=>x.turn+' '+x.as).join(' · '));
   const habits=$('habit-list');habits.replaceChildren();const hb=d.habits||{},active=hb.active||[],bound=hb.bound||[];
   for(const name of active)mk('span','chip'+(bound.includes(name)?' on':''),habits,name+(bound.includes(name)?' · bound':''));
   if(!active.length)mk('span','chip',habits,'No rules in force');mk('span','chip',habits,'Violations: '+(num(hb.violations)?hb.violations:'unreported'));
