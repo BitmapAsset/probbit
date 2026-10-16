@@ -20,7 +20,9 @@
 //! is an answer, a bad persona or rule a tool error.
 //! `probbit_live_event` and `probbit_live_verify` (docs/persona.md §5.7) run in this process, stateless as well: one event of a
 //! resident individual (the host's clock gives `elapsed_hours`) and, with `strand_path`, its line appended to a strand file on the
-//! server's disk; verify replays a strand. A divergence is an answer, a bad persona, state, event or strand a tool error.
+//! server's disk; verify replays a strand. A divergence is an answer, and so is an unsupported strand (a field or line kind this
+//! engine does not know: `{ok: false, line, unsupported, engine, strand_engine}`); a bad persona, state, event or strand is a tool
+//! error.
 use crate::json::{self, num, obj, str as jstr, Json};
 use std::io::{BufRead, Write};
 
@@ -168,7 +170,8 @@ fn fuzz_tool(args: &[(String, Json)]) -> (String, Option<Json>, bool) {
     (crate::persona::canon(&doc), Some(doc), is_error)
 }
 
-/// `probbit_live_event` / `probbit_live_verify`, in process -> (text, structured JSON, isError); a divergence is an answer
+/// `probbit_live_event` / `probbit_live_verify`, in process -> (text, structured JSON, isError); a divergence is an answer, and so
+/// is an unsupported strand
 fn live_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, bool) {
     let t0 = std::time::Instant::now();
     let eng = crate::persona_engine();
@@ -244,7 +247,7 @@ fn tools() -> Json {
               "seed": {{"type": "integer", "minimum": 0, "description": "a new individual (default: the persona's identity.seed)"}},
               "event": {{"type": "object", "description": "the event's inputs keyed by input id, plus elapsed_hours (hours since the previous event, >= 0; default 0)", "properties": {{{GOALS_ARG}, {SENSES_ARG}, {CREDIT_ARG}}}, "additionalProperties": {{"type": ["boolean", "number", "string"]}}}},
               "strand_path": {{"type": "string", "description": "a strand file on the server's disk to append the event's line to (created with its header if missing)"}}}}}}"#))),
-        tool("probbit_live_verify", "Replay a strand", "probbit live verify: a strand (its text, or a file path on the server's disk) -> {ok: true, events, persona, seed, engine, final_state, last_line} when every line replays byte for byte from the header alone, else {ok: false, line, diverges} with the earliest line that differs and what (a changed input, a removed or reordered line, a changed header). A divergence is an answer, not a tool error.",
+        tool("probbit_live_verify", "Replay a strand", "probbit live verify: a strand (its text, or a file path on the server's disk) -> {ok: true, events, persona, seed, engine, final_state, last_line} when every line replays byte for byte from the header alone, else {ok: false, line, diverges} with the earliest line that differs and what (a changed input, a removed or reordered line, a changed header), or {ok: false, line, unsupported, engine, strand_engine} at the earliest line with a field or line kind this engine does not know (unsupported: the field's path; a newer engine's strand, not verified and not a divergence). Both are answers, not tool errors.",
             p(r#"{"type": "object", "additionalProperties": false, "properties": {"strand": {"type": "string", "description": "the strand's text (header line, then one line per event)"}, "strand_path": {"type": "string", "description": "a strand file on the server's disk"}}}"#)),
     ])
 }

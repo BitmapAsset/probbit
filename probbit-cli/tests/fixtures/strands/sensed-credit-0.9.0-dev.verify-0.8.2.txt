@@ -1,0 +1,6 @@
+# probbit 0.8.2, the released binary (sha256 2c3455ef93092fd5036be766b19e96954cc4d164c15773f1411759fc26b93669, the one
+# bench/individuality/fixtures/MANIFEST names), recorded 2026-10-16: probbit live verify sensed-credit-0.9.0-dev.strand
+# It cannot be changed: it names the first field of the 0.9.0 persona it does not know (senses; for a persona with a credit
+# block and no senses block, learning.credit) and reports a correct strand as a divergence at line 1, exit 1.
+# exit 1
+{"diverges":"the persona document: senses: unknown field (allowed: agenda, comment, couplings, drives, engine, habits, history, identity, inputs, learning, line, moods, probbit_persona, reward_from, traits)","line":1,"ok":false}

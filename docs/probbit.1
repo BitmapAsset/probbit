@@ -1,4 +1,4 @@
-.TH PROBBIT 1 "" "probbit 0.8.2" "probbit manual"
+.TH PROBBIT 1 "" "probbit 0.9.0-dev" "probbit manual"
 .SH NAME
 probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under hard rules, with gated odds
 .SH SYNOPSIS
@@ -301,7 +301,7 @@ Subcommands:
 .RS 4
 .TP
 \fBverify\fR STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint; with \-\-actions, also the earliest turn whose host action differs from the level its stance released
+replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with \-\-actions, also the earliest turn whose host action differs from the level its stance released
 .RS 4
 .TP
 \fB\-\-from\-checkpoint\fR
@@ -328,7 +328,7 @@ when (default: now, UTC)
 .PP
 \fIthe safety kit\fR: (docs/persona.md \[u00A7]5.7) one writer per strand: `\-\-strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (\[u00A7]2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event.
 .PP
-\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written).
+\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {"ok": false, "line", "unsupported": the field, "engine", "strand_engine"}; not verified, and not a divergence).
 .PP
 Examples:
 .RS 4
@@ -348,7 +348,7 @@ one CI gate: prove + fuzz a persona's rules, replay its strands (exit 0 / 1 / 3)
 .PP
 The rule lock in one command, for CI: vet the rules a persona must keep before its first task and after every policy update, then replay the receipts. It runs `probbit persona lint`'s pipeline (contradicting habits; with \-\-props, prove each rule over the individuals, then fuzz the ones the bound leaves unknown, the rules' and habits' thresholds on the grid) and `probbit live verify` on every \-\-strand (each strand replays against the persona in its own header).
 .PP
-One line per rule (held = proved for every event sequence, held_by_construction = a habit implies it, broken seed N = the search found a counterexample, unproven = not proved and no counterexample found), one line per strand (ok N events, or FAIL and the first line that differs), then `check: held H \[u00B7] broken B \[u00B7] unproven U \[u00B7] strands S/T`.
+One line per rule (held = proved for every event sequence, held_by_construction = a habit implies it, broken seed N = the search found a counterexample, unproven = not proved and no counterexample found), one line per strand (ok N events, FAIL and the first line that differs, or the first line with a field or line kind this engine does not know: `line K: unsupported by this engine: FIELD (written by ENGINE)`, never FAIL), then `check: held H \[u00B7] broken B \[u00B7] unproven U \[u00B7] strands S/T`.
 .PP
 Flags:
 .RS 4
@@ -369,10 +369,10 @@ events per fuzzed script, 1 to 64 (default 8)
 comma\-separated idle hours the fuzzer tries between events (default 1,12,48)
 .TP
 \fB\-\-json\fR
-one document: {persona, props, seeds, depth, hours, rules (the persona lint document), strands [{path, ok, events, final_state, error?}], verdict {held, broken, unproven, conflicts, strands_ok, strands_total, exit}}
+one document: {persona, props, seeds, depth, hours, rules (the persona lint document), strands [{path, ok, events, final_state, error?, unsupported?, strand_engine?}], verdict {held, broken, unproven, conflicts, strands_ok, strands_total, exit}}
 .RE
 .PP
-\fIexit\fR: 0 every rule held and every strand replays; 1 a rule broken, an unresolved habit contradiction or a strand that fails (1 wins over 3); 2 a bad persona, rule file or flag (one {"error"} object on stdout, code "persona", when stdout is not a terminal or with \-\-json); 3 the only problem is an unproven rule.
+\fIexit\fR: 0 every rule held and every strand replays; 1 a rule broken, an unresolved habit contradiction, a strand that fails or a strand this engine cannot verify (unsupported, `live verify` exit 5: its line says so) (1 wins over 3); 2 a bad persona, rule file or flag (one {"error"} object on stdout, code "persona", when stdout is not a terminal or with \-\-json); 3 the only problem is an unproven rule.
 .PP
 Examples:
 .RS 4
@@ -904,7 +904,7 @@ print the version (also \-\-version, \-V)
 .PP
 Print the version.
 .SH EXIT STATUS
-0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input (a line on stderr; for bad input also one {"error"} object on stdout when stdout is not a terminal); 3 refused / declined / non\-finite (decide, run, evaluate), or a rule left unproven (persona lint); 4 refused by a lock, a pause or a retirement (live). Each command's \-\-help has its own list.
+0 done or an answer; 1 an answer that says no (infeasible, a line that differs, a counterexample, a rule left unknown); 2 a bad command, flag or input (a line on stderr; for bad input also one {"error"} object on stdout when stdout is not a terminal); 3 refused / declined / non\-finite (decide, run, evaluate), or a rule left unproven (persona lint); 4 refused by a lock, a pause or a retirement (live); 5 a strand with a field or line kind this engine does not know (live verify: unsupported, not verified and not a divergence). Each command's \-\-help has its own list.
 .SH ENVIRONMENT
 PROBBIT_CHAINS, PROBBIT_THREADS, PROBBIT_CPU_LIMIT, PROBBIT_MEM_LIMIT_MB, PROBBIT_PRIORITY: the processor controls (flag > environment > probbit.json, or the file PROBBIT_CONFIG names > default). NO_COLOR=1 or PROBBIT_THEME=plain: no colour on a terminal.
 .SH EXAMPLES
