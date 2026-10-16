@@ -50,13 +50,15 @@ struct Var { id: String, levels: Vec<String>, say: Vec<String> }
 struct Input { id: String, kind: String, max: f64 }
 /// A declared sense (§2.11), in declared order: its range on the scale its normal is kept on (a flag's is [0, 1])
 struct SenseRow { id: String, say: String, unit: String, flag: bool, log1p: bool, lo: f64, hi: f64, drift_cap: f64 }
+/// A declared need (RFC 0002 A.1), in declared order: its phrase, unit, cap and the goal it pays
+struct NeedRow { id: String, say: String, unit: String, cap: f64, goal: String }
 impl SenseRow {
     /// A reading or a range end on the normal's scale
     fn scaled(&self, x: f64) -> f64 { if self.log1p { x.ln_1p() } else { x } }
 }
 /// What the layout reads from the strand's header
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
-    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow> }
+    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow>, needs: Vec<NeedRow> }
 impl Meta {
     fn of(r: &Replay) -> Meta {
         let d = persona::describe(&r.live.p);
@@ -81,7 +83,10 @@ impl Meta {
                 let txt = |k: &str| f(k).and_then(Json::as_str).unwrap_or("").to_string();
                 let (flag, log1p) = (txt("kind") == "flag", txt("scale") == "log1p");
                 let (lo, hi) = range.unwrap_or((0.0, 1.0)); let sc = |v: f64| if log1p { v.ln_1p() } else { v };
-                SenseRow { say: txt("say"), unit: txt("unit"), flag, log1p, lo: sc(lo), hi: sc(hi), drift_cap, id } }).collect() }
+                SenseRow { say: txt("say"), unit: txt("unit"), flag, log1p, lo: sc(lo), hi: sc(hi), drift_cap, id } }).collect(),
+            // a needs block (RFC 0002), from describe's items in declared order
+            needs: d.get("needs").and_then(|n| n.get("items")).and_then(Json::as_obj).map_or(vec![], |o| o.iter().map(|(id, x)| { let t = |k: &str| x.get(k).and_then(Json::as_str).unwrap_or("").to_string();
+                NeedRow { say: t("say"), unit: t("unit"), cap: x.get("cap").and_then(Json::as_f64).unwrap_or(1.0), goal: t("bind"), id: id.clone() } }).collect()) }
     }
 }
 
@@ -293,6 +298,17 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
             let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
             out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} {say}: the normal moved {mv} within 50 events (over drift_cap / 2 = {})", s.g("⚠", "!"), persona::r6(x.drift_cap / 2.0))))); }
     }
+    // 3c. the needs (RFC 0002): per need its deficit as a bar over [0, cap], its pursue term and its goal's omission window; an
+    // alert when a deficit sits at its cap
+    let nw = m.needs.iter().map(|x| x.id.chars().count()).max().unwrap_or(4).clamp(4, 14);
+    for (k, x) in m.needs.iter().enumerate() {
+        let e = doc.get("needs").and_then(|n| n.get(&x.id)); let g = |key: &str| e.and_then(|r| r.get(key)).and_then(Json::as_f64).unwrap_or(0.0);
+        let (dx, term) = (g("deficit"), g("term"));
+        let win = match doc.get("drives").and_then(|d| d.get("window")).and_then(|w| w.get(&x.goal)) { Some(Json::Num(h)) => format!("window {} {h:.2} h left", x.goal), _ => format!("window {} closed", x.goal) };
+        out.push(format!("{}{:<nw$}  {}  {}  {}", lab(if k == 0 { "NEEDS" } else { "" }), x.id, nbar(s, dx, x.cap, AMBER), s.bold(CYAN, &format!("deficit {dx:.2}/{} {}  term {term:+.2}", persona::r6(x.cap), x.unit)), s.paint(GREY, &win)));
+        if dx >= x.cap - 5e-7 { let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
+            out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} {say}: the deficit sits at its cap ({})", s.g("⚠", "!"), persona::r6(x.cap))))); }
+    }
     // 4. the habits: in force, the ones that bound highlighted, the violations counter (0 by construction)
     let hb = doc.get("habits");
     let list = |k: &str| strs(hb.and_then(|h| h.get(k)));
@@ -399,6 +415,10 @@ fn meta_json(w: Option<&Watch>, path: &str) -> Json {
         if !m.senses.is_empty() {
             kv.push(("senses", Json::Arr(m.senses.iter().map(|x| o(vec![("id", s(&x.id)), ("say", s(&x.say)), ("unit", s(&x.unit)), ("kind", s(if x.flag { "flag" } else { "number" })),
                 ("scale", s(if x.log1p { "log1p" } else { "linear" })), ("lo", json::num(persona::r6(x.lo))), ("hi", json::num(persona::r6(x.hi))), ("drift_cap", Json::Num(x.drift_cap))])).collect())));
+        }
+        // the needs (RFC 0002), only when the persona declares them: their phrase, unit, cap and bound goal
+        if !m.needs.is_empty() {
+            kv.push(("needs", Json::Arr(m.needs.iter().map(|x| o(vec![("id", s(&x.id)), ("say", s(&x.say)), ("unit", s(&x.unit)), ("cap", Json::Num(x.cap)), ("goal", s(&x.goal))])).collect())));
         }
     }
     o(kv)

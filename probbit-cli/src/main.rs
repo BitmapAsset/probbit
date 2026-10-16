@@ -845,7 +845,7 @@ fn live_cmd(args: &[String]) {
         if !lock.as_ref().is_some_and(live::Lock::held) { refuse("live: ", json::InErr { code: "locked", path: "strand".into(), msg: format!("the writer lock {f}.lock is no longer this run's (removed or taken over): stopped before writing") }) }
         live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
     if let Some(h) = &header { log(&[h]); }
-    let (mut bad, mut refused, mut warned, mut warned_credit) = (0, 0, false, false);
+    let (mut bad, mut refused, mut warned, mut warned_credit, mut warned_needs) = (0, 0, false, false, false);
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
         let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| {
             // readings sent to a persona without a senses block are an undeclared input (listed in `ignored`): say so once
@@ -854,6 +854,9 @@ fn live_cmd(args: &[String]) {
             // so are `await`, `for` and `cancel` without a credit block (docs/persona.md §2.8): say so once
             if !warned_credit && !lv.p.has_credit() && ["await", "for", "cancel"].iter().any(|k| ev.get(k).is_some()) { warned_credit = true;
                 err_line(&format!("probbit: live: events[{i}]: this persona has no credit block: `await`, `for` and `cancel` are undeclared inputs (listed in ignored), feedback pays the previous stance")); }
+            // and `needs` without a needs block (docs/persona.md §2.12): say so once
+            if !warned_needs && !lv.p.has_needs() && ev.get("needs").is_some() { warned_needs = true;
+                err_line(&format!("probbit: live: events[{i}]: this persona has no needs block: `needs` is an undeclared input (listed in ignored), no amount is paid")); }
             lv.event(&ev, eng) });
         match res {
             Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
@@ -891,6 +894,10 @@ fn lint_report(args: &[String], path: &str, p: &persona::Persona, depth: usize, 
     let (mut broken, mut unproven) = (0, vec![]);
     // drives (§2.9): habits that outrank a goal floor, floors whose lift can reach 50
     if let Some(mut n) = persona::floor_notes(p) { n.extend(persona::floor_reach(p, &seeds)); doc.push(("floors", Json::Arr(n))); }
+    // needs (RFC 0002): horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal
+    if let Some(n) = persona::needs_notes(p) { doc.push(("needs", Json::Arr(n))); }
+    // needs (RFC 0002): horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal
+    if let Some(n) = persona::needs_notes(p) { doc.push(("needs", Json::Arr(n))); }
     // with rules (§5.6): prove each one, then fuzz the ones the bound leaves unknown
     if args.iter().any(|a| a == "--never" || a == "--props") {
         let props = rules_arg(args, p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);

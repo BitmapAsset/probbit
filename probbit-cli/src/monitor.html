@@ -176,6 +176,9 @@ function diagnostics(f) {
     const bar=Array.from({length:12},(_,i)=>i===c?'●':i===t?'┃':'─').join(''),norm=x.kind==='flag'?'rate '+f2(mean):(x.scale==='log1p'?f2(Math.expm1(mean)):f2(mean))+' '+x.unit;
     fact(inputs,'Sense · '+(x.say||x.id),bar+'  '+(r?'read '+JSON.stringify(r.raw)+' · z '+(r.z<0?'−':'+')+Math.abs(r.z).toFixed(1):'not read')+' · normal '+norm+' over '+(num(n)?n:0)+' readings');
     if(num(nm.moved)&&nm.moved>x.drift_cap/2)fact(inputs,'⚠ Normal moved',(x.say||x.id)+': '+nm.moved+' within 50 events (over drift_cap / 2 = '+(x.drift_cap/2)+')');}
+  for(const x of M?.needs||[]){const e=obj(get(d.needs,x.id))||{},w=get(get(d.drives,'window'),x.goal),k=Math.round(Math.max(0,Math.min(1,(e.deficit||0)/(x.cap||1)))*12);
+    fact(inputs,'Need · '+(x.say||x.id),'█'.repeat(k)+'░'.repeat(12-k)+'  deficit '+f2(e.deficit||0)+' / '+x.cap+' '+x.unit+' · term '+f2(e.term||0)+' · window '+x.goal+' '+(num(w)?f2(w)+' h left':'closed'));
+    if(num(e.deficit)&&e.deficit>=x.cap-5e-7)fact(inputs,'⚠ At its cap',(x.say||x.id)+': the deficit sits at its cap ('+x.cap+')');}
   const cr=obj(d.credit);if(f.open)fact(inputs,'Open decisions',f.open.length?f.open.map(o=>o.turn+' (e '+f2(o.e)+')').join(' · '):'None');
   if(cr&&cr.paid)fact(inputs,'Paid',`turn ${cr.paid.turn} · e ${f2(cr.paid.e)} · sign ${cr.paid.sign}`+(cr.paid.absorbed?' · absorbed':''));
   if(cr&&cr.closed?.length)fact(inputs,'Closed',cr.closed.map(x=>x.turn+' '+x.as).join(' · '));
