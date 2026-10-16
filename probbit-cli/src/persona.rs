@@ -4033,7 +4033,7 @@ mod tests {
             for _ in 0..age { st = tn(&p, &st, "{}").unwrap().1; }
             let (doc, ns) = tn(&p, &st, r#"{"praise":true,"for":0}"#).unwrap();
             assert_eq!(g(&doc, &["credit", "paid", "e"]).as_f64(), Some(e), "age {age}");
-            assert_eq!(canon(&table(&ns.learned)), canon(&table(&learn(&l, &c0, 1.0, e, &st.learned))), "age {age}: the step scaled by e");
+            assert_eq!(canon(&table(&ns.learned)), canon(&table(&learn(&l, &c0, 1.0, e, &st.learned, &[], None))), "age {age}: the step scaled by e");
             assert_eq!((canon(g(&doc, &["credit", "closed"])), ns.open.len()), (r#"[{"as":"paid","turn":0}]"#.to_string(), 0), "age {age}");
         }
         let mut st = tn(&p, &init(&p, Some(1), true, &run), r#"{"await":true}"#).unwrap().1;
@@ -4464,5 +4464,236 @@ mod tests {
         assert_eq!(alpha.iter().find(|a| a.0 == "need.fuel").map(|a| canon(&Json::Arr(a.2.clone()))), Some("[0.5,1]".to_string()));
         assert_eq!(alpha.iter().find(|a| a.0 == "elapsed_hours").map(|a| canon(&Json::Arr(a.2.clone()))), Some("[1]".to_string()));
         assert_eq!(canon(&event_json(&[("need.fuel".into(), Json::Num(0.5)), ("busy".into(), Json::Bool(true))])), r#"{"busy":true,"needs":{"fuel":0.5}}"#);
+    }
+
+    // ------------------------------------------------------------------ RFC 0002 wave 1b: surprise, pace, dispositions
+    /// bench/body's gate.yaml as JSON: one 3-level learned trait, rate 0.5, step_cap 0.2, total_cap 1, a credit block, `surprise` at its
+    /// defaults
+    const GATE: &str = r#"{"probbit_persona":1,"identity":{"name":"Body gate","version":"1.0.0","seed":0},"traits":[{"id":"approach","levels":["low","mid","high"]}],
+        "inputs":[{"id":"praise","kind":"flag"},{"id":"criticism","kind":"flag"}],
+        "learning":{"from":["praise","criticism"],"traits":["approach"],"rate":0.5,"step_cap":0.2,"total_cap":1,"credit":{"max_open":8,"half_life_events":32}},
+        "reward_from":["human","env"],"surprise":{"volatility_rate":0.3,"v0":0.45,"r_ref":4,"r_max":20,"g_max":3}}"#;
+    /// bench/body's pace.yaml as JSON: one paid goal (win_max 4), reward_from [env], pace (6 h, cap 4, r0 1, levels [0.5, 1.5])
+    const PACE: &str = r#"{"probbit_persona":1,"identity":{"name":"Body pace","version":"1.0.0","seed":0},"traits":[{"id":"initiative","levels":["low","mid","high"]},{"id":"verbosity","levels":["terse","short","full"]}],
+        "drives":{"goals":[{"id":"task"},{"id":"other"}],"expectation":{"win_max":4}},"reward_from":["env"],
+        "pace":{"half_life_hours":6,"cap":4,"r0":1,"levels":[0.5,1.5],"effects":{"initiative":0.5,"verbosity":-0.3}}}"#;
+    /// bench/body's optimism.yaml as JSON: expectation rate 0.2, half-life 48 h, optimism_spread 0.3
+    const OPT: &str = r#"{"probbit_persona":1,"identity":{"name":"Body optimism","version":"1.0.0","seed":0},"traits":[{"id":"tone","levels":["plain","warm"]}],
+        "inputs":[{"id":"busy","kind":"flag"}],"drives":{"goals":[{"id":"task"},{"id":"other"}],"expectation":{"rate":0.2,"half_life_hours":48}},
+        "dispositions":{"optimism_spread":0.3},"habits":[{"id":"busy_other","when":{"busy":true},"then":{"pursue":["other"]}}]}"#;
+    /// Every wave 1b block at once: learning with credit, drives, reward_from, surprise at its defaults, pace, all three genes
+    const BODYB: &str = r#"{"probbit_persona":1,"identity":{"name":"Body b","version":"1.0.0","seed":0},"traits":[{"id":"approach","levels":["low","mid","high"]},{"id":"verbosity","levels":["terse","short","full"]}],
+        "inputs":[{"id":"praise","kind":"flag"},{"id":"criticism","kind":"flag"}],
+        "learning":{"from":["praise","criticism"],"traits":["approach"],"rate":0.5,"step_cap":0.2,"total_cap":1,"credit":{"max_open":8,"half_life_events":32}},
+        "drives":{"goals":[{"id":"task"},{"id":"other"}],"expectation":{"win_max":4}},"reward_from":["human","env"],
+        "surprise":{},"pace":{"levels":[0.5,1.5],"effects":{"verbosity":-0.3}},"dispositions":{"optimism_spread":0.3,"patience_spread":0.5,"volatility_spread":0.1}}"#;
+    fn body_with(base: &str, from: &str, to: &str) -> R<Persona> { assert!(base.contains(from), "{from}"); build(&json::parse(&base.replacen(from, to, 1)).unwrap()) }
+    fn gnum(j: &Json, path: &[&str]) -> f64 { path.iter().fold(j, |a, k| a.get(k).unwrap_or_else(|| panic!("{k}"))).as_f64().unwrap() }
+
+    /// RFC 0002 Design B on the engine: a new learner's gate (v 0, r̂ 1, g 2.5) and its stance key and clause; the opening paid step at
+    /// (v, r̂, g) = (0.15, 2, 1.666667) with its learned weights and counts (s3); over a lesson and its reversal every state keeps v in
+    /// [0, 1], r̂ in [1, r_max], g in [1, g_max] and every step within g_max × step_cap; consistent feedback closes the gate to g 1 and
+    /// the reversal opens it
+    #[test]
+    fn the_surprise_gate_follows_its_closed_forms() {
+        let p = build(&json::parse(GATE).unwrap()).unwrap(); let st0 = init(&p, Some(0), true, &run);
+        assert_eq!(st0.to_json(&p).get("surprise").map(canon), Some(r#"{"approach":{"counts":[[0,0],[0,0],[0,0]],"g":2.5,"r":1,"v":0}}"#.to_string()));
+        let (d0, st1) = ok_turn(&p, &st0, r#"{"await":true,"src":"human"}"#);
+        assert_eq!(d0.get("surprise").map(canon), Some(r#"{"approach":2.5}"#.to_string()));
+        assert!(d0.get("why").and_then(Json::as_str).unwrap().contains("learning fast: feedback changed"));
+        let lv = ["low", "mid", "high"]; let a0 = d0.get("stance").unwrap().get("approach").unwrap();
+        let taken = lv.iter().position(|l| a0.get("level").and_then(Json::as_str) == Some(*l)).unwrap();
+        let odds: Vec<f64> = lv.iter().map(|l| gnum(a0, &["odds", l])).collect();
+        let (_, st2) = ok_turn(&p, &st1, r#"{"criticism":true,"for":0,"src":"human"}"#);
+        let s2 = st2.to_json(&p);
+        assert_eq!([gnum(&s2, &["surprise", "approach", "v"]), gnum(&s2, &["surprise", "approach", "r"]), gnum(&s2, &["surprise", "approach", "g"])], [0.15, 2.0, 1.666667]);
+        let g = 1.666667; let c: Vec<f64> = (0..3).map(|l| (if l == taken { 1.0 } else { 0.0 }) - odds[l]).collect();
+        let step: Vec<f64> = c.iter().map(|x| (-1.0 * 0.5 * g * x).clamp(-0.2 * g, 0.2 * g)).collect(); let mu = step.iter().fold(0.0, |a, b| a + b) / 3.0;
+        let got: Vec<f64> = s2.get("learned").unwrap().get("approach").unwrap().as_arr().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+        assert_eq!(got, step.iter().map(|x| r6(x - mu)).collect::<Vec<f64>>(), "the opening gated step");
+        let mut counts = vec![[0.0, 0.0]; 3]; counts[taken][1] = 1.0;
+        assert_eq!(st2.gate.as_ref().unwrap()[0].1.counts, counts);
+        // a lesson (praise `mid`, criticise the rest) for 40 turns, then its reversal (praise `high`) for 40
+        let (mut st, mut prev) = (st0.clone(), Json::Null); let (mut g_end_a, mut g_max_b, mut fast_b) = (0.0, 0.0f64, false);
+        for i in 0..80 { let target = if i < 40 { "mid" } else { "high" };
+            let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else {
+                let good = prev.get("stance").unwrap().get("approach").unwrap().get("level").and_then(Json::as_str) == Some(if i - 1 < 40 { "mid" } else { "high" });
+                format!(r#"{{"await":true,"{}":true,"for":{},"src":"human"}}"#, if good { "praise" } else { "criticism" }, i - 1) };
+            let before = st.learned[0].1.clone(); let (d, ns) = ok_turn(&p, &st, &ev);
+            let gt = &ns.gate.as_ref().unwrap()[0].1;
+            assert!((0.0..=1.0).contains(&gt.v) && (1.0..=20.0).contains(&gt.r) && (1.0..=3.0).contains(&gt.g), "turn {i}: {gt:?}");
+            let dl: Vec<f64> = ns.learned[0].1.iter().zip(&before).map(|(a, b)| a - b).collect();
+            assert!(dl.iter().fold(f64::MIN, |a, b| a.max(*b)) - dl.iter().fold(f64::MAX, |a, b| a.min(*b)) <= 2.0 * 3.0 * 0.2 + 1e-6, "turn {i}: step {dl:?}");
+            assert!(ns.learned[0].1.iter().all(|x| x.abs() <= 1.0));
+            if i == 39 { g_end_a = gt.g; } if i >= 40 { g_max_b = g_max_b.max(gt.g); fast_b |= d.get("why").and_then(Json::as_str).unwrap().contains("learning fast"); }
+            let _ = target; prev = d; st = ns; }
+        assert_eq!(g_end_a, 1.0, "consistent feedback closes the gate"); assert!(g_max_b > 1.0 && fast_b, "the reversal opens it: {g_max_b}");
+    }
+
+    /// RFC 0002 Design C on the engine: R̄'s event form (a win of 1 from 0 is 1 − 0.5^(1/6)), offered stakes move nothing, the
+    /// stamped hours decay it, the reward flag counts 1 and a correction 0, a burst pins it at the cap with the level and clause, the
+    /// host never sends pace_up / pace_down, and the loop host's transient to the fixed points 1.2632, 1.5 and 2.25 at loop gain
+    /// G 0.24, 0.60, 0.84 (p6)
+    #[test]
+    fn pace_follows_its_closed_forms() {
+        let p = build(&json::parse(PACE).unwrap()).unwrap(); let st0 = init(&p, Some(0), true, &run);
+        let rb = |d: &Json| gnum(d, &["pace", "rbar"]); let k = 1.0 - 0.5f64.powf(1.0 / 6.0);
+        assert_eq!(st0.to_json(&p).get("pace").map(canon), Some(r#"{"rbar":0}"#.to_string()));
+        let (d1, s1) = ok_turn(&p, &st0, r#"{"goals":{"task":{"win":1}},"src":"env"}"#); assert_eq!(rb(&d1), r6(k));
+        assert_eq!(d1.get("pace").unwrap().get("level").and_then(Json::as_str), Some("slow"));
+        assert!(d1.get("why").and_then(Json::as_str).unwrap().contains("pace slow: average reward 0.11 an hour"));
+        let (d2, _) = ok_turn(&p, &s1, r#"{"goals":{"task":{"cue":true,"deadline_hours":3,"progress":0.5,"novelty":0.2}},"src":"env"}"#);
+        assert_eq!(rb(&d2), r6(k)); assert!(d2.get("inputs").unwrap().get("pace_up").is_none() && d2.get("inputs").unwrap().get("pace_down").is_none());
+        let (d3, _) = ok_turn(&p, &s1, r#"{"elapsed_hours":6,"src":"env"}"#); assert_eq!(rb(&d3), r6(r6(k) * 0.5));
+        let mut st = st0.clone(); let mut last = Json::Null;
+        for _ in 0..12 { let (d, ns) = ok_turn(&p, &st, r#"{"goals":{"task":{"win":4},"other":{"win":4}},"src":"env"}"#); assert!(rb(&d) <= 4.0); st = ns; last = d; }
+        assert_eq!((rb(&last), last.get("pace").unwrap().get("level").and_then(Json::as_str)), (4.0, Some("brisk")));
+        assert!(last.get("why").and_then(Json::as_str).unwrap().contains("pace brisk: average reward 4 an hour"));
+        assert_eq!(turn(&p, &st0, &evj(r#"{"pace_up":1,"src":"env"}"#), false, &run, false).err().map(|e| e.path), Some("inputs.pace_up".to_string()));
+        // the reward flag counts 1, a correction nothing (a learning block with reward_from and a pace block, no drives)
+        let q = body_with(GATE, r#""surprise":{"volatility_rate":0.3,"v0":0.45,"r_ref":4,"r_max":20,"g_max":3}"#, r#""pace":{"levels":[0.5,1.5],"effects":{"approach":0.4}}"#).unwrap();
+        let sq = init(&q, Some(0), true, &run);
+        let (dq, sq1) = ok_turn(&q, &sq, r#"{"await":true,"src":"human"}"#); assert_eq!(rb(&dq), 0.0);
+        let (dq1, sq2) = ok_turn(&q, &sq1, r#"{"praise":true,"for":0,"await":true,"src":"human"}"#); assert_eq!(rb(&dq1), r6(k));
+        let (dq2, _) = ok_turn(&q, &sq2, r#"{"criticism":true,"for":1,"src":"human"}"#); assert_eq!(rb(&dq2), r6(k));
+        // the loop host of bench/body (base 4, p 0.3, r0 1, actions in [0, 12]): the transient to R* = p base (1 − κ r0) / (1 − G)
+        for (kappa, fixed) in [(0.2, 1.2632), (0.5, 1.5), (0.7, 2.25)] {
+            let g = 0.3 * kappa * 4.0; let closed = 0.3 * 4.0 * (1.0 - kappa) / (1.0 - g); assert_eq!(round_to(closed, 4), fixed);
+            let (mut st, mut r) = (st0.clone(), 0.0); let w0 = r6(1.2 / (3.0 * k));
+            for _ in 0..3 { let (d, ns) = ok_turn(&p, &st, &format!(r#"{{"goals":{{"task":{{"win":{w0}}}}},"src":"env"}}"#)); st = ns; r = rb(&d); }
+            let start = r;
+            for _ in 0..400 { let a = (4.0 * (1.0 + kappa * (r - 1.0))).clamp(0.0, 12.0); let pay = r6((0.3 * a).min(4.0));
+                let ev = if pay > 0.0 { format!(r#"{{"elapsed_hours":1,"goals":{{"task":{{"win":{pay}}}}},"src":"env"}}"#) } else { r#"{"elapsed_hours":1,"src":"env"}"#.to_string() };
+                let (d, ns) = ok_turn(&p, &st, &ev); st = ns; r = rb(&d); }
+            let transient = closed + (start - closed) * (1.0 - k * (1.0 - g)).powi(400);
+            assert!((r - transient).abs() <= 1e-4, "kappa {kappa}: {r} vs {transient}"); }
+    }
+
+    /// RFC 0002 Design D on the engine: the genes (4 decimals, from name and seed, unchanged by an unrelated edit; a spread of 0 stores
+    /// none), E's asymmetric step at every event (α± = min(rate × e^±o, 1)), its mean settling at the expectile τb + (1 − τ)a (o1), and
+    /// the sign rule: an individual with o > 0 keeps E at or above its spread-0 twin's at every step (o2); patience multiplies the
+    /// credit half-life within [1, 10000]
+    #[test]
+    fn dispositions_follow_their_closed_forms() {
+        let p = build(&json::parse(OPT).unwrap()).unwrap(); let p0 = body_with(OPT, r#""optimism_spread":0.3"#, r#""optimism_spread":0"#).unwrap();
+        let seed = (0..40u64).find(|s| disp_gene(&p, *s, "optimism").is_some_and(|o| o > 0.05)).unwrap();
+        let o = disp_gene(&p, seed, "optimism").unwrap(); assert_eq!(round_to(o, 4), o);
+        let q = body_with(OPT, r#""version":"1.0.0""#, r#""version":"1.0.1""#).unwrap(); assert_eq!(disp_genes(&q, seed), disp_genes(&p, seed));
+        assert!(init(&p0, Some(seed), false, &run).to_json(&p0).get("dispositions").is_none());
+        assert_eq!(init(&p, Some(seed), false, &run).to_json(&p).get("dispositions").map(canon), Some(format!(r#"{{"optimism":{}}}"#, pyn(o))));
+        let mut x: u64 = 12345; let mut wins = vec![];
+        for _ in 0..3000 { x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); wins.push(if (x >> 33) % 2 == 0 { 0.5 } else { 1.5 }); }
+        let (mut sz, mut s0) = (init(&p, Some(seed), false, &run), init(&p0, Some(seed), false, &run)); let (mut ez, mut e0, mut tail) = (0.0f64, 0.0f64, 0.0);
+        let et = |d: &Json| gnum(d, &["drives", "expect", "task"]);
+        for (i, m) in wins.iter().copied().enumerate() { let ev = format!(r#"{{"goals":{{"task":{{"win":{m}}}}}}}"#);
+            let (dz, nz) = ok_turn(&p, &sz, &ev); let (d0, n0) = ok_turn(&p0, &s0, &ev); sz = nz; s0 = n0;
+            let a = |o: f64, e: f64| if m > e { (0.2 * o.exp()).min(1.0) } else { (0.2 * (-o).exp()).min(1.0) };
+            ez = r6((ez + a(o, ez) * (m - ez)).clamp(0.0, 2.0)); e0 = r6((e0 + a(0.0, e0) * (m - e0)).clamp(0.0, 2.0));
+            assert!((et(&dz) - ez).abs() <= 1e-6 && (et(&d0) - e0).abs() <= 1e-6, "event {i}: {} {ez} / {} {e0}", et(&dz), et(&d0));
+            assert!(et(&dz) >= et(&d0), "event {i}: an optimist's E below its spread-0 twin's");
+            if i >= 1000 { tail += et(&dz); } }
+        let (ap, am) = ((0.2 * o.exp()).min(1.0), (0.2 * (-o).exp()).min(1.0)); let tau = ap / (ap + am); let want = tau * 1.5 + (1.0 - tau) * 0.5;
+        assert!((tail / 2000.0 - want).abs() <= 0.03, "{} vs the expectile {want}", tail / 2000.0);
+        // patience: the credit half-life times the gene, within [1, 10000]; spread 0 leaves it
+        let b = build(&json::parse(BODYB).unwrap()).unwrap(); let sb = init(&b, Some(seed), false, &run);
+        let pt = disp_gene(&b, seed, "patience").unwrap(); assert_eq!(credit_hl(&b, &sb), (32.0 * pt).clamp(1.0, 10000.0));
+        assert_eq!(sb.drives.as_ref().unwrap().pt, pt); assert_eq!(init(&p0, Some(seed), false, &run).drives.as_ref().unwrap().pt, 1.0);
+    }
+
+    /// The persona refusals of RFC 0002 Designs B-D (V-R1, V-R2, P-R1-P-R3, D-R1, D-R2): each at its path when the persona is read, so a
+    /// refused persona never runs; pace_up and pace_down are reserved only with a pace block
+    #[test]
+    fn every_surprise_pace_and_disposition_row_is_refused_at_its_path() {
+        let g = |f: &str, t: &str| err(body_with(GATE, f, t)); let pc = |f: &str, t: &str| err(body_with(PACE, f, t)); let o = |f: &str, t: &str| err(body_with(OPT, f, t));
+        let path = |e: String| e.split(':').next().unwrap_or("").to_string();
+        // V-R1
+        let nolearn = GATE.replace(r#""learning":{"from":["praise","criticism"],"traits":["approach"],"rate":0.5,"step_cap":0.2,"total_cap":1,"credit":{"max_open":8,"half_life_events":32}},"#, "")
+            .replace(r#""reward_from":["human","env"],"#, "");
+        assert_eq!(err(build(&json::parse(&nolearn).unwrap())), "surprise: a surprise block needs a learning block (it gates the learned weights' step size)");
+        assert_eq!(g(r#""g_max":3}"#, r#""g_max":3,"precision":true}"#), "surprise.precision: precision weighting scales the senses' effect gains: it needs a senses block");
+        // V-R2
+        for (f, t, at) in [(r#""volatility_rate":0.3"#, r#""volatility_rate":0"#, "surprise.volatility_rate"), (r#""volatility_rate":0.3"#, r#""volatility_rate":1"#, "surprise.volatility_rate"),
+            (r#""v0":0.45"#, r#""v0":1"#, "surprise.v0"), (r#""v0":0.45"#, r#""v0":-0.1"#, "surprise.v0"), (r#""r_ref":4"#, r#""r_ref":0.5"#, "surprise.r_ref"),
+            (r#""r_max":20"#, r#""r_max":0"#, "surprise.r_max"), (r#""g_max":3"#, r#""g_max":1"#, "surprise.g_max"), (r#""g_max":3"#, r#""g_max":3.5"#, "surprise.g_max")] {
+            assert_eq!(path(g(f, t)), at, "{t}"); }
+        // P-R1, P-R2, P-R3
+        assert_eq!(pc(r#""reward_from":["env"],"#, ""), "pace: a pace block needs reward_from (only accepted rewards move the average)");
+        for (f, t, at) in [(r#""cap":4"#, r#""cap":0"#, "pace.cap"), (r#""half_life_hours":6"#, r#""half_life_hours":0"#, "pace.half_life_hours"), (r#""r0":1"#, r#""r0":4"#, "pace.r0"),
+            (r#""r0":1"#, r#""r0":0"#, "pace.r0"), (r#""levels":[0.5,1.5]"#, r#""levels":[1.5,0.5]"#, "pace.levels"), (r#""levels":[0.5,1.5]"#, r#""levels":[0.5,5]"#, "pace.levels[1]"),
+            (r#""levels":[0.5,1.5]"#, r#""levels":[-1,1.5]"#, "pace.levels[0]"), (r#""levels":[0.5,1.5],"#, "", "pace.levels"), (r#""levels":[0.5,1.5]"#, r#""levels":[0.5]"#, "pace.levels"),
+            (r#","effects":{"initiative":0.5,"verbosity":-0.3}"#, "", "pace.effects"), (r#""r0":1"#, r#""r0":1,"pace_spread":3.5"#, "pace.pace_spread")] {
+            assert_eq!(path(pc(f, t)), at, "{t}"); }
+        assert_eq!(pc(r#""initiative":0.5,"#, r#""pursue":0.5,"#), "pace.effects.pursue: pace never moves pursue (it sets how fast, not what)");
+        assert_eq!(pc(r#""initiative":0.5,"#, r#""tempo":0.5,"#), r#"pace.effects.tempo: unknown trait or mood "tempo""#);
+        assert_eq!(pc(r#""traits":["#, r#""inputs":[{"id":"pace_down","kind":"number"}],"traits":["#), "inputs[0].id: reserved for the pace block (pace_up, pace_down)");
+        // D-R1, D-R2
+        assert_eq!(o(r#""optimism_spread":0.3"#, r#""optimism_spread":3.5"#), "dispositions.optimism_spread: must be <= 3");
+        assert_eq!(o(r#""optimism_spread":0.3"#, r#""patience_spread":-1"#), "dispositions.patience_spread: must be >= 0");
+        assert_eq!(o(r#""optimism_spread":0.3"#, r#""volatility_spread":0.2"#), "dispositions.volatility_spread: offsets surprise.v0: it needs a surprise block");
+        let bare = r#"{"probbit_persona":1,"identity":{"name":"Bare","version":"1.0.0"},"traits":[{"id":"tone","levels":["plain","warm"]}],"dispositions":{"optimism_spread":0.3}}"#;
+        assert_eq!(err(build(&json::parse(bare).unwrap())), "dispositions.optimism_spread: sets the learning block's rate or the drives block's expectation rate per outcome sign: it needs one of them");
+        let no_credit = GATE.replace(r#","credit":{"max_open":8,"half_life_events":32}"#, "").replace(r#""surprise":{"#, r#""dispositions":{"patience_spread":0.5},"surprise":{"#);
+        assert_eq!(err(build(&json::parse(&no_credit).unwrap())), "dispositions.patience_spread: multiplies learning.credit.half_life_events and drives.pursue.deadline_tau_hours: it needs one of them");
+        assert!(body_with(GATE, r#""surprise":{"#, r#""dispositions":{"patience_spread":0.5,"optimism_spread":0.2,"volatility_spread":0.1},"surprise":{"#).is_ok());
+        // without the block the ids are anyone's: an input named pace_up is an ordinary input
+        assert!(body_with(GATE, r#"{"id":"praise","kind":"flag"}"#, r#"{"id":"pace_up","kind":"flag"},{"id":"praise","kind":"flag"}"#).is_ok());
+        assert!(build(&json::parse(BODYB).unwrap()).is_ok());
+    }
+
+    /// RFC 0002 "State fields" for Designs B-D: each new field out of its box or past its decimals is refused at its path, even with a
+    /// recomputed digest; genes that miss the seed; a field without its block and a block without its field
+    #[test]
+    fn the_new_state_fields_are_refused_out_of_their_boxes() {
+        let p = build(&json::parse(BODYB).unwrap()).unwrap(); let st = init(&p, Some(3), true, &run);
+        assert!(State::read(&p, &st.to_json(&p)).is_ok());
+        let set = |f: &dyn Fn(&mut State)| { let mut s = st.clone(); f(&mut s); s.seal(&p); err(State::read(&p, &s.to_json(&p))) };
+        fn gt(s: &mut State) -> &mut Gate { &mut s.gate.as_mut().unwrap()[0].1 }
+        assert_eq!(set(&|s| gt(s).v = 1.000001), "state.surprise.approach.v: the volatility average in [0, 1], 6 decimals");
+        assert_eq!(set(&|s| gt(s).v = 0.1234567), "state.surprise.approach.v: the volatility average in [0, 1], 6 decimals");
+        assert_eq!(set(&|s| gt(s).r = 0.5), "state.surprise.approach.r: the run length in [1, 20] (r_max), 6 decimals");
+        assert_eq!(set(&|s| gt(s).r = 20.000001), "state.surprise.approach.r: the run length in [1, 20] (r_max), 6 decimals");
+        assert_eq!(set(&|s| gt(s).g = 0.999999), "state.surprise.approach.g: the gain in [1, 3] (g_max), 6 decimals");
+        assert_eq!(set(&|s| gt(s).g = 3.1), "state.surprise.approach.g: the gain in [1, 3] (g_max), 6 decimals");
+        assert_eq!(set(&|s| gt(s).counts[1][0] = -1.0), "state.surprise.approach.counts[1]: [plus, minus]: two counts >= 0, 6 decimals");
+        assert_eq!(set(&|s| { gt(s).counts.pop(); }), "state.surprise.approach.counts: one [plus, minus] pair per level (3)");
+        assert!(set(&|s| { let g = gt(s); g.v = 0.5; g.r = 3.0; g.g = 1.25; g.counts[2] = [1.5, 0.25]; }).is_empty(), "inside the box");
+        assert_eq!(set(&|s| s.rbar = Some(4.000001)), "state.pace.rbar: the average reward in [0, 4] (cap), 6 decimals");
+        assert_eq!(set(&|s| s.rbar = Some(-0.5)), "state.pace.rbar: the average reward in [0, 4] (cap), 6 decimals");
+        assert_eq!(set(&|s| s.rbar = Some(1.0000001)), "state.pace.rbar: the average reward in [0, 4] (cap), 6 decimals");
+        assert_eq!(set(&|s| s.disp[0].1 += 0.0001), "state.dispositions: disposition genes do not match the seed");
+        assert_eq!(set(&|s| { s.disp.pop(); }), "state.dispositions: disposition genes do not match the seed");
+        assert_eq!(set(&|s| s.disp.clear()), "state.dispositions: required with a disposition spread above 0");
+        assert_eq!(set(&|s| s.rbar = None), "state.pace: required with a pace block");
+        assert_eq!(set(&|s| s.gate = None), "state.surprise: required with a surprise block");
+        // a persona without the blocks refuses their fields
+        let q = need1(); let mut j = init(&q, Some(0), true, &run).to_json(&q);
+        if let Json::Obj(o) = &mut j { let at = o.len() - 1; o.insert(at, ("pace".into(), json::parse(r#"{"rbar":0}"#).unwrap()));
+            let body = Json::Obj(o.iter().filter(|(k, _)| k != "digest").cloned().collect()); o.iter_mut().find(|(k, _)| k == "digest").unwrap().1 = Json::Str(sha(&body)); }
+        assert_eq!(err(State::read(&q, &j)), "state.pace: this persona has no pace block");
+        // the genes come from name and seed: another seed's genes are refused
+        let other = init(&p, Some(4), true, &run);
+        assert_eq!(set(&|s| s.disp = other.disp.clone()), "state.dispositions: disposition genes do not match the seed");
+    }
+
+    /// The wave 1b surfaces: `describe` prints the gate's settings, pace's closed form and the genes; `lint` reports pace's largest field
+    /// shift with its warning; the fuzzer's alphabet never carries pace_up / pace_down and adds bursts and alternating feedback; the
+    /// learned box `prove` reads is unchanged by `surprise` (the state keeps every learned weight within ±total_cap)
+    #[test]
+    fn the_wave_1b_surfaces_say_what_the_blocks_do() {
+        let p = build(&json::parse(BODYB).unwrap()).unwrap(); let d = describe(&p);
+        assert_eq!(d.get("surprise").map(canon), Some(r#"{"g_max":3,"precision":false,"r_max":20,"r_ref":4,"start":{"g":2.5,"r":1,"v":0},"v0":0.45,"volatility_rate":0.3}"#.to_string()));
+        let pc = d.get("pace").unwrap();
+        assert_eq!(pc.get("closed_form").and_then(Json::as_str), Some("rbar = clip(rbar * 0.5^(h / 6) + 0.109101 * r_t, 0, 4); r_t = the accepted wins + 1 per reward flag on"));
+        assert_eq!((gnum(pc, &["largest_field_shift"]), pc.get("reserved").map(canon)), (0.9, Some(r#"["pace_up","pace_down"]"#.to_string())));
+        assert_eq!(d.get("dispositions").and_then(|x| x.get("genes")).map(canon), Some(canon(&disp_json(&disp_genes(&p, 0)))));
+        assert!(d.get("inputs").unwrap().get("pace_up").is_none());
+        assert_eq!(pace_notes(&p).map(|n| canon(&n)), Some(r#"{"largest_field_shift":0.9,"note":"the largest shift pace can put on the field, in nats","warn":false}"#.to_string()));
+        let q = build(&json::parse(PACE).unwrap()).unwrap(); assert_eq!(pace_notes(&q).and_then(|n| n.get("warn").cloned()), Some(Json::Bool(true)));
+        assert!(pace_notes(&need1()).is_none() && describe(&need1()).get("pace").is_none() && describe(&need1()).get("surprise").is_none());
+        let alpha = alphabet(&p, &[0.5, 1.0], &[1.0]);
+        assert!(alpha.iter().all(|a| !PACE_IDS.contains(&a.0.as_str())), "the host's alphabet");
+        assert_eq!(burst_events(&p).len(), 3); assert!(alternating(&p).is_some() && alternating(&q).is_none() && burst_events(&need1()).is_empty());
+        assert_eq!(gate_gains(&p, &init(&p, Some(0), false, &run)), vec![("approach".to_string(), 2.5, 3.0)]);
+        assert_eq!(pace_rbar(&p, &init(&p, Some(0), false, &run)), Some((0.0, 1.0, 4.0)));
     }
 }

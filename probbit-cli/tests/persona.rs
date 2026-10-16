@@ -901,3 +901,33 @@ fn two_hundred_drives_turns_equal_the_reference_for_three_individuals() {
         assert_eq!(goals.len(), 4, "seed {seed}: every goal pursued on some turn");
     }
 }
+
+/// The pacer example (docs/persona.md §2.13 to §2.15, RFC 0002 wave 1b: a surprise gate on a learned trait, a pace and three
+/// disposition genes) driven as a host drives it: `init`, `compile` of turn 0, 24 `turn --state FILE` calls (addressed praise and
+/// criticism with `await` and `for`, wins from people and from CI, reward bursts, a 12 h and a 24 h gap), the final state, `replay`
+/// of the same script, `lint` (pace's largest field shift) and `describe` (the gate's settings, pace's closed form, the genes). CI
+/// runs it on Linux, macOS and Windows: the same bytes on each.
+#[test]
+fn stdout_matches_the_pacer_golden() {
+    let p = ex("pacer.yaml"); let g = |f: &str| read(&ex(&format!("golden/pacer/{f}")));
+    let script = parse(&g("day.json")); let turns = script.as_arr().unwrap(); assert_eq!(turns.len(), 24);
+    let (c, s0, e) = probbit(&["persona", "init", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(s0, g("state0.json"), "state0");
+    let st = tmp("pacer-state.json"); std::fs::write(&st, &s0).unwrap();
+    let (c, prog, e) = probbit(&["persona", "compile", &p, "--state", &st, "--inputs", &jw(&turns[0])], ""); assert_eq!(c, 0, "{e}");
+    assert_eq!(prog, g("program-turn0.json"), "program of turn 0");
+    let gold = g("day.jsonl"); let lines: Vec<&str> = gold.lines().collect(); assert_eq!(lines.len(), 24);
+    for (i, t) in turns.iter().enumerate() {
+        let (c, out, e) = probbit(&["persona", "turn", &p, "--state", &st, "--inputs", &jw(t)], ""); assert_eq!(c, 0, "{e}");
+        assert_eq!(out.trim_end(), lines[i], "pacer turn {i}"); }
+    assert_eq!(read(&st), g("final-state.json"), "final state");
+    let (c, rep, e) = probbit(&["persona", "replay", &p, "--script", &ex("golden/pacer/day.json")], ""); assert_eq!(c, 0, "{e}"); assert_eq!(rep, gold, "replay");
+    let (c, lint, e) = probbit(&["persona", "lint", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(lint, g("lint.json"), "lint");
+    let (c, d, e) = probbit(&["persona", "describe", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(d, g("describe.json"), "describe");
+    // a new learner's gain 2.5 and its clause; consistent praise closes the gate and the reversal opens it; pace brisk after the
+    // bursts and slow after the 12 h gap
+    assert!(lines[0].contains(r#""surprise":{"initiative":2.5}"#) && lines[0].contains("learning fast: feedback changed"), "{}", lines[0]);
+    assert!(lines[3].contains(r#""surprise":{}"#) && !lines[3].contains("learning fast"), "{}", lines[3]);
+    assert!(lines[11].contains(r#""pace":{"level":"brisk","rbar":1.683403}"#) && lines[11].contains("pace brisk: average reward 1.68 an hour"), "{}", lines[11]);
+    assert!(lines[15].contains(r#""level":"slow""#) && lines[8].contains(r#""initiative":1.900694"#), "{}", lines[15]);
+    let _ = std::fs::remove_file(&st);
+}
