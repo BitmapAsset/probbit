@@ -13,6 +13,10 @@ Status: draft for review · Target: probbit 0.10.0 (part 1), a follow-on release
 4. Found by the build (wave 1a): `r_cap` above `drives.expectation.win_max` is refused with N-R5 (a need's win joins its
    goal's wins, which are at most `win_max`), and one need satisfied twice in one event is refused with N-E1. `drv_expect`
    reads the same E the turn's surprise is measured against (after the event's decay, before its win).
+5. Found by the build (wave 1b): P-R3 also refuses a habit condition on `pace_up` or `pace_down`, and an event that sends either
+   is refused at `inputs.<id>` (the engine sets both from R̄, as N-E4 does for the needs' inputs). The stance's `surprise` map is
+   `{}` once every gate is closed; precision weighting reads each sense's variance after the event's sense step; the pace clause
+   prints R̄ to 2 decimals.
 
 ## Summary
 

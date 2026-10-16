@@ -179,6 +179,9 @@ function diagnostics(f) {
   for(const x of M?.needs||[]){const e=obj(get(d.needs,x.id))||{},w=get(get(d.drives,'window'),x.goal),k=Math.round(Math.max(0,Math.min(1,(e.deficit||0)/(x.cap||1)))*12);
     fact(inputs,'Need · '+(x.say||x.id),'█'.repeat(k)+'░'.repeat(12-k)+'  deficit '+f2(e.deficit||0)+' / '+x.cap+' '+x.unit+' · term '+f2(e.term||0)+' · window '+x.goal+' '+(num(w)?f2(w)+' h left':'closed'));
     if(num(e.deficit)&&e.deficit>=x.cap-5e-7)fact(inputs,'⚠ At its cap',(x.say||x.id)+': the deficit sits at its cap ('+x.cap+')');}
+  if(M?.pace){const p=obj(d.pace)||{},r=num(p.rbar)?p.rbar:0,k=Math.round(Math.max(0,Math.min(1,r/(M.pace.cap||1)))*12);
+    fact(inputs,'Pace','█'.repeat(k)+'░'.repeat(12-k)+'  rbar '+f2(r)+' / '+M.pace.cap+' · r0 '+M.pace.r0+' · '+(p.level||'steady'));}
+  for(const t of M?.gates||[]){const g=num(get(d.surprise,t))?get(d.surprise,t):1;fact(inputs,'Gain · '+t,'g '+f2(g)+(g>1?' · learning fast':''));}
   const cr=obj(d.credit);if(f.open)fact(inputs,'Open decisions',f.open.length?f.open.map(o=>o.turn+' (e '+f2(o.e)+')').join(' · '):'None');
   if(cr&&cr.paid)fact(inputs,'Paid',`turn ${cr.paid.turn} · e ${f2(cr.paid.e)} · sign ${cr.paid.sign}`+(cr.paid.absorbed?' · absorbed':''));
   if(cr&&cr.closed?.length)fact(inputs,'Closed',cr.closed.map(x=>x.turn+' '+x.as).join(' · '));
