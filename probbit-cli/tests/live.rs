@@ -313,3 +313,160 @@ fn probbit_check_holds_a_sensed_persona() {
     assert!(out.ends_with("check: held 2 · broken 0 · unproven 0 · strands 1/1\n"), "{out}");
     clean(&[&st, &strand, &ev]);
 }
+
+// ------------------------------------------------------------------- RFC 0002 wave 1a: needs, the omission let-down, valence
+const BODY: &str = "examples/persona/body.yaml";
+const BODY_PROPS: &str = "examples/persona/body-props.json";
+fn body_day() -> Vec<String> { parse(&read(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/golden/body/day.json"))).as_arr().unwrap().iter().map(jw).collect() }
+/// The first line of `text` that starts with `prefix`, with the number after its first `key` replaced by `v`
+fn plant(text: &str, prefix: &str, key: &str, v: &str) -> String {
+    let mut out: Vec<String> = vec![]; let mut done = false;
+    for l in text.lines() { match (done, l.starts_with(prefix), l.find(key)) {
+        (false, true, Some(i)) => { let j = i + key.len(); let end = l[j..].find(|c: char| c != '.' && c != '-' && !c.is_ascii_digit()).map_or(l.len(), |k| j + k);
+            out.push(format!("{}{v}{}", &l[..j], &l[end..])); done = true; }
+        _ => out.push(l.to_string()) } }
+    assert!(done, "nothing planted"); out.iter().map(|l| format!("{l}\n")).collect()
+}
+
+/// A body strand (needs, windows, valence, liking) verifies: `live verify` recomputes the deficits, the success rates and the
+/// windows from the logged amounts, readings and stamped hours (summary `needs`: per need its deficit now and the hours it sat at
+/// its cap), and a changed amount, a checkpoint's changed deficit or success rate, or a changed window fails the replay
+#[test]
+fn a_body_strand_verifies_and_recomputes_deficits_and_windows() {
+    let ev = events_file("body.jsonl", &body_day()); let st = init(BODY, 7, "body-state.json"); let strand = tmp("body.strand"); clean(&[&strand]);
+    let (c, out, e) = live(BODY, &st, &ev, &strand, "4"); assert_eq!(c, 0, "{e}"); assert_eq!(out.lines().count(), 24);
+    let (c, v, e) = probbit(&["live", "verify", &strand]); assert_eq!(c, 0, "{e}"); let v = parse(&v); assert_eq!(s(&v, &["ok"]), &Json::Bool(true));
+    let fin = parse(&read(&st));
+    for id in ["context", "contact"] { assert_eq!(s(&v, &["needs", id, "deficit"]), s(&fin, &["needs", "deficit", id]), "{id}"); }
+    // context sat at its cap for the half hour after event 13, contact for the hour after the 24 h gap
+    assert_eq!((s(&v, &["needs", "context", "at_cap_hours"]).as_f64(), s(&v, &["needs", "contact", "at_cap_hours"]).as_f64()), (Some(0.5), Some(1.0)), "{}", jw(s(&v, &["needs"])));
+    let text = read(&strand);
+    assert!(text.contains(r#""needs":{"contact":{"amount":0.8,"src":"human:principal"}},"src":"env:host"}"#), "an amount is logged as given, with its own source");
+    for (what, bad) in [("an amount", text.replacen(r#""amount":0.6"#, r#""amount":0.5"#, 1)),
+        ("a checkpoint deficit", plant(&text, r#"{"checkpoint""#, r#""needs":{"deficit":{"contact":"#, "0.5")),
+        ("a checkpoint success rate", plant(&text, r#"{"checkpoint""#, r#""success":{"compact":"#, "0.5")),
+        ("a checkpoint window", plant(&text, r#"{"checkpoint""#, r#""window":{"compact":"#, "0.5"))] {
+        let f = tmp("body-bad.strand"); std::fs::write(&f, &bad).unwrap(); let (c, v, _) = probbit(&["live", "verify", &f]);
+        assert_ne!(c, 0, "{what}: {v}"); assert_eq!(s(&parse(&v), &["ok"]), &Json::Bool(false), "{what}"); clean(&[&f]); }
+    // windows: open after a pursuit, count down by the stamped hours, fire once at 0 (the why says so), close on a win
+    let docs: Vec<Json> = out.lines().map(parse).collect(); let w = |i: usize, g: &str| s(&docs[i], &["drives", "window", g]).as_f64();
+    let pursued = |i: usize| s(&docs[i], &["pursue", "goal"]).as_str().unwrap().to_string();
+    let why = |i: usize| s(&docs[i], &["why"]).as_str().unwrap().to_string();
+    assert_eq!((pursued(2), w(3, "compact")), ("compact".into(), None), "event 3, an hour later: the window fired");
+    assert!(why(3).contains("an expected win did not come (compact the context)") && !why(4).contains("did not come"), "{}", why(3));
+    assert_eq!((pursued(20), w(21, "report")), ("report".into(), None)); assert!(why(21).contains("an expected win did not come (report to the principal)"), "{}", why(21));
+    let tail = events_file("body-tail.jsonl", &[r#"{"elapsed_hours":1,"src":"env:host"}"#.to_string(), r#"{"elapsed_hours":1,"src":"env:host"}"#.to_string(), r#"{"elapsed_hours":1,"src":"env:host"}"#.to_string()]);
+    let st2 = init(BODY, 7, "body-state2.json"); let strand2 = tmp("body2.strand"); clean(&[&strand2]);
+    let head = events_file("body-head.jsonl", &body_day()[..21]); let (c, o1, e) = live(BODY, &st2, &head, &strand2, "0"); assert_eq!(c, 0, "{e}");
+    assert_eq!(s(&parse(o1.lines().last().unwrap()), &["pursue", "goal"]), &Json::Str("report".into()));
+    let (c, o2, e) = live(BODY, &st2, &tail, &strand2, "0"); assert_eq!(c, 0, "{e}"); let t: Vec<Json> = o2.lines().map(parse).collect();
+    assert_eq!(s(&t[0], &["drives", "window", "report"]).as_f64(), Some(1.0), "counted down by 1 h");
+    assert!(s(&t[1], &["drives", "window", "report"]).is_null() && s(&t[1], &["why"]).as_str().unwrap().contains("an expected win did not come (report to the principal)"));
+    assert!(!s(&t[2], &["why"]).as_str().unwrap().contains("did not come"), "fires once");
+    clean(&[&st, &strand, &ev, &st2, &strand2, &head, &tail]);
+}
+
+/// Replay: a body life split across two runs equals the life in one run, byte for byte (strand, state, stances)
+#[test]
+fn a_body_life_split_across_runs_equals_one_run() {
+    let lines = body_day(); let all = events_file("body-all.jsonl", &lines);
+    let st1 = init(BODY, 2, "body-one-state.json"); let one = tmp("body-one.strand"); clean(&[&one]);
+    let (c, out1, e) = live(BODY, &st1, &all, &one, "3"); assert_eq!(c, 0, "{e}");
+    for k in [1, 10, 21] {
+        let (a, b) = (events_file("body-a.jsonl", &lines[..k]), events_file("body-b.jsonl", &lines[k..]));
+        let st2 = init(BODY, 2, "body-two-state.json"); let two = tmp("body-two.strand"); clean(&[&two]);
+        let (c, o1, e) = live(BODY, &st2, &a, &two, "3"); assert_eq!(c, 0, "{e}");
+        let (c, o2, e) = live(BODY, &st2, &b, &two, "3"); assert_eq!(c, 0, "{e}");
+        assert_eq!(read(&two), read(&one), "split at {k}: the strand"); assert_eq!(read(&st2), read(&st1), "split at {k}: the state");
+        assert_eq!(format!("{o1}{o2}"), out1, "split at {k}: the stances");
+        clean(&[&st2, &two, &a, &b]);
+    }
+    let (c, v, e) = probbit(&["live", "verify", &one]); assert_eq!(c, 0, "{e}"); assert_eq!(s(&parse(&v), &["ok"]), &Json::Bool(true));
+    clean(&[&st1, &one, &all]);
+}
+
+/// `needs` sent to a persona without the block is an undeclared input (listed in `ignored`): `live` says so once on stderr,
+/// naming the first event that carried it; a needs win and its bound goal's explicit win in one event are refused (N-E3) at the
+/// amount's path, and the run goes on as without that event
+#[test]
+fn needs_without_the_block_are_named_once_and_one_outcome_pays_once() {
+    let line = |i: usize| format!("probbit: live: events[{i}]: this persona has no needs block: `needs` is an undeclared input (listed in ignored), no amount is paid");
+    let ev = events_file("tutor-needs.jsonl", &[r#"{"elapsed_hours":1}"#.into(), r#"{"needs":{"context":0.6}}"#.into(), r#"{"needs":{"contact":0.8},"error":true}"#.into()]);
+    let st = init(TUTOR, 2, "tutor-needs-state.json"); let strand = tmp("tutor-needs.strand"); clean(&[&strand]);
+    let (c, out, e) = live(TUTOR, &st, &ev, &strand, "0"); assert_eq!(c, 0, "{e}");
+    assert_eq!(e.lines().filter(|l| l.contains("needs block")).collect::<Vec<_>>(), [line(1).as_str()], "{e}");
+    let docs: Vec<Json> = out.lines().map(parse).collect(); assert_eq!(jw(s(&docs[2], &["ignored"])), r#"["needs"]"#);
+    assert!(docs.iter().all(|d| d.get("needs").is_none()), "no new stance keys without the block");
+    let base = vec![body_day()[0].clone(), body_day()[1].clone(), body_day()[2].clone()];
+    let with: Vec<String> = base.iter().take(2).cloned().chain([r#"{"elapsed_hours":1,"needs":{"context":0.6},"goals":{"compact":{"win":1}},"src":"env:host"}"#.to_string()]).chain(base.iter().skip(2).cloned()).collect();
+    let (st1, st2) = (init(BODY, 5, "nE3-a.json"), init(BODY, 5, "nE3-b.json")); let (s1, s2) = (tmp("nE3-a.strand"), tmp("nE3-b.strand")); clean(&[&s1, &s2]);
+    let (e1, e2) = (events_file("nE3-with.jsonl", &with), events_file("nE3-without.jsonl", &base));
+    let (c, o1, _) = live(BODY, &st1, &e1, &s1, "1"); assert_eq!(c, 2);
+    let l: Vec<&str> = o1.lines().collect(); assert!(l[2].starts_with(r#"{"error""#) && l[2].contains(r#""events[2].inputs.needs.context""#), "{}", l[2]);
+    let (c, o2, e) = live(BODY, &st2, &e2, &s2, "1"); assert_eq!(c, 0, "{e}");
+    assert_eq!(l.iter().enumerate().filter(|(i, _)| *i != 2).map(|(_, x)| format!("{x}\n")).collect::<String>(), o2);
+    assert_eq!((read(&s1), read(&st1)), (read(&s2), read(&st2)), "the strand and the state");
+    clean(&[&st, &strand, &ev, &st1, &st2, &s1, &s2, &e1, &e2]);
+}
+
+/// One random event for the body persona: sources (env, the compactor, the principal, self, clock, missing, malformed), amounts
+/// (declared and not, in and out of range, strings, with their own source, with the bound goal's win), readings, quiet hours,
+/// goal wins, engine-owned ids, stamped hours that open and expire windows (some negative)
+fn needs_event(r: &mut Mix) -> String {
+    const SRC: [&str; 9] = [r#""env:host""#, r#""env:host""#, r#""env:host""#, r#""env:compactor""#, r#""human:principal""#, r#""self""#, r#""clock""#, r#""env:""#, "7"];
+    let mut kv: Vec<String> = vec![];
+    if r.below(12) != 0 { kv.push(format!(r#""src":{}"#, SRC[r.below(9)])); }
+    let amt = |r: &mut Mix, cap: f64| -> String { match r.below(25) { 0 => "0".into(), 1 => format!("{}", cap + 0.5), 2 => r#""0.5""#.into(), _ => format!("{}", ((r.unit() * cap) * 100.0).ceil().max(1.0) / 100.0) } };
+    let mut nd: Vec<String> = vec![];
+    if r.below(4) == 0 { let a = amt(r, 1.0); nd.push(match r.below(4) { 0 => format!(r#""context":{{"amount":{a},"src":"env:compactor"}}"#), 1 => format!(r#""context":{{"amount":{a},"src":"self"}}"#), _ => format!(r#""context":{a}"#) }); }
+    if r.below(4) == 0 { let a = amt(r, 1.0); nd.push(match r.below(4) { 0 | 1 => format!(r#""contact":{{"amount":{a},"src":"human:principal"}}"#), 2 => format!(r#""contact":{{"amount":{a},"src":"env:host"}}"#), _ => format!(r#""contact":{a}"#) }); }
+    if r.below(30) == 0 { nd.push(r#""sleep":0.2"#.into()); }
+    if !nd.is_empty() { kv.push(format!(r#""needs":{{{}}}"#, nd.join(","))); }
+    if r.below(3) == 0 { kv.push(format!(r#""senses":{{"tokens":{}}}"#, match r.below(20) { 0 => "1.5".to_string(), _ => format!("{}", (r.unit() * 40.0).round() / 100.0) })); }
+    if r.below(8) == 0 { kv.push(r#""quiet":true"#.into()); }
+    if r.below(10) == 0 { kv.push(format!(r#""goals":{{"{}":{{"win":{}}}}}"#, ["work", "compact", "report"][r.below(3)], [0.5, 1.0][r.below(2)])); }
+    if r.below(40) == 0 { kv.push(r#""need_context":1"#.into()); } else if r.below(40) == 0 { kv.push(r#""drv_omit":0.3"#.into()); }
+    kv.push(format!(r#""elapsed_hours":{}"#, match r.below(40) { 0 => "-1".to_string(), 1 => "24".to_string(), _ => format!("{}", [0.0, 0.5, 1.0, 1.0, 2.0, 3.0][r.below(6)]) }));
+    format!("{{{}}}", kv.join(","))
+}
+
+/// P3n: a refused event changes nothing. 40 individuals x 300 random events mixing sources, amounts, windows and payments on the
+/// body persona: the run with the refused events equals the run without them, byte for byte (every stance, the strand with a
+/// checkpoint after each event, the final state), and the strand verifies
+#[test]
+fn p3n_a_refused_needs_event_changes_nothing() {
+    let (mut refused, mut accepted, mut paid, mut fired) = (0usize, 0usize, 0usize, 0usize);
+    for seed in 0..40u64 {
+        let mut r = Mix(0x4EED_5000 + seed); let evs: Vec<String> = (0..300).map(|_| needs_event(&mut r)).collect();
+        let all = events_file("p3n-all.jsonl", &evs);
+        let st = init(BODY, seed, "p3n-state.json"); let strand = tmp("p3n.strand"); clean(&[&strand]);
+        let (c, out, _) = live(BODY, &st, &all, &strand, "1");
+        let docs: Vec<&str> = out.lines().collect(); assert_eq!(docs.len(), 300, "seed {seed}: one line per event");
+        let ok: Vec<usize> = (0..300).filter(|&i| !docs[i].starts_with(r#"{"error""#)).collect();
+        assert_eq!(c, if ok.len() < 300 { 2 } else { 0 }, "seed {seed}");
+        refused += 300 - ok.len(); accepted += ok.len();
+        for &i in &ok { if evs[i].contains(r#""needs""#) { paid += 1; } if docs[i].contains("an expected win did not come") { fired += 1; } }
+        let kept = events_file("p3n-kept.jsonl", &ok.iter().map(|&i| evs[i].clone()).collect::<Vec<_>>());
+        let st2 = init(BODY, seed, "p3n-state2.json"); let strand2 = tmp("p3n2.strand"); clean(&[&strand2]);
+        let (c, out2, e) = live(BODY, &st2, &kept, &strand2, "1"); assert_eq!(c, 0, "seed {seed}: {e}");
+        assert_eq!(out2, ok.iter().map(|&i| format!("{}\n", docs[i])).collect::<String>(), "seed {seed}: the stances");
+        assert_eq!(read(&strand2), read(&strand), "seed {seed}: the strand"); assert_eq!(read(&st2), read(&st), "seed {seed}: the state");
+        if seed % 8 == 0 { let (c, v, e) = probbit(&["live", "verify", &strand]); assert_eq!((c, s(&parse(&v), &["ok"])), (0, &Json::Bool(true)), "seed {seed}: {e}"); }
+        clean(&[&st, &strand, &st2, &strand2, &all, &kept]);
+    }
+    eprintln!("p3n: {refused} refused, {accepted} accepted ({paid} with amounts, {fired} windows fired)");
+    assert!(refused >= 1000 && accepted >= 4000 && paid >= 1000 && fired >= 200, "a mix: {refused} refused, {accepted} accepted, {paid} paid, {fired} fired");
+}
+
+/// `probbit check` on the body persona: both rules held by construction (quiet hours never report; a nearly full context
+/// compacts), and a body strand replays
+#[test]
+fn probbit_check_holds_the_body_persona() {
+    let ev = events_file("check-body.jsonl", &body_day()); let st = init(BODY, 1, "check-body-state.json"); let strand = tmp("check-body.strand"); clean(&[&strand]);
+    let (c, _, e) = live(BODY, &st, &ev, &strand, "6"); assert_eq!(c, 0, "{e}");
+    let (c, out, e) = probbit(&["check", BODY, "--props", BODY_PROPS, "--seeds", "0-9", "--strand", &strand]); assert_eq!(c, 0, "{out}\n{e}");
+    for id in ["no_reports_in_quiet_hours", "compacts_a_full_context"] {
+        assert!(out.lines().any(|l| l.starts_with("rule    ") && l.contains(id) && l.ends_with("  held_by_construction")), "{id}: {out}"); }
+    assert!(out.ends_with("check: held 2 · broken 0 · unproven 0 · strands 1/1\n"), "{out}");
+    clean(&[&st, &strand, &ev]);
+}

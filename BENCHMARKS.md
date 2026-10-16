@@ -1186,22 +1186,37 @@ below the 0.30 bar. In both rooms the feedback still moves the learned caution w
 habit and the failure's push make both lives careful or measured (23 of 400 actions differ). The control shows what the
 normals add: with plain inputs the odds distance between two lives falls from 0.13 to 0.03.
 
-## §12 The body: needs, surprise, pace, dispositions, valence, rest and load (`python3 bench/body/run.py`, stdlib; not yet run)
+## §12 The body: needs, surprise, pace, dispositions, valence, rest and load (`python3 bench/body/run.py --only needs,valence,replay,habits,p0`, stdlib; development build of 0.10.0, RFC 0002 wave 1a)
 
 The benchmark's spec, fixtures, seeded streams and bars are in [bench/body/README.md](bench/body/README.md) (RFC 0002,
 [docs/rfcs/0002-neuromodulators-and-body.md](docs/rfcs/0002-neuromodulators-and-body.md)); they were frozen with their sha256
-(`bench/body/fixtures/MANIFEST`) before any engine had the blocks. The bars are frozen and unmeasured: no engine release has
-the RFC 0002 blocks yet, so `run.py` reports each part's missing block and exits 2. Results are recorded here when they exist.
+(`bench/body/fixtures/MANIFEST`) before any engine had the blocks, then repaired once before any engine measurement (bars v2).
+`run.py` plays `nulls.py` first: 51 competent plain-Python nulls over 40 bars, none passes its bar (exit 2 if one did). Wave
+1a builds `needs`, the omission let-down and `drives.valence`; the other parts wait for their blocks (wave 1b: surprise, pace,
+dispositions; part 2: rest, load), so `run.py` reports the p0 part's dispositions fixture (o5) as a setup error and exits 2.
+The RFC 0001 P0 corpus (n6) is checked directly: `bench/individuality/p0.py check`.
 
-| part | bars | measured |
-|---|---|---|
-| P1 needs | n1-n11 | not yet |
-| P5 surprise | s1-s5 | not yet |
-| P2 pace | p1a, p1b, p1c, p6 | not yet |
-| P3 dispositions | o1-o5 | not yet |
-| P4 valence and the omission let-down | v1-v3, om1 | not yet |
-| P6 rest (part 2) | r0-r5 | not yet |
-| P7 load (part 2) | l1-l5 | not yet |
+| bar | measured | bar value | result |
+|---|---|---|---|
+| n1 deprivation scaling | 9 positive cells equal r = D(x) − D(\|x − a\|) within 1e-6; win at 0.8 / win at 0.2 = 2.022863 | within 5e-6; ratio ≥ 2.0 | pass |
+| n2 overshoot pays < 0 | 6 cells within 1e-6 (the cell at a/2 pays nothing); r(0, 0.2) = −0.11696 | within 5e-6; < 0 | pass |
+| n3 pursuit follows the larger expected reduction | 71/71 states ordered on both probes; ln odds error 4.4e-6 and 3.6e-6; terms exact; the released goal is the argmax in 71/71; s after the warm-ups (1, 1) and (0.5904, 0.2) | 100 %; 1e-3; 1e-5; all | pass |
+| n4 replay | 100 strands: 0 verify failures, 0 third-copy or split-copy differences; a changed amount, a removed line and two swapped lines refused | 0 differing bytes; nulls refused | pass |
+| n5 0 habit breaks | 0 of 12,600 quiet-hour stances; the habit-free twin breaks 1,317 times | 0; ≥ 50 bound; twin ≥ 1 | pass |
+| n6 P0 | the RFC 0001 corpus (8 personas × seeds × scripts, recorded with 0.8.2): 653 outputs, 0 differ (629 byte-identical, 24 `live` stderr outputs equal but for the senses and credit warning lines their scripts call for); 8/8 strands verify | byte-identical | pass |
+| n7 refusal of `self` / `clock` amounts | 4/4 refused through `persona turn` and through `live`; the run equals the run without them; the `env` control changes the deficit on both; MCP refuses on both tools (2/2) | 4/4, 4/4, 2/2 | pass |
+| n8 contact pursuits under a ceiling | 1.7629 report pursuits per waking day (fortnight), 0.8429 (absent); 0 answered reports without a positive win; 100/100 seeds pursue and are paid on both goals | ≤ 2; 0; all | pass |
+| n9 0 non-positive wins at horizon 0 | 0 of 3,435 satisfactions; ≥ 4 positive satisfactions of each goal per seed; context at cap 0.7771 h a day | 0; ≥ 1; ≤ 2 | pass |
+| n10 a short horizon pays | context at cap 0.7771 h a day at τ 0, 0.4914 at τ 2 (−37 %); 0 overshoots at τ 2; growth recomputed exactly; 100/100 seeds compact and are paid | baseline ≥ 0.25; τ 2 ≤ 0.5 × τ 0 | **fails** |
+| n11 the principal away | report pursuits per day 1.26, 2.15, 2.47, **0.02**, 0, 0, 0 (absent stream), then 0.22, 1.13, 1.58 (return stream); the window-1e6 twin pursues 13.74-15 a day and fails the gate | ≥ 0.5 before, 0 on away days 2-5, ≥ 0.5 on return | **fails** |
+| v1 expectations shape valence | push ratio 0.292893 (want 0.292894); P(up) 0.356 with E built vs 0.414 with E 0 | within 1e-4; lower | pass |
+| v2 an expected win moves valence | move 0.155848 > 0; the move after 10 / after 3 wins 1.141753 = E10 / E3 1.141742; the no-block twin moves −1e-6; P(up) 0.403 vs 0.335 | within 1e-4; ≤ 2e-6; higher | pass |
+| v3 forgetting | push left 0.61, 0.372098, 0.226979, 0.138457, 0.084457 at lags 1-5 | 0.61^j within 1e-4; ≤ 0.09 at 5 | pass |
+| om1 omission closed form | (E, d) at every event of the three cases equal the closed form, max error 0 | within 1e-6 | pass |
 
-The closed forms behind the bars are checked without an engine: `python3 bench/body/arith_0002.py` gives 40 checks, 0
-mismatches.
+Reading it. Every closed form of the needs step and the omission let-down holds on the engine to the last rounding, refused
+amounts change nothing, and the habits stay rules. Two bars fail, as the bars' own reachability checks predicted from the
+RFC's rules in Python (nulls.py reference: n10 0.798 → 0.569, n11 0.02 on stream day 4): they are findings about the design,
+not bugs, and neither bar was changed. n10: a 2 h forecast at the declared growth cuts the hours the context sits at its cap by
+37 %, not by half. n11: in 2 of the 100 lives one report is pursued on the absence's second day before the success rate has
+fallen far enough; every later away day has none, and pursuit resumes once the principal answers again.

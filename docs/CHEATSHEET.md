@@ -45,6 +45,8 @@ The exact tiers run before the sampler:
 - `credit` (a persona with a `learning.credit` block, docs/persona.md §2.8): `paid` (`turn`, `e`, `sign`, `absorbed`,
   `stance`) or null, `closed` (`turn`, `as`: control, expired, cancelled, paid, evicted), `open` (turns), `stance` (this
   stance's digest).
+- `needs` (a persona with a `needs:` block, docs/persona.md §2.12): per need its `deficit` after this event, the `forecast`
+  and the `term` the `pursue` field read; `drives.window`: per goal with `expect_by_hours` the hours left, or null.
 
 ## Senses (0.9.0, docs/persona.md §2.11)
 - Event: `{"senses": {"tool_fail": true, "tool_latency": {"v": 2.4, "src": "env:runner"}}, "src": "env:host"}`: a bare
@@ -68,6 +70,25 @@ The exact tiers run before the sampler:
   digest that is not the turn's stance (B-R6). A control line closes every open decision; MCP refuses `cancel`.
 - `live verify` summary: `open`; `live verify STRAND --actions FILE`: lines `{"turn": T, "action": {trait: level}}`, the
   earliest one that differs from the released level (exit 1).
+
+## Needs, omission windows, valence (0.10.0, docs/persona.md §2.12, §2.9)
+- Block: `needs: {drive: {"n": 4, "m": 3}, r_cap: 1, items: [{id, unit, cap, weight, per_hour, satisfy_from, amount, bind}]}`
+  (quote `"n"`: YAML 1.1 reads a bare n as false); the bound goal declares `expect_by_hours`.
+- Event: `{"needs": {"context": {"amount": 0.6, "src": "env:compactor"}}, "src": "env:host"}`: a bare amount takes the event's
+  `src`, which must be in the need's `satisfy_from` (`env`, `human`; never `self` or `clock`).
+- Per event: every need grows (per stamped hour, per raw reading of a number sense), then each satisfaction pays
+  r = D(x) − D(x with x_j ← |x_j − a|) as a win (or a setback) of its bound goal; D = (Σ w x^4)^(1/3) at n 4, m 3: amount 0.2
+  pays 2.0229× more at deficit 0.8 than at 0.2, and −0.117 at deficit 0.
+- `pursue` gains the term want × s × (expected reduction), capped at `pursue.cap`; s, the goal's success rate, rises on a win
+  and falls × (1 − rate) when the goal's window expires unanswered. Rules read `need.<id>.deficit`, never the term.
+- Windows: open after a released stance pursues the goal, count down by stamped hours, close on a win, fire once at 0:
+  d = −min(E, pe_cap), E ← E × (1 − rate); `why`: "an expected win did not come"; not a learning signal.
+- `drives.valence: {mood, expect, surprise}` (0 < expect < surprise): mood evidence = expect × E of the goal pursued before
+  + surprise × the turn's prediction error; `afterglow.liking` adds a gain on the win itself.
+- Refused: N-R1–N-R6 when the persona is read; amounts that are undeclared, ≤ 0, above cap, twice, from a source not listed,
+  with the bound goal's own win (N-E3), or engine-owned ids sent as inputs (N-E4); amounts through the MCP turn tools.
+- `live verify` summary: `needs` per need (`deficit`, `at_cap_hours`); `monitor`: a NEEDS row per need, its window, an
+  at-cap alert; `lint`: horizons whose forecast passes K/2 before the deficit does, habits that exclude a bound goal.
 
 ## Exit codes
 - `decide`, `run`, `evaluate`: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one

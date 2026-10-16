@@ -220,6 +220,25 @@ class Mcp(unittest.TestCase):
         r = self.call("probbit_persona_turn", {"persona_path": tutor, "state": t0, "inputs": {"senses": {"tool_fail": True}}})
         self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["stance"]["ignored"], ["senses"])
 
+    def test_needs_amounts_never_come_through_the_agents_channel(self):
+        # needs (docs/persona.md 2.12, RFC 0002 security review): both turn tools refuse an event that carries needs amounts for a
+        # persona with a needs block, from any source; the same event without amounts is answered; without the block `needs` is
+        # listed in ignored, as before
+        self.legacy("2025-11-25")
+        path = os.path.join(EX, "persona", "body.yaml")
+        state = self.call("probbit_persona_init", {"persona_path": path, "seed": 3})["structuredContent"]
+        for tool, key in (("probbit_persona_turn", "inputs"), ("probbit_live_event", "event")):
+            for amount in ({"context": 0.6}, {"contact": {"amount": 0.8, "src": "human:principal"}}):
+                args = {"persona_path": path, "state": state, key: {"needs": amount, "src": "env:host"}}
+                e = self.call(tool, args)
+                self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], "arguments.%s.needs" % key)
+            ok = self.call(tool, dict(args, **{key: {"elapsed_hours": 1, "src": "env:host"}}))
+            self.assertFalse(ok["isError"])
+        tutor = os.path.join(EX, "persona", "tutor.yaml")
+        t0 = self.call("probbit_persona_init", {"persona_path": tutor, "seed": 3})["structuredContent"]
+        r = self.call("probbit_persona_turn", {"persona_path": tutor, "state": t0, "inputs": {"needs": {"context": 0.6}}})
+        self.assertFalse(r["isError"]); self.assertEqual(r["structuredContent"]["stance"]["ignored"], ["needs"])
+
     def test_persona_fuzz_answers_exactly_as_the_cli(self):
         self.legacy("2025-11-25")
         tutor = os.path.join(EX, "..", "probbit-cli", "tests", "fixtures", "persona", "tutor-0.5.0.yaml")

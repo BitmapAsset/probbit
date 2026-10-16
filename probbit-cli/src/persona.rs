@@ -4149,4 +4149,26 @@ mod tests {
         let gw = g(&st.to_json(&p), &["needs", "genes", "weight", "contact"]).as_f64().unwrap(); assert_eq!(gw, r6(round_to((0.4 * normal(&[&p.name, "4", "need", "contact", "weight"])).exp(), 4)));
         assert!(g(&st.to_json(&p), &["needs", "genes", "weight", "context"]).is_null(), "spread 0 stores no gene");
     }
+
+    /// `prove` boxes a need's term (RFC 0002 Invariants, proof coverage): `need_<id>` enters the bound anywhere in [-pursue.cap,
+    /// +pursue.cap], so a margin the drives' box alone would prove is unknown with the need, and a margin past both boxes is proved
+    #[test]
+    fn prove_puts_the_need_terms_in_their_box() {
+        let rule = json::parse(r#"{"when":{"busy":true},"then":{"pursue":["idle"]}}"#).unwrap();
+        let doc = |m: &str, needs: bool| { let d = NEED1.replace(r#""drives":"#, &format!(r#""inputs":[{{"id":"busy","kind":"flag","effects":{{"pursue":{{"idle":{m}}}}}}}],"drives":"#));
+            if needs { return d; } let Json::Obj(kv) = json::parse(&d.replace(r#","expect_by_hours":1"#, "")).unwrap() else { unreachable!() };
+            json::write(&Json::Obj(kv.into_iter().filter(|(k, _)| k != "needs").collect()), false) };
+        let verdict = |m: &str, needs: bool| { let p = build(&json::parse(&doc(m, needs)).unwrap()).unwrap(); prove_seed(&p, &props(&p, &rule, "--never", "never").unwrap()[0], 0, &run) };
+        assert!(verdict("6.5", false).is_ok(), "the drives' box alone: proved");
+        let (cell, why) = verdict("6.5", true).unwrap_err();
+        assert_eq!(why, "pursue: the score gap 6.5000 is within the bound 8.5000", "the need's box adds pursue.cap 3");
+        assert_eq!(canon(g(&cell, &["number_halfwidth"])), r#"{"fuel term":3}"#);
+        assert!(verdict("8.6", true).is_ok(), "past both boxes: proved");
+        // the fuzzer's alphabet sends amounts on the grid x (0, cap] and the windows' hours
+        let p = build(&json::parse(&doc("6.5", true)).unwrap()).unwrap();
+        let alpha = alphabet(&p, &[0.0, 0.5, 1.0], &[1.0]);
+        assert_eq!(alpha.iter().find(|a| a.0 == "need.fuel").map(|a| canon(&Json::Arr(a.2.clone()))), Some("[0.5,1]".to_string()));
+        assert_eq!(alpha.iter().find(|a| a.0 == "elapsed_hours").map(|a| canon(&Json::Arr(a.2.clone()))), Some("[1]".to_string()));
+        assert_eq!(canon(&event_json(&[("need.fuel".into(), Json::Num(0.5)), ("busy".into(), Json::Bool(true))])), r#"{"busy":true,"needs":{"fuel":0.5}}"#);
+    }
 }
