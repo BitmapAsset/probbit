@@ -316,8 +316,9 @@ choice is fixed here and frozen with the rest:
   the learner re-learns in 6 turns after rest instead of 5, 6 / 11 = 0.545 against the pass value 0.5, because the lock
   habit of r4 shares the stream: rule 2; without them 5 / 11 = 0.4545, the number the bar's reachability check cites; the
   locked ratio is reported); s3 checks the cap on the step before recentring, as the RFC states it (v1's script compared
-  each recentred change with g_max × step_cap, which a correct gated step exceeds in 968 of 1,800 lives of the dry run).
-  Pass values and bar text unchanged.
+  each recentred change with g_max × step_cap, which a correct gated step exceeds in 968 of 1,800 lives of the dry run);
+  v2's no-block twin is gated at a move within 2e-6 of 0, not exactly 0 (its six-decimal accumulator leaves a residue of
+  1e-6). Pass values and bar text unchanged.
 - **Bars v2, n7's script** (before any engine measurement): the `persona turn` control moved from 1 h to 5 h of growth. At
   1 h the deficit is 0.1 and the amount 0.2 overshoots it back to 0.1, so a correct engine shows no change and would have
   failed the bar. Found by a dry run of `needs.py` against a Python model of RFC 0002 A.3-A.4 (not the engine); the bar's
