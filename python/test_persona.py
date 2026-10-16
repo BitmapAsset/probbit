@@ -5,6 +5,7 @@ import probbit
 
 EX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "examples", "persona")
 FX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probbit-cli", "tests", "fixtures", "persona")
+ST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probbit-cli", "tests", "fixtures", "strands")
 
 
 def load(name):
@@ -138,6 +139,25 @@ class Live(unittest.TestCase):
             with self.assertRaises(probbit.ProbbitInputError) as e:
                 probbit.live_event(tutor, r["state"], {"elapsed_hours": -1})
             self.assertEqual(e.exception.path, "events[0].event.elapsed_hours")
+
+    def test_live_verify_answers_unsupported_for_a_newer_engines_strand(self):
+        # docs/persona.md 5.7: a block or a line kind this engine does not know (RFC 0002's needs, a rest line) is unsupported
+        # (exit 5), a document as a divergence is; a strand tampered with next to it still diverges at its line
+        import subprocess, tempfile
+        this = subprocess.run([probbit.find_binary(), "version"], capture_output=True, encoding="utf-8").stdout.strip()
+        self.assertTrue(probbit.live_verify(os.path.join(ST, "sensed-credit-0.9.0-dev.strand"))["ok"])
+        for name, line, field in (("next-needs.strand", 1, "needs"), ("next-rest.strand", 8, "rest")):
+            self.assertEqual(probbit.live_verify(os.path.join(ST, name)),
+                             {"ok": False, "line": line, "unsupported": field, "engine": this, "strand_engine": "probbit 0.10.0-dev"})
+        with open(os.path.join(ST, "next-rest.strand"), encoding="utf-8") as f:
+            lines = f.read().splitlines()
+        del lines[3]  # event 3 removed: line 4 no longer chains to the line before it
+        with tempfile.TemporaryDirectory() as d:
+            bent = os.path.join(d, "bent.strand")
+            with open(bent, "w", encoding="utf-8", newline="") as f:
+                f.write("\n".join(lines) + "\n")
+            self.assertEqual(probbit.live_verify(bent), {"ok": False, "line": 4, "diverges":
+                             "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)"})
 
 
 class BoundaryErrors(unittest.TestCase):

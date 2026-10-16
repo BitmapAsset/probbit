@@ -120,7 +120,7 @@ enum Kind { Event, Control, Checkpoint }
 fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else { Kind::Event } }
 /// The header's keys, as this engine writes them
 const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state", "document"];
-/// The first key of a line after the header that its kind does not have (the line's keys in their canonical order): a line kind
+/// The earliest key of a line after the header that its kind does not have (the line's keys in canonical order): a line kind
 /// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "rest": ...}`
 /// gives `rest`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
@@ -377,7 +377,7 @@ pub fn failure(text: &str, line: usize, why: &str) -> Json {
 }
 /// The engine a strand's header names: its `engine` string, or null when the header is not JSON or has none
 pub fn strand_engine(text: &str) -> Json {
-    json::parse(lines(text).first().copied().unwrap_or("")).ok().and_then(|h| h.get("engine").cloned()).filter(|e| matches!(e, Json::Str(_))).unwrap_or(Json::Null)
+    json::parse(lines(text).into_iter().next().unwrap_or("")).ok().and_then(|h| h.get("engine").cloned()).filter(|e| matches!(e, Json::Str(_))).unwrap_or(Json::Null)
 }
 /// This binary's engine (the strand header's `engine`)
 pub fn engine() -> String { format!("probbit {}", env!("CARGO_PKG_VERSION")) }

@@ -26,8 +26,20 @@ All notable changes to this project are documented here. The format follows
   the released levels; `monitor` draws the open decisions with their eligibility; `fuzz` adds late, reordered, duplicated,
   cancelled and unknown payments; the MCP turn tools refuse `cancel`. `examples/agent-harness/addressed.json` (with
   `late.py` and its golden) and benchmark metric c are new.
+- docs/persona.md §7: the host contract in three paragraphs (one outcome per stance; host event ids and duplicate delivery;
+  restart time), one line each in docs/CHEATSHEET.md.
 
 ### Changed
+- Unreleased builds print `0.9.0-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a strand
+  header tells them from 0.8.2.
+- `live verify` (CLI, Python `live_verify`, MCP `probbit_live_verify`) reports a header key, a persona or state field, a line
+  kind or a line field this engine does not know (a newer engine's strand) as `unsupported by this engine: <field>`: exit 5,
+  `{ok: false, line, unsupported, engine, strand_engine}`, never the divergence verdict. A tampered strand still diverges at
+  its line (exit 1), the chain checked past an unsupported line too. The released 0.8.2 binary reports a 0.9.0 strand as
+  `line 1 diverges` (its output is kept in `probbit-cli/tests/fixtures/strands/`). `probbit check` prints such a strand as
+  `line K: unsupported by this engine: <field> (written by <engine>)`, never FAIL (a strand that fails the gate: exit 1), and
+  its `--json` entry adds `unsupported` and `strand_engine`; `live --strand` and `live control` name the field when they refuse
+  to continue it.
 - `live` says once on stderr when a persona without a senses block receives a `senses` key (still an undeclared input,
   listed in `ignored`). The monitor's panel of the event's inputs is labelled INPUTS (it was SENSES).
 - `live` says once on stderr when a persona without a credit block receives `await`, `for` or `cancel` (still undeclared

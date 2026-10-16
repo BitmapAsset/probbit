@@ -348,7 +348,7 @@ one CI gate: prove + fuzz a persona's rules, replay its strands (exit 0 / 1 / 3)
 .PP
 The rule lock in one command, for CI: vet the rules a persona must keep before its first task and after every policy update, then replay the receipts. It runs `probbit persona lint`'s pipeline (contradicting habits; with \-\-props, prove each rule over the individuals, then fuzz the ones the bound leaves unknown, the rules' and habits' thresholds on the grid) and `probbit live verify` on every \-\-strand (each strand replays against the persona in its own header).
 .PP
-One line per rule (held = proved for every event sequence, held_by_construction = a habit implies it, broken seed N = the search found a counterexample, unproven = not proved and no counterexample found), one line per strand (ok N events, FAIL and the first line that differs, or the first line with a field or line kind this engine does not know: `line K: unsupported by this engine: FIELD (written by ENGINE)`, never FAIL), then `check: held H \[u00B7] broken B \[u00B7] unproven U \[u00B7] strands S/T`.
+One line per rule (held = proved for every event sequence, held_by_construction = a habit implies it, broken seed N = the search found a counterexample, unproven = not proved and no counterexample found), one line per strand (ok N events, or FAIL and the first line that differs), then `check: held H \[u00B7] broken B \[u00B7] unproven U \[u00B7] strands S/T`.
 .PP
 Flags:
 .RS 4
