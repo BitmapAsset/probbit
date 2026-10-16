@@ -55,10 +55,10 @@ def quiet(hour):
     return h >= 23 or h < 8
 
 
-def fortnight(seed, days=14, absent_from_day=None):
+def fortnight(seed, days=14, absent_from_day=None, absent_until_day=None):
     """Per hour: quiet, the `tokens` reading (waking hours, uniform 0-0.12), the answer draw (p 0.5) for a report sent the hour
-    before, the unprompted-message draw (p 0.15, waking hours). Days from `absent_from_day` (0-based) have no answers and no
-    principal messages."""
+    before, the unprompted-message draw (p 0.15, waking hours). Days from `absent_from_day` (0-based) up to (not including)
+    `absent_until_day` have no answers and no principal messages."""
     g = rng(seed)
     quiet_s, tokens, answer, unprompted = [], [], [], []
     for hour in range(24 * days):
@@ -66,7 +66,8 @@ def fortnight(seed, days=14, absent_from_day=None):
         t = r6(g.uniform(0.0, 0.12))
         a = g.random() < 0.5
         u = g.random() < 0.15
-        away = absent_from_day is not None and hour // 24 >= absent_from_day
+        away = (absent_from_day is not None and hour // 24 >= absent_from_day
+                and (absent_until_day is None or hour // 24 < absent_until_day))
         quiet_s.append(q)
         tokens.append(0.0 if q else t)
         answer.append(a and not away)
@@ -81,6 +82,11 @@ def gen_fortnight():
 def gen_absent():
     # the fortnight's opening 2 days (the same draws), then 5 days with no principal messages and no answers
     return [fortnight(s, days=7, absent_from_day=2) for s in FORTNIGHT_SEEDS]
+
+
+def gen_return():
+    # bars v2 (n11): the absent stream's 7 days (the same draws), then 3 days with the principal back
+    return [fortnight(s, days=10, absent_from_day=2, absent_until_day=7) for s in FORTNIGHT_SEEDS]
 
 
 def gen_probe():
@@ -151,10 +157,37 @@ def gen_loop():
             for a in (12, 20) for k in (0.2, 0.5, 0.7, 0.9, 1.0)]
 
 
+def gen_bursts():
+    """Bars v2 (p1c), no draws: three streams of 600 hours with the same average reward, 0.5 an hour, on goal `task` from
+    `env`: steady (a win of 0.5 every hour), bursty (a win of 4 every 8th hour, an event every hour) and spaced (an event
+    every 3 hours, each a win of 1.5)."""
+    steady = [{"elapsed_hours": 0 if i == 0 else 1, "goals": {"task": {"win": 0.5}}, "src": "env:host"} for i in range(600)]
+    bursty = []
+    for i in range(600):
+        ev = {"elapsed_hours": 0 if i == 0 else 1, "src": "env:host"}
+        if i % 8 == 7:
+            ev["goals"] = {"task": {"win": 4}}
+        bursty.append(ev)
+    spaced = [{"elapsed_hours": 0 if i == 0 else 3, "goals": {"task": {"win": 1.5}}, "src": "env:host"} for i in range(200)]
+    return [{"name": "steady", "events": steady}, {"name": "bursty", "events": bursty}, {"name": "spaced", "events": spaced}]
+
+
+def gen_burst():
+    """Bars v2 (p6), no draws: an admissible burst that drives an uncapped R-bar above the cap: 12 events at elapsed 0, each
+    paying a win of 4 (win_max), then 24 quiet hourly events (the recovery from the cap)."""
+    return [{"burst_events": 12, "win": 4, "recovery_hours": 24}]
+
+
 # ---------------------------------------------------------------- dispositions: two-point and pairs
 def gen_two_point():
     g = rng(TWO_POINT_SEED)
     return [{"wins": "".join("b" if g.random() < 0.5 else "a" for _ in range(20000)), "a": 0.5, "b": 1.5}]
+
+
+def gen_two_point_gaps():
+    """Bars v2 (o1): 3,000 wins of 0.5 or 1.5 at p 0.5 with elapsed hours uniform 0.5-3, so E's 48 h half-life acts."""
+    g = rng(TWO_POINT_SEED + 1)
+    return [{"wins": [[r6(g.uniform(0.5, 3.0)), 1.5 if g.random() < 0.5 else 0.5] for _ in range(3000)]}]
 
 
 def gen_pairs():
@@ -199,7 +232,10 @@ STREAM_GENS = {
     "fortnight": gen_fortnight, "absent": gen_absent, "probe": gen_probe, "flip": gen_flip, "blocks": gen_blocks,
     "loop": gen_loop, "two-point": gen_two_point, "pairs": gen_pairs, "reversal": gen_reversal, "lineage": gen_lineage,
     "patterns": gen_patterns,
+    # bars v2
+    "return": gen_return, "bursts": gen_bursts, "burst": gen_burst, "two-point-gaps": gen_two_point_gaps,
 }
+GAINS = (1.25, 1.5, 2.0, 2.5, 3.0)   # bars v2 (s1, s2): the constant-gain learners
 
 
 # ---------------------------------------------------------------- variant personas, derived from the frozen fixtures
@@ -288,6 +324,20 @@ def gen_variants():
                                      lambda t: drop_block(t, "habits"))
     v["load-noload.yaml"] = variant("load.yaml", ["load.yaml without the load block (the null of l1; P0 copy).", frozen],
                                     lambda t: drop_block(t, "load"))
+    # bars v2
+    v["needs2-s02.yaml"] = variant("needs2.yaml", ["needs2.yaml with success.init 0.2, so warm-up wins on one goal set the two "
+                                                   "goals' success rates apart (bar n3, v2).", frozen],
+                                   lambda t: sub_once(t, "  success: {rate: 0.2, init: 1}", "  success: {rate: 0.2, init: 0.2}"))
+    for g in GAINS:
+        v["gate-g%s.yaml" % g] = variant("gate.yaml", ["gate.yaml without surprise, rate and step_cap times a constant gain %s: "
+                                                       "the gate's step with g fixed (s1, s2 v2 nulls)." % g, frozen],
+                                         lambda t: drop_block(t, "surprise"),
+                                         lambda t, g=g: sub_once(t, "  rate: 0.5\n", "  rate: %s\n" % r6(0.5 * g)),
+                                         lambda t, g=g: sub_once(t, "  step_cap: 0.2\n", "  step_cap: %s\n" % r6(0.2 * g)))
+    v["load-effects.yaml"] = variant("load.yaml", ["load.yaml with a load effect on caution (bar l1 v2: the load reaches a decision).",
+                                                   frozen],
+                                     lambda t: sub_once(t, "  hold: {mood: strain, above: 1, per_hour: 0.01}",
+                                                        "  hold: {mood: strain, above: 1, per_hour: 0.01}\n  effects: {caution: 1}"))
     return v
 
 

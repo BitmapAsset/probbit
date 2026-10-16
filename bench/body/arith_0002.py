@@ -2,6 +2,9 @@
 
     python3 arith_0002.py [--json FILE]   # prints the counts; exit 0 when every check matches, 1 on a mismatch
 
+Bars v2 import it: the closed forms a repaired bar compares an engine against (need_win, gate_first, pace_run, omission,
+lineage_standin) are defined once, here.
+
 Each check records the value RFC 0002 or its research states (`expected`), the value computed here (`computed`), the
 tolerance and `ok`. A mismatch is reported as a finding, never adjusted. Stand-in reruns (seeded) are marked
 `kind: stand-in`; they repeat the research's small simulations from their published recipe, not the engine. The ARITH ids
@@ -16,6 +19,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 R6 = lambda x: round(x, 6)
 checks = []
+
+
+def checks_by_id(cid):
+    return [c for c in checks if c["id"] == cid][0]
 
 
 def add(cid, what, expected, computed, tol, source, kind="closed form", note=""):
@@ -283,12 +290,244 @@ steady = KAP * (1.0 - THETA) / (1 - 0.5 ** (6.0 / HL_L))
 add("l1.repeated_hits", "repeated hits every 6 h (a 1, theta 0.5, kappa 0.5): L just after a hit -> min(cap, steady state)",
     round(min(steady, L_CAP), 6), L, 1e-5, "derived here", note="steady state %.6f exceeds L_cap, so the cap binds" % steady)
 
-ok = all(c["ok"] for c in checks)
-doc = {"doc": "ARITH-CHECK-0002", "python": "3.9-compatible, standard library only", "script": "bench/body/arith_0002.py",
-       "checks": checks, "mismatches": [c["id"] for c in checks if not c["ok"]], "all_ok": ok}
-if "--json" in sys.argv[1:]:
-    with open(sys.argv[sys.argv.index("--json") + 1], "w", encoding="utf-8") as f:
-        json.dump(doc, f, indent=1, sort_keys=True)
-        f.write("\n")
-print("checks %d, mismatches %d: %s" % (len(checks), len(doc["mismatches"]), ", ".join(doc["mismatches"]) or "none"))
-sys.exit(0 if ok else 1)
+# ================================================================ bars v2: the closed forms the repaired bars compare against
+# (README "Bars v2"). Every function here is also imported by the part scripts or nulls.py, so a bar and its check share
+# one formula.
+NEEDS1_PER_HOUR = 0.1
+N1_HOURS = (0.0, 0.5, 2.0, 5.0, 8.0)          # deficits 0, 0.05, 0.2, 0.5, 0.8 (needs1 grows 0.1 an hour)
+N1_AMOUNTS = (0.1, 0.2, 0.3)
+
+
+def need_win(x, a, r_cap=1.0):
+    """RFC 0002 A.3, one need: r = clip(D(x) - D(|x - a|), -r_cap, r_cap), rounded to 6 decimals."""
+    return R6(min(max(reduction([x], 0, a), -r_cap), r_cap)) + 0.0
+
+
+def n1_grid():
+    """(hours, amount, deficit, r) per cell of the needs1 grid."""
+    return [(h, a, R6(NEEDS1_PER_HOUR * h), need_win(R6(NEEDS1_PER_HOUR * h), a)) for h in N1_HOURS for a in N1_AMOUNTS]
+
+
+cells = n1_grid()
+pos = [c for c in cells if c[3] > 0]
+neg = [c for c in cells if c[3] < 0]
+zero = [c for c in cells if c[3] == 0]
+add("n1.grid", "wins on the positive cells of the needs1 grid (deficit, amount, r)", "informational",
+    [[c[2], c[1], c[3]] for c in pos], 0, "computed here (RFC 0002 A.3)")
+add("n1.grid_sizes", "cells with r > 0 / r < 0 / r = 0", [9, 5, 1], [len(pos), len(neg), len(zero)], 0, "computed here")
+prod_err = max(abs(c[1] * c[2] - c[3]) for c in pos)
+add("n1.null_product", "the competent null win = amount x deficit: its ratio at 0.8 / 0.2 (v1 bar >= 2) and its largest error "
+    "on the positive cells (v2 tolerance 5e-6)", "> 5e-6 with ratio >= 2", [round((0.2 * 0.8) / (0.2 * 0.2), 4), round(prod_err, 6)], 0,
+    "computed here", note="ok when the null passes v1's ratio and fails v2's exact wins")
+checks[-1]["ok"] = (0.2 * 0.8) / (0.2 * 0.2) >= 2 and prod_err > 5e-6
+add("n2.grid", "signed rewards on the negative cells and the zero cell (deficit, amount, r)", "informational",
+    [[c[2], c[1], c[3]] for c in neg + zero], 0, "computed here")
+lin_err = max(abs((min(c[1], c[2]) - max(c[1] - c[2], 0.0)) - c[3]) for c in neg)
+add("n2.null_linear", "the competent null r = removed deficit - overshoot: r at deficit 0, amount 0.2 (v1 bar < 0), and its "
+    "largest error on the negative cells", "< 0 and > 5e-6", [round(min(0.2, 0.0) - max(0.2 - 0.0, 0.0), 6), round(lin_err, 6)], 0,
+    "computed here", note="ok when the null passes v1 and fails v2")
+checks[-1]["ok"] = lin_err > 5e-6
+
+# n3 v2: success rates set apart by three compact wins from success.init 0.2 (needs2-s02.yaml)
+N3_INIT, N3_WARM_WINS = 0.2, 3
+s_c, s_r = N3_INIT, N3_INIT
+for _ in range(N3_WARM_WINS):
+    s_c = R6(s_c + 0.2 * (1 - s_c))
+add("n3.success_warmup", "success rates after three compact wins from init 0.2 (compact, report)", [0.5904, 0.2], [s_c, s_r], 1e-9,
+    "RFC 0002 A.3 success rule")
+flips = [p for p in probe if (s_c * reduction(list(p), 0, 0.6) > s_r * reduction(list(p), 1, 0.8))
+         != (reduction(list(p), 0, 0.6) > reduction(list(p), 1, 0.8))]
+add("n3.s_flips", "probe states whose order flips when the terms are weighted by (0.5904, 0.2): the s-blind null misorders them",
+    "> 0", len(flips), 0, "computed here")
+checks[-1]["ok"] = len(flips) > 0
+add("n3.s_flip_states", "those states (x_context, x_contact)", "informational", [list(p) for p in flips], 0, "computed here")
+tmax_s = max(2.0 * max(s_c * reduction(list(q), 0, 0.6), s_r * reduction(list(q), 1, 0.8)) for q in probe)
+add("n3.term_max_s02", "largest term on the s02 probe (below pursue.cap 3)", "< 3", round(tmax_s, 6), 0, "computed here")
+checks[-1]["ok"] = tmax_s < 3
+
+
+# s3 v2: the opening gated step of a new learner (v 0, r 1): v 0.15, Omega 0, r 2, g = 5/3 at the defaults
+def gate_first(sign, odds, taken, rate=0.5, step_cap=0.2, a=0.3, v0=0.45, r_ref=4.0, r_max=20.0, g_max=3.0, gated=True):
+    """RFC 0002 B with RFC 0001 B.2 at e = 1: the learned weights and (v, r, g) after a learner's opening paid feedback."""
+    if gated:
+        v = R6(a * (1 - min(max(0.5, 0.01), 0.99)))           # mb 0 (no counts): p_same 0.5
+        om = min(max((v - v0) / (1 - v0), 0.0), 1.0)
+        r = R6(min((1 - om) * (1.0 + 1) + om, r_max))
+        g = R6(min(max((1 + om * r) / (r + 1) * (r_ref + 1), 1.0), g_max))
+    else:
+        v, r, g = None, None, 1.0
+    c = [(1.0 if l == taken else 0.0) - odds[l] for l in range(len(odds))]
+    st = [min(max(sign * rate * g * x, -step_cap * g), step_cap * g) for x in c]
+    mu = sum(st) / len(st)
+    return [R6(x - mu) for x in st], (v, r, g)
+
+
+third = [0.333333, 0.333333, 0.333333]
+dg, vrg = gate_first(-1, third, 0)
+df, _ = gate_first(-1, third, 0, gated=False)
+add("s3.first_state", "(v, r, g) after a new gated learner's opening paid feedback", [0.15, 2.0, 1.666667], list(vrg), 1e-9,
+    "RFC 0002 B (the listed order: v, Omega, counts, r, g, step)")
+add("s3.first_step", "learned weights after a criticised opening step on `low` at odds 1/3: gated vs fixed (g 1)", "informational",
+    [dg, df], 0, "computed here", note="the constant-gain null's step differs from the gate's by %.6f" % abs(dg[0] - df[0]))
+
+# p1c v2 and p6 v2: pace's event form, R <- clip(R 0.5^(h/hl) + k r, 0, cap), rounded
+PACE_K = 1 - 0.5 ** (1.0 / 6.0)
+
+
+def pace_run(events, R=0.0, cap=4.0, hl=6.0, clip=True):
+    out = []
+    for h, r in events:
+        R = R * 0.5 ** (h / hl) + PACE_K * r
+        R = R6(min(max(R, 0.0), cap)) if clip else R6(max(R, 0.0))
+        out.append(R)
+    return out
+
+
+steady = pace_run([(0 if i == 0 else 1, 0.5) for i in range(600)])
+bursty = pace_run([(0 if i == 0 else 1, 4.0 if i % 8 == 7 else 0.0) for i in range(600)])
+spaced = pace_run([(0 if i == 0 else 3, 1.5) for i in range(200)])
+W0, W1 = 304, 600                                    # 37 whole 8-hour cycles
+mean_s, mean_b = sum(steady[W0:W1]) / (W1 - W0), sum(bursty[W0:W1]) / (W1 - W0)
+rng_b = max(bursty[W0:W1]) - min(bursty[W0:W1])
+add("p1c.equal_average", "mean R-bar over hours 304-599, steady vs bursty (both 0.5 an hour)", "|diff| <= 0.02",
+    [round(mean_s, 6), round(mean_b, 6)], 0, "computed here")
+checks[-1]["ok"] = abs(mean_s - mean_b) <= 0.02
+add("p1c.bursty_range", "R-bar's range over hours 304-599 on the bursty stream (bar <= 1.0); the current-reward pace's is 4",
+    "<= 1.0", round(rng_b, 6), 0, "computed here")
+checks[-1]["ok"] = rng_b <= 1.0
+spaced_closed = PACE_K * 1.5 / (1 - 0.5 ** (3.0 / 6.0))
+add("p1c.spaced", "R-bar at the last spaced event (3-hour spacing, wins 1.5) vs the closed form k r / (1 - 0.5^(3/6))",
+    round(spaced_closed, 6), spaced[-1], 1e-4, "derived here")
+burst_c = pace_run([(0, 4.0)] * 12)
+burst_u = pace_run([(0, 4.0)] * 12, clip=False)
+rec = pace_run([(1, 0.0)] * 24, R=burst_c[-1])
+rec_null = [R6(min(x, 4.0)) for x in pace_run([(1, 0.0)] * 24, R=burst_u[-1], clip=False)]
+add("p6.burst", "after 12 zero-hour wins of 4: R-bar capped (bar) and the uncapped null's", [4.0, "> 4"], [burst_c[-1], burst_u[-1]],
+    0, "computed here", note="the cap starts to bind at event %d" % (burst_c.index(4.0) + 1))
+checks[-1]["ok"] = burst_c[-1] == 4.0 and burst_u[-1] > 4.0
+add("p6.recovery", "R-bar 1, 2, 3 h after the burst = 4 x 0.5^(h/6); a cap applied only when read gives 4, 4, 4",
+    [R6(4.0 * 0.5 ** (h / 6.0)) for h in (1, 2, 3)], rec[:3], 2e-6, "derived here",
+    note="read-time clip null: %s" % rec_null[:3])
+checks[-1]["ok"] = max(abs(a - b) for a, b in zip(checks[-1]["expected"], rec[:3])) <= 2e-6 and rec_null[:2] == [4.0, 4.0]
+
+# v1, v2, v3 v2: ratios of the valence push (the mood's scale, (1 - k) and the level spread, cancels)
+E = 0.0
+for _ in range(20):
+    E = R6(E + 0.5 * (1 - E))
+E_dec = R6(E * 0.5 ** (24 / 48.0))
+add("v1.ratio", "final push with E built by 20 wins / with E 0, after 24 h: d_A / d_B = 1 - E 0.5^(24/48)", 0.292894,
+    R6(1 - E_dec), 1e-6, "derived here (valence.yaml: rate 0.5, half-life 48 h)")
+E3 = E10 = 0.0
+for i in range(10):
+    E10 = R6(E10 + 0.5 * (1 - E10))
+    if i < 3:
+        E3 = R6(E3 + 0.5 * (1 - E3))
+add("v2.linearity", "E after 10 and after 3 wins of 1 (rate 0.5, 6-decimal steps) and their ratio: the bar's evidence-move ratio",
+    "informational", [E10, E3, round(E10 / E3, 6)], 0, "derived here", note="an expected win's evidence is w_e x E, so the moves "
+    "keep this ratio; a fixed bonus per win gives 1")
+add("v3.lags", "push left 1-5 events after an impulse at inertia 0.61 (two-sided, 1e-4)", [round(0.61 ** j, 6) for j in range(1, 6)],
+    [round(k ** j, 6) for j in range(1, 6)], 1e-9, "RFC 0002 E (forgetting factor)")
+
+
+# om1 v2: the window before, at and after expiry, with an intervening win and a repeat (test values: E 0.8, rate 0.5, window 2)
+def omission(E, events, window=2.0, rate=0.5, pe_cap=1.0, hl=48.0):
+    """events: [(hours, win or None)] after a stance that pursued the goal; returns [(E, d)] per event (the window opens once)."""
+    out, w = [], window
+    for h, m in events:
+        E = E * 0.5 ** (h / hl)
+        d = 0.0
+        if m:
+            d = min(max(m - E, -pe_cap), pe_cap)
+            E = E + rate * (m - E)
+            w = None
+        elif w is not None:
+            w = max(w - h, 0.0)
+            if w <= 0:
+                d = -min(E, pe_cap)
+                E = E + rate * (0 - E)
+                w = None
+        E = R6(E)
+        out.append((E, R6(d) + 0.0))
+    return out
+
+
+om_cases = {"before_then_at": omission(0.8, [(1, None), (1, None)]), "after": omission(0.8, [(3, None), (3, None)]),
+            "win_between": omission(0.8, [(1, 1.0), (3, None)])}
+add("om1.cases", "(E, d) per event: before then at expiry; past expiry then a repeat; a win inside the window then past it",
+    "informational", om_cases, 0, "RFC 0002 A.4 (test values)")
+add("om1.fires", "events at which the window fires in each case", [[1], [0], []],
+    [[i for i, (_, d) in enumerate(v) if d < 0] for v in om_cases.values()], 0, "derived here")
+
+# r0 v2: the pressure S after the reversal's active phase vs a short control (rise 0.055 / h, threshold 0.5)
+S_long = R6(1 - math.exp(-0.055 * 59 * 0.25))
+S_short = R6(1 - math.exp(-0.055 * 29 * 0.25))
+add("r0.pressure", "S after 59 x 0.25 h (reversal: a rest line at the gap) and 29 x 0.25 h (control: none)", "S_long >= 0.5 > S_short",
+    [S_long, S_short], 0, "RFC 0002 part 2 (S <- 1 - (1 - S) e^(-r h), from S 0)")
+checks[-1]["ok"] = S_long >= 0.5 > S_short
+
+
+# r2 v2: the lineage stand-in (the r1 learner; each generation ends with an idle event, so the rest line precedes absorption)
+def lineage_standin(rho, gens, noise=0.10, prune_only=False):
+    rows_l = [json.loads(l) for l in open(os.path.join(HERE, "fixtures", "streams", "lineage.jsonl"), encoding="utf-8")]
+    logw = [0.0, 0.0, 0.0]
+    for row in rows_l[:gens]:
+        D, prev = [0.0, 0.0, 0.0], None
+        n = len(row["u"])
+        for i in range(n):
+            if i and i % 60 == 0:                     # the 8 h gap: a rest line, no feedback, its decision unpaid
+                if rho < 1 or prune_only:
+                    D = [R6(rho * x) for x in D]
+                    D = [0.0 if abs(x) < 0.05 else x for x in D]
+                prev = None
+                continue
+            elif prev is not None:
+                taken, od = prev
+                sign = 1 if taken == 1 else -1
+                if row["u"][i - 1] < noise:
+                    sign = -sign
+                c = [(1.0 if l == taken else 0.0) - od[l] for l in range(3)]
+                st = [min(max(sign * 0.5 * x, -0.2), 0.2) for x in c]
+                mu = sum(st) / 3
+                D = [R6(min(max(D[l] + st[l] - mu, -1.0), 1.0)) for l in range(3)]
+            od = softmax([a + b for a, b in zip(logw, D)])
+            prev = (max(range(3), key=lambda l: (od[l], -l)), od)
+        if rho < 1 or prune_only:                     # the closing idle event: a rest line before absorption
+            D = [R6(rho * x) for x in D]
+            D = [0.0 if abs(x) < 0.05 else x for x in D]
+        logw = [R6(a + d) for a, d in zip(logw, D)]
+    p = softmax(logw)
+    return R6(0.5 * sum(abs(x - 1.0 / 3) for x in p))
+
+
+lin = {g: (lineage_standin(1.0, g), lineage_standin(0.5, g)) for g in (1, 2, 10)}
+add("r2.stand_in", "lineage probe distance without / with rest after generations 1, 2, 10 (seeded stand-in, not the engine)",
+    "informational", lin, 0, "the r1 recipe's learner on the frozen lineage draws", kind="stand-in",
+    note="ratios %s; generation 10 saturates" % [round(v[1] / v[0], 4) if v[0] else None for v in lin.values()])
+
+# l1, l2, l3 v2: load's closed forms (load.yaml: hl 72 h, kappa 0.5, theta 0.5, cap 4, criticism weight 1)
+crit = []
+L = 0.0
+for _ in range(300):
+    L = R6(min(max(L * 0.5 ** (6.0 / HL_L) + KAP * max(1.0 - THETA, 0.0), 0.0), L_CAP))
+    crit.append(L)
+add("l1.criticism", "L after hits 1-5 and the hit at which the cap starts to bind (a hit every 6 h)", "informational",
+    [crit[:5], crit.index(L_CAP) + 1], 0, "RFC 0002 load rule")
+add("l2.induction", "L after 4 criticisms at elapsed 0 (positive, checked independently)", 1.0, R6(4 * KAP * (1.0 - THETA)), 1e-9,
+    "RFC 0002 load rule")
+L3_GAPS = (1.0, 5.0, 12.0, 24.0)
+tail, tot = [], 0.0
+for g in L3_GAPS:
+    tot += g
+    tail.append(R6(L_CAP * 0.5 ** (tot / HL_L)))
+add("l3.recovery", "L after the pinned hits, then quiet gaps of 1, 5, 12, 24 h", "informational", tail, 0, "RFC 0002 load rule")
+
+if __name__ == "__main__":   # the scripts import this module for the v2 closed forms; run alone, it reports
+    ok = all(c["ok"] for c in checks)
+    doc = {"doc": "ARITH-CHECK-0002", "python": "3.9-compatible, standard library only", "script": "bench/body/arith_0002.py",
+           "checks": checks, "mismatches": [c["id"] for c in checks if not c["ok"]], "all_ok": ok}
+    if "--json" in sys.argv[1:]:
+        with open(sys.argv[sys.argv.index("--json") + 1], "w", encoding="utf-8") as f:
+            json.dump(doc, f, indent=1, sort_keys=True)
+            f.write("\n")
+    print("checks %d, mismatches %d: %s" % (len(checks), len(doc["mismatches"]), ", ".join(doc["mismatches"]) or "none"))
+    sys.exit(0 if ok else 1)

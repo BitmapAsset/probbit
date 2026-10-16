@@ -1,0 +1,28 @@
+# gate.yaml without surprise, rate and step_cap times a constant gain 3.0: the gate's step with g fixed (s1, s2 v2 nulls).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body gate
+  version: 1.0.0
+  seed: 0
+  summary: one learned trait with a volatility-gated step size
+traits:
+  - id: approach
+    levels: [low, mid, high]
+inputs:
+  - id: praise
+    kind: flag
+    say: the outcome was confirmed good
+  - id: criticism
+    kind: flag
+    say: the outcome was judged bad
+learning:
+  from: [praise, criticism]
+  traits: [approach]
+  rate: 1.5
+  step_cap: 0.6
+  total_cap: 1
+  credit:
+    max_open: 8
+    half_life_events: 32
+reward_from: [human, env]

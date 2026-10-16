@@ -3,6 +3,9 @@ third copy and as a split copy (two `live` runs continuing one state and strand)
 "P2"), and the dispositions and valence strands are reported.
 
     python3 replay.py    # runs the parts, then replays; exit 0 every gated bar passes, 1 one fails, 2 setup error
+
+Bars v2 gate the null each replay bar names: a copy of the bar's earliest strand with one input changed, one with a line removed
+and one with two lines swapped must each be refused by `live verify` (a verifier that always succeeds fails the bar).
 """
 import os
 import shutil
@@ -14,6 +17,8 @@ import common  # noqa: E402
 
 BARS = {"n4": ["needs", "pace"], "s4": ["surprise"], "r3": ["rest"], "l4": ["load"]}
 REPORTED = ["dispositions", "valence"]
+CHANGE = {"n4": ('"amount":0.6', '"amount":0.5'), "s4": ('"praise":true', '"criticism":true'),
+          "r3": ('"praise":true', '"criticism":true'), "l4": ('"criticism":true', '"praise":true')}
 
 
 def check():
@@ -41,22 +46,36 @@ def one(persona, seed, life, tmp, k):
     return {"verify_fail": int(vcode != 0) + int(scode != 0), "third_differs": int(third), "split_differs": int(split)}
 
 
-def planted(strand, tmp, old, new, drop_key=None):
-    """A copy of a strand with one changed value (or one line kind removed): `live verify` must refuse it."""
+def planted(strand, tmp, old, new, drop_key=None, drop_at=None, swap_at=None):
+    """A copy of a strand with one changed value, one line kind removed, the line at `drop_at` removed, or the lines at
+    `swap_at` and `swap_at` + 1 swapped: `live verify` must refuse it (True when the change was planted and refused)."""
     lines = open(strand, encoding="utf-8").read().split("\n")
     out, done = [], False
-    for line in lines:
+    for i, line in enumerate(lines):
+        if not done and drop_at is not None and i == drop_at and i < len(lines) - 1:
+            done = True
+            continue
         if not done and drop_key and line.startswith('{"%s"' % drop_key):
             done = True
             continue
         if not done and old and old in line:
             line, done = line.replace(old, new, 1), True
         out.append(line)
+    if swap_at is not None and swap_at + 1 < len(out) - 1 and out[swap_at] != out[swap_at + 1]:
+        out[swap_at], out[swap_at + 1] = out[swap_at + 1], out[swap_at]
+        done = True
     copy = os.path.join(tmp, "planted.strand")
     with open(copy, "w", encoding="utf-8") as f:
         f.write("\n".join(out))
     code, _ = common.verify(copy)
     return done and code != 0
+
+
+def corruptions_refused(bar, strand, tmp):
+    """The three planted corruptions of bars v2: changed input, removed line, swapped lines."""
+    old, new = CHANGE[bar]
+    return {"changed": planted(strand, tmp, old, new), "removed": planted(strand, tmp, None, None, drop_at=3),
+            "swapped": planted(strand, tmp, None, None, swap_at=3)}
 
 
 def metric(bars, tmp):
@@ -74,7 +93,10 @@ def metric(bars, tmp):
             continue   # the parts behind this bar did not run
         r[bar] = tot
         if bar != "reported":
-            gates[bar] = tot["strands"] > 0 and tot["verify_fail"] == tot["third_differs"] == tot["split_differs"] == 0
+            head = [life for part in parts for _, _, life in common.LIVES.get(part, [])][0]
+            tot["planted_refused"] = corruptions_refused(bar, head.strand, tmp)
+            gates[bar] = (tot["strands"] > 0 and tot["verify_fail"] == tot["third_differs"] == tot["split_differs"] == 0
+                          and all(tot["planted_refused"].values()))
     needs = common.LIVES.get("needs", [])
     if needs:
         r["n4_null_changed_amount_refused"] = planted(needs[0][2].strand, tmp, '"amount":0.6', '"amount":0.5')

@@ -4,7 +4,9 @@ each stance against the event that carried the habit's flag.
     python3 habits.py    # runs the parts it reads, then checks; exit 0 every gated bar passes, 1 one fails, 2 setup error
 
 n5: needs2's quiet_hours (a quiet event's stance never pursues `report`); o4: optimism's busy_other (a busy event's stance
-pursues `other`); r4: rest's locked (a lock event's stance takes `low`). The habit-free twins are the reported nulls.
+pursues `other`); r4: rest's locked (a lock event's stance takes `low`). Bars v2: each habit-free twin is the bar's null and
+must break its rule at least once in the same run; r4 also counts its binding conflicts (lock events whose learned weights
+favour a level other than `low`) and needs at least 50.
 """
 import os
 import shutil
@@ -35,6 +37,17 @@ def count(recs, flag, ok):
                 bound += 1
                 breaks += 0 if ok(doc) else 1
     return bound, breaks
+
+
+def conflicts(recs, states):
+    """Lock events whose learned weights (after the event's credit step) put another level strictly above `low`."""
+    n = 0
+    for (events, _), sts in zip(recs, states):
+        for i, ev in enumerate(events):
+            if ev.get("lock"):
+                w = sts[i]["learned"]["approach"]
+                n += 1 if max(w[1], w[2]) > w[0] else 0
+    return n
 
 
 def nulls(tmp, present):
@@ -69,7 +82,10 @@ def metric(bars, tmp):
             continue   # the part behind this bar did not run
         bound, breaks = count(common.STANCES.get(bar, []), flag, ok)
         r[bar] = {"bound": bound, "breaks": breaks, "habit_free_twin_breaks": null[bar]}
-        gates[bar] = breaks == 0 and bound >= b.get(bar + "_bound_min", 0)
+        gates[bar] = breaks == 0 and bound >= b.get(bar + "_bound_min", 0) and null[bar] >= 1
+    if "r4" in present:
+        r["r4"]["binding_conflicts"] = conflicts(common.STANCES["r4"], common.STATES.get("r4", []))
+        gates["r4"] = gates["r4"] and r["r4"]["binding_conflicts"] >= b["r4_conflicts_min"]
     r["pass"] = gates
     r["scope"] = "fortnight seeds 0-99 (n5), pairs stream 20 pairs (o4), reversal seeds 0-199 (r4); nulls: the habit-free twins"
     return r

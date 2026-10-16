@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format follows
 
 - **RFC 0002 draft and bench/body frozen** (docs/rfcs/0002-neuromodulators-and-body.md, bench/body/): fixtures, seeds and
   bars committed before any engine measurement; no engine change.
+- **bench/body bars v2**, repaired before any engine measurement: 28 weak or vacuous bars now need exact or bounded
+  magnitudes, coverage and executable nulls; `bench/body/nulls.py` plays a competent plain-Python null against every bar
+  (each is rejected); the v1 bars stay as `fixtures/bars-v1.md` and `bars-v1.json`.
 
 ## 0.9.0 - unreleased
 

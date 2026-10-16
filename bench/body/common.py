@@ -25,6 +25,7 @@ BOOTSTRAP_RESAMPLES = 2000
 # filled by the parts during one run: replay.py replays LIVES, habits.py checks STANCES
 LIVES = {}     # part -> [(persona, seed, Life)]
 STANCES = {}   # bar -> [(events, stances)]
+STATES = {}    # bar -> [states per life] (bars v2: r4 reads the learned weights a lock event's habit overrides)
 
 
 class SetupError(Exception):

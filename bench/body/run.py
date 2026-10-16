@@ -3,9 +3,9 @@
     python3 run.py [--only needs,gate,pace,dispositions,valence,rest,load,replay,habits,p0] [--out result.json]
 
 The binary is PROBBIT_BIN, else `probbit` on PATH. Exit 0: every gated bar of the parts run passes; 1: one fails; 2: a setup
-error (no binary, a file that differs from fixtures/MANIFEST, or an engine that refuses a part's block). An engine without
-a part's block is reported per part, `<part>  setup error: this engine does not support <block>`; the supported parts are
-still measured, result.json records both, and the exit is 2.
+error (no binary, a file that differs from fixtures/MANIFEST, a bar that passes its competent null in nulls.py, or an engine
+that refuses a part's block). An engine without a part's block is reported per part, `<part>  setup error: this engine does
+not support <block>`; the supported parts are still measured, result.json records both, and the exit is 2.
 """
 import json
 import os
@@ -20,6 +20,19 @@ import manifest_check  # noqa: E402
 
 PARTS = ["needs", "gate", "pace", "dispositions", "valence", "rest", "load", "replay", "habits", "p0"]
 DERIVED = {"replay", "habits"}   # read the lives the parts above wrote in this run; no block of their own
+
+
+def nulls_check():
+    """Bars v2: every bar must reject its competent plain-Python null (nulls.py) before an engine number counts."""
+    import io
+    import contextlib
+    import nulls
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = nulls.main([])
+    if code:
+        raise common.SetupError("a bar passes its competent null: " + out.getvalue().strip().splitlines()[-1])
+    return out.getvalue().strip().splitlines()[-1]
 
 
 def main(argv):
@@ -43,9 +56,10 @@ def main(argv):
         if bad:
             raise common.SetupError("files differ from fixtures/MANIFEST: " + ", ".join(bad))
         bars = common.bars()
+        nulls_ok = nulls_check()
     except common.SetupError as e:
         common.fail(str(e))
-    result = {"probbit": common.version(b), "parts": {}, "setup_errors": {}}
+    result = {"probbit": common.version(b), "bars_version": bars.get("version", 1), "nulls": nulls_ok, "parts": {}, "setup_errors": {}}
     tmp = common.tmpdir()
     try:
         for name in [p for p in PARTS if p in only]:
