@@ -307,3 +307,7 @@ choice is fixed here and frozen with the rest:
   variants added (every v1 stream and variant regenerates byte for byte), `bars.json` and `bars.md` rewritten with a
   version marker, the v1 copies kept as `bars-v1.json` and `bars-v1.md`, MANIFEST regenerated. Section "Bars v2" lists
   every change; no pass value was relaxed.
+- **Bars v2, n7's script** (before any engine measurement): the `persona turn` control moved from 1 h to 5 h of growth. At
+  1 h the deficit is 0.1 and the amount 0.2 overshoots it back to 0.1, so a correct engine shows no change and would have
+  failed the bar. Found by a dry run of `needs.py` against a Python model of RFC 0002 A.3-A.4 (not the engine); the bar's
+  pass value and text are unchanged.

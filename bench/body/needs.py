@@ -95,9 +95,10 @@ def n7_bars(tmp):
         code, doc, err = common.turn(p, st, {"elapsed_hours": 1, "needs": {"fuel": bsrc}}, out)
         refused_turn += 1 if (code != 0 and not os.path.exists(out)) else 0
     # the positive control through the same transport: accepted, and the state differs from the turn without the amount
+    # (5 h: deficit 0.5 -> 0.3 with a win; at 1 h the amount 0.2 would overshoot 0.1 back to 0.1 and change nothing)
     o_env, o_none = os.path.join(tmp, "n7-env.out"), os.path.join(tmp, "n7-none.out")
-    c_env, d_env, _ = common.turn(p, st, {"elapsed_hours": 1, "needs": {"fuel": {"amount": 0.2, "src": "env:host"}}}, o_env)
-    c_none, d_none, _ = common.turn(p, st, {"elapsed_hours": 1, "src": "env:host"}, o_none)
+    c_env, d_env, _ = common.turn(p, st, {"elapsed_hours": 5, "needs": {"fuel": {"amount": 0.2, "src": "env:host"}}}, o_env)
+    c_none, d_none, _ = common.turn(p, st, {"elapsed_hours": 5, "src": "env:host"}, o_none)
     turn_env_changes = (c_env == 0 and c_none == 0 and os.path.exists(o_env) and d_env is not None and d_none is not None
                         and deficits(d_env).get("fuel") != deficits(d_none).get("fuel"))
     # live: the refused events change nothing (the run equals the run without them); the env amount changes the deficit
