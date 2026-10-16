@@ -47,6 +47,23 @@ fn senses_rows_and_the_moved_normal_alert() {
     let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
 }
 
+/// docs/persona.md §2.12: one row per declared need under NEEDS (its deficit as a bar over [0, cap], the term, its goal's
+/// window) and an alert while a deficit sits at its cap: the body example's day up to its 24 h gap leaves contact at its cap
+#[test]
+fn needs_rows_and_the_at_cap_alert() {
+    let f = tmp("body"); let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
+    let day = std::fs::read_to_string("../examples/persona/golden/body/day.json").unwrap();
+    let ev = format!("{f}.events"); std::fs::write(&ev, day.lines().filter(|l| l.starts_with(" {")).take(23).map(|l| format!("{}\n", l.trim().trim_end_matches(','))).collect::<String>()).unwrap();
+    let (c, _, err) = probbit(&["live", "../examples/persona/body.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
+    let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
+    let k = out.lines().position(|l| l.starts_with("NEEDS   ")).expect(&out); let rows: Vec<&str> = out.lines().skip(k).collect();
+    assert_eq!(rows[0], "NEEDS   context  [###.....]  deficit 0.40/1 token_share  term +0.02  window compact closed", "{out}");
+    assert_eq!(rows[1], "        contact  [########]  deficit 1.00/1 share  term +0.99  window report closed", "{out}");
+    assert_eq!(rows[2].trim_start(), "! contact with the principal: the deficit sits at its cap (1)", "{out}");
+    let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("NEEDS"), "no row without the block");
+    for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
+}
+
 /// --once --plain: one frame in plain ASCII, byte for byte; the last event of the week and a failure turn (event 18: loss and
 /// praise lit, the bound habit in brackets, humour held at none)
 #[test]

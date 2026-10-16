@@ -3403,7 +3403,7 @@ mod tests {
         assert_eq!(bad(r#""from":["praise","criticism"]"#, r#""from":["praise","drv_c0"]"#), "learning.from[1]: reserved for the drives block");
         assert_eq!(bad(r#""floor":0.1"#, r#""floor":0.6"#), "drives.goals[3].floor: must be <= 0.5");
         assert_eq!(bad(r#""id":"craft""#, r#""id":"fun""#), "drives.goals[1].id: goal ids must be distinct");
-        assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":0.5,"spice":1"#), "drives.spice: unknown field (allowed: afterglow, comment, effects, expectation, goals, learn_from_surprise, pursue, wanting)");
+        assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""learn_from_surprise":0.5,"spice":1"#), "drives.spice: unknown field (allowed: afterglow, comment, effects, expectation, goals, learn_from_surprise, pursue, valence, wanting)");
         assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""wanting":{"drain":2}"#), "drives.wanting.drain: must be <= 1");
         assert_eq!(bad(r#""learn_from_surprise":0.5"#, r#""afterglow":{"cap":0}"#), "drives.afterglow.cap: must be > 0");
         assert_eq!(bad(r#""surprise":{"valence":0.5}"#, r#""surprise":{"valence":[0,0,1]}"#), "drives.effects.surprise.valence: a number (ordinal shift)");
@@ -3995,6 +3995,9 @@ mod tests {
         let (dl, _) = ok_turn(&l, &sl, r#"{"goals":{"task":{"win":0.4}},"src":"env"}"#); let (d0, _) = ok_turn(&p, &init(&p, Some(5), true, &run), r#"{"goals":{"task":{"win":0.4}},"src":"env"}"#);
         assert_eq!((g(&d0, &["drives", "glow", "task"]).as_f64(), g(&dl, &["drives", "glow", "task"]).as_f64()), (Some(0.4), Some(r6(0.5 * gene * 0.4 + 0.4))));
         assert!(g(&init(&p, Some(5), true, &run).to_json(&p), &["drives", "genes", "liking"]).is_null(), "spread 0 stores no gene");
+        // a state whose liking gene misses its seed is refused, even with a recomputed digest
+        let mut sb = sl.clone(); if let Json::Obj(gv) = &mut sb.drives.as_mut().unwrap().genes { gv.iter_mut().find(|(k, _)| k == "liking").unwrap().1 = Json::Num(1.0); } sb.seal(&l);
+        assert_eq!(err(State::read(&l, &sb.to_json(&l))), "state.drives.genes: drive genes do not match the seed");
     }
 
     /// The persona refusals of RFC 0002 A.5 (N-R1 to N-R6) and Design E (E-R1, E-R2): each at its path, when the persona is read
