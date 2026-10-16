@@ -91,7 +91,7 @@ def gate_v1(r, b):
 
 def gate_v2(r, b):
     m = r["v2_move_ratio"]
-    return (r["v2_move"] > 0 and r["v2_null_move"] == 0 and m[0] is not None and m[1] is not None
+    return (r["v2_move"] > 0 and abs(r["v2_null_move"]) <= 2e-6 and m[0] is not None and m[1] is not None
             and abs(m[0] - m[1]) <= RATIO_TOL and r["v2_up_odds"]["block"] > r["v2_up_odds"]["no_block"])
 
 

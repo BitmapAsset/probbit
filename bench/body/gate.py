@@ -53,9 +53,12 @@ def one(persona, row, noise, tmp, tag, gated=False):
     states = life.states()
     learned = [s["learned"]["approach"] for s in states]
     moved_a = sum(abs(learned[t][l] - learned[t - 1][l]) for t in range(1, T) for l in range(3))
+    # the cap is on the step before recentring (docs/persona.md section 2.8): the recentred changes d = step - mean(step) come
+    # from a step within +-cap exactly when max(d) - min(d) <= 2 x cap (v1 compared each recentred change with the cap, which
+    # a correct step exceeds by up to a third)
     g_cap = G_MAX if gated else 1.0
-    steps_ok = all(abs(learned[t][l] - learned[t - 1][l]) <= g_cap * STEP_CAP + 1e-6 and abs(learned[t][l]) <= TOTAL_CAP + 1e-9
-                   for t in range(1, len(learned)) for l in range(3))
+    steps_ok = all(max(d) - min(d) <= 2 * g_cap * STEP_CAP + 1e-6 and all(abs(x) <= TOTAL_CAP + 1e-9 for x in learned[t])
+                   for t in range(1, len(learned)) for d in [[learned[t][l] - learned[t - 1][l] for l in range(3)]])
     rl = common.relearn(life.stances, T, "high")
     return {"relearn": rl, "moved_a": moved_a, "steps_ok": steps_ok, "life": life, "end_a_mid": common.top(life.stances[T - 1]) == "mid",
             "relearned": rl < T, "first_err": first_step(life, row, noise, gated)}

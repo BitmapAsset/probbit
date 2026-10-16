@@ -492,6 +492,7 @@ def rest_rows(b):
     rv = common.stream("reversal")
     # r0, r1: phase A (praise `mid`) in the Python learner, then what each null does at the gap
     pre = [phase(sr, rest.GAP_AT) for sr in rv]
+    pre_free = [phase(dict(sr, lock="0" * len(sr["lock"])), rest.GAP_AT) for sr in rv]   # r1 runs without lock turns
     short = [phase(sr, rest.SHORT_AT) for sr in rv if sr["seed"] in rest.CONTROL_SEEDS]
     halve = lambda D: [R6(0.5 * x) for x in D]
     r = {"r0_inversions": 0, "r0_top_level_changed": 0, "r0_lives_without_a_rest_line": 0,
@@ -506,14 +507,14 @@ def rest_rows(b):
     full = common.median([A.life(sd, 0.0) for sd in range(200)])
     none = common.median([A.life(sd, 1.0) for sd in range(200)])
     strict_mid = lambda W: A.softmax(W)[1] > max(A.softmax(W)[0], A.softmax(W)[2])
-    kept = sum(1 for D in pre if strict_mid([0.0 * x for x in D]))
-    rr = {"r1_ratio": round(full / none, 4), "r1_retained_share": kept / float(len(pre))}
+    kept = sum(1 for D in pre_free if strict_mid([0.0 * x for x in D]))
+    rr = {"r1_ratio": round(full / none, 4), "r1_retained_share": kept / float(len(pre_free))}
     row("r1", "full reset of the learned weights at the gap", "re-learning ratio %.3f, phase A's lesson kept in %d/%d"
-        % (rr["r1_ratio"], kept, len(pre)), rr["r1_ratio"] <= 0.5,
+        % (rr["r1_ratio"], kept, len(pre_free)), rr["r1_ratio"] <= 0.5,
         rr["r1_ratio"] <= b["rest"]["r1_ratio_max"] and rr["r1_retained_share"] >= b["rest"]["r1_retained_min"])
-    kept_half = sum(1 for D in pre if strict_mid(halve(D)))
-    row("r1", "reference: the RFC's rest in Python, retention", "kept in %d/%d" % (kept_half, len(pre)), True,
-        kept_half / float(len(pre)) >= b["rest"]["r1_retained_min"])
+    kept_half = sum(1 for D in pre_free if strict_mid(halve(D)))
+    row("r1", "reference: the RFC's rest in Python, retention", "kept in %d/%d" % (kept_half, len(pre_free)), True,
+        kept_half / float(len(pre_free)) >= b["rest"]["r1_retained_min"])
     # r2: prune-only rest (no downscale), on the lineage stand-in
     d = {"rest": {str(g): A.lineage_standin(1.0, g, prune_only=True) for g in rest.LINEAGE_READ},
          "none": {str(g): A.lineage_standin(1.0, g) for g in rest.LINEAGE_READ}}

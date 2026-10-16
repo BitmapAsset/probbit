@@ -9,7 +9,9 @@ are added to the next generation's prior (`logw`), 10 generations of 300 rewarde
 
 Bars v2: r0 checks the exact contraction at the rest line, strict distinctions above 2 x prune, and a short-activity control
 whose pressure stays below the threshold (no rest line); r1 adds retention of phase A's lesson at the stance right after the
-gap; r2 ends every generation with an idle event (the rest line precedes absorption) and reads generations 1, 2 and 10.
+gap; r1 runs on the reversal draws without lock turns (rule 2: the lock habit of r4 also delays re-learning, 6/11 instead of
+5/11 for a faithful learner); r2 ends every generation with an idle event (the rest line precedes absorption) and reads
+generations 1, 2 and 10.
 """
 import json
 import os
@@ -130,6 +132,7 @@ def metric(bars, tmp):
     p, norest = common.fixture("rest.yaml"), common.fixture("variants/rest-norest.yaml")
     inv, top_changed, missing, n, contr, lost = 0, 0, 0, 0, 0.0, 0
     t_rest, t_none, recs, states, kept, kept_n = [], [], [], [], 0, 0
+    t_rest_free, t_none_free = [], []
     for row in common.stream("reversal"):
         life = reversal(p, row, tmp, "rest")
         sts = life.states()
@@ -140,32 +143,40 @@ def metric(bars, tmp):
         contr = max(contr, contraction_error(pre, post))
         lost += lost_distinctions(pre, post)
         n += 1
-        if row["lock"][GAP_AT] != "1":   # retention: phase A's lesson at the stance right after the gap (no habit forcing it)
-            odds = life.stances[GAP_AT]["stance"]["approach"]["odds"]
-            kept_n += 1
-            kept += 1 if odds["mid"] > max(odds["low"], odds["high"]) else 0
         t_rest.append(common.relearn(life.stances, GAP_AT, "high"))
         recs.append((life.events, life.stances))
         states.append(sts)
         common.LIVES.setdefault("rest", []).append((p, row["seed"], life))
         t_none.append(common.relearn(reversal(norest, row, tmp, "norest").stances, GAP_AT, "high"))
+        # r1 v2: the same draws without lock turns (rule 2: r4's lock habit also delays re-learning)
+        free = dict(row, lock="0" * len(row["lock"]))
+        lf = reversal(p, free, tmp, "rest-free")
+        t_rest_free.append(common.relearn(lf.stances, GAP_AT, "high"))
+        t_none_free.append(common.relearn(reversal(norest, free, tmp, "norest-free").stances, GAP_AT, "high"))
+        odds = lf.stances[GAP_AT]["stance"]["approach"]["odds"]
+        kept += 1 if odds["mid"] > max(odds["low"], odds["high"]) else 0
+        kept_n += 1
     common.STANCES["r4"] = recs
     common.STATES["r4"] = states
     ctl = [short_control(p, row, tmp) for row in common.stream("reversal") if row["seed"] in CONTROL_SEEDS]
     r = {"r0_inversions": inv, "r0_top_level_changed": top_changed, "r0_lives_without_a_rest_line": missing,
          "r0_contraction_max_error": round(contr, 9), "r0_lost_distinctions": lost,
          "r0_control_rest_lines": sum(c[0] for c in ctl), "r0_control_max_change": round(max(c[1] for c in ctl), 9),
-         "r1_median_turns": [common.median(t_rest), common.median(t_none)],
+         "r1_median_turns": [common.median(t_rest_free), common.median(t_none_free)],
+         "r1_median_turns_with_lock_turns": [common.median(t_rest), common.median(t_none)],
          "r1_retained": "%d/%d" % (kept, kept_n), "r1_retained_share": kept / float(kept_n) if kept_n else 0.0}
     r["r1_ratio"] = round(r["r1_median_turns"][0] / r["r1_median_turns"][1], 4) if r["r1_median_turns"][1] else None
+    lk = r["r1_median_turns_with_lock_turns"]
+    r["r1_ratio_with_lock_turns"] = round(lk[0] / lk[1], 4) if lk[1] else None   # reported (v1's measurement), not gated
     r["r2_probe_distance"] = {"rest": lineage(p, tmp, "lin-rest"), "none": lineage(norest, tmp, "lin-none")}
     r["pass"] = {
         "r0": gate_r0(r),
         "r1": r["r1_ratio"] is not None and r["r1_ratio"] <= b["r1_ratio_max"] and r["r1_retained_share"] >= b["r1_retained_min"],
         "r2": gate_r2(r["r2_probe_distance"], b),
     }
-    r["scope"] = ("rest.yaml vs rest-norest.yaml; reversal stream seeds 0-199, 120 events, noise 0.10 (r0, r1), its seeds 0-19 "
-                  "cut to 30 events for the r0 control; lineage stream, 10 generations of 300 events + 1 idle event, seed 0 (r2)")
+    r["scope"] = ("rest.yaml vs rest-norest.yaml; reversal stream seeds 0-199, 120 events, noise 0.10 (r0, r4's lives), the "
+                  "same draws without lock turns (r1), its seeds 0-19 cut to 30 events for the r0 control; lineage stream, 10 "
+                  "generations of 300 events + 1 idle event, seed 0 (r2)")
     return r
 
 

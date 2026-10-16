@@ -181,7 +181,7 @@ copy without the block).
 | bar | pass value | how measured | null it must reject | competent null (nulls.py) | reachability check |
 |---|---|---|---|---|---|
 | r0 order kept, weights contracted | at every rest line the learned weights equal round(ρΔ, 6) with \|·\| < prune set to 0 (within 1e-6); 0 strict order inversions; the top level unchanged; no strict order lost where a weight survives the prune; and 20 short lives (29 × 0.25 h active, S 0.329 < θ) get no rest line and no change at the gap | reversal stream, every rest line; reversal seeds 0-19 cut to 30 events, then the gap | Δ reset to 0 at a rest line: every strict order lost; rest as identity | halving the weights at every idle gap, whatever the pressure: the short controls change by 0.5 | x → ρx is increasing [r0.inversions, 0 in 40,000]; S 0.556 after the reversal's 14.75 active hours, 0.329 after 7.25 [r0.pressure]; stand-in 200/200 |
-| r1 plasticity returns, the lesson stays | median re-learning turns with rest ≤ 0.5 × without, at ρ 0.5; and phase A's lesson (`mid` strictly on top) holds at the stance right after the gap in ≥ 90 % of the lives the lock does not force there | reversal stream, seeds 0-199 | ρ 1: ratio 1 | a full reset of the learned weights at the gap: ratio 0.182 (passes v1), the lesson kept in 0 of 200 | stand-in 11 → 5 (ratio 0.4545) [r1.relearn]; ρ 0.75 gives 8 and is outside the bar; the RFC's rest in Python keeps the lesson in 200 of 200 (nulls.py reference) |
+| r1 plasticity returns, the lesson stays | median re-learning turns with rest ≤ 0.5 × without, at ρ 0.5; and phase A's lesson (`mid` strictly on top) holds at the stance right after the gap in ≥ 90 % of lives | the reversal stream's draws without its lock turns (rule 2: r4's lock habit also delays re-learning; the locked ratio is reported), seeds 0-199 | ρ 1: ratio 1 | a full reset of the learned weights at the gap: ratio 0.182 (passes v1), the lesson kept in 0 of 200 | stand-in 11 → 5 (ratio 0.4545) [r1.relearn]; ρ 0.75 gives 8 and is outside the bar; the RFC's rest in Python keeps the lesson in 200 of 200 (nulls.py reference) |
 | r2 lineage drift | each generation closes with one idle event (its rest line comes before absorption); probe distance without rest ≥ 0.1 after generation 1; with rest ≤ 0.8 × without after generations 1 and 2; with rest ≤ without after 10 | lineage stream | RFC 0001's absorbing lineage without rest: 0.460; rest as identity: equal distances | pruning small weights only (no downscale): ratio 1.0 | stand-in [r2.stand_in]: 0.243 vs 0.454 (0.54) after 1, 0.454 vs 0.631 (0.72) after 2, 0.660 vs 0.666 after 10 (the distance saturates by generation 10) |
 | r3 replay | 0 differing bytes, rest lines included | rest strands | a strand with a rest line removed: verify exit 1 | as n4 | rest lines are logged |
 | r4 0 habit breaks under conflict | 0 breaks; ≥ 50 bound stances; ≥ 50 binding conflicts (lock events whose learned weights put `mid` or `high` above `low`); the habit-free twin breaks at least once | reversal stream | as n5 | the lock as a host-side filter (the stance still releases the learned level): 2,437 conflicts released against the lock | the Python learner on the frozen draws exercises 2,437 conflicts |
@@ -222,7 +222,7 @@ the column above); `nulls.py` exits 0 with every one rejected. No pass value was
 | n11 | vacuous | contact before the absence and after the return (new stream `return`); the window-1e6 twin gated | permanently disabled contact passed |
 | s1 | weak | constant-gain twins on the engine: the gate must need strictly fewer re-learning turns than any of them within its movement budget | a constant gain was an untested stronger control |
 | s2 | vacuous | phase A learned and phase B re-learned in ≥ 90 % of lives | frozen learning moved 0 and passed |
-| s3 | vacuous | every life's opening paid step against the closed form, (v, r, g) included | zero steps respected every cap |
+| s3 | vacuous | every life's opening paid step against the closed form, (v, r, g) included; the cap read before recentring | zero steps respected every cap; and v1's script compared each recentred change with the cap, which a correct step exceeds by up to a third |
 | p1b | vacuous | an accepted-reward control in every fuzzed stream | a constant pace passed |
 | p1c | vacuous | equal-average steady / bursty / spaced streams (new stream `bursts`) | a current-reward pace can rank with block rates |
 | p6 | weak | an admissible burst (12 zero-hour wins of 4) and the recovery (new stream `burst`) | with payments clipped at 4 the uncapped null could not pass 4 |
@@ -234,7 +234,7 @@ the column above); `nulls.py` exits 0 with every one rejected. No pass value was
 | v3 | vacuous | the residual at lags 1-5, two-sided | erasing the accumulator passed ≤ 0.09 |
 | om1 | weak | before, at and past expiry, a win inside the window, a repeat | firing at the next event after a pursuit passed |
 | r0 | vacuous | exact contraction, strict distinctions, a short-activity control below threshold | rest as identity passed |
-| r1 | weak | the phase-A lesson kept after the gap | a full reset re-learns fast and forgets everything |
+| r1 | weak | the phase-A lesson kept after the gap; measured on the reversal draws without lock turns | a full reset re-learns fast and forgets everything; and the lock turns r4 needs also delay re-learning (rule 2): with them a faithful learner gives 6 / 11 = 0.545, without them 5 / 11, the research stand-in's number |
 | r2 | vacuous | a closing idle event per generation, a positive baseline, ≥ 20 % reduction after generations 1 and 2 | rest as identity passed "≤"; at generation 10 the distance saturates |
 | r4 | weak | ≥ 50 bound stances and ≥ 50 binding conflicts; the habit-free twin gated | the bar never required a conflict |
 | l1 | vacuous | each channel's amplitude and time course, and a decision the load reaches (variant `load-effects`) | three arbitrary increments passed |
@@ -300,6 +300,10 @@ choice is fixed here and frozen with the rest:
 - **Choices the RFC leaves open**, fixed here: the rest pressure S starts at 0 for a new individual (r0's short control and
   every rest bar assume it); within one event every need grows before any satisfaction is paid (the recomputed wins of n8
   and n9 assume it; their signs do not depend on it).
+- **r1** plays the reversal draws twice: with the lock turns (r0 and r4 read those lives) and without them (r1's ratio
+  and retention), so the habit r4 measures does not slow the re-learning r1 measures (rule 2).
+- **s3** reads the cap where the RFC puts it, on the step before recentring (docs/persona.md section 2.8): the recentred
+  changes of a learned trait come from a step within ±g_max × step_cap exactly when their range is ≤ 2 × g_max × step_cap.
 
 ## Changes after the freeze
 
@@ -307,6 +311,13 @@ choice is fixed here and frozen with the rest:
   variants added (every v1 stream and variant regenerates byte for byte), `bars.json` and `bars.md` rewritten with a
   version marker, the v1 copies kept as `bars-v1.json` and `bars-v1.md`, MANIFEST regenerated. Section "Bars v2" lists
   every change; no pass value was relaxed.
+- **Bars v2, r1's lives and s3's cap** (before any engine measurement), found by the same dry run, against the `arith_0002.py`
+  learner played through `rest.py` and `gate.py`: r1 is measured on the reversal draws without the lock turns (with them
+  the learner re-learns in 6 turns after rest instead of 5, 6 / 11 = 0.545 against the pass value 0.5, because the lock
+  habit of r4 shares the stream: rule 2; without them 5 / 11 = 0.4545, the number the bar's reachability check cites; the
+  locked ratio is reported); s3 checks the cap on the step before recentring, as the RFC states it (v1's script compared
+  each recentred change with g_max × step_cap, which a correct gated step exceeds in 968 of 1,800 lives of the dry run).
+  Pass values and bar text unchanged.
 - **Bars v2, n7's script** (before any engine measurement): the `persona turn` control moved from 1 h to 5 h of growth. At
   1 h the deficit is 0.1 and the amount 0.2 overshoots it back to 0.1, so a correct engine shows no change and would have
   failed the bar. Found by a dry run of `needs.py` against a Python model of RFC 0002 A.3-A.4 (not the engine); the bar's
