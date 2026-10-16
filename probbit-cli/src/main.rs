@@ -896,6 +896,8 @@ fn lint_report(args: &[String], path: &str, p: &persona::Persona, depth: usize, 
     if let Some(mut n) = persona::floor_notes(p) { n.extend(persona::floor_reach(p, &seeds)); doc.push(("floors", Json::Arr(n))); }
     // needs (RFC 0002): horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal
     if let Some(n) = persona::needs_notes(p) { doc.push(("needs", Json::Arr(n))); }
+    // pace (RFC 0002 Design C): the largest field shift pace can cause, with a warning over 1
+    if let Some(n) = persona::pace_notes(p) { doc.push(("pace", n)); }
     // with rules (§5.6): prove each one, then fuzz the ones the bound leaves unknown
     if args.iter().any(|a| a == "--never" || a == "--props") {
         let props = rules_arg(args, p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);

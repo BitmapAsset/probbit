@@ -131,7 +131,7 @@ pub fn utc_now() -> String {
 /// rules. `open` checks the header and rebuilds the individual; each `step` replays one event line on the fixed clock and
 /// checks it (`prev`, `n`, the stance and state digests, the bytes). After an error the replay is spent: the chain past the
 /// line that differs cannot be checked.
-pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool, norms: Normals, at_cap: Vec<f64> }
+pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool, norms: Normals, at_cap: Vec<f64>, seen: (f64, Vec<f64>) }
 /// A senses block's normals over the replay (§2.11): per sense the means after the last 50 events, the largest move of a mean
 /// within 50 events so far, and the latest event's move (the monitor's alert: over drift_cap / 2)
 #[derive(Default)]
@@ -158,8 +158,8 @@ impl Replay {
         let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, format!("the initial state: {}: {}", e.path, e.msg)))?;
         let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
         if header != head { return Err((1, "the header is not as written".into())); }
-        let norms = Normals::start(&live.p, &live.st); let at_cap = vec![0.0; persona::deficits(&live.p, &live.st).len()];
-        Ok(Replay { live, header: h, doc, line: 1, from: None, last: None, checkpoint_ready: false, norms, at_cap })
+        let norms = Normals::start(&live.p, &live.st); let at_cap = vec![0.0; persona::deficits(&live.p, &live.st).len()]; let seen = (0.0, vec![0.0; persona::gate_gains(&live.p, &live.st).len()]);
+        Ok(Replay { live, header: h, doc, line: 1, from: None, last: None, checkpoint_ready: false, norms, at_cap, seen })
     }
     /// The replay from a checkpoint line (`cp`, without its line ending, at 1-based line `at`; `before` = the event line before it)
     /// instead of the header: the header is read as by `open`; the checkpoint must follow `before` (prev), at its event count, with
@@ -184,7 +184,7 @@ impl Replay {
         let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, format!("the checkpoint's state: {}: {}", e.path, e.msg)))?;
         if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
         r.live.st = st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
-        r.norms = Normals::start(&r.live.p, &r.live.st); r.at_cap = vec![0.0; r.at_cap.len()];
+        r.norms = Normals::start(&r.live.p, &r.live.st); r.at_cap = vec![0.0; r.at_cap.len()]; r.seen = (0.0, vec![0.0; r.seen.1.len()]);
         Ok(r)
     }
     /// The stance document of the last event replayed (or of the checkpoint the replay started from)
@@ -224,6 +224,9 @@ impl Replay {
         if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
         if line != l { return Err((i, "the line differs".into())); }
         self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true; self.norms.track(&self.live.p, &self.live.st);
+        // RFC 0002: the largest R̄ (Design C) and per learned trait the largest gain (Design B) after any event replayed
+        if let Some((r, _, _)) = persona::pace_rbar(&self.live.p, &self.live.st) { self.seen.0 = self.seen.0.max(r); }
+        for (k, (_, g, _)) in persona::gate_gains(&self.live.p, &self.live.st).iter().enumerate() { if let Some(m) = self.seen.1.get_mut(k) { *m = m.max(*g); } }
         Ok(Some(stance))
     }
     /// `verify`'s summary of the lines replayed so far
@@ -243,6 +246,11 @@ impl Replay {
         let dx = persona::deficits(&live.p, &live.st);
         if !dx.is_empty() { v.push(("needs".into(), Json::Obj(dx.iter().enumerate().map(|(k, (id, x, _))| (id.clone(), Json::Obj(vec![("deficit".into(), Json::Num(*x)),
             ("at_cap_hours".into(), Json::Num(self.at_cap.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
+        // RFC 0002 Design C: R̄ now and the largest after any event replayed; Design B: per learned trait the largest gain seen
+        if let Some((r, _, _)) = persona::pace_rbar(&live.p, &live.st) { v.push(("pace".into(), Json::Obj(vec![("rbar".into(), Json::Num(r)), ("max".into(), Json::Num(self.seen.0))]))); }
+        let gg = persona::gate_gains(&live.p, &live.st);
+        if !gg.is_empty() { v.push(("surprise".into(), Json::Obj(gg.iter().enumerate().map(|(k, (t, _, _))| (t.clone(),
+            Json::Obj(vec![("g_max_seen".into(), Json::Num(self.seen.1.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
         // a credit block (§2.8): the decisions still awaiting an outcome
         if let Some(o) = persona::open_decisions(&live.p, &live.st) { v.push(("open".into(), Json::Arr(o.iter().map(|(t, _)| Json::Num(*t as f64)).collect()))); }
         Json::Obj(v)

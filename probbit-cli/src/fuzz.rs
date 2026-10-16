@@ -138,6 +138,10 @@ fn individual(p: &Persona, props: &[Prop], seed: u64, s: &Search, eng: persona::
     for (id, _, vals) in persona::alphabet(p, &s.grid, &s.hours).into_iter().filter(|(_, k, _)| *k == "need") {
         for v in &vals { for k in [1usize, 5, 20] { search(&vec![vec![(id.clone(), v.clone())]; k], &mut best); } } }
     for h in persona::window_hours(p) { search(&vec![vec![("elapsed_hours".to_string(), Json::Num(h))]; 6], &mut best); }
+    // RFC 0002 Design C: reward bursts at elapsed 0 (each goal's top win, the reward flag), 1, 5 and 20 events (the average runs
+    // to its cap); Design B: feedback alternating over 20 events (the gate opens)
+    for b in persona::burst_events(p) { for k in [1usize, 5, 20] { search(&vec![b.clone(); k], &mut best); } }
+    if let Some((up, down)) = persona::alternating(p) { search(&(0..20).map(|i| if i % 2 == 0 { up.clone() } else { down.clone() }).collect::<Vec<Event>>(), &mut best); }
     if s.beam > 0 { for (i, pr) in props.iter().enumerate() { let limit = best[i].as_ref().map_or(s.depth, |b| b.len() - 1);
         if let Some(sc) = beam(p, pr, &st0, limit, s, eng, turns) { best[i] = Some(sc); } } }
     props.iter().zip(best).map(|(pr, b)| b.map(|sc| shrink(p, pr, &st0, sc, eng, turns))).collect()
