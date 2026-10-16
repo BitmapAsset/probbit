@@ -346,8 +346,11 @@ def pace_rows(b):
         rho >= 0.7, pace.gate_p1c(r, b["pace"]))
     row("p1b", "constant pace (degenerate)", "0 changes; the accepted control moves nothing", True,
         pace.gate_p1b({"p1b_pace_changes": 0, "p1b_control_max_error": R6(A.PACE_K)}, b["pace"]))
-    row("p1b", "a pace that adds the turn's offered stakes", "changes on every fuzzed cue", False,
-        pace.gate_p1b({"p1b_pace_changes": 2000, "p1b_control_max_error": 0.0}, b["pace"]))
+    events = [r["event"] for r in blocks]
+    staked = sum(1 for sd in pace.FUZZ_SEEDS for e in pace.fuzzed(events, sd)
+                 if any(k in sig for sig in (e.get("goals") or {}).values() for k in ("cue", "deadline_hours", "progress", "novelty")))
+    row("p1b", "a pace that adds the turn's offered stakes", "changes at %d fuzzed events (every one that offers a stake)" % staked,
+        staked == 0, pace.gate_p1b({"p1b_pace_changes": staked, "p1b_control_max_error": 0.0}, b["pace"]))
     burst = common.stream("burst")[0]
     stored = A.pace_run([(0, burst["win"])] * burst["burst_events"], clip=False)
     stored += A.pace_run([(1, 0.0)] * burst["recovery_hours"], R=stored[-1], clip=False)
@@ -457,13 +460,18 @@ def o3_standin(static, tiny=False, gene=False):
 
 # ================================================================ P4 valence and omission
 def valence_rows(b):
-    # v1: reward minus the running mean of past outcomes (no decay): d_A = 1 - 1, d_B = 1 - 0
-    r = {"v1_max_diff": 1.0, "v1_push_ratio": 0.0, "v1_push_ratio_want": A.checks_by_id("v1.ratio")["computed"],
-         "v1_up_odds": [0.3, 0.6]}
+    # v1: reward minus the running mean of past outcomes (no decay): d_A = 1 - 1, d_B = 1 - 0; the mood's odds from the push
+    def up_odds(e):
+        a = [(1 - valence.INERTIA) * 0.6 * e * c for c in (-1.0, 0.0, 1.0)]
+        return round(math.exp(a[2]) / sum(math.exp(x) for x in a), 6)
+    r = {"v1_max_diff": (1 - valence.INERTIA) * 0.6, "v1_push_ratio": 0.0,
+         "v1_push_ratio_want": A.checks_by_id("v1.ratio")["computed"], "v1_up_odds": [up_odds(0.0), up_odds(1.0)]}
     row("v1", "valence = reward minus the running mean of past rewards", "push ratio 0 (want %.6f)" % r["v1_push_ratio_want"],
         True, valence.gate_v1(r, b["valence"]))
     E10, E3 = A.E10, A.E3
-    r2 = {"v2_move": 0.156, "v2_null_move": 0.0, "v2_move_ratio": [1.0, round(E10 / E3, 6)], "v2_up_odds": {"block": 0.4, "no_block": 0.3}}
+    bonus = 2 * (1 - valence.INERTIA) * 0.2 * 1.0                 # a fixed evidence of w_e x 1 on every win, whatever E is
+    r2 = {"v2_move": round(bonus, 6), "v2_null_move": 0.0, "v2_move_ratio": [1.0, round(E10 / E3, 6)],
+          "v2_up_odds": {"block": up_odds(0.2 / 0.6), "no_block": up_odds(0.0)}}
     row("v2", "a fixed valence bonus on every win (not x E)", "move ratio 1 (want %.6f)" % (E10 / E3), True, valence.gate_v2(r2, b["valence"]))
     lags = [round(0.5 ** j, 6) for j in range(1, 6)]
     ok = all(abs(v - valence.INERTIA ** j) <= valence.RATIO_TOL for j, v in enumerate(lags, 1))
