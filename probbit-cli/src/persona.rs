@@ -4696,4 +4696,58 @@ mod tests {
         assert_eq!(gate_gains(&p, &init(&p, Some(0), false, &run)), vec![("approach".to_string(), 2.5, 3.0)]);
         assert_eq!(pace_rbar(&p, &init(&p, Some(0), false, &run)), Some((0.0, 1.0, 4.0)));
     }
+
+    /// The α⁻ seam wave 1a left at `rate` (RFC 0002 A.4): with an optimism gene the omission let-down steps E by α⁻ = min(rate x e^−o,
+    /// 1); the `surprise` block and `drives.valence` live together, and E-R1 still refuses `drives.valence` with `drives.effects.surprise`
+    #[test]
+    fn the_omission_reads_the_optimism_gene_and_e_r1_stands() {
+        let src = OPT.replacen(r#"{"id":"task"}"#, r#"{"id":"task","expect_by_hours":1}"#, 1).replacen(r#""inputs":[{"id":"busy","kind":"flag"}]"#, r#""inputs":[{"id":"busy","kind":"flag"},{"id":"go","kind":"flag"}]"#, 1)
+            .replacen(r#""habits":["#, r#""habits":[{"id":"go_task","when":{"go":true},"then":{"pursue":["task"]}},"#, 1);
+        let p = build(&json::parse(&src).unwrap()).unwrap();
+        let seed = (0..40u64).find(|s| disp_gene(&p, *s, "optimism").is_some_and(|o| o.abs() > 0.05)).unwrap(); let o = disp_gene(&p, seed, "optimism").unwrap();
+        let mut st = init(&p, Some(seed), false, &run);
+        for _ in 0..5 { st = ok_turn(&p, &st, r#"{"goals":{"task":{"win":1}}}"#).1; }
+        let (d1, s1) = ok_turn(&p, &st, r#"{"go":true}"#); assert_eq!(d1.get("pursue").and_then(|x| x.get("goal")).and_then(Json::as_str), Some("task"));
+        let e1 = gnum(&d1, &["drives", "expect", "task"]); let (d2, _) = ok_turn(&p, &s1, r#"{"elapsed_hours":2}"#);
+        let ed = e1 * 0.5f64.powf(2.0 / 48.0); let a = (0.2 * (-o).exp()).min(1.0);
+        assert_eq!(gnum(&d2, &["drives", "expect", "task"]), r6(ed + a * (0.0 - ed)), "o {o}");
+        assert!(d2.get("why").and_then(Json::as_str).unwrap().contains("an expected win did not come"));
+        let both = BODYB.replacen(r#""traits":[{"id":"approach""#, r#""moods":[{"id":"valence","levels":["down","even","up"]}],"traits":[{"id":"approach""#, 1)
+            .replacen(r#""expectation":{"win_max":4}"#, r#""expectation":{"win_max":4},"valence":{"mood":"valence","expect":0.2,"surprise":0.6}"#, 1);
+        assert!(build(&json::parse(&both).unwrap()).is_ok(), "the surprise block and valence together");
+        let e_r1 = both.replacen(r#""valence":{"mood""#, r#""effects":{"surprise":{"verbosity":0.5}},"valence":{"mood""#, 1);
+        assert_eq!(err(build(&json::parse(&e_r1).unwrap())), "drives.valence: drives.valence replaces drives.effects.surprise: declare one of them");
+    }
+
+    /// `prove` boxes pace's inputs (RFC 0002 Invariants, proof coverage): a rule with a small margin is unknown with pace_up and
+    /// pace_down in the cell's number box; with a margin past every box it is proved
+    #[test]
+    fn prove_puts_the_pace_inputs_in_their_box() {
+        let rule = json::parse(r#"{"when":{"busy":true},"then":{"verbosity":["terse"]}}"#).unwrap();
+        let doc = |m: &str| PACE.replace(r#""drives":"#, &format!(r#""inputs":[{{"id":"busy","kind":"flag","effects":{{"verbosity":{{"terse":{m}}}}}}}],"drives":"#));
+        let verdict = |m: &str| { let p = build(&json::parse(&doc(m)).unwrap()).unwrap(); prove_seed(&p, &props(&p, &rule, "--never", "never").unwrap()[0], 0, &run) };
+        let (cell, why) = verdict("0.5").unwrap_err(); let hw = canon(g(&cell, &["number_halfwidth"]));
+        assert_eq!(hw, r#"{"pace_down":0.5,"pace_up":1.5}"#, "{why}: the half-widths of the boxes [0, r0] and [0, cap - r0]");
+        assert!(verdict("40").is_ok(), "past every box: proved");
+    }
+
+    /// A refused pace input changes nothing (RFC 0002 Invariants, refusal): 10 individuals x 60 random events mixing wins, hours and
+    /// engine-owned pace_up / pace_down values; each refused event leaves the state as it was, and the run equals the run without
+    /// those events, byte for byte
+    #[test]
+    fn a_refused_pace_input_changes_nothing() {
+        let p = build(&json::parse(PACE).unwrap()).unwrap(); let mut x: u64 = 99;
+        let mut rnd = |n: u64| { x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (x >> 33) % n };
+        for seed in 0..10u64 {
+            let (mut a, mut b) = (init(&p, Some(seed), false, &run), init(&p, Some(seed), false, &run)); let (mut refused, mut da, mut db) = (0, vec![], vec![]);
+            for _ in 0..60 {
+                let (w, h) = (rnd(9) as f64 * 0.5, rnd(4)); let mut ev = format!(r#""elapsed_hours":{h},"src":"env""#);
+                if w > 0.0 { ev += &format!(r#","goals":{{"{}":{{"win":{w}}}}}"#, if rnd(2) == 0 { "task" } else { "other" }); }
+                let bad = rnd(4) == 0; if bad { ev += &format!(r#","{}":{}"#, if rnd(2) == 0 { "pace_up" } else { "pace_down" }, rnd(3)); }
+                let ev = format!("{{{ev}}}");
+                match turn(&p, &a, &evj(&ev), false, &run, false) { Ok((d, ns)) => { assert!(!bad, "{ev}"); da.push(canon(&d)); a = ns; }
+                    Err(e) => { assert!(bad && e.path.starts_with("inputs.pace_"), "{ev}: {}", e.path); refused += 1; } }
+                if !bad { let (d, ns) = ok_turn(&p, &b, &ev); db.push(canon(&d)); b = ns; } }
+            assert!(refused > 0, "seed {seed}"); assert_eq!(da, db, "seed {seed}"); assert_eq!(canon(&a.to_json(&p)), canon(&b.to_json(&p)), "seed {seed}"); }
+    }
 }
