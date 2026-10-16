@@ -1191,7 +1191,7 @@ normals add: with plain inputs the odds distance between two lives falls from 0.
 The benchmark's spec, fixtures, seeded streams and bars are in [bench/body/README.md](bench/body/README.md) (RFC 0002,
 [docs/rfcs/0002-neuromodulators-and-body.md](docs/rfcs/0002-neuromodulators-and-body.md)); they were frozen with their sha256
 (`bench/body/fixtures/MANIFEST`) before any engine had the blocks, then repaired once before any engine measurement (bars v2).
-`run.py` plays `nulls.py` first: 51 competent plain-Python nulls over 40 bars, none passes its bar (exit 2 if one did). Wave
+`run.py` plays `nulls.py` before any part: 51 competent plain-Python nulls over 40 bars, none passes its bar (exit 2 if one did). Wave
 1a builds `needs`, the omission let-down and `drives.valence`; the other parts wait for their blocks (wave 1b: surprise, pace,
 dispositions; part 2: rest, load), so `run.py` reports the p0 part's dispositions fixture (o5) as a setup error and exits 2.
 The RFC 0001 P0 corpus (n6) is checked directly: `bench/individuality/p0.py check`.

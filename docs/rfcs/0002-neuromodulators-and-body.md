@@ -6,7 +6,7 @@ Status: draft for review · Target: probbit 0.10.0 (part 1), a follow-on release
 **Changes after the freeze** (2026-10-16; the text is not a bar, no pass value moved):
 
 1. A.3 runs in two passes per event: every need grows in declared order, then each satisfaction pays in declared order. The
-   first draft said "per need in declared order", which left the order of growth and payment across needs open; the bench
+   frozen draft said "per need in declared order", which left the order of growth and payment across needs open; the bench
    scripts had to pick one. The deficits after an event do not depend on the order, and sign(r) never does.
 2. Part 2: `pressure.s` starts at 0 and `pressure.pending` at false when the individual is made (`persona init`).
 3. A.1's example quotes `"n"`: the YAML reader refuses a bare `n` key (YAML 1.1 reads it as false).

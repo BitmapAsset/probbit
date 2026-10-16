@@ -975,7 +975,7 @@ fn needs_step(d: &Drives, nb: &Needs, nd: &NState, read: &[Option<SRead>], raw: 
     for (i, x) in nb.items.iter().enumerate() {
         let (reading, rate) = x.reading.map_or((0.0, 0.0), |(si, r)| (read.get(si).and_then(Option::as_ref).and_then(|q| q.raw.as_f64()).unwrap_or(0.0), r));
         ns.deficit[i] = r6((nd.deficit[i] + need_gene(nd, "growth", &x.id) * (x.per_hour * h + rate * reading)).max(0.0).min(x.cap)); }
-    // pass 2: each satisfaction pays, in declared order (DECISIONS-R111 item 2)
+    // pass 2: each satisfaction pays, in declared order (RFC 0002 A.3, two passes)
     let mut paid: Vec<(usize, f64)> = vec![];
     for (j, x) in nb.items.iter().enumerate() { let Some(a) = amt[j] else { continue };
         let after = with(&ns.deficit, j, (ns.deficit[j] - a).abs());
