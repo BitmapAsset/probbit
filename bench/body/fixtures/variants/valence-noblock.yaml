@@ -1,0 +1,40 @@
+# valence.yaml with today's effects.surprise on the mood instead of drives.valence, and no expect_by_hours (nulls of v1, v2, om1; P0 copy).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body valence
+  version: 1.0.0
+  seed: 0
+  summary: valence from expectations and prediction errors
+traits:
+  - id: tone
+    levels: [plain, warm]
+moods:
+  - id: valence
+    levels: [down, even, up]
+    inertia: 0.61
+    half_life_hours: 1
+inputs:
+  - id: go_task
+    kind: flag
+    say: the host asks for the task
+  - id: go_other
+    kind: flag
+    say: the host asks for the other thing
+drives:
+  goals:
+    - id: task
+    - id: other
+  effects:
+    surprise: {valence: 0.6}
+habits:
+  - id: go_task
+    when: {go_task: true}
+    then: {pursue: [task]}
+    say: the host asked for the task
+  - id: go_other
+    when: {go_other: true}
+    then: {pursue: [other]}
+    say: the host asked for the other thing
+engine:
+  on_conflict: yield     # go_task and go_other are never sent together

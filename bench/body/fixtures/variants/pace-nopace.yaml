@@ -1,0 +1,19 @@
+# pace.yaml without the pace block (P0 copy).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body pace
+  version: 1.0.0
+  seed: 0
+  summary: average reward sets a pace level
+traits:
+  - id: initiative
+    levels: [low, mid, high]
+  - id: verbosity
+    levels: [terse, short, full]
+drives:
+  goals:
+    - id: task
+    - id: other
+  expectation: {win_max: 4}
+reward_from: [env]

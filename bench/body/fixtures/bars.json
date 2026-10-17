@@ -1,0 +1,15 @@
+{
+ "version": 2,
+ "_note": "Bars v2 (README.md 'Bars', repaired before any engine measurement): the pass values the scripts and nulls.py compare against; frozen with MANIFEST. bars.md is the README's bar tables (version: 2), extracted by manifest_check.py. The v1 values stay, verbatim, in bars-v1.json and bars-v1.md.",
+ "needs": {"n1_ratio_min": 2.0, "n2_win_below": 0, "n3_states": 71, "n3_share_min": 1.0, "n8_per_waking_day_max": 2,
+           "n9_cover_min": 1, "n9_at_cap_max": 2, "n10_ratio_max": 0.5, "n10_baseline_min": 0.25, "n11_per_day_max": 0,
+           "n11_before_min": 0.5, "n11_return_min": 0.5},
+ "surprise": {"s1_ratio_max": 0.75, "s2_ratio_max": 1.5, "s2_adapt_min": 0.9},
+ "pace": {"p1a_tol": 1e-06, "p1b_changes": 0, "p1b_control_tol": 2e-06, "p1c_spearman_min": 0.7, "p1c_mean_gap_max": 0.02,
+          "p1c_range_max": 1.0, "p6_tol": 0.0001},
+ "dispositions": {"o1_error_max": 0.01, "o1_min_abs_o": 0.02, "o3_distance_min": 0.001, "o3_pairs_changed_min": 10},
+ "valence": {"v1_differ_above": 0, "v3_push_left_max": 0.09, "om1_tol": 1e-06},
+ "rest": {"r1_ratio_max": 0.5, "r1_retained_min": 0.9, "r2_baseline_min": 0.1, "r2_reduction_max": 0.8},
+ "load": {"l1_differ_above": 1e-06, "l2_tol": 1e-05},
+ "habits": {"n5_bound_min": 50, "o4_bound_min": 50, "r4_bound_min": 50, "r4_conflicts_min": 50}
+}

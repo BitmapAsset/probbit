@@ -1,0 +1,30 @@
+# bench/body fixture (RFC 0002 Design A), bars n1, n2 and n7: one need (n 4, m 3, weight 1, cap 1, amount 0.2,
+# satisfy_from [env]) bound to a goal with `expect_by_hours: 1` (row N-R6); drives at their defaults. The drives block needs
+# two goals, so `idle` is a second goal no event pays. `per_hour` 0.1 grows the deficit to 0.8 in 8 h and to 0.2 in 2 h.
+# Frozen with its sha256 in MANIFEST before any engine measurement.
+probbit_persona: 1
+identity:
+  name: Body needs1
+  version: 1.0.0
+  seed: 0
+  summary: one need bound to one goal
+traits:
+  - id: tone
+    levels: [plain, warm]
+drives:
+  goals:
+    - id: refuel
+      expect_by_hours: 1
+    - id: idle
+needs:
+  drive: {"n": 4, "m": 3}       # quoted: the YAML reader refuses a bare n (YAML 1.1 reads it as false)
+  r_cap: 1
+  items:
+    - id: fuel
+      unit: share
+      cap: 1
+      weight: 1
+      per_hour: 0.1
+      satisfy_from: [env]
+      amount: 0.2
+      bind: refuel
