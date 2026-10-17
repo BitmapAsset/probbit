@@ -4,6 +4,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # its ref is the Rust toolchain it installs: the msrv job pins Cargo.toml's rust-version, moved only on purpose
+      - dependency-name: "dtolnay/rust-toolchain"
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:

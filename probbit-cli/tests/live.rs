@@ -2,7 +2,9 @@
 //! normals (summary `normals` with `max_move_50`), a life split across runs equal to one run, the one stderr line for readings
 //! sent to a persona without the block, the refusal property P3s, and `probbit check` on a sensed persona. With action-addressed
 //! feedback (§2.8): the refusal property P3c with random payments, every refusal row byte for byte, control lines closing open
-//! decisions, and `probbit check` on a credit persona.
+//! decisions, and `probbit check` on a credit persona. Unsupported is not diverges (§5.7): a newer engine's strand (a block or a
+//! line kind this engine does not know) is unsupported (exit 5), a tampered one still diverges (exit 1), and `probbit check`
+//! says which.
 use std::io::Write;
 use std::process::{Command, Stdio};
 #[allow(dead_code)]
@@ -312,6 +314,81 @@ fn probbit_check_holds_a_sensed_persona() {
     let (c, out, e) = probbit(&["check", SENSED, "--props", SENSED_PROPS, "--seeds", "0-9", "--strand", &strand]); assert_eq!(c, 0, "{out}\n{e}");
     assert!(out.ends_with("check: held 2 · broken 0 · unproven 0 · strands 1/1\n"), "{out}");
     clean(&[&st, &strand, &ev]);
+}
+
+/// The fixtures of "unsupported is not diverges" (docs/persona.md §5.7), in probbit-cli/tests/fixtures/strands/:
+/// `sensed-credit-0.9.0-dev.strand`, recorded by this build (`probbit live sensed-credit.json --seed 0 --clock fixed --events
+/// sensed-credit.events.jsonl --strand ... --checkpoint-every 4`: a senses block and a learning.credit block, 5 events, a
+/// checkpoint at line 6); `sensed-credit-0.9.0-dev.verify-0.8.2.txt`, what the released 0.8.2 binary printed on it (it cannot be
+/// changed); and one version up, derived from the 0.9.0 strand (not recordings: no engine with these exists yet), the header's
+/// engine set to "probbit 0.11.0-dev" and every later line re-chained: `next-load.strand` (the header's persona document gains
+/// RFC 0002 part 2's `load` block, which no engine has yet, its digest recomputed for it) and `next-rest.strand` (a rest line appended as line 8).
+const STRANDS: &str = "probbit-cli/tests/fixtures/strands";
+fn fixture(name: &str) -> String { format!("{STRANDS}/{name}") }
+fn fixture_text(name: &str) -> String { read(&format!("{}/../{STRANDS}/{name}", env!("CARGO_MANIFEST_DIR"))) }
+const THIS: &str = concat!("probbit ", env!("CARGO_PKG_VERSION"));
+
+/// (i) the 0.9.0 strand verifies here (exit 0); the released 0.8.2 binary called it a divergence at line 1 (exit 1). (ii) one
+/// version up, a block or a line kind this engine does not know is unsupported (exit 5): the document {engine, line, ok: false,
+/// strand_engine, unsupported} on stdout and `line K: unsupported by this engine: FIELD` on stderr, never `diverges`, from the
+/// header, from the last checkpoint and with --actions alike
+#[test]
+fn a_newer_engines_strand_is_unsupported_not_a_divergence() {
+    let (c, out, e) = probbit(&["live", "verify", &fixture("sensed-credit-0.9.0-dev.strand")]); assert_eq!(c, 0, "{e}");
+    let v = parse(&out); assert_eq!((s(&v, &["ok"]), s(&v, &["events"]), s(&v, &["engine"])), (&Json::Bool(true), &Json::Num(5.0), &Json::Str("probbit 0.9.0-dev".into())));
+    assert!(v.get("normals").is_some() && v.get("open").is_some(), "the senses and the credit replayed: {out}");
+    // the released 0.8.2 binary's recorded answer: the tamper verdict on a correct strand
+    let rec = fixture_text("sensed-credit-0.9.0-dev.verify-0.8.2.txt");
+    assert!(rec.starts_with("# probbit 0.8.2, the released binary") && rec.lines().any(|l| l == "# exit 1"), "{rec}");
+    let old = parse(rec.lines().find(|l| !l.starts_with('#')).unwrap());
+    assert_eq!((s(&old, &["ok"]), s(&old, &["line"])), (&Json::Bool(false), &Json::Num(1.0)));
+    assert!(s(&old, &["diverges"]).as_str().unwrap().starts_with("the persona document: senses: unknown field"), "{rec}");
+    // one version up: unsupported, at line 1 for the header's persona, at line 8 for the rest line
+    let actions = tmp("unsupported-actions.jsonl"); std::fs::write(&actions, "{\"turn\":0,\"action\":{\"action\":\"retry\"}}\n").unwrap();
+    for (name, line, field) in [("next-load.strand", 1, "load"), ("next-rest.strand", 8, "rest")] {
+        let want = format!(r#"{{"engine":"{THIS}","line":{line},"ok":false,"strand_engine":"probbit 0.11.0-dev","unsupported":"{field}"}}"#);
+        let say = format!("probbit: live verify: line {line}: unsupported by this engine: {field} (written by probbit 0.11.0-dev; this engine is {THIS}): not verified, and not a divergence");
+        for extra in [vec![], vec!["--from-checkpoint"], vec!["--actions", actions.as_str()]] {
+            let f = fixture(name); let mut a = vec!["live", "verify", f.as_str()]; a.extend(extra.iter().copied());
+            let (c, out, e) = probbit(&a);
+            assert_eq!((c, out.trim_end(), e.trim_end()), (5, want.as_str(), say.as_str()), "{name} {extra:?}");
+            assert!(!out.contains("diverges") && !e.contains("diverges"), "{name} {extra:?}");
+        }
+    }
+    clean(&[&actions]);
+}
+
+/// A tampered strand still diverges at its line (exit 1), next to an unsupported one too: an input changed, a known header value
+/// changed, a line removed after the unknown block, the rest line's prev changed. And `probbit check` reports an unsupported strand
+/// as unsupported (never FAIL), fails the gate (exit 1) and names the field and the strand's engine in --json.
+#[test]
+fn a_tampered_strand_still_diverges_and_check_says_unsupported() {
+    let t = fixture_text("sensed-credit-0.9.0-dev.strand"); let load = fixture_text("next-load.strand"); let rest = fixture_text("next-rest.strand");
+    let lines = |x: &str| x.lines().map(str::to_string).collect::<Vec<_>>();
+    let mut cut = lines(&load); cut.remove(2);
+    let mut moved = lines(&rest); let last = moved.len() - 1;
+    let k = moved[last].find("\"prev\":\"sha256:").unwrap() + "\"prev\":\"sha256:".len();
+    let flip = if &moved[last][k..k + 1] == "0" { "1" } else { "0" }; moved[last].replace_range(k..k + 1, flip);
+    for (name, text, line, why) in [
+        ("an input changed", t.replacen(r#""error":true,"senses":{"tool_fail":true}"#, r#""error":false,"senses":{"tool_fail":false}"#, 1), 3, "the stance differs"),
+        ("a known header value changed", t.replacen(r#""seed":0,"state""#, r#""seed":1,"state""#, 1), 1, "the header is not as written"),
+        ("a line removed after the unknown block", cut.join("\n") + "\n", 3, "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)"),
+        ("the rest line's prev changed", moved.join("\n") + "\n", 8, "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)")] {
+        let f = tmp(&format!("tampered-{}.strand", name.replace(' ', "-"))); std::fs::write(&f, &text).unwrap();
+        let (c, out, e) = probbit(&["live", "verify", &f]);
+        assert_eq!((c, out.trim_end()), (1, format!(r#"{{"diverges":"{why}","line":{line},"ok":false}}"#).as_str()), "{name}: {e}");
+        clean(&[&f]);
+    }
+    // probbit check: the 0.9.0 strand replays, the newer one is unsupported (its line, its field, the engine that wrote it)
+    let persona = fixture("sensed-credit.json"); let (ok, nx) = (fixture("sensed-credit-0.9.0-dev.strand"), fixture("next-load.strand"));
+    let (c, out, e) = probbit(&["check", &persona, "--seeds", "0-1", "--strand", &ok, "--strand", &nx]); assert_eq!(c, 1, "{out}\n{e}");
+    assert!(out.lines().any(|l| l.starts_with("strand  ") && l.contains(&ok) && l.ends_with("  ok 5 events")), "{out}");
+    assert!(out.lines().any(|l| l.starts_with("strand  ") && l.contains(&nx) && l.ends_with("  line 1: unsupported by this engine: load (written by probbit 0.11.0-dev)")), "{out}");
+    assert!(!out.contains("FAIL") && !out.contains("diverges"), "{out}");
+    let (c, out, e) = probbit(&["check", &persona, "--seeds", "0-1", "--strand", &nx, "--json"]); assert_eq!(c, 1, "{e}");
+    let d = parse(&out); let st = &s(&d, &["strands"]).as_arr().unwrap()[0];
+    assert_eq!(jw(st), format!(r#"{{"error":"line 1: unsupported by this engine: load","events":null,"final_state":null,"ok":false,"path":"{nx}","strand_engine":"probbit 0.11.0-dev","unsupported":"load"}}"#));
+    assert_eq!((s(&d, &["verdict", "strands_ok"]), s(&d, &["verdict", "exit"])), (&Json::Num(0.0), &Json::Num(1.0)));
 }
 
 // ------------------------------------------------------------------- RFC 0002 wave 1a: needs, the omission let-down, valence

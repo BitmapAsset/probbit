@@ -1,4 +1,4 @@
-# probbit cheat sheet (0.8.2)
+# probbit cheat sheet (0.9.0)
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 
@@ -74,6 +74,15 @@ The exact tiers run before the sampler:
 - `live verify` summary: `open`; `live verify STRAND --actions FILE`: lines `{"turn": T, "action": {trait: level}}`, the
   earliest one that differs from the released level (exit 1).
 
+## Host contract (docs/persona.md §7)
+- One outcome per stance: a stance is paid once; a second outcome addressed to it is refused ("turn N is neither open nor the
+  previous stance"). One event with `await: true` per tool call, each outcome `for` its own stance.
+- No event id: a duplicate observation event (a retried hook, a redelivered callback) is appended and counted twice. Keep an
+  idempotency key per event (your event id -> the receipt: the stance's `turn`, the new state's `digest`); never resend an
+  accepted event.
+- Restart time: `--clock real` starts with the process and refuses an event's own `elapsed_hours`, so downtime is not counted;
+  to count it, run `--clock fixed` and stamp `elapsed_hours` from your own clock (MCP and Python's `live_event` always do).
+
 ## Needs, omission windows, valence (0.10.0, docs/persona.md §2.12, §2.9)
 - Block: `needs: {drive: {"n": 4, "m": 3}, r_cap: 1, items: [{id, unit, cap, weight, per_hour, satisfy_from, amount, bind}]}`
   (quote `"n"`: YAML 1.1 reads a bare n as false); the bound goal declares `expect_by_hours`.
@@ -113,9 +122,11 @@ The exact tiers run before the sampler:
   `{"error"}` object on stdout, see Errors) or bad flag (stderr), 3 refused / declined / non-finite result.
 - `persona`: 0 done; 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or
   prove left a rule unknown; 2 bad persona / state / inputs / script / rule, or bad flag.
-- `live`: 0 done; 1 verify: a line differs; 2 a bad persona, state, event or flag.
-- `check`: 0 every rule held and every strand replays; 1 a rule broken, an unresolved contradiction or a strand that fails
-  (1 wins); 2 a bad persona, rule file or flag; 3 the only problem is an unproven rule.
+- `live`: 0 done; 1 verify: a line differs; 2 a bad persona, state, event or flag; 4 refused (the writer lock, a pause, a
+  retirement); 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: not
+  verified, and not a divergence).
+- `check`: 0 every rule held and every strand replays; 1 a rule broken, an unresolved contradiction, a strand that fails or one
+  this engine cannot verify (unsupported) (1 wins); 2 a bad persona, rule file or flag; 3 the only problem is an unproven rule.
 - `monitor`: 0 every line replays; 1 a line differs; 2 a bad flag, a port that cannot be had, or a file that is not a strand.
 
 ## Errors
@@ -150,14 +161,15 @@ One channel, the same for every command (0.8.2):
 |---|---|
 | `live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE]` | JSONL events in, one stance per event out |
 | `live PERSONA --demo week [--seed N] [--plain]` | a scripted week: learning to a cap, a night, rules that hold |
-| `live verify STRAND [--actions FILE]` | replay a strand; the earliest line that differs (and host action, with `--actions`) |
+| `live verify STRAND [--actions FILE]` | replay a strand; the earliest line that differs (and host action, with `--actions`), or the earliest line this engine cannot read: `unsupported by this engine: FIELD`, exit 5 |
 | `monitor STRAND [--follow] [--once] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars in the terminal, or the Activity Monitor page on 127.0.0.1 (channel table, event-history traces, inspector) |
 | `monitor --demo [week\|drives] [--open]` | synthetic data: the tutor's week, paced, in under a minute; `drives`: a short goal-signal scenario |
 
 ## `probbit check PERSONA` (0.8.3): one gate for CI
 `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds 0-99] [--depth 8] [--hours 1,12,48] [--json]` runs `persona
 lint`'s pipeline on the rules (prove, then fuzz the unknown ones) and `live verify` on every strand. One line per rule
-(`held`, `held_by_construction`, `broken seed N`, `unproven`), one per strand (`ok N events` / `FAIL line K: ...`), then
+(`held`, `held_by_construction`, `broken seed N`, `unproven`), one per strand (`ok N events` / `FAIL line K: ...` /
+`line K: unsupported by this engine: FIELD (written by ENGINE)`), then
 `check: held H · broken B · unproven U · strands S/T`. `--json`: `{persona, props, seeds, depth, hours, rules, strands,
 verdict}`, where `rules` is the `persona lint` document. In GitHub Actions: `uses: BitmapAsset/probbit@<ref>` (README,
 "Check in CI").

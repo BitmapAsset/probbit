@@ -247,7 +247,7 @@ const F_P_SEEDS: Flag = Flag { name: "--seeds", arg: "LIST", help: "the individu
 const F_P_THREADS: Flag = Flag { name: "--threads", arg: "N", help: "search threads, 1 to 1024 (default: the logical CPUs)" };
 const F_P_JSON: Flag = Flag { name: "--json", arg: "", help: "the JSON document instead of the readable report" };
 const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json) or bad flag (stderr), 3 lint (with rules): a rule the bound leaves unknown and the search cannot break (\"unproven\", not broken).";
-const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with --actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written).";
+const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with --actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {\"ok\": false, \"line\", \"unsupported\": the field, \"engine\", \"strand_engine\"}; not verified, and not a divergence).";
 pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "persona", aliases: &[], group: "persona", summary: "the individuality layer: persona + state + inputs -> one stance",
         usage: &["persona SUB PERSONA [flags]   (SUB: init turn replay explain diff lint fuzz prove check compile describe)"],
@@ -313,7 +313,7 @@ pub(crate) static COMMANDS: &[Command] = &[
             Flag { name: "--checkpoint-every", arg: "K", help: "with --strand: a checkpoint line (the whole state) after every K-th event (default 1000; 0: none); `verify --from-checkpoint` and `monitor` start at the last one" },
         ]],
         subs: &[
-            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE]", help: "replay a strand: the earliest line that differs; from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
+            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE]", help: "replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
                 flags: &[Flag { name: "--from-checkpoint", arg: "", help: "start at the last checkpoint instead of the header" },
                     Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" }] },
             Sub { name: "control", args: "STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]",
@@ -339,10 +339,10 @@ pub(crate) static COMMANDS: &[Command] = &[
             F_P_SEEDS,
             Flag { name: "--depth", arg: "N", help: "events per fuzzed script, 1 to 64 (default 8)" },
             Flag { name: "--hours", arg: "LIST", help: "comma-separated idle hours the fuzzer tries between events (default 1,12,48)" },
-            Flag { name: "--json", arg: "", help: "one document: {persona, props, seeds, depth, hours, rules (the persona lint document), strands [{path, ok, events, final_state, error?}], verdict {held, broken, unproven, conflicts, strands_ok, strands_total, exit}}" },
+            Flag { name: "--json", arg: "", help: "one document: {persona, props, seeds, depth, hours, rules (the persona lint document), strands [{path, ok, events, final_state, error?, unsupported?, strand_engine?}], verdict {held, broken, unproven, conflicts, strands_ok, strands_total, exit}}" },
         ]],
         subs: &[], list_subs: false, shared: false,
-        after: &[("exit", "0 every rule held and every strand replays; 1 a rule broken, an unresolved habit contradiction or a strand that fails (1 wins over 3); 2 a bad persona, rule file or flag (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json); 3 the only problem is an unproven rule.")],
+        after: &[("exit", "0 every rule held and every strand replays; 1 a rule broken, an unresolved habit contradiction, a strand that fails or a strand this engine cannot verify (unsupported, `live verify` exit 5: its line says so) (1 wins over 3); 2 a bad persona, rule file or flag (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json); 3 the only problem is an unproven rule.")],
         examples: &["probbit check examples/persona/dispatch-policy.yaml --props examples/persona/dispatch-props.json",
             "probbit check agent.yaml --props rules.yaml --strand day1.strand --strand day2.strand --json > check.json"],
         run: check_cmd },
@@ -783,6 +783,15 @@ fn live_cmd(args: &[String]) {
         let mut a = vec!["live verify".to_string()]; a.extend(args.iter().skip(3).cloned()); let (v, w) = sub_flags("live", "verify").unwrap(); check_flags(&a, &v, &w);
         let Some(path) = args.get(2).filter(|a| !a.starts_with("--")) else { fail("live verify: the strand file: probbit live verify STRAND") };
         let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("live verify: cannot read {path}: {e}")));
+        // a strand that does not verify: the earliest line that differs (exit 1), or the earliest line with a field or line kind
+        // this engine does not know (exit 5: unsupported, the strand of a newer engine; not verified, and not a divergence)
+        let failed = |line: usize, why: &str| -> ! {
+            let doc = live::failure(&text, line, why);
+            if live::unsupported_field(why).is_some() {
+                let by = doc.get("strand_engine").and_then(Json::as_str).map_or_else(|| "the header names no engine".to_string(), |e| format!("written by {e}"));
+                err_line(&format!("probbit: live verify: line {line}: {why} ({by}; this engine is {}): not verified, and not a divergence", live::engine()));
+                emit(&persona::canon(&doc)); exit(5) }
+            emit(&persona::canon(&doc)); exit(1) };
         // --actions (docs/persona.md §5.7): the host's action log against the released levels, replayed from the header
         if let Some(af) = opt("--actions") {
             if args.iter().any(|a| a == "--from-checkpoint") { fail("live verify: --actions replays from the header: drop --from-checkpoint") }
@@ -793,13 +802,13 @@ fn live_cmd(args: &[String]) {
                 Ok((mut doc, kept, p)) => { let (checked, d) = live::first_difference(&p, &acts, &kept).unwrap_or_else(|e| bad_input("live verify: ", e)); let differs = d.is_some();
                     if let Json::Obj(v) = &mut doc { v.push(("actions".into(), obj(vec![("checked", num(checked as f64)), ("differs", d.unwrap_or(Json::Null))]))); }
                     emit(&persona::canon(&doc)); if differs { std::process::exit(1) } }
-                Err((line, why)) => { emit(&persona::canon(&obj(vec![("ok", Json::Bool(false)), ("line", num(line as f64)), ("diverges", jstr(&why))]))); std::process::exit(1) } }
+                Err((line, why)) => failed(line, &why) }
             return;
         }
         let res = if args.iter().any(|a| a == "--from-checkpoint") { live::verify_from_checkpoint(&text, eng) } else { live::verify(&text, eng) };
         match res {
             Ok(doc) => emit(&persona::canon(&doc)),
-            Err((line, why)) => { emit(&persona::canon(&obj(vec![("ok", Json::Bool(false)), ("line", num(line as f64)), ("diverges", jstr(&why))]))); std::process::exit(1) } }
+            Err((line, why)) => failed(line, &why) }
         return;
     }
     if args.get(1).map(String::as_str) == Some("control") {
@@ -939,11 +948,17 @@ fn check_cmd(args: &[String]) {
     let Lint { doc: lint, unresolved, broken, unproven } = lint_report(&a, &path, &p, depth, hours.clone());
     let engine = persona_engine(); let eng: persona::Engine = &engine;
     let strand_docs: Vec<Json> = strands.iter().map(|f| {
-        let res = std::fs::read_to_string(f).map_err(|e| format!("cannot read: {e}")).and_then(|t| live::verify(&t, eng).map_err(|(line, why)| format!("line {line}: {why}")));
+        // a strand with a field or line kind this engine does not know (`live verify` exit 5) fails the gate as unsupported: its
+        // entry adds `unsupported` (the field) and `strand_engine` (the header's engine), and its line never says FAIL
+        let (res, unsupported) = match std::fs::read_to_string(f) {
+            Err(e) => (Err(format!("cannot read: {e}")), None),
+            Ok(t) => match live::verify(&t, eng) { Ok(d) => (Ok(d), None),
+                Err((line, why)) => { let u = live::unsupported_field(&why).map(|u| (jstr(u), live::strand_engine(&t))); (Err(format!("line {line}: {why}")), u) } } };
         let mut e = vec![("path", jstr(f))];
         match res {
             Ok(d) => { e.push(("ok", Json::Bool(true))); e.push(("events", d.get("events").cloned().unwrap_or(Json::Null))); e.push(("final_state", d.get("final_state").cloned().unwrap_or(Json::Null))); }
             Err(why) => { e.push(("ok", Json::Bool(false))); e.push(("events", Json::Null)); e.push(("final_state", Json::Null)); e.push(("error", jstr(&why))); } }
+        if let Some((u, by)) = unsupported { e.push(("unsupported", u)); e.push(("strand_engine", by)); }
         obj(e) }).collect();
     let strands_ok = strand_docs.iter().filter(|s| s.get("ok") == Some(&Json::Bool(true))).count();
     let rules: &[Json] = lint.get("props").and_then(Json::as_arr).unwrap_or(&[]);
@@ -973,7 +988,10 @@ fn check_cmd(args: &[String]) {
         o.push(format!("rule    {id:<width$}  {what}")); }
     for s in &strand_docs {
         let f = s.get("path").and_then(Json::as_str).unwrap_or("");
-        let what = if s.get("ok") == Some(&Json::Bool(true)) { format!("ok {} events", s.get("events").and_then(Json::as_f64).unwrap_or(0.0)) } else { format!("FAIL {}", s.get("error").and_then(Json::as_str).unwrap_or("")) };
+        let error = s.get("error").and_then(Json::as_str).unwrap_or("");
+        let what = if s.get("ok") == Some(&Json::Bool(true)) { format!("ok {} events", s.get("events").and_then(Json::as_f64).unwrap_or(0.0)) }
+            else if s.get("unsupported").is_some() { format!("{error} ({})", s.get("strand_engine").and_then(Json::as_str).map_or_else(|| "the header names no engine".to_string(), |e| format!("written by {e}"))) }
+            else { format!("FAIL {error}") };
         o.push(format!("strand  {f:<width$}  {what}")); }
     o.push(format!("check: held {held} · broken {broken} · unproven {} · strands {strands_ok}/{}", unproven.len(), strand_docs.len()));
     emit(&o.join("\n"));
