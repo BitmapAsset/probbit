@@ -29,6 +29,17 @@ One binary of about 2 MB, zero third-party dependencies, nothing phones home. Al
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
 <p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
 
+## What's new in 0.9.0
+
+- **Senses** and **action-addressed feedback** (RFC 0001, opt-in): each reading is compared with a learned normal per sense
+  that moves only inside declared caps (`why` names it); an outcome pays the decision it names, and duplicate, cancelled and
+  unknown payments are refused whole. A persona without the new blocks gives the documents 0.8.2 gave, byte for byte.
+- **`probbit check`**: one CI gate (prove, fuzz, replay) and a GitHub Action. `live verify` reports a field a newer engine
+  wrote as unsupported (exit 5), never as a divergence; docs/persona.md §7 states the host contract.
+- **Measured** (BENCHMARKS.md §10, §11): 653 outputs recorded with 0.8.2, 0 differ; habituation, the named past, credit
+  (8,393 payments, 100 % equal to an independent learner), replay and habits pass their bars; the twins bars a1 and a2 fail
+  and are reported as findings. [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.9.0) · [RFC 0001](docs/rfcs/0001-senses-and-reward.md) · [CHANGELOG](CHANGELOG.md)
+
 ## probbit in two minutes
 
 probbit is a p-bit processor: it couples bits that hold a probability on the CPU you already own, settles a whole plan under
@@ -105,7 +116,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.8.2.
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.9.0.
 
 | how | command |
 |---|---|
@@ -536,7 +547,7 @@ numbers), and uploads the JSON report as an artifact:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: BitmapAsset/probbit@v0.8.3     # the action needs probbit 0.8.3 or later
+- uses: BitmapAsset/probbit@v0.9.0     # the action needs probbit 0.9.0 or later
   with:
     persona: agent/policy.yaml
     props: agent/rules.json
@@ -552,7 +563,7 @@ numbers), and uploads the JSON report as an artifact:
 | `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
 | `seeds` | `0-99` | the individuals |
 | `depth` | probbit's (8) | events per fuzzed script |
-| `version` | `latest` | the release `install.sh` installs (`v0.8.3`, ...) |
+| `version` | `latest` | the release `install.sh` installs (`v0.9.0`, ...) |
 | `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
 | `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
 | `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |

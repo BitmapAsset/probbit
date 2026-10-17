@@ -904,7 +904,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.8.2","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.9.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
@@ -922,7 +922,7 @@ It prints `{"ok":true,"events","persona","seed","engine","final_state","last_lin
 (its stance or state no longer replays), a removed or reordered line at the next line's `prev`, a changed header at line 1. A copy
 with `\r\n` line endings (Windows text mode, an editor) verifies and can be continued: the hashes cover each line's text without
 its line ending, and a canonical JSON line never ends in `\r`. Verify replays with the binary that runs it; the header's `engine`
-names the version that wrote the strand (unreleased builds write `probbit 0.9.0-dev`, so their strands are told from 0.8.2's).
+names the version that wrote the strand (a development build writes its `-dev` version, so its strands are told from a release's).
 Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,055,367 bytes and verifies in 3.3 s, about 3,000
 events per second.
 
