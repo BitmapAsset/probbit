@@ -26,6 +26,15 @@ All notable changes to this project are documented here. The format follows
   `examples/persona/body.yaml` (with its golden and rules) is new.
 - `live` says once on stderr when a persona without a needs block receives a `needs` key (still an undeclared input,
   listed in `ignored`).
+- **Surprise, pace, dispositions** (docs/persona.md §2.13, §2.14, §2.15): optional blocks. The learned step grows after a run
+  of surprising feedback (at most 3×, never past `total_cap`); average reward over the last hours sets a pace level; optimism,
+  patience and volatility are genes. A persona without the blocks gives byte-identical documents.
+- Stance keys `surprise` (each learned trait's gain above 1) and `pace` (`level`, `rbar`); `why` says "learning fast:
+  feedback changed" and "pace brisk: average reward <R̄> an hour". `live verify` summarises `pace` (`rbar`, `max`) and
+  `surprise` (`g_max_seen`); `monitor` draws the average with its r0 tick and g per learned trait; `lint` reports pace's
+  largest field shift and warns over 1; `fuzz` sends reward bursts and alternating feedback; `prove` boxes `pace_up` and
+  `pace_down`; `describe` prints the gate's settings, pace's closed form and the genes. `examples/persona/pacer.yaml` (with
+  its golden) is new.
 
 ## 0.9.0 - 2026-10-17
 

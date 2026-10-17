@@ -547,3 +547,58 @@ fn probbit_check_holds_the_body_persona() {
     assert!(out.ends_with("check: held 2 · broken 0 · unproven 0 · strands 1/1\n"), "{out}");
     clean(&[&st, &strand, &ev]);
 }
+
+// ------------------------------------------------------------------- RFC 0002 wave 1b: surprise, pace, dispositions
+const PACER: &str = "examples/persona/pacer.yaml";
+fn pacer_day() -> Vec<String> { parse(&read(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/golden/pacer/day.json"))).as_arr().unwrap().iter().map(jw).collect() }
+
+/// A strand with every wave 1b block (surprise, pace, dispositions) verifies: `live verify` recomputes R̄, the gate's v, r̂, g and
+/// counts and the genes from the logged feedback, wins and stamped hours (summary `pace: {rbar, max}` and `surprise: {trait:
+/// {g_max_seen}}`), and a changed win, a checkpoint's changed R̄, gain or gene fails the replay; a different future leaves every
+/// earlier stance (its `pace.rbar` included) byte-identical (p1a)
+#[test]
+fn a_pacer_strand_verifies_and_recomputes_the_average_the_gate_and_the_genes() {
+    let ev = events_file("pacer.jsonl", &pacer_day()); let st = init(PACER, 5, "pacer-state.json"); let strand = tmp("pacer.strand"); clean(&[&strand]);
+    let (c, out, e) = live(PACER, &st, &ev, &strand, "4"); assert_eq!(c, 0, "{e}"); assert_eq!(out.lines().count(), 24);
+    let (c, v, e) = probbit(&["live", "verify", &strand]); assert_eq!(c, 0, "{e}"); let v = parse(&v); assert_eq!(s(&v, &["ok"]), &Json::Bool(true));
+    let fin = parse(&read(&st)); let docs: Vec<Json> = out.lines().map(parse).collect();
+    assert_eq!(s(&v, &["pace", "rbar"]), s(&fin, &["pace", "rbar"]));
+    let max = docs.iter().map(|d| s(d, &["pace", "rbar"]).as_f64().unwrap()).fold(0.0, f64::max); assert_eq!(s(&v, &["pace", "max"]).as_f64(), Some(max));
+    let gmax = docs.iter().filter_map(|d| s(d, &["surprise"]).get("initiative").and_then(Json::as_f64)).fold(1.0, f64::max);
+    assert_eq!(s(&v, &["surprise", "initiative", "g_max_seen"]).as_f64(), Some(gmax)); assert!(gmax > 1.5, "{gmax}");
+    assert!(s(&fin, &["dispositions", "optimism"]).as_f64().is_some() && s(&fin, &["dispositions", "patience"]).as_f64().is_some());
+    let text = read(&strand);
+    for (what, bad) in [("a win", text.replacen(r#""win":2"#, r#""win":1.5"#, 1)),
+        ("a checkpoint average", plant(&text, r#"{"checkpoint""#, r#""pace":{"rbar":"#, "0.5")),
+        ("a checkpoint gain", plant(&text, r#"{"checkpoint""#, r#""g":"#, "2")),
+        ("a checkpoint gene", plant(&text, r#"{"checkpoint""#, r#""optimism":"#, "0.5"))] {
+        let f = tmp("pacer-bad.strand"); std::fs::write(&f, &bad).unwrap(); let (c, v, _) = probbit(&["live", "verify", &f]);
+        assert_ne!(c, 0, "{what}: {v}"); assert_eq!(s(&parse(&v), &["ok"]), &Json::Bool(false), "{what}"); clean(&[&f]); }
+    // p1a: stance t reads R̄ after event t; doubled wins after event 12 leave stances 0-12 byte-identical and change a later one
+    let fut: Vec<String> = pacer_day().iter().enumerate().map(|(i, l)| if i > 12 { l.replace(r#""win":1}"#, r#""win":2}"#).replace(r#""win":0.5}"#, r#""win":1}"#) } else { l.clone() }).collect();
+    let ev2 = events_file("pacer-future.jsonl", &fut); let st2 = init(PACER, 5, "pacer-state2.json"); let strand2 = tmp("pacer2.strand"); clean(&[&strand2]);
+    let (c, out2, e) = live(PACER, &st2, &ev2, &strand2, "0"); assert_eq!(c, 0, "{e}");
+    let (a, b): (Vec<&str>, Vec<&str>) = (out.lines().collect(), out2.lines().collect());
+    assert_eq!(a[..13], b[..13], "the past"); assert_ne!(a[17], b[17], "the future differs");
+    clean(&[&st, &strand, &ev, &st2, &strand2, &ev2]);
+}
+
+/// Replay: a pacer life split across two runs equals the life in one run, byte for byte (strand, state, stances): R̄, the gates and
+/// the genes carry over in the state
+#[test]
+fn a_pacer_life_split_across_runs_equals_one_run() {
+    let lines = pacer_day(); let all = events_file("pacer-all.jsonl", &lines);
+    let st1 = init(PACER, 2, "pacer-one-state.json"); let one = tmp("pacer-one.strand"); clean(&[&one]);
+    let (c, out1, e) = live(PACER, &st1, &all, &one, "3"); assert_eq!(c, 0, "{e}");
+    for k in [1, 9, 16] {
+        let (a, b) = (events_file("pacer-a.jsonl", &lines[..k]), events_file("pacer-b.jsonl", &lines[k..]));
+        let st2 = init(PACER, 2, "pacer-two-state.json"); let two = tmp("pacer-two.strand"); clean(&[&two]);
+        let (c, o1, e) = live(PACER, &st2, &a, &two, "3"); assert_eq!(c, 0, "{e}");
+        let (c, o2, e) = live(PACER, &st2, &b, &two, "3"); assert_eq!(c, 0, "{e}");
+        assert_eq!(read(&two), read(&one), "split at {k}: the strand"); assert_eq!(read(&st2), read(&st1), "split at {k}: the state");
+        assert_eq!(format!("{o1}{o2}"), out1, "split at {k}: the stances");
+        clean(&[&st2, &two, &a, &b]);
+    }
+    let (c, v, e) = probbit(&["live", "verify", &one]); assert_eq!(c, 0, "{e}"); assert_eq!(s(&parse(&v), &["ok"]), &Json::Bool(true));
+    clean(&[&st1, &one, &all]);
+}

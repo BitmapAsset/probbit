@@ -1186,14 +1186,17 @@ below the 0.30 bar. In both rooms the feedback still moves the learned caution w
 habit and the failure's push make both lives careful or measured (23 of 400 actions differ). The control shows what the
 normals add: with plain inputs the odds distance between two lives falls from 0.13 to 0.03.
 
-## §12 The body: needs, surprise, pace, dispositions, valence, rest and load (`python3 bench/body/run.py --only needs,valence,replay,habits,p0`, stdlib; development build of 0.10.0, RFC 0002 wave 1a)
+## §12 The body: needs, surprise, pace, dispositions, valence, rest and load (`python3 bench/body/run.py --only needs,gate,pace,dispositions,valence,replay,habits,p0`, stdlib; development build of 0.10.0, RFC 0002 waves 1a and 1b)
 
 The benchmark's spec, fixtures, seeded streams and bars are in [bench/body/README.md](bench/body/README.md) (RFC 0002,
 [docs/rfcs/0002-neuromodulators-and-body.md](docs/rfcs/0002-neuromodulators-and-body.md)); they were frozen with their sha256
 (`bench/body/fixtures/MANIFEST`) before any engine had the blocks, then repaired once before any engine measurement (bars v2).
 `run.py` plays `nulls.py` before any part: 51 competent plain-Python nulls over 40 bars, none passes its bar (exit 2 if one did). Wave
-1a builds `needs`, the omission let-down and `drives.valence`; the other parts wait for their blocks (wave 1b: surprise, pace,
-dispositions; part 2: rest, load), so `run.py` reports the p0 part's dispositions fixture (o5) as a setup error and exits 2.
+1a builds `needs`, the omission let-down and `drives.valence`; wave 1b builds `surprise`, `pace` and `dispositions`, so the p0
+part's o5 runs; part 2 (rest, load) waits for its blocks. Wave 1b's rows were measured on the release build of its head with
+`PROBBIT_THREADS=1` (a resource control: the documents are byte-identical at any thread count, and one solver thread halves the
+wall time per event on a loaded machine); the gate part's nine (T, noise) cells ran in parallel shards through the part's own
+functions and were combined by its own `gate_cells`.
 The RFC 0001 P0 corpus (n6) is checked directly: `bench/individuality/p0.py check`.
 
 | bar | measured | bar value | result |
@@ -1213,6 +1216,20 @@ The RFC 0001 P0 corpus (n6) is checked directly: `bench/individuality/p0.py chec
 | v2 an expected win moves valence | move 0.155848 > 0; the move after 10 / after 3 wins 1.141753 = E10 / E3 1.141742; the no-block twin moves −1e-6; P(up) 0.403 vs 0.335 | within 1e-4; ≤ 2e-6; higher | pass |
 | v3 forgetting | push left 0.61, 0.372098, 0.226979, 0.138457, 0.084457 at lags 1-5 | 0.61^j within 1e-4; ≤ 0.09 at 5 | pass |
 | om1 omission closed form | (E, d) at every event of the three cases equal the closed form, max error 0 | within 1e-6 | pass |
+| s1 flip re-learning | median re-learning turns, gated / fixed: T100, noise 0.00: 0.625 (5.0 vs 8.0 turns); T100, noise 0.10: 0.5 (5.0 vs 10.0 turns); T100, noise 0.20: 0.5769 (7.5 vs 13.0 turns); T40, noise 0.00: 0.625 (5.0 vs 8.0 turns); T40, noise 0.10: 0.5556 (5.0 vs 9.0 turns); T40, noise 0.20: 0.6667 (8.0 vs 12.0 turns); T60, noise 0.00: 0.625 (5.0 vs 8.0 turns); T60, noise 0.10: 0.5 (5.0 vs 10.0 turns); T60, noise 0.20: 0.625 (7.5 vs 12.0 turns); every constant gain whose phase-A movement is within the gate's re-learns strictly slower | ≤ 0.75 in every cell; same-budget gains slower | pass |
+| s2 stable-phase movement | phase-A movement, gated / fixed: T100, noise 0.00 1.0502; T100, noise 0.10 1.0343; T100, noise 0.20 1.0719; T40, noise 0.00 1.0502; T40, noise 0.10 1.0415; T40, noise 0.20 1.0613; T60, noise 0.00 1.0502; T60, noise 0.10 1.0383; T60, noise 0.20 1.0626; in every cell ≥ 1.000 of gated lives end phase A with `mid` on top and re-learn before T | ≤ 1.5; ≥ 0.9 | pass |
+| s3 caps and the opening step | 1800/1800 lives within g_max × step_cap and ±total_cap; the opening paid step and (v, r, g) = (0.15, 2, 1.666667) within 0.0 | 100 %; within 1e-5 | pass |
+| s4 replay | 1800 gate strands: 0 verify failures, 0 third-copy and 0 split-copy differences; a changed input, a removed line and two swapped lines refused | 0 differing bytes; nulls refused | pass |
+| s5 P0 | as n6 | byte-identical | pass |
+| p1a pace reads the past | stance t's R̄ equals the recomputation from events 1..t, max error 0.0 over 2,000 events; 0 earlier stances changed by a perturbed future (cuts at 100, 500, 1,000, 1,500) | within 1e-6; 0 | pass |
+| p1b offered stakes do nothing | 0 pace changes over 10 fuzzed streams (cues, deadlines, progress, novelty); the accepted win of 1 at event 1,000 moves R̄ by 1 − 0.5^(1/6) within 0.0 | 0; within 2e-6 | pass |
+| p1c pace tracks the reward rate | Spearman 0.8414 on blocks; equal averages: mean R̄ 0.499996 steady vs 0.5 bursty, bursty range 0.401242; spaced 0.558741 vs 0.558743 | ≥ 0.7; within 0.02; ≤ 1.0; within 1e-4 | pass |
+| p6 loop gain | after 400 h, G 0.24: 1.263152 vs 1.263158; G 0.6: 1.499989 vs 1.5; G 0.84: 2.249084 vs 2.249084 (the transient's closed form); pinned at the binding cap: G 1.08, a_cap 12: 3.599996; G 1.08, a_cap 20: 3.999996; G 1.2, a_cap 12: 3.599996; G 1.2, a_cap 20: 3.999996; after 12 wins of 4: max 4, 4 from the 10th win, recovery max error 0.0 | within 1e-4; ≤ 4; within 2e-6 | pass |
+| o1 E settles at the expectile | pooled sign-aligned error -0.001417 over individuals 0-4 (o = -0.2877, 0.2429, -0.1708, 0.1468, 0.2556); on the gaps stream every E equals the closed form within 0.0 | ≤ 0.01; within 1e-5 | pass |
+| o2 the gene's sign is readable | 100/100 individuals; each E (and its spread-0 twin's) equals the closed form within 0.0 over 3,000 wins | 100/100; within 1e-5 | pass |
+| o3 twin distance rises with outcomes | mean §5.4 distance 0.002753 at spread 0.3 (0.0 at spread 0); 0.0 up to each pair's earliest win; the released goal differs in 18/20 pairs | ≥ 0.001; 0; ≥ 10 of 20 | pass |
+| o4 0 habit breaks | {"o4": {"bound": 2390, "breaks": 0, "habit_free_twin_breaks": 1709}} | 0; ≥ 50 bound | pass |
+| o5 P0 | spread 0 vs no block on pairs 0-1, stances and states without digests: 4/4 identical; a planted change detected: True | identical | pass |
 
 Reading it. Every closed form of the needs step and the omission let-down holds on the engine to the last rounding, refused
 amounts change nothing, and the habits stay rules. Two bars fail, as the bars' own reachability checks predicted from the
@@ -1220,3 +1237,14 @@ RFC's rules in Python (nulls.py reference: n10 0.798 → 0.569, n11 0.02 on stre
 not bugs, and neither bar was changed. n10: a 2 h forecast at the declared growth cuts the hours the context sits at its cap by
 37 %, not by half. n11: in 2 of the 100 lives one report is pursued on the absence's second day before the success rate has
 fallen far enough; every later away day has none, and pursuit resumes once the principal answers again.
+
+Reading it (wave 1b). The gate re-learns a reversed lesson in 0.50 to 0.67 of the fixed rate's turns in every (T, noise) cell
+up to noise 0.20 while moving the stable phase only 3 to 7 % more, and every constant gain that moves no more than the gate
+re-learns more slowly: the speed comes from opening on a change, not from a larger step everywhere. Every gated step stays within
+g_max × step_cap and every learned weight within ±total_cap; the opening step equals the RFC's arithmetic exactly. Pace reads only
+the past (no earlier stance moved by any of four perturbed futures), ignores offered stakes, tracks the block reward rate
+(Spearman 0.84), averages a bursty and a steady stream of equal reward alike, and settles at the loop-gain fixed points within
+1.1e-5 or pins at the cap that binds. The optimism gene moves E to the expectile its rates predict (pooled error −0.0014), its
+sign is readable in 100 of 100 individuals, E follows the asymmetric closed form exactly, and two individuals that differ only by
+the gene stay identical until their earliest win and then diverge (mean distance 0.0028; a different released goal in 18 of 20
+pairs). A spread of 0 gives today's bytes, and the valence bars re-measured on this build pass as before.

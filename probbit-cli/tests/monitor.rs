@@ -64,6 +64,21 @@ fn needs_rows_and_the_at_cap_alert() {
     for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
 }
 
+/// docs/persona.md §2.13 and §2.14: a PACE row (the average as a dot over [0, cap] with an r0 tick, and the level) and a GAIN
+/// row per learned trait (its gain, `learning fast` while above 1): the pacer example after its reward bursts (event 11)
+#[test]
+fn pace_and_gain_rows() {
+    let f = tmp("pacer"); let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
+    let day = std::fs::read_to_string("../examples/persona/golden/pacer/day.json").unwrap();
+    let ev = format!("{f}.events"); std::fs::write(&ev, day.lines().filter(|l| l.starts_with(" {")).take(12).map(|l| format!("{}\n", l.trim().trim_end_matches(','))).collect::<String>()).unwrap();
+    let (c, _, err) = probbit(&["live", "../examples/persona/pacer.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
+    let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
+    let pace = out.lines().find(|l| l.starts_with("PACE    ")).expect(&out); assert!(pace.ends_with("]  rbar 1.68/4 | r0 1 | brisk"), "{pace}");
+    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.90  learning fast"), "{gain}");
+    let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("PACE    ") && !out.contains("GAIN    "), "no rows without the blocks");
+    for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
+}
+
 /// --once --plain: one frame in plain ASCII, byte for byte; the last event of the week and a failure turn (event 18: loss and
 /// praise lit, the bound habit in brackets, humour held at none)
 #[test]

@@ -58,7 +58,8 @@ impl SenseRow {
 }
 /// What the layout reads from the strand's header
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
-    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow>, needs: Vec<NeedRow> }
+    history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow>, needs: Vec<NeedRow>,
+    pace: Option<(f64, f64)>, gates: Vec<String> }
 impl Meta {
     fn of(r: &Replay) -> Meta {
         let d = persona::describe(&r.live.p);
@@ -86,7 +87,10 @@ impl Meta {
                 SenseRow { say: txt("say"), unit: txt("unit"), flag, log1p, lo: sc(lo), hi: sc(hi), drift_cap, id } }).collect(),
             // a needs block (RFC 0002), from describe's items in declared order
             needs: d.get("needs").and_then(|n| n.get("items")).and_then(Json::as_obj).map_or(vec![], |o| o.iter().map(|(id, x)| { let t = |k: &str| x.get(k).and_then(Json::as_str).unwrap_or("").to_string();
-                NeedRow { say: t("say"), unit: t("unit"), cap: x.get("cap").and_then(Json::as_f64).unwrap_or(1.0), goal: t("bind"), id: id.clone() } }).collect()) }
+                NeedRow { say: t("say"), unit: t("unit"), cap: x.get("cap").and_then(Json::as_f64).unwrap_or(1.0), goal: t("bind"), id: id.clone() } }).collect()),
+            // a pace block (RFC 0002 Design C): r0 and the cap; a surprise block (Design B): the learned traits whose gain is drawn
+            pace: d.get("pace").and_then(|p| Some((p.get("r0")?.as_f64()?, p.get("cap")?.as_f64()?))),
+            gates: if d.get("surprise").is_some() { strs(d.get("learning").and_then(|l| l.get("traits"))) } else { vec![] } }
     }
 }
 
@@ -309,6 +313,14 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         if dx >= x.cap - 5e-7 { let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
             out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} {say}: the deficit sits at its cap ({})", s.g("⚠", "!"), persona::r6(x.cap))))); }
     }
+    // 3d. pace (RFC 0002 Design C): the average as a dot over [0, cap] with an r0 tick, and the level; 3e. the surprise gate
+    // (Design B): per learned trait its gain g (1 when the stance lists none: the gate is closed)
+    if let Some((r0, cap)) = m.pace { let p = doc.get("pace"); let rb = p.and_then(|x| x.get("rbar")).and_then(Json::as_f64).unwrap_or(0.0);
+        let lv = p.and_then(|x| x.get("level")).and_then(Json::as_str).unwrap_or("steady");
+        out.push(format!("{}{}  {}", lab("PACE"), tick(s, 0.0, cap, r0, Some(rb)), s.bold(CYAN, &format!("rbar {rb:.2}/{} {dot} r0 {} {dot} {lv}", persona::r6(cap), persona::r6(r0))))); }
+    for (k, t) in m.gates.iter().enumerate() { let g = doc.get("surprise").and_then(|x| x.get(t)).and_then(Json::as_f64).unwrap_or(1.0);
+        out.push(format!("{}{t:<idw$}  {}  {}", lab(if k == 0 { "GAIN" } else { "" }), nbar(s, g - 1.0, 2.0, AMBER),
+            s.bold(if g > 1.0 { AMBER } else { GREEN }, &format!("g {g:.2}{}", if g > 1.0 { "  learning fast" } else { "" })))); }
     // 4. the habits: in force, the ones that bound highlighted, the violations counter (0 by construction)
     let hb = doc.get("habits");
     let list = |k: &str| strs(hb.and_then(|h| h.get(k)));
@@ -420,6 +432,9 @@ fn meta_json(w: Option<&Watch>, path: &str) -> Json {
         if !m.needs.is_empty() {
             kv.push(("needs", Json::Arr(m.needs.iter().map(|x| o(vec![("id", s(&x.id)), ("say", s(&x.say)), ("unit", s(&x.unit)), ("cap", Json::Num(x.cap)), ("goal", s(&x.goal))])).collect())));
         }
+        // pace and the surprise gate (RFC 0002 Designs B, C), only when the persona declares them
+        if let Some((r0, cap)) = m.pace { kv.push(("pace", o(vec![("r0", Json::Num(r0)), ("cap", Json::Num(cap))]))); }
+        if !m.gates.is_empty() { kv.push(("gates", Json::Arr(m.gates.iter().map(|t| s(t)).collect()))); }
     }
     o(kv)
 }

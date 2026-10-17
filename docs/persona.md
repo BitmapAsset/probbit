@@ -259,6 +259,11 @@ on: 0), each learned trait's weights move, before the turn is compiled:
     step(l) = step(l) - mean over levels of step                    (recentred: the step moves weight between levels)
     Δ(l)    = round(clip(Δ(l) + step(l), -total_cap, +total_cap), 6)
 
+With a `surprise` block (section 2.13) each learned trait's gain g joins the step and its cap, `step(l) = clip(sign x rate x g x
+credit(l), -step_cap x g, +step_cap x g)` (g is 1 without the block, so the step is the one above); with an optimism gene o
+(section 2.15) `rate` is `rate x e^(sign x o)`, and with a patience gene p a payment's half-life is `half_life_events x p`,
+clipped to [1, 10000].
+
 A turn with no feedback, or feedback on a stance with zero credit, moves nothing. Δ is added to the trait's field (section 3,
 step 2), so the feedback turn's own stance already uses it. What learning can and cannot change:
 
@@ -363,7 +368,7 @@ Per goal: `progress` 0..1, `novelty` 0..1 or true/false, `cue` true/false, `setb
 1. **Decay by clock time:** wanting W, afterglow A and expectation E each halve per their half-life (`x 0.5^(h / half_life)`);
    a set deadline counts down by h (not below 0). There is no per-turn inertia: a host that calls more often does not make a
    drive fade faster.
-2. **A win of size m > 0:** the prediction error `d = clip(m - E, -pe_cap, +pe_cap)`; `E <- E + rate x (m - E)`; wanting is
+2. **A win of size m > 0:** the prediction error `d = clip(m - E, -pe_cap, +pe_cap)`; `E <- E + rate x (m - E)` (with an optimism gene, section 2.15, the rate above or below E); wanting is
    consumed, `W <- W x (1 - drain x min(m, 1))`; `A <- A + k x max(d, 0)`; a full win (m >= 1) clears the deadline. Without a win,
    d = 0. Repeated equal wins drive E toward m and d toward 0: they stop moving the individual.
 3. **Wanting evidence:** `W <- W + k x (progress, novelty, cue, setback) . signals` (the weights above).
@@ -400,7 +405,7 @@ its reach.
 **Omission windows** (RFC 0002 A.4). A goal may declare `expect_by_hours: H` (> 0): after a released stance pursues the goal its
 window opens at H hours (if not already open); each event counts it down by its stamped hours in the decay (step 1); a win of the
 goal (m > 0) closes it in step 2; an event at which it reaches 0 without a win fires it once: `d = -min(E, pe_cap)` and
-`E <- E + rate x (0 - E)` (E after its decay), the window closes and `why` says `an expected win did not come (<the goal's
+`E <- E + rate x (0 - E)` (E after its decay; with an optimism gene the rate below E, section 2.15), the window closes and `why` says `an expected win did not come (<the goal's
 say>)`. The omitted d joins the turn's summed surprise, so `effects.surprise` and valence act on it, and the optional
 `effects.omission` map, per unit of min(the omitted E, pe_cap) (the input `drv_omit`); it does not join the learning sign (it is
 about the stance that opened the window, and as feedback it would trip B-R1 whenever another decision is open). A goal a need
@@ -664,6 +669,129 @@ windows and payments). Amounts never come through the MCP tools (section 7). A s
 passes every check; amounts are logged and replayed, not shown true. A need is arithmetic over logged numbers, not an inner
 state.
 
+### 2.13 Surprise (optional)
+
+After a run of surprising outcomes the learner takes larger steps, and smaller ones again once things settle (RFC 0002 Design
+B; Behrens et al. 2007; Nassar et al. 2010).
+
+```yaml
+surprise:                     # needs a learning block; every field optional (the defaults shown)
+  volatility_rate: 0.3        # a: the volatility average's weight per feedback, in (0, 1)
+  v0: 0.45                    # the volatility at which the gate opens, in [0, 1)
+  r_ref: 4                    # the run length at which the gain is 1 (>= 1)
+  r_max: 20                   # the cap on the run length (>= 1)
+  g_max: 3                    # the most the gate multiplies a step, in (1, 3]
+  precision: false            # true needs a senses block: each sense's effect gain x (1 - var / var_cap)
+```
+
+**The gate** runs inside the credit step (section 2.8), after the payment is settled and before the learner: for each learned
+trait whose paid credit has a taken level l* (credit > 0), when the feedback's sign is not 0, in this order (each stored number
+rounded to 6 decimals):
+
+    mb      = (plus(l*) - minus(l*)) / (plus(l*) + minus(l*) + 2)
+    p_same  = clip((1 + sign x mb) / 2, 0.01, 0.99)
+    v       = (1 - a) x v + a x (1 - p_same)
+    Ω       = clip((v - v0') / (1 - v0'), 0, 1)            v0' = clip(v0 + the volatility gene, 0, 0.999999)
+    counts  = counts x (1 - Ω), then plus(l*) or minus(l*) += |sign|
+    r       = min((1 - Ω) x (r + 1) + Ω, r_max)
+    g       = clip((1 + Ω x r) / (r + 1) x (r_ref + 1), 1, g_max)
+
+and the learner's step carries g (section 2.8). A new learner starts at v = 0, r = 1, so g = (r_ref + 1) / 2 (2.5 at the
+defaults) until its opening feedback, which at the defaults leaves (v, r, g) = (0.15, 2, 1.666667); consistent feedback raises
+r and brings g to 1 within a few turns, and a run of contrary feedback (a lesson reversed) raises v past v0 and g with it. g
+never goes below 1, so the gate never learns slower than `rate` alone; `total_cap` is untouched, so the learned box `prove`
+uses is the same. The volatility average is slow on purpose: it needs a run of surprises, which a real change produces and
+noise rarely does. bench/body's bars s1-s3 measure the re-learning turns, the stable-phase movement and the caps
+(BENCHMARKS.md section 12).
+
+**Precision** (`precision: true`): each sense input's effect gain is multiplied by 1 − var / var_cap of its sense after this
+event's sense step (section 2.11), so a sense whose readings vary widely moves the stance less. It is off by default because it
+changes every sensed document.
+
+**State and stance.** The state keeps `surprise: {<trait>: {v, r, g, counts: [[plus, minus], ...]}}` per learned trait, one
+pair per level. The stance gains `"surprise": {"<trait>": g}` for the learned traits whose gain is above 1 (`{}` once every gate
+is closed), and `why` says `learning fast: feedback changed` while any gain is above 1.
+
+Refused when the persona is read (exit 2, at the field's path): a surprise block without a learning block, `precision: true`
+without a senses block (V-R1); `volatility_rate` outside (0, 1), `v0` outside [0, 1), `r_ref` or `r_max` below 1, `g_max`
+outside (1, 3] (V-R2). A state is refused, even with a recomputed digest, when v leaves [0, 1], r leaves [1, r_max], g leaves
+[1, g_max], a count is negative, the pairs do not match the trait's levels, or a number has more than 6 decimals.
+
+### 2.14 Pace (optional)
+
+Average reward over the last hours sets the pace of the next actions; a single reward does not (RFC 0002 Design C; Niv et al.
+2007; Beierholm et al. 2013).
+
+```yaml
+pace:                          # needs reward_from (section 2.10)
+  half_life_hours: 6           # the average's half-life in stamped hours (> 0)
+  cap: 4                       # the average stays in [0, cap] (> 0)
+  r0: 1                        # the average at which the effects are 0, in (0, cap)
+  levels: [0.5, 1.5]           # required: slow below the one, brisk above the other; 0 <= slow_below < brisk_above <= cap
+  effects: {initiative: 0.5, verbosity: -0.3}   # required: ordinal shift per unit of (average - r0), on traits or moods
+  pace_spread: 0               # gene: a gain exp(N(0, s^2)) on the effects, 0 to 3
+```
+
+**The pace step** runs after the drive step (h = `elapsed_hours`; r_t = the sum of this event's accepted wins, the needs' wins
+included, plus 1 when the learning block's reward flag is on; corrections add nothing):
+
+    R = round(clip(R x 0.5^(h / half_life_hours) + (1 - 0.5^(1 / half_life_hours)) x r_t, 0, cap), 6)
+
+A new individual starts at R = 0. Stance t reads R after event t: the outcome of turn t's action, carried by a later event,
+moves only later stances. R enters the field as two number inputs, `pace_up` = max(R − r0, 0) (box [0, cap − r0]) and
+`pace_down` = max(r0 − R, 0) (box [0, r0]), carrying `effects` (negated for `pace_down`) times the gain g_pace =
+round(exp(pace_spread x z(name, seed, "pace", "gain")), 4). The two ids are reserved only with the block; the engine sets them
+(an event that sends one is refused at `inputs.pace_up`), and the stance's `inputs` leave them out.
+
+On hourly events this is a running average: a host acting a = base x (1 + κ x (R − r0)) times an hour, each action paying with
+probability p, settles at R* = p x base x (1 − κ x r0) / (1 − G) while the loop gain G = p x κ x base < 1 (1.2632, 1.5, 2.25 at
+G = 0.24, 0.60, 0.84) and runs to the cap that binds when G >= 1. The engine cannot see that loop (p is the world's), so `lint`
+reports the largest shift pace can put on the field, sum of |effects| x max(cap − r0, r0), and warns over 1; `describe` prints
+the closed form.
+
+**State and stance.** The state keeps `pace: {rbar}`. The stance gains `"pace": {"level": "brisk", "rbar": 1.683403}` (slow,
+steady or brisk by `levels`, for the host's scheduler), and `why` says `pace brisk: average reward 1.68 an hour` (R to 2
+decimals) when the level is not steady.
+
+Refused when the persona is read: a pace block without `reward_from` (P-R1: no self-reward can move it); `cap` or
+`half_life_hours` <= 0, `r0` outside (0, cap), `levels` not ordered within [0, cap], a missing `levels` or `effects`, a
+`pace_spread` outside 0 to 3 (P-R2); an effect on `pursue` or on an unknown trait or mood, a declared input or a habit
+condition that takes `pace_up` or `pace_down` (P-R3). A state is refused, even with a recomputed digest, when R leaves [0, cap]
+or has more than 6 decimals.
+
+### 2.15 Dispositions (optional)
+
+Each individual learns at its own rate from better- and worse-than-expected outcomes; the rates are genes (RFC 0002 Design D;
+Lefebvre et al. 2017; Frank et al. 2009).
+
+```yaml
+dispositions:                 # each spread 0 to 3, default 0 (no gene)
+  optimism_spread: 0.3        # o = s x z: rate x e^o above the expectation, rate x e^-o below (a learning or a drives block)
+  patience_spread: 0          # p = exp(s x z): x credit.half_life_events and x deadline_tau_hours (a credit or a drives block)
+  volatility_spread: 0        # an offset s x z on surprise.v0 (a surprise block)
+```
+
+The genes come from the persona hash family z(name, seed, "disposition", <gene>): `optimism` = round(s x z, 4), `patience` =
+round(exp(s x z), 4), `volatility` = round(s x z, 4). They act here:
+
+    section 2.8 step:  rate x e^(sign x o), then the step_cap clip
+    section 2.9 E:     E <- E + α x (m - E), α = min(rate x e^o, 1) if m > E, min(rate x e^-o, 1) if m < E (the omission too)
+    patience:          half_life_events x p, clipped to [1, 10000] (expiry at 4 half-lives); deadline_tau_hours x p
+
+With wins b and a at equal odds, E settles at the expectile τb + (1 − τ)a, τ = α⁺ / (α⁺ + α⁻); on one stream an individual
+with o > 0 keeps E at or above its spread-0 twin's at every step (the update is increasing in E and α⁺, decreasing in α⁻).
+
+**State.** `dispositions: {optimism, patience, volatility}`, only the genes whose spread is above 0: a spread of 0 stores
+nothing, so a block with every spread 0 gives the bytes of the persona without it (digests aside). There is no `why` clause;
+`describe` prints the spreads and the genes at the persona's seed. Refused when the persona is read: a spread outside 0 to 3
+(D-R1); `volatility_spread` without `surprise`, `optimism_spread` without a learning and without a drives block,
+`patience_spread` without a credit block and without a drives block (D-R2). A state whose genes miss its seed is refused.
+
+What the three blocks guarantee, and what they do not. A persona without them may use `pace_up` and `pace_down` as any ids,
+and every document it produces is the same, byte for byte, as before the blocks existed. Every new number is capped, rounded
+to 6 decimals (genes to 4) and recomputed by `live verify` from logged feedback, wins and stamped hours. The gate, the average
+and the genes are arithmetic over logged numbers, not inner states.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -690,7 +818,9 @@ For turn t of an individual (seed s), with inputs x_t:
    and the goal conditions as flag inputs of the turn; `starve_<goal>` habits follow the declared habits (step 6). With a
    needs block (section 2.12) each need's term enters as the number input `need_<id>` (weight 1 on its bound goal, box
    [-pursue.cap, +pursue.cap]) and each `need.<id>.deficit` condition as a flag input; with `valence` the input `drv_expect`
-   and with a window and `effects.omission` the input `drv_omit` (section 2.9) join the evidence.
+   and with a window and `effects.omission` the input `drv_omit` (section 2.9) join the evidence. With a pace block (section 2.14)
+   `pace_up` and `pace_down` join the inputs with gain g_pace; with `surprise.precision` each sense input's gain is multiplied
+   by its precision factor (section 2.13).
 3. **Mood variable** m: `h(m,l) = ln prior(l) + gene_m x c(l) + a_t(m,l)`, where the **mood accumulator**
    `a_t = k x d x a_(t-1) + (1 - k) x e_t`, e_t = the turn's input and history effects on m (with gains), k = `inertia`,
    d = 0.5 ^ (elapsed_hours / half_life_hours) (1 without them). An event's total impact over time is e_t whatever k is;
@@ -707,7 +837,8 @@ For turn t of an individual (seed s), with inputs x_t:
 
 **The steps of one event**, in order: validation and refusals (section 2.10, the senses' S1-S2, the credit rows, the needs'
 N-E1-N-E4); the sense step (section 2.11); the needs step (section 2.12: growth, then each satisfaction's win or setback); the
-drive step (section 2.9: decay and the windows' countdown, wins, an omission, wanting, caps); the credit step (section 2.8); the
+drive step (section 2.9: decay and the windows' countdown, wins, an omission, wanting, caps; with an optimism gene the rate above or below E); the pace step (section 2.14); the credit step (section 2.8)
+with the surprise gate (section 2.13); the
 compile above; the solve, the stance and `why`; after the turn: `since`, a window opened for the goal a released stance
 pursues, `await`. Nothing runs between events: growth and decay use the next event's stamped hours.
 
@@ -787,6 +918,10 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
   window (section 2.9) `drives` adds `"window": {"report": 1.5}` per goal with `expect_by_hours` (hours left, or null).
 - With a needs block (section 2.12): `"needs": {"context": {"deficit": 0.55, "forecast": 0.61, "term": 1.109371}}` per need
   (after this event's needs step); `inputs` echoes `needs` as given.
+- With a pace block (section 2.14): `"pace": {"level": "steady", "rbar": 0.97}` (the average after this event's pace step);
+  `inputs` leaves out `pace_up` and `pace_down`.
+- With a surprise block (section 2.13): `"surprise": {"<trait>": g}` for the learned traits whose gain is above 1 (`{}` when none
+  is).
 - Timing is never part of the stance: `--timing` adds a separate, non-canonical `timing` object (compile, engine and decode ms,
   engine calls, the 1-minute load average).
 
@@ -810,6 +945,9 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
             "window": {"fun": null}},                                       # and (expect_by_hours) the omission windows
  "needs": {"genes": {"weight": {}, "growth": {"contact": 1.0914}},            # with a needs block (section 2.12): genes,
            "deficit": {"context": 0.3, "contact": 0.12}, "success": {"compact": 1, "report": 0.8}},   # deficits, s per goal
+ "surprise": {"verbosity": {"v": 0.15, "r": 2, "g": 1.666667, "counts": [[0, 1], [0, 0], [0, 0]]}},   # with surprise (2.13)
+ "pace": {"rbar": 0.97},                                                     # with a pace block (section 2.14)
+ "dispositions": {"optimism": 0.1421, "patience": 1.0815},                   # genes with a spread above 0 (2.15)
  "senses": {"genes": {"gain": {"tool_fail": 1.19}, "threshold": {"tool_fail": -0.17}, "habituation": {"tool_fail": 1.46}},
             "norm": {"tool_fail": {"mean": 0.3, "var": 0.2, "n": 10}}},  # with a senses block (section 2.11): per sense
  "learned_from": {"caution": {"rewards": 3, "corrections": 2}},     # with learning and line.why_past: feedback turns by sign
@@ -831,7 +969,10 @@ before the state's turn, credits within ±1, a stance digest each), `prev_stance
 turn) and `control_closed` (decisions a control line closed, listed by the next stance); a persona without the block
 refuses a state with any of them. With a needs block the state is refused, even with a recomputed digest, when a deficit
 leaves [0, cap], a success rate leaves [0, 1], a window leaves [0, `expect_by_hours`] or null, the need set or the bound goals
-differ from the persona's, or a need gene misses its seed; a persona without the block refuses a state with a `needs` field.
+differ from the persona's, or a need gene misses its seed; a persona without the block refuses a state with a `needs` field. The fields of sections
+2.13 to 2.15 are refused the same way, at their paths: a gate's v outside [0, 1], r outside [1, r_max], g outside [1, g_max], a
+negative count; R outside [0, cap]; any of them past 6 decimals; genes that miss the seed; a field whose block the persona
+lacks, or a block without its field.
 
 ### 5.2 Canonical JSON and the number rule
 
@@ -981,6 +1122,12 @@ With a senses block the labels cover readings too (a bare reading takes the even
 numbers on `--grid` × the range, one reading repeated 1, 5 and 20 times, and the range ends alternating. `prove` reads each
 `sense_<id>_up/down` input as a box [0, zcap] × gain and each sense condition both ways, so a habit on `sense.<id>.raw` holds
 by construction for a rule with the same condition. A rule reads the sense conditions the persona's habits use.
+
+**Surprise and pace in fuzz and prove** (sections 2.13, 2.14). With a pace block `fuzz` adds reward bursts: each goal's top win
+and the reward flag, at elapsed 0, repeated 1, 5 and 20 times (the average runs to its cap); with a surprise block, feedback
+alternating between the reward and the correction flag over 20 events (the gate opens). The alphabet never carries `pace_up`
+or `pace_down` (the engine sets them). `prove` reads them as boxes [0, cap − r0] and [0, r0] times g_pace in their traits' and
+moods' boxes; the learned box is unchanged by `surprise` (g scales the step, never `total_cap`).
 
 **Needs in fuzz and prove** (section 2.12). `fuzz` adds amounts to its events (nested in `needs`) on `--grid` × (0, cap] per
 need, each amount repeated 1, 5 and 20 times (satisfactions past the deficit overshoot), and each window's length as idle hours
@@ -1164,6 +1311,11 @@ its source, and `verify` recomputes the normals from the logged readings: its su
 persona without the block lists `senses` in `ignored`, as before, and `live` says so once on stderr, at the earliest event
 that carries it: `probbit: live: events[i]: this persona has no senses block: ...`. The documents and the strand are unchanged.
 
+**Surprise, pace and dispositions in live** (sections 2.13 to 2.15). `verify` recomputes the average, each gate's v, r, g
+and counts and the genes from the logged feedback, wins and stamped hours: its summary adds `"pace": {"rbar", "max"}` (the
+average now and the largest after any event replayed) and `"surprise": {"<trait>": {"g_max_seen"}}` (the largest gain after
+any event replayed). A life split across runs equals one run, byte for byte: all three live in the state.
+
 **Needs in live** (section 2.12). An event carries `needs` as `persona turn` does; the strand logs each amount as given, with its
 source, and `verify` recomputes the deficits, the success rates and the windows from the logged amounts, readings and stamped
 hours: its summary adds `"needs": {"<id>": {"deficit", "at_cap_hours"}}`, the deficit now and the stamped hours of the events
@@ -1224,7 +1376,8 @@ in force, the ones that bound in colour, and the violations counter (0 by constr
 level as centred bars within ±total_cap (with a learning block, section 2.8), and with a credit block a CREDIT row: the open
 decisions with the eligibility a payment at the next event would get, this event's payment (turn, e, sign, absorbed) and the
 decisions it closed. With a needs block a NEEDS row per need: its deficit as a bar over [0, cap], its term and its goal's
-window (hours left or closed), and an alert while a deficit sits at its cap. The drives, when a document carries `pursue` or
+window (hours left or closed), and an alert while a deficit sits at its cap. With a pace block a PACE row: the average as a dot
+over [0, cap] with an r0 tick, and the level; with a surprise block a GAIN row per learned trait: its gain g (1 when closed). The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
 
 **Checkpoints and control lines.** A strand with checkpoint lines (section 5.7) is replayed from its last checkpoint, not from
@@ -1365,10 +1518,10 @@ previous event, the restart included). `probbit_live_event` (MCP) and Python's `
 | `probbit persona replay PERSONA [--seed N] --script JSON\|FILE [--out TRACE] [--no-inertia] [--timing]` | `init`, then every turn of a script: one stance per line; stderr: the trace's sha256 and the final state digest |
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
-| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; with a needs block, `needs`: each horizon whose forecast can pass K/2 before the deficit does and every habit that can exclude a bound goal (notes, not errors); exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
+| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; with a needs block, `needs`: each horizon whose forecast can pass K/2 before the deficit does and every habit that can exclude a bound goal (notes, not errors); with a pace block, `pace`: the largest field shift pace can cause, with a warning over 1; exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
-| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids; the learning block with its credit block; needs: the drive's n and m, the pursue term, the success rate, per need its unit, cap, weight, growth, sources, amount, bound goal, horizon, spreads and reserved id; the windows, valence's weights and liking) |
+| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids; the learning block with its credit block; needs: the drive's n and m, the pursue term, the success rate, per need its unit, cap, weight, growth, sources, amount, bound goal, horizon, spreads and reserved id; the windows, valence's weights and liking; surprise's settings and a new learner's start; pace's closed form, levels, effects, gain and largest field shift; the disposition spreads and genes) |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |

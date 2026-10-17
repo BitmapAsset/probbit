@@ -40,6 +40,9 @@ One binary of about 2 MB, zero third-party dependencies, nothing phones home. Al
   (8,393 payments, 100 % equal to an independent learner), replay and habits pass their bars; the twins bars a1 and a2 fail
   and are reported as findings. [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.9.0) · [RFC 0001](docs/rfcs/0001-senses-and-reward.md) · [CHANGELOG](CHANGELOG.md)
 
+On `main`, unreleased: RFC 0002 part 1 (needs, the omission let-down, valence, surprise, pace, dispositions),
+opt-in, measured in BENCHMARKS.md §12; ships as 0.10.0 after the fix wave.
+
 ## probbit in two minutes
 
 probbit is a p-bit processor: it couples bits that hold a probability on the CPU you already own, settles a whole plan under
@@ -530,7 +533,7 @@ probbit check dispatch-without-routine-habit.yaml --props examples/persona/dispa
 The bound proves `routine_work_acts` for 76 of the 100 individuals and leaves 24 unknown; the search breaks it on 15 of
 those 24 (9 of them with a single event, so before any learning). The other 9 it cannot break at depth 8: checked alone
 (`--seeds 18,20,28,30-31,79,87,92,96`) they report `unproven` and exit 3, which fails the job unless you allow it. Measured
-on this file with probbit 0.8.3 (unreleased), seeds 0-99, default depth.
+on this file with probbit 0.9.0, seeds 0-99, default depth.
 
 **Reproduce the clip: `python3 examples/rule-check/demo.py`.** The script (Python 3.9 standard library, probbit 0.8.2 or
 later) removes the `routine_acts` habit from the shipped policy and runs the rule check (`persona prove`) on 20 individuals

@@ -47,6 +47,9 @@ The exact tiers run before the sampler:
   stance's digest).
 - `needs` (a persona with a `needs:` block, docs/persona.md §2.12): per need its `deficit` after this event, the `forecast`
   and the `term` the `pursue` field read; `drives.window`: per goal with `expect_by_hours` the hours left, or null.
+- `pace` (a persona with a `pace:` block, docs/persona.md §2.14): `level` (slow / steady / brisk) and `rbar`, the average
+  reward after this event.
+- `surprise` (a persona with a `surprise:` block, docs/persona.md §2.13): per learned trait its gain g while above 1.
 
 ## Senses (0.9.0, docs/persona.md §2.11)
 - Event: `{"senses": {"tool_fail": true, "tool_latency": {"v": 2.4, "src": "env:runner"}}, "src": "env:host"}`: a bare
@@ -99,6 +102,21 @@ The exact tiers run before the sampler:
 - `live verify` summary: `needs` per need (`deficit`, `at_cap_hours`); `monitor`: a NEEDS row per need, its window, an
   at-cap alert; `lint`: horizons whose forecast passes K/2 before the deficit does, habits that exclude a bound goal.
 
+## Surprise, pace, dispositions (0.10.0, docs/persona.md §2.13 to §2.15)
+- `surprise: {volatility_rate: 0.3, v0: 0.45, r_ref: 4, r_max: 20, g_max: 3}` (needs a learning block; the defaults shown):
+  per learned trait a gain g in [1, g_max] multiplies the step and its cap; a run of contrary feedback raises it, consistent
+  feedback brings it back to 1; a new learner starts at g 2.5. Stance `surprise: {trait: g}` while g > 1; `why`: "learning
+  fast: feedback changed". `precision: true` (with senses) scales each sense's effect by 1 − var / var_cap.
+- `pace: {half_life_hours: 6, cap: 4, r0: 1, levels: [0.5, 1.5], effects: {initiative: 0.5, verbosity: -0.3}}` (needs
+  `reward_from`): R̄ ← clip(R̄ × 0.5^(h/6) + 0.109101 × r_t, 0, 4) after the drive step, r_t = the accepted wins + 1 per
+  reward flag on; stance `pace: {level, rbar}` (slow / steady / brisk); inputs `pace_up`, `pace_down` (the engine's);
+  `lint` warns when Σ|effects| × max(cap − r0, r0) > 1.
+- `dispositions: {optimism_spread, patience_spread, volatility_spread}` (0 to 3): genes o (rate × e^±o on the learned step
+  and on E), p (× the credit half-life and the deadline τ) and an offset on `surprise.v0`; a spread of 0 stores nothing.
+- Refused: V-R1, V-R2, P-R1–P-R3, D-R1, D-R2 when the persona is read; `pace_up` or `pace_down` sent as inputs. `live verify`
+  summary: `pace` (`rbar`, `max`), `surprise` (`g_max_seen` per trait); `monitor`: a PACE row (R̄ with its r0 tick) and a
+  GAIN row per learned trait.
+
 ## Exit codes
 - `decide`, `run`, `evaluate`: 0 answer (exact | diagnostics_passed | partial), 1 infeasible (a proof), 2 bad input (one
   `{"error"}` object on stdout, see Errors) or bad flag (stderr), 3 refused / declined / non-finite result.
@@ -147,7 +165,7 @@ One channel, the same for every command (0.8.2):
 | `monitor STRAND [--follow] [--once] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars in the terminal, or the Activity Monitor page on 127.0.0.1 (channel table, event-history traces, inspector) |
 | `monitor --demo [week\|drives] [--open]` | synthetic data: the tutor's week, paced, in under a minute; `drives`: a short goal-signal scenario |
 
-## `probbit check PERSONA` (0.8.3): one gate for CI
+## `probbit check PERSONA` (0.9.0): one gate for CI
 `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds 0-99] [--depth 8] [--hours 1,12,48] [--json]` runs `persona
 lint`'s pipeline on the rules (prove, then fuzz the unknown ones) and `live verify` on every strand. One line per rule
 (`held`, `held_by_construction`, `broken seed N`, `unproven`), one per strand (`ok N events` / `FAIL line K: ...` /

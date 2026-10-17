@@ -1,0 +1,1 @@
+{"conflicts":[],"floors":[],"ok":true,"pace":{"largest_field_shift":1.5,"note":"pace can shift the field by more than 1 nat: a host whose actions pay at the pace's level can run the average to its cap (loop gain >= 1)","warn":true},"persona":"Pacer","unresolved":0,"warnings":[]}
