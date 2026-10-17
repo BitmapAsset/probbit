@@ -1,0 +1,5 @@
+{"await": true, "senses": {"tool_fail": false}, "src": "env:runner", "elapsed_hours": 0.5}
+{"await": true, "error": true, "senses": {"tool_fail": true}, "src": "env:runner", "elapsed_hours": 0.25}
+{"praise": true, "for": 0, "src": "env:ci", "elapsed_hours": 0.1}
+{"await": true, "senses": {"tool_fail": false}, "src": "env:runner", "elapsed_hours": 1}
+{"praise": true, "for": 3, "src": "env:ci", "elapsed_hours": 0.2}

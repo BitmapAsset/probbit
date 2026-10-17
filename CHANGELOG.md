@@ -25,7 +25,7 @@ All notable changes to this project are documented here. The format follows
 - `live` says once on stderr when a persona without a needs block receives a `needs` key (still an undeclared input,
   listed in `ignored`).
 
-## 0.9.0 - unreleased
+## 0.9.0 - 2026-10-17
 
 ### Added
 - **Senses** (docs/persona.md §2.11): an optional `senses` block. The host sends measured readings in declared units with
@@ -48,16 +48,30 @@ All notable changes to this project are documented here. The format follows
   the released levels; `monitor` draws the open decisions with their eligibility; `fuzz` adds late, reordered, duplicated,
   cancelled and unknown payments; the MCP turn tools refuse `cancel`. `examples/agent-harness/addressed.json` (with
   `late.py` and its golden) and benchmark metric c are new.
+- docs/persona.md §7: the host contract in three paragraphs (one outcome per stance; host event ids and duplicate delivery;
+  restart time), one line each in docs/CHEATSHEET.md.
 
 ### Changed
+- The version is 0.9.0 (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a strand header tells a
+  0.9.0 strand from a 0.8.2 one.
+- `live verify` (CLI, Python `live_verify`, MCP `probbit_live_verify`) reports a header key, a persona or state field, a line
+  kind or a line field this engine does not know (a newer engine's strand) as `unsupported by this engine: <field>`: exit 5,
+  `{ok: false, line, unsupported, engine, strand_engine}`, never the divergence verdict. A tampered strand still diverges at
+  its line (exit 1), the chain checked past an unsupported line too. The released 0.8.2 binary reports a 0.9.0 strand as
+  `line 1 diverges` (its output is kept in `probbit-cli/tests/fixtures/strands/`). `probbit check` prints such a strand as
+  `line K: unsupported by this engine: <field> (written by <engine>)`, never FAIL (a strand that fails the gate: exit 1), and
+  its `--json` entry adds `unsupported` and `strand_engine`; `live --strand` and `live control` name the field when they refuse
+  to continue it.
+  **Upgrade note:** `live verify` exits 5 on a newer engine's strand where 0.8.2 exited 1; a gate that treats every non-zero
+  exit as a failure still fails on such strands.
 - `live` says once on stderr when a persona without a senses block receives a `senses` key (still an undeclared input,
   listed in `ignored`). The monitor's panel of the event's inputs is labelled INPUTS (it was SENSES).
 - `live` says once on stderr when a persona without a credit block receives `await`, `for` or `cancel` (still undeclared
   inputs, listed in `ignored`; feedback pays the previous stance).
 
-## 0.8.3 - unreleased
+### probbit check and fixes (was 0.8.3, never tagged)
 
-### Added
+#### Added
 - `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds LIST] [--depth N] [--hours LIST] [--json]`: one gate for
   CI. It runs `persona lint`'s pipeline on the rules (prove each one, then fuzz the ones the bound leaves unknown, the rules'
   and habits' thresholds on the grid) and `live verify` on every strand, then prints one line per rule (`held`,
@@ -78,7 +92,7 @@ All notable changes to this project are documented here. The format follows
   events teach to ask about routine work (24 of 24 over seeds 0-99); with the habit, `held_by_construction` and 0 of 20.
   `python/test_rule_check_demo.py` runs it small (4 individuals, 20 events, about 2 s).
 
-### Fixed
+#### Fixed
 - `cargo +1.78.0 test --workspace --locked` compiles again: a CLI test used `std::io::pipe()` (Rust 1.87); it now gets a
   readerless pipe from a child process's stdin. The build MSRV was unaffected.
 

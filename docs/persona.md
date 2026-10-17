@@ -1050,7 +1050,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.8.2","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.9.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
@@ -1068,8 +1068,30 @@ It prints `{"ok":true,"events","persona","seed","engine","final_state","last_lin
 (its stance or state no longer replays), a removed or reordered line at the next line's `prev`, a changed header at line 1. A copy
 with `\r\n` line endings (Windows text mode, an editor) verifies and can be continued: the hashes cover each line's text without
 its line ending, and a canonical JSON line never ends in `\r`. Verify replays with the binary that runs it; the header's `engine`
-names the version that wrote the strand. Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,055,367
-bytes and verifies in 3.3 s, about 3,000 events per second.
+names the version that wrote the strand (a development build writes its `-dev` version, so its strands are told from a release's).
+Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,055,367 bytes and verifies in 3.3 s, about 3,000
+events per second.
+
+**Unsupported is not diverges.** A newer engine's strand can carry what this engine does not know: a header key, a persona
+block or field (`senses` and `learning.credit` for 0.8.2; RFC 0002's `needs` for this one), a state field, a line kind (a `rest`
+line) or a field on a known line. `verify` stops at the earliest such line, prints
+`{"engine":"<this engine>","line":n,"ok":false,"strand_engine":"<the header's engine>","unsupported":"<field>"}`, says
+`probbit: live verify: line n: unsupported by this engine: <field> (written by <the header's engine>; this engine is <this
+engine>): not verified, and not a divergence` on stderr, and exits 5. Nothing from that line on was replayed: the strand is not
+verified, and not shown to differ either; verify it with the engine that wrote it. The field is named as the persona validator
+names it (`needs`, `learning.credit`), as `state.<field>` in a state, and by its path in the line otherwise (`rest`,
+`inputs.senses.tool_fail.z`). What this engine knows is still checked: a value it does not accept in a field it knows diverges
+(a changed input, a changed header value), and the chain is checked past an unsupported line, so an edited, removed or
+reordered line diverges at the earliest line whose `prev` shows it (exit 1); `unsupported` is left only for a strand whose
+chain is whole. An edit that adds a field this engine does not know, with the chain rebuilt after it, reads as unsupported:
+exit 5 is not a pass either. A newer engine that computes a known field differently (another stance or state digest) cannot be
+told from an edit: such a strand diverges at the earliest line where it differs, and the header's `engine` names the engine to
+verify it with. The released 0.8.2 binary predates this: on a 0.9.0 strand it prints `{"diverges":"the persona document:
+senses: unknown field (allowed: ...)","line":1,"ok":false}` and exits 1 (`probbit-cli/tests/fixtures/strands/` keeps that
+output next to the strand). MCP's `probbit_live_verify` and Python's `live_verify` return the same document: like a
+divergence, it is an answer, not an error.
+`probbit check` counts an unsupported strand as one that fails the gate (exit 1) and prints `line n: unsupported by this
+engine: <field> (written by <engine>)` for it, never FAIL; its `--json` entry adds `unsupported` and `strand_engine`.
 
 **Following a file.** `--events FILE --watch` follows the file as lines are appended (as `tail -f`): a line counts once its
 newline is written, and the run stops when the file is removed (tested on Linux and macOS).
@@ -1174,8 +1196,9 @@ same format as in 0.8.0. New strand headers record the current engine version, s
 Exit codes: `live` 0 when every event got its stance; 2 for a bad persona, state or flag, and after a bad event (each bad event
 prints one `{"error"}` object on stdout, changes nothing and the run goes on); 4 when the writer lock is held by another writer
 (nothing read or written) and after events refused by a paused or retired individual. `verify` 0 when every line replays, 1 at
-a line that differs, 2 for a bad flag or an unreadable file. `control` 0 when the line is appended, 2 for a bad field or an
-invalid move, 4 when the lock is held or the individual is retired.
+a line that differs, 5 at a line with a field or line kind this engine does not know (unsupported, above: not verified, and not
+a divergence), 2 for a bad flag or an unreadable file. `control` 0 when the line is appended, 2 for a bad field or an invalid
+move, 4 when the lock is held or the individual is retired.
 
 ### 5.8 Monitor: watch an individual's inner state
 
@@ -1318,6 +1341,23 @@ Before each model call: build the turn's inputs (the standard ones above, plus t
 into the prompt **after** the cached prefix (the line changes every turn; placed early it would invalidate a prompt cache),
 store the new state. On `refused` or `fallback`, use the line as given (habits only) and log `escalate`.
 
+**One outcome per stance.** With a credit block (section 2.8) a stance that governs two actions can be paid once: an outcome
+addressed to it pays it, and a second one is refused whole ("turn N is neither open nor the previous stance", rule
+B-R2; the event changes nothing and is not logged). Open one stance per action (one event with `await: true` per tool call)
+and address each outcome to its own stance (`for: N`, or `for: {turn, stance}`).
+
+**Host event ids and duplicate delivery.** The event schema has no event id: a key such as `id` is an undeclared input, listed
+in `ignored`. The engine refuses a second payment of a decision (B-R2, above), but a duplicate observation event (a retried
+hook, a redelivered callback) is a new event: it is appended to the strand and counted twice (two turns; a reading moves the
+normal twice, a flag counts twice in a history streak). The host keeps an idempotency key per event, its own event id mapped to
+the receipt (the stance's `turn` and the new state's `digest`, which the strand line logs), and does not resend an event it
+has a receipt for.
+
+**Restart time.** `--clock real` starts its clock with the process: a run's opening event is stamped with the time since the
+start, and an event that carries its own `elapsed_hours` is refused, so downtime across a restart is not counted. A host that
+needs downtime counted runs `--clock fixed` and stamps each event's `elapsed_hours` from its own clock (the hours since the
+previous event, the restart included). `probbit_live_event` (MCP) and Python's `live_event` always run the fixed clock.
+
 | command | what it does |
 |---|---|
 | `probbit persona init PERSONA [--seed N] [--out STATE]` | a new individual: genes from the seed, the resting stance (one engine call) |
@@ -1332,7 +1372,7 @@ store the new state. On `refused` or `fallback`, use the line as given (habits o
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
-| `probbit live verify STRAND [--from-checkpoint] [--actions FILE]` | replay a strand from its header alone: ok, or the earliest line that differs (exit 1); with `--actions`, also the earliest turn whose host action differs from the level its stance released (section 5.7) |
+| `probbit live verify STRAND [--from-checkpoint] [--actions FILE]` | replay a strand from its header alone: ok, the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported`, exit 5: a newer engine's strand, not a divergence); with `--actions`, also the earliest turn whose host action differs from the level its stance released (section 5.7) |
 | `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N]`, `probbit monitor --demo [...]` | watch an individual's inner state: the strand replayed as live bars in the terminal, or as a page on 127.0.0.1 (section 5.8) |
 
 A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes
@@ -1349,7 +1389,8 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
   `probbit_live_event {persona | persona_path, state | seed, event, strand_path}` -> `{stance, state}`, one event of a resident
   individual (`event` is its inputs, `elapsed_hours` from the host's clock, quantised to 1e-6 h; with `strand_path` the event is
   logged to that strand on the server's disk, a new file getting the header, and the answer gets `strand: {path, events, head}`);
-  `probbit_live_verify {strand | strand_path}` -> `live verify`'s document (section 5.7; a divergence is an answer).
+  `probbit_live_verify {strand | strand_path}` -> `live verify`'s document (section 5.7; a divergence is an answer, and so is
+  an unsupported strand: `{ok: false, line, unsupported, engine, strand_engine}`).
   For a persona with a senses block, `probbit_persona_turn` and `probbit_live_event` refuse an event that carries readings
   (rule S7, section 2.11: readings come from the host's instruments, never through the agent's channel); a persona without
   the block lists `senses` in `ignored`, as before. For a persona with a credit block they refuse an event that carries
@@ -1358,14 +1399,15 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
   that carries `needs` amounts, from any source (section 2.12: an amount comes from the host's `satisfy_from` sources, never
   through the agent's channel, so the agent cannot pay its own needs); a persona without the block lists `needs` in `ignored`.
   A persona with a drives block takes `goals` in `inputs` / `event` (section 2.9); the schemas declare it.
-  Stateless; the documents are the CLI's. A refusal, a fallback, a counterexample or a divergent strand is an answer; a bad
-  persona, state, input, event or rule is a tool error carrying the error object.
+  Stateless; the documents are the CLI's. A refusal, a fallback, a counterexample, a divergent strand or an unsupported one is
+  an answer; a bad persona, state, input, event or rule is a tool error carrying the error object.
 - **Python** (python/probbit.py, standard library only): `probbit.persona_init(persona, seed=None)` -> the state;
   `probbit.persona_turn(persona, state, inputs, timing=False, no_inertia=False)` -> `{"stance", "state"}`;
   `probbit.persona_replay(persona, script, seed=None)` -> the stances; `probbit.persona_fuzz(persona, never=None, props=None,
   seeds="0-99", **flags)` and `probbit.persona_prove(...)` -> the `--json` documents of section 5.6 (a counterexample or an
   unknown rule is an answer); `probbit.live_event(persona, state=None, event=None, seed=None, strand=None)` -> `{"stance",
-  "state"}` (+ `"strand"` with a strand path), the MCP tool's shape; `probbit.live_verify(strand)` -> `live verify`'s document.
+  "state"}` (+ `"strand"` with a strand path), the MCP tool's shape; `probbit.live_verify(strand)` -> `live verify`'s document
+  (a divergence, exit 1, and an unsupported strand, exit 5, are documents too, as over MCP).
   `persona` is a file path or the document as a dict; bad input raises `ProbbitInputError` (`.code == "persona"`, `.path`,
   `.message`).
 - **Browser** (probbit-wasm, no threads): `probbit_call` op 4 = persona init, op 5 = persona turn, with the MCP tools' arguments

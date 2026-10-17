@@ -286,6 +286,24 @@ class Mcp(unittest.TestCase):
                 e = self.call("probbit_live_event", args)
                 self.assertTrue(e["isError"]); self.assertEqual(e["structuredContent"]["error"]["path"], where)
 
+    def test_live_verify_answers_unsupported_for_a_newer_engines_strand(self):
+        # docs/persona.md 5.7: a block or a line kind this engine does not know is an answer with its own key (unsupported), not a
+        # tool error and not a divergence; the text is the CLI's stdout (exit 5); serverInfo names this engine's version
+        init = self.legacy("2025-11-25")
+        code, out = cli(["version"])
+        self.assertEqual((code, "probbit " + init["serverInfo"]["version"]), (0, out.strip()))
+        st = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probbit-cli", "tests", "fixtures", "strands")
+        for name, line, field in (("next-needs.strand", 1, "needs"), ("next-rest.strand", 8, "rest")):
+            path = os.path.join(st, name)
+            code, text = cli(["live", "verify", path])
+            self.assertEqual(code, 5)
+            v = self.call("probbit_live_verify", {"strand_path": path})
+            self.assertFalse(v["isError"]); self.assertEqual(v["content"][0]["text"], text.rstrip("\n"))
+            self.assertEqual(v["structuredContent"], {"ok": False, "line": line, "unsupported": field, "engine": out.strip(),
+                                                      "strand_engine": "probbit 0.10.0-dev"})
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(self.call("probbit_live_verify", {"strand": f.read()})["structuredContent"], v["structuredContent"])
+
     def test_persona_and_live_tools_pass_goal_signals(self):
         # drives (docs/persona.md 2.9): `goals` passes through probbit_persona_turn and probbit_live_event unchanged
         self.legacy("2025-11-25")
