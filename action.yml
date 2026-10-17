@@ -65,7 +65,7 @@ runs:
         fi
         bin="$(cd "$(dirname "$bin")" && pwd)/$(basename "$bin")"
         if ! "$bin" check --help > /dev/null 2>&1; then
-          echo "::error title=probbit check::$("$bin" version 2>&1) has no check command: it needs probbit 0.8.3 or later (set the version input)"
+          echo "::error title=probbit check::$("$bin" version 2>&1) has no check command: it needs probbit 0.9.0 or later (set the version input)"
           exit 1
         fi
         command -v jq > /dev/null || { echo "::error title=probbit check::jq is not on this runner (it reads the --json document)"; exit 1; }

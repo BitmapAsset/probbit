@@ -533,7 +533,7 @@ probbit check dispatch-without-routine-habit.yaml --props examples/persona/dispa
 The bound proves `routine_work_acts` for 76 of the 100 individuals and leaves 24 unknown; the search breaks it on 15 of
 those 24 (9 of them with a single event, so before any learning). The other 9 it cannot break at depth 8: checked alone
 (`--seeds 18,20,28,30-31,79,87,92,96`) they report `unproven` and exit 3, which fails the job unless you allow it. Measured
-on this file with probbit 0.8.3 (unreleased), seeds 0-99, default depth.
+on this file with probbit 0.9.0, seeds 0-99, default depth.
 
 **Reproduce the clip: `python3 examples/rule-check/demo.py`.** The script (Python 3.9 standard library, probbit 0.8.2 or
 later) removes the `routine_acts` habit from the shipped policy and runs the rule check (`persona prove`) on 20 individuals

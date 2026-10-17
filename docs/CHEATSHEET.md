@@ -165,7 +165,7 @@ One channel, the same for every command (0.8.2):
 | `monitor STRAND [--follow] [--once] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars in the terminal, or the Activity Monitor page on 127.0.0.1 (channel table, event-history traces, inspector) |
 | `monitor --demo [week\|drives] [--open]` | synthetic data: the tutor's week, paced, in under a minute; `drives`: a short goal-signal scenario |
 
-## `probbit check PERSONA` (0.8.3): one gate for CI
+## `probbit check PERSONA` (0.9.0): one gate for CI
 `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds 0-99] [--depth 8] [--hours 1,12,48] [--json]` runs `persona
 lint`'s pipeline on the rules (prove, then fuzz the unknown ones) and `live verify` on every strand. One line per rule
 (`held`, `held_by_construction`, `broken seed N`, `unproven`), one per strand (`ok N events` / `FAIL line K: ...` /
