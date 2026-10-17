@@ -1,0 +1,38 @@
+# needs2.yaml without the needs block and expect_by_hours (P0 copy).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body needs2
+  version: 1.0.0
+  seed: 0
+  summary: two needs, context and contact, bound to compact and report
+traits:
+  - id: tone
+    levels: [plain, warm]
+inputs:
+  - id: quiet
+    kind: flag
+    say: quiet hours
+senses:
+  - id: tokens
+    kind: number
+    unit: token_share
+    range: [0, 1]
+    src: [env]
+    prior: {mean: 0.06, var: 0.01}
+    drift_cap: 0.5
+    say: context used this hour
+drives:
+  goals:
+    - id: work
+      interest: 1.0
+    - id: compact
+      interest: 0.6
+    - id: report
+      interest: 0.6
+  pursue: {glow: 0}
+habits:
+  - id: quiet_hours
+    when: {quiet: true}
+    then: {pursue: {not: [report]}}
+    say: no reports in quiet hours

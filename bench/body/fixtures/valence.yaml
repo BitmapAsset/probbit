@@ -1,0 +1,42 @@
+# bench/body fixture (RFC 0002 Design E and A.4), bars v1, v2, v3 and om1: drives.valence on the mood `valence` (expect 0.2,
+# surprise 0.6), mood inertia 0.61 and half-life 1 h, and `expect_by_hours: 2` on the paid goal `task`. The habits only
+# choose the pursued goal (go_task, go_other), so a bar can fix which goal's E enters the valence evidence; no input moves a
+# trait or mood. Frozen with its sha256 in MANIFEST before any engine measurement.
+probbit_persona: 1
+identity:
+  name: Body valence
+  version: 1.0.0
+  seed: 0
+  summary: valence from expectations and prediction errors
+traits:
+  - id: tone
+    levels: [plain, warm]
+moods:
+  - id: valence
+    levels: [down, even, up]
+    inertia: 0.61
+    half_life_hours: 1
+inputs:
+  - id: go_task
+    kind: flag
+    say: the host asks for the task
+  - id: go_other
+    kind: flag
+    say: the host asks for the other thing
+drives:
+  goals:
+    - id: task
+      expect_by_hours: 2
+    - id: other
+  valence: {mood: valence, expect: 0.2, surprise: 0.6}
+habits:
+  - id: go_task
+    when: {go_task: true}
+    then: {pursue: [task]}
+    say: the host asked for the task
+  - id: go_other
+    when: {go_other: true}
+    then: {pursue: [other]}
+    say: the host asked for the other thing
+engine:
+  on_conflict: yield     # go_task and go_other are never sent together

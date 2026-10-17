@@ -1,0 +1,29 @@
+# bench/body fixture (RFC 0002 Design D), bars o1-o5: drives with one paid goal (`task`; `other` is the second goal the
+# block needs, and the goal the habit `busy_other` binds), expectation rate 0.2 and half_life_hours 48, and dispositions
+# optimism_spread 0.3. Its spread-0 copy is optimism-spread0.yaml. Frozen with its sha256 in MANIFEST before any engine
+# measurement.
+probbit_persona: 1
+identity:
+  name: Body optimism
+  version: 1.0.0
+  seed: 0
+  summary: per-individual rates for better- and worse-than-expected wins
+traits:
+  - id: tone
+    levels: [plain, warm]
+inputs:
+  - id: busy
+    kind: flag
+    say: the principal is busy
+drives:
+  goals:
+    - id: task
+    - id: other
+  expectation: {rate: 0.2, half_life_hours: 48}
+dispositions:
+  optimism_spread: 0.3
+habits:
+  - id: busy_other
+    when: {busy: true}
+    then: {pursue: [other]}
+    say: the principal is busy, do the other thing

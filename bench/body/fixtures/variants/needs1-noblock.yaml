@@ -1,0 +1,15 @@
+# needs1.yaml without the needs block and expect_by_hours (P0 copy).
+# Derived by ../gen.py from the frozen fixture; recorded in MANIFEST.
+probbit_persona: 1
+identity:
+  name: Body needs1
+  version: 1.0.0
+  seed: 0
+  summary: one need bound to one goal
+traits:
+  - id: tone
+    levels: [plain, warm]
+drives:
+  goals:
+    - id: refuel
+    - id: idle

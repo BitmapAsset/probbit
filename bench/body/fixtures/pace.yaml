@@ -1,0 +1,27 @@
+# bench/body fixture (RFC 0002 Design C), bars p1a, p1b, p1c and p6: drives with one paid goal (`task`; the drives block
+# needs two goals, so `other` is never paid), win_max 4, reward_from [env], and pace (half_life_hours 6, cap 4, r0 1, levels
+# [0.5, 1.5], effects on initiative and verbosity). The no-pace twin is variants/pace-nopace.yaml.
+# Frozen with its sha256 in MANIFEST before any engine measurement.
+probbit_persona: 1
+identity:
+  name: Body pace
+  version: 1.0.0
+  seed: 0
+  summary: average reward sets a pace level
+traits:
+  - id: initiative
+    levels: [low, mid, high]
+  - id: verbosity
+    levels: [terse, short, full]
+drives:
+  goals:
+    - id: task
+    - id: other
+  expectation: {win_max: 4}
+reward_from: [env]
+pace:
+  half_life_hours: 6
+  cap: 4
+  r0: 1
+  levels: [0.5, 1.5]
+  effects: {initiative: 0.5, verbosity: -0.3}

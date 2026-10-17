@@ -1185,3 +1185,23 @@ below the 0.30 bar. In both rooms the feedback still moves the learned caution w
 −0.32 after room A, −0.11 after room B), so the two lives drift the same way, and on the 10 probes with a tool failure the
 habit and the failure's push make both lives careful or measured (23 of 400 actions differ). The control shows what the
 normals add: with plain inputs the odds distance between two lives falls from 0.13 to 0.03.
+
+## §12 The body: needs, surprise, pace, dispositions, valence, rest and load (`python3 bench/body/run.py`, stdlib; not yet run)
+
+The benchmark's spec, fixtures, seeded streams and bars are in [bench/body/README.md](bench/body/README.md) (RFC 0002,
+[docs/rfcs/0002-neuromodulators-and-body.md](docs/rfcs/0002-neuromodulators-and-body.md)); they were frozen with their sha256
+(`bench/body/fixtures/MANIFEST`) before any engine had the blocks. The bars are frozen and unmeasured: no engine release has
+the RFC 0002 blocks yet, so `run.py` reports each part's missing block and exits 2. Results are recorded here when they exist.
+
+| part | bars | measured |
+|---|---|---|
+| P1 needs | n1-n11 | not yet |
+| P5 surprise | s1-s5 | not yet |
+| P2 pace | p1a, p1b, p1c, p6 | not yet |
+| P3 dispositions | o1-o5 | not yet |
+| P4 valence and the omission let-down | v1-v3, om1 | not yet |
+| P6 rest (part 2) | r0-r5 | not yet |
+| P7 load (part 2) | l1-l5 | not yet |
+
+The closed forms behind the bars are checked without an engine: `python3 bench/body/arith_0002.py` gives 40 checks, 0
+mismatches.
