@@ -1019,10 +1019,10 @@ mod tests {
         let diverges_at = |t: &str, line: usize| { let (l, why) = verify(t, &run).unwrap_err(); assert_eq!(l, line, "{why}"); assert_eq!(unsupported_field(&why), None, "{why}");
             assert!(verify_doc(t, &run).get("diverges").is_some()); };
         let header = |f: &dyn Fn(&mut Json)| { let mut h = json::parse(&ls[0]).unwrap(); f(&mut h); persona::text(&h) };
-        let needs = json::parse(r#"{"drive":{"n":4,"m":3},"r_cap":1,"items":[{"id":"context","unit":"token_share","cap":1,"weight":1,"satisfy_from":["env"],"amount":0.6}]}"#).unwrap();
-        // the header: a persona block (RFC 0002's needs) and a field in a known block, each with the persona digest of its document
-        for (path, field) in [(vec!["document", "needs"], "needs"), (vec!["document", "learning", "pace"], "learning.pace")] {
-            let h = header(&|h| { put(h, &path, needs.clone()); let d = persona::sha(h.get("document").unwrap()); put(h, &["persona", "digest"], Json::Str(d)); });
+        let load = json::parse(r#"{"half_life_hours":72,"kappa":0.5,"theta":1,"cap":4,"from":{"criticism":1,"sense_tool_fail":1},"effects":{"caution":0.5}}"#).unwrap();
+        // the header: a persona block (RFC 0002 part 2's load) and a field in a known block, each with the persona digest of its document
+        for (path, field) in [(vec!["document", "load"], "load"), (vec!["document", "learning", "pace"], "learning.pace")] {
+            let h = header(&|h| { put(h, &path, load.clone()); let d = persona::sha(h.get("document").unwrap()); put(h, &["persona", "digest"], Json::Str(d)); });
             let mut t: Vec<String> = ls.clone(); t[0] = h; let t = rechain(t, 1);
             unsupported_at(&t, 1, field);
             // the same header written over the old one, the chain left as it was: tampered, line 2's prev
@@ -1030,9 +1030,9 @@ mod tests {
         }
         // a header key, and a state field (the state's digest recomputed, as a writer's would be)
         let h = header(&|h| put(h, &["clock"], Json::Str("fixed".into()))); let mut t = ls.clone(); t[0] = h; unsupported_at(&rechain(t, 1), 1, "clock");
-        let h = header(&|h| { put(h, &["state", "pace"], Json::Num(0.0)); let mut s = h.get("state").unwrap().clone(); if let Json::Obj(v) = &mut s { v.retain(|(k, _)| k != "digest"); }
+        let h = header(&|h| { put(h, &["state", "load"], Json::Num(0.0)); let mut s = h.get("state").unwrap().clone(); if let Json::Obj(v) = &mut s { v.retain(|(k, _)| k != "digest"); }
             put(h, &["state", "digest"], Json::Str(persona::sha(&s))); });
-        let mut t = ls.clone(); t[0] = h; unsupported_at(&rechain(t, 1), 1, "state.pace");
+        let mut t = ls.clone(); t[0] = h; unsupported_at(&rechain(t, 1), 1, "state.load");
         // a line kind (a rest line) at the end, and in the middle with the lines after it re-chained
         let rest = |prev: &str| persona::canon(&json::parse(&format!(r#"{{"prev":"{prev}","rest":{{"rho":0.5}}}}"#)).unwrap());
         let mut t = ls.clone(); t.push(rest(&persona::digest_of(&ls[6]))); unsupported_at(&rechain(t, 7), 8, "rest");

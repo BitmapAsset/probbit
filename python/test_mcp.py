@@ -293,7 +293,7 @@ class Mcp(unittest.TestCase):
         code, out = cli(["version"])
         self.assertEqual((code, "probbit " + init["serverInfo"]["version"]), (0, out.strip()))
         st = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "probbit-cli", "tests", "fixtures", "strands")
-        for name, line, field in (("next-needs.strand", 1, "needs"), ("next-rest.strand", 8, "rest")):
+        for name, line, field in (("next-load.strand", 1, "load"), ("next-rest.strand", 8, "rest")):
             path = os.path.join(st, name)
             code, text = cli(["live", "verify", path])
             self.assertEqual(code, 5)

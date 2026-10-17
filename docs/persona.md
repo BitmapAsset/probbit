@@ -1073,7 +1073,7 @@ Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,
 events per second.
 
 **Unsupported is not diverges.** A newer engine's strand can carry what this engine does not know: a header key, a persona
-block or field (`senses` and `learning.credit` for 0.8.2; RFC 0002's `needs` for this one), a state field, a line kind (a `rest`
+block or field (`senses` and `learning.credit` for 0.8.2; RFC 0002 part 2's `load` for this one), a state field, a line kind (a `rest`
 line) or a field on a known line. `verify` stops at the earliest such line, prints
 `{"engine":"<this engine>","line":n,"ok":false,"strand_engine":"<the header's engine>","unsupported":"<field>"}`, says
 `probbit: live verify: line n: unsupported by this engine: <field> (written by <the header's engine>; this engine is <this
