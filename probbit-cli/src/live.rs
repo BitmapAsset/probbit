@@ -3,7 +3,8 @@
 //! nobody is talking to it, and feedback moves the learned deltas (§2.8). Every event appends one line to the strand: the
 //! inputs as the turn used them, the stance's and the new state's digests, and the sha256 of the line before. The strand's
 //! header carries the persona document, the initial state and the engine version, so `probbit live verify STRAND` replays the
-//! whole life from the strand alone and names the earliest line that differs.
+//! whole life from the strand alone and names the earliest line that differs, or the earliest line with a field or line kind
+//! this engine does not know (`unsupported`, a newer engine's strand: not verified, and not a divergence).
 //!
 //! The safety kit (§5.7): one writer per strand (`STRAND.lock`), control lines (pause, resume, retire: appended by `probbit live
 //! control`, never by an event; no credit crosses them) and checkpoint lines (the whole state every K events, so a replay can
@@ -117,6 +118,29 @@ pub fn control_line(prev: &str, what: &str, by: &str, reason: &str, at: &str) ->
 /// What kind of strand line `j` is
 enum Kind { Event, Control, Checkpoint }
 fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else { Kind::Event } }
+/// The header's keys, as this engine writes them
+const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state", "document"];
+/// The earliest key of a line after the header that its kind does not have (the line's keys in canonical order): a line kind
+/// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "rest": ...}`
+/// gives `rest`) or a field it does not know on a known one
+fn unknown_key(j: &Json) -> Option<&str> {
+    let known: &[&str] = match kind(j) { Kind::Event => &["inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
+        Kind::Checkpoint => &["checkpoint", "prev", "stance", "state"] };
+    j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
+}
+/// The start of a replay's `why` that is not a divergence: the line has a field or a line kind this engine does not know (a
+/// strand from a newer engine). Nothing from that line on was checked: the strand is not verified, and not shown to differ.
+/// `verify` reports it as `unsupported` (exit 5), never as `diverges`; a changed value of a field this engine knows still
+/// diverges.
+pub const UNSUPPORTED: &str = "unsupported by this engine: ";
+/// The `why` of an unsupported field: UNSUPPORTED, then its path (a persona field as the persona validator names it, a state
+/// field under `state.`, otherwise its path in the strand line)
+fn unsupported(path: &str) -> String { format!("{UNSUPPORTED}{path}") }
+/// The field path of an unsupported `why`; None for a divergence
+pub fn unsupported_field(why: &str) -> Option<&str> { why.strip_prefix(UNSUPPORTED) }
+/// A persona, state or event error for a field this engine does not know (the validators' "unknown field" at its path) -> the
+/// unsupported `why`; any other error -> `what` + the error, a divergence
+fn read_err(e: InErr, what: &str) -> String { if e.msg.starts_with("unknown field") { unsupported(&e.path) } else { format!("{what}{}: {}", e.path, e.msg) } }
 /// Now as RFC 3339 UTC to the second (the control lines' default `at`)
 pub fn utc_now() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -148,14 +172,16 @@ impl Normals {
     }
 }
 impl Replay {
-    /// The header line (without its line ending) -> the replay, ready for event lines; Err((1, what differs))
+    /// The header line (without its line ending) -> the replay, ready for event lines; Err((1, what differs)), or Err((1, the
+    /// unsupported `why`)) for a header key, persona field or state field this engine does not know
     pub fn open(head: &str) -> Result<Replay, (usize, String)> {
         let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
         if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
+        if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()))) { return Err((1, unsupported(k))); }
         let doc = h.get("document").cloned().ok_or((1, "the header has no persona document".to_string()))?;
-        let p = persona::build(&doc).map_err(|e| (1, format!("the persona document: {}: {}", e.path, e.msg)))?;
+        let p = persona::build(&doc).map_err(|e| (1, read_err(e, "the persona document: ")))?;
         if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
-        let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, format!("the initial state: {}: {}", e.path, e.msg)))?;
+        let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, read_err(e, "the initial state: ")))?;
         let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
         if header != head { return Err((1, "the header is not as written".into())); }
         let norms = Normals::start(&live.p, &live.st);
@@ -170,6 +196,7 @@ impl Replay {
         let j = json::parse(cp).map_err(|e| (at, format!("not JSON: {}", e.msg)))?;
         let b = json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?;
         if persona::canon(&j) != cp { return Err((at, "not canonical JSON".into())); }
+        if let Some(k) = unknown_key(&j) { return Err((at, unsupported(k))); }
         if !j.as_obj().is_some_and(|kv| kv.len() == 4 && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()))) {
             return Err((at, "checkpoint fields must be checkpoint, prev, stance and state".into()));
         }
@@ -181,7 +208,7 @@ impl Replay {
         if b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
         let stance = j.get("stance").cloned().unwrap_or(Json::Null);
         if b.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
-        let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, format!("the checkpoint's state: {}: {}", e.path, e.msg)))?;
+        let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, read_err(e, "the checkpoint's state: ")))?;
         if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
         r.live.st = st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
         r.norms = Normals::start(&r.live.p, &r.live.st);
@@ -195,12 +222,15 @@ impl Replay {
     /// line); Err((its 1-based line number, what differs)). A control line must be a valid move of the status and the line its
     /// fields give; a checkpoint line must immediately follow an event while active and carry
     /// the event count and the state the replay reached. The last stance remains available to
-    /// the monitor after controls/checkpoints, but that does not authorize another checkpoint.
+    /// the monitor after controls/checkpoints, but that does not authorize another checkpoint. A chained line with a key its
+    /// kind does not have (a newer line kind, a newer field), or an event whose inputs have a field this engine does not know,
+    /// is Err((its line number, the unsupported `why`)).
     pub fn step(&mut self, l: &str, eng: Engine) -> Result<Option<Json>, (usize, String)> {
         let (i, live) = (self.line + 1, &mut self.live);
         let j = json::parse(l).map_err(|e| (i, format!("not JSON: {}", e.msg)))?;
         if persona::canon(&j) != l { return Err((i, "not canonical JSON".into())); }
-        if j.get("prev").and_then(Json::as_str) != Some(live.head()) { return Err((i, "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)".into())); }
+        if j.get("prev").and_then(Json::as_str) != Some(live.head()) { return Err((i, PREV.into())); }
+        if let Some(k) = unknown_key(&j) { return Err((i, unsupported(k))); }
         match kind(&j) {
             Kind::Control => { let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
                 let line = live.control(f("control"), f("by"), f("reason"), f("at")).map_err(|e| (i, format!("control line: {}: {}", e.path, e.msg)))?;
@@ -216,7 +246,7 @@ impl Replay {
             Kind::Event => {} }
         if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i, format!("n is not {}", live.n + 1))); }
         let ev = j.get("inputs").ok_or((i, "no inputs".to_string()))?;
-        let (stance, line) = live.event(ev, eng).map_err(|e| (i, format!("{}: {}", e.path, e.msg)))?;
+        let (stance, line) = live.event(ev, eng).map_err(|e| (i, read_err(e, "")))?;
         if j.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
         if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
         if line != l { return Err((i, "the line differs".into())); }
@@ -249,12 +279,32 @@ pub fn lines(text: &str) -> Vec<&str> {
 }
 /// `probbit live verify`: replay a strand from its header -> Ok(summary) when every line is as recorded; Err((1-based line
 /// number, what differs)) at the earliest line that is not. Lines end in `\n` or `\r\n`; the chain hashes the line text alone.
+/// A line with a field or line kind this engine does not know stops the replay as unsupported, unless a later line breaks the
+/// chain (`chain_first`).
 pub fn verify(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
     let lines = lines(text);
-    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
-    for l in lines.iter().skip(1) { r.step(l, eng)?; }
-    Ok(r.summary())
+    let replay = || -> Result<Json, (usize, String)> {
+        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+        for l in lines.iter().skip(1) { r.step(l, eng)?; }
+        Ok(r.summary()) };
+    replay().map_err(|e| chain_first(&lines, e))
 }
+/// The divergence the hash chain shows after an unsupported line: a strand this engine cannot replay to the end is still checked
+/// for what the format alone says, so an edited, removed or reordered line after it (or the unsupported line itself, edited:
+/// the next line's `prev`) diverges at the earliest line that breaks the chain (not JSON, not canonical JSON, or a `prev` that is
+/// not the sha256 of the line before), as in a replay. `unsupported` is left only for a strand whose chain is whole; a
+/// divergence passes unchanged.
+fn chain_first(lines: &[&str], (line, why): (usize, String)) -> (usize, String) {
+    if unsupported_field(&why).is_none() { return (line, why); }
+    for i in line.max(1)..lines.len() {
+        let j = match json::parse(lines[i]) { Ok(j) => j, Err(e) => return (i + 1, format!("not JSON: {}", e.msg)) };
+        if persona::canon(&j) != lines[i] { return (i + 1, "not canonical JSON".into()); }
+        if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(lines[i - 1]).as_str()) { return (i + 1, PREV.into()); }
+    }
+    (line, why)
+}
+/// The divergence of a line whose `prev` is not the sha256 of the line before
+const PREV: &str = "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)";
 /// The 0-based index of the strand's last checkpoint line followed by at least `after` lines, if any (a cheap scan: the key)
 pub fn last_checkpoint(lines: &[&str], after: usize) -> Option<usize> {
     (1..lines.len().saturating_sub(after)).rev().find(|&i| lines[i].starts_with(r#"{"checkpoint":"#))
@@ -263,17 +313,21 @@ pub fn last_checkpoint(lines: &[&str], after: usize) -> Option<usize> {
 pub fn verify_from_checkpoint(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
     let lines = lines(text);
     let Some(k) = last_checkpoint(&lines, 0) else { return verify(text, eng) };
-    let mut r = Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1)?;
-    for l in lines.iter().skip(k + 1) { r.step(l, eng)?; }
-    Ok(r.summary())
+    let replay = || -> Result<Json, (usize, String)> {
+        let mut r = Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1)?;
+        for l in lines.iter().skip(k + 1) { r.step(l, eng)?; }
+        Ok(r.summary()) };
+    replay().map_err(|e| chain_first(&lines, e))
 }
 /// `verify` from the header, keeping the stance documents of the given turns (what `--actions` compares with)
 pub fn verify_keep(text: &str, eng: Engine, keep: &[u64]) -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
     let lines = lines(text);
-    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut kept = vec![];
-    for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? {
-        if let Some(t) = doc.get("turn").and_then(Json::as_f64).map(|x| x as u64).filter(|t| keep.contains(t)) { kept.push((t, doc)); } } }
-    Ok((r.summary(), kept, r.live.p.clone()))
+    let replay = || -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
+        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut kept = vec![];
+        for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? {
+            if let Some(t) = doc.get("turn").and_then(Json::as_f64).map(|x| x as u64).filter(|t| keep.contains(t)) { kept.push((t, doc)); } } }
+        Ok((r.summary(), kept, r.live.p.clone())) };
+    replay().map_err(|e| chain_first(&lines, e))
 }
 /// One line of a host's action log (`live verify --actions FILE`, §5.7): the decision's turn and, per trait the host acted on,
 /// the level it acted on
@@ -309,9 +363,21 @@ pub fn first_difference(p: &Persona, actions: &[Action], stances: &[(u64, Json)]
                 ("released".into(), released.map_or(Json::Null, |r| s(&r))), ("why".into(), s(why))])))); } }
     Ok((checked, None))
 }
-/// `verify` as one document: the summary, or {ok: false, line, diverges}
-pub fn verify_doc(text: &str, eng: Engine) -> Json {
-    verify(text, eng).unwrap_or_else(|(line, why)| Json::Obj(vec![("ok".into(), Json::Bool(false)), ("line".into(), Json::Num(line as f64)), ("diverges".into(), Json::Str(why))]))
+/// `verify` as one document: the summary, or `failure`'s document
+pub fn verify_doc(text: &str, eng: Engine) -> Json { verify(text, eng).unwrap_or_else(|(line, why)| failure(text, line, &why)) }
+/// The document of a strand that does not verify at `line`: {ok: false, line, diverges: what differs}, or, for a field or line
+/// kind this engine does not know, {ok: false, line, unsupported: the field's path, engine: this engine, strand_engine: the
+/// header's `engine` (null if it names none)}
+pub fn failure(text: &str, line: usize, why: &str) -> Json {
+    let mut v = vec![("ok".into(), Json::Bool(false)), ("line".into(), Json::Num(line as f64))];
+    match unsupported_field(why) {
+        Some(f) => { v.push(("unsupported".into(), Json::Str(f.to_string()))); v.push(("engine".into(), Json::Str(engine()))); v.push(("strand_engine".into(), strand_engine(text))); }
+        None => v.push(("diverges".into(), Json::Str(why.to_string()))) }
+    Json::Obj(v)
+}
+/// The engine a strand's header names: its `engine` string, or null when the header is not JSON or has none
+pub fn strand_engine(text: &str) -> Json {
+    json::parse(lines(text).into_iter().next().unwrap_or("")).ok().and_then(|h| h.get("engine").cloned()).filter(|e| matches!(e, Json::Str(_))).unwrap_or(Json::Null)
 }
 /// This binary's engine (the strand header's `engine`)
 pub fn engine() -> String { format!("probbit {}", env!("CARGO_PKG_VERSION")) }
@@ -331,6 +397,7 @@ fn check_chain(text: &str) -> Result<Status, InErr> {
         if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(ls[i - 1]).as_str()) {
             return Err(err(i + 1, "prev is not the sha256 of the line before".into()));
         }
+        if let Some(k) = unknown_key(&j) { return Err(err(i + 1, unsupported(k))); }
         match kind(&j) {
             Kind::Control => {
                 let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
@@ -504,7 +571,7 @@ pub fn control_cmd(path: &str, what: &str, by: &str, reason: &str, at: &str) -> 
 /// (a document or a path), the state (or a seed: a new individual), one event (its inputs; `elapsed_hours` comes from the host's
 /// clock and is quantised here) and optionally a strand file on the server's disk (a new one gets the header; an existing one is
 /// continued and `state` must be its last state) -> {stance, state} (+ strand {path, events, head}). verify: a strand (its text
-/// or a path) -> `verify_doc` (a divergence is an answer).
+/// or a path) -> `verify_doc` (a divergence is an answer, and so is an unsupported strand).
 pub fn tool(name: &str, args: &[(String, Json)], eng: Engine) -> Result<Json, InErr> {
     let get = |k: &str| args.iter().find(|(x, _)| x == k).map(|(_, v)| v).filter(|v| !v.is_null());
     let known: &[&str] = if name == "probbit_live_verify" { &["strand", "strand_path"] } else { &["persona", "persona_path", "state", "seed", "event", "strand_path"] };
@@ -914,6 +981,68 @@ mod tests {
         let t4 = text.replacen(r#""rate":0.5"#, r#""rate":0.6"#, 1); assert_eq!(verify(&t4, &run).unwrap_err().0, 1);
         // a truncated last line
         let t5 = &text[..text.len() - 10]; assert_eq!(verify(t5, &run).unwrap_err().0, 31);
+    }
+
+    /// `j` with `v` at `path` (objects only; the last key replaced, or appended when missing)
+    fn put(j: &mut Json, path: &[&str], v: Json) {
+        let Json::Obj(kv) = j else { panic!("not an object at {path:?}") };
+        match path {
+            [k] => match kv.iter_mut().find(|(x, _)| x == k) { Some((_, x)) => *x = v, None => kv.push((k.to_string(), v)) },
+            [k, rest @ ..] => put(&mut kv.iter_mut().find(|(x, _)| x == k).unwrap_or_else(|| panic!("no {k}")).1, rest, v),
+            [] => unreachable!() }
+    }
+    /// The lines re-chained from index `from` on (each `prev` the sha256 of the line before), as the strand's text
+    fn rechain(mut ls: Vec<String>, from: usize) -> String {
+        for i in from.max(1)..ls.len() { let mut j = json::parse(&ls[i]).unwrap(); put(&mut j, &["prev"], Json::Str(persona::digest_of(&ls[i - 1]))); ls[i] = persona::canon(&j); }
+        ls.join("\n") + "\n"
+    }
+    /// docs/persona.md §5.7, "Unsupported": a header key, a persona field, a state field, a line kind or a line field this engine
+    /// does not know (a newer engine's strand, its chain whole) is `unsupported by this engine: FIELD` at the line that has it,
+    /// never a divergence; `verify_doc` (the MCP tool's document) is {ok, line, unsupported, engine, strand_engine}. A tampered
+    /// strand still diverges at its line: a changed input, a removed line, a changed known header value, and an unknown field
+    /// added without the chain that a writer would give it (the chain is checked past an unsupported line).
+    #[test]
+    fn a_field_this_engine_does_not_know_is_unsupported_not_a_divergence() {
+        let (text, _) = strand(6); let ls: Vec<String> = text.lines().map(str::to_string).collect(); assert_eq!(ls.len(), 7);
+        let unsupported_at = |t: &str, line: usize, field: &str| {
+            assert_eq!(verify(t, &run).unwrap_err(), (line, format!("unsupported by this engine: {field}")), "{field}");
+            let want = format!(r#"{{"engine":"{}","line":{line},"ok":false,"strand_engine":"probbit test","unsupported":"{field}"}}"#, engine());
+            assert_eq!(persona::canon(&verify_doc(t, &run)), want, "{field}: the document");
+        };
+        let diverges_at = |t: &str, line: usize| { let (l, why) = verify(t, &run).unwrap_err(); assert_eq!(l, line, "{why}"); assert_eq!(unsupported_field(&why), None, "{why}");
+            assert!(verify_doc(t, &run).get("diverges").is_some()); };
+        let header = |f: &dyn Fn(&mut Json)| { let mut h = json::parse(&ls[0]).unwrap(); f(&mut h); persona::text(&h) };
+        let needs = json::parse(r#"{"drive":{"n":4,"m":3},"r_cap":1,"items":[{"id":"context","unit":"token_share","cap":1,"weight":1,"satisfy_from":["env"],"amount":0.6}]}"#).unwrap();
+        // the header: a persona block (RFC 0002's needs) and a field in a known block, each with the persona digest of its document
+        for (path, field) in [(vec!["document", "needs"], "needs"), (vec!["document", "learning", "pace"], "learning.pace")] {
+            let h = header(&|h| { put(h, &path, needs.clone()); let d = persona::sha(h.get("document").unwrap()); put(h, &["persona", "digest"], Json::Str(d)); });
+            let mut t: Vec<String> = ls.clone(); t[0] = h; let t = rechain(t, 1);
+            unsupported_at(&t, 1, field);
+            // the same header written over the old one, the chain left as it was: tampered, line 2's prev
+            let mut bent = ls.clone(); bent[0] = t.lines().next().unwrap().to_string(); diverges_at(&(bent.join("\n") + "\n"), 2);
+        }
+        // a header key, and a state field (the state's digest recomputed, as a writer's would be)
+        let h = header(&|h| put(h, &["clock"], Json::Str("fixed".into()))); let mut t = ls.clone(); t[0] = h; unsupported_at(&rechain(t, 1), 1, "clock");
+        let h = header(&|h| { put(h, &["state", "pace"], Json::Num(0.0)); let mut s = h.get("state").unwrap().clone(); if let Json::Obj(v) = &mut s { v.retain(|(k, _)| k != "digest"); }
+            put(h, &["state", "digest"], Json::Str(persona::sha(&s))); });
+        let mut t = ls.clone(); t[0] = h; unsupported_at(&rechain(t, 1), 1, "state.pace");
+        // a line kind (a rest line) at the end, and in the middle with the lines after it re-chained
+        let rest = |prev: &str| persona::canon(&json::parse(&format!(r#"{{"prev":"{prev}","rest":{{"rho":0.5}}}}"#)).unwrap());
+        let mut t = ls.clone(); t.push(rest(&persona::digest_of(&ls[6]))); unsupported_at(&rechain(t, 7), 8, "rest");
+        let mut mid = ls.clone(); mid.insert(3, rest("")); let mid = rechain(mid, 3); unsupported_at(&mid, 4, "rest");
+        // a field on an event line
+        let mut t = ls.clone(); let mut j = json::parse(&t[4]).unwrap(); put(&mut j, &["why"], Json::Str("a newer field".into())); t[4] = persona::canon(&j); unsupported_at(&rechain(t, 5), 5, "why");
+        // tampered: a changed input diverges at its line; a removed line at the next line's prev; a changed known header value at line 1
+        diverges_at(&text.replacen(r#""praise":false"#, r#""praise":true"#, 1), 2);
+        let mut t = ls.clone(); t.remove(3); diverges_at(&(t.join("\n") + "\n"), 4);
+        diverges_at(&text.replacen(r#""rate":0.5"#, r#""rate":0.6"#, 1), 1);
+        // tampered around an unsupported line: a rest line with a wrong prev; a line removed after it; the rest line itself edited
+        let mut t = ls.clone(); t.push(rest(&persona::digest_of(&ls[5]))); diverges_at(&(t.join("\n") + "\n"), 8);
+        let mut t: Vec<String> = mid.lines().map(str::to_string).collect(); t.remove(5); diverges_at(&(t.join("\n") + "\n"), 6);
+        diverges_at(&mid.replacen(r#""rho":0.5"#, r#""rho":0.9"#, 1), 5);
+        // `live --strand` (resume) and `live control` refuse to continue it, saying why (exit 2)
+        let mut t = ls.clone(); t.push(rest(&persona::digest_of(&ls[6]))); let e = check_chain(&rechain(t, 7)).unwrap_err();
+        assert_eq!(e.msg, "line 8: unsupported by this engine: rest");
     }
 
     /// The header holds the state as canonical JSON, so one individual starts one header whether it comes fresh from `init`

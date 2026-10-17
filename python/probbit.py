@@ -15,10 +15,13 @@
     verdicts = probbit.persona_prove(persona, props=[rule1, rule2], seeds="0-9")  # held_by_construction | proved | unknown per rule
     r = probbit.live_event(persona, state, {"praise": True, "elapsed_hours": 2.5}, strand="pip.strand")   # one event of a resident individual
     report = probbit.live_verify("pip.strand")                                   # {"ok": True, ...} or {"ok": False, "line": n, "diverges": ...}
+                                                                                 # or {"ok": False, "line": n, "unsupported": field, "engine", "strand_engine"}
 
 Answers: `probbit run` reports per-variable odds under "marginals", `probbit decide` under "odds" (docs/probbit-ir-json.md, README).
 Every call returns the decoded JSON answer for exit 0 (exact / diagnostics_passed / partial), exit 1 (`infeasible`, a proof)
-and exit 3 (`refused` / `declined`: the gate or a cap said no; that is an answer, not an error). It raises:
+and exit 3 (`refused` / `declined`: the gate or a cap said no; that is an answer, not an error). `live_verify` returns its
+document for exit 1 (a line differs: "diverges") and exit 5 (a line has a field or line kind this engine does not know, a newer
+engine's strand: "unsupported" names the field; not verified, and not a divergence). It raises:
   ProbbitInputError   exit 2: the input or a flag was rejected (.code / .path / .message from the structured error object;
                    flag errors carry the CLI's stderr line in .message and code "flag")
   ProbbitNumericError exit 3 with an {"error": {"code": "numeric"}} object: a computed quantity was not finite (no answer)
@@ -408,5 +411,7 @@ def live_event(persona, state=None, event=None, *, seed=None, strand=None, timeo
 def live_verify(strand, *, timeout_s=None, binary=None):
     """`probbit live verify` (docs/persona.md §5.7): replay a strand file from its header alone -> {"ok": True, "events", "persona",
     "seed", "engine", "final_state", "last_line"} when every line replays byte for byte, else {"ok": False, "line": n, "diverges":
-    what} at the earliest line that differs (an answer, not an error)."""
-    return _live_call(["verify", os.fspath(strand)], timeout_s, binary, answers=(0, 1))
+    what} at the earliest line that differs, or {"ok": False, "line": n, "unsupported": field, "engine": this engine,
+    "strand_engine": the header's engine} at the earliest line with a field or line kind this engine does not know (a newer
+    engine's strand: not verified, and not a divergence; verify it with the engine that wrote it). Answers, not errors."""
+    return _live_call(["verify", os.fspath(strand)], timeout_s, binary, answers=(0, 1, 5))
