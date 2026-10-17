@@ -300,7 +300,7 @@ class Mcp(unittest.TestCase):
             v = self.call("probbit_live_verify", {"strand_path": path})
             self.assertFalse(v["isError"]); self.assertEqual(v["content"][0]["text"], text.rstrip("\n"))
             self.assertEqual(v["structuredContent"], {"ok": False, "line": line, "unsupported": field, "engine": out.strip(),
-                                                      "strand_engine": "probbit 0.10.0-dev"})
+                                                      "strand_engine": "probbit 0.11.0-dev"})
             with open(path, encoding="utf-8") as f:
                 self.assertEqual(self.call("probbit_live_verify", {"strand": f.read()})["structuredContent"], v["structuredContent"])
 

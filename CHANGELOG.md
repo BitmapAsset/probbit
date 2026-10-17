@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.10.0 - unreleased
 
+- Development builds print `0.10.0-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
+  strand header tells them from 0.9.0.
 - **RFC 0002 draft and bench/body frozen** (docs/rfcs/0002-neuromodulators-and-body.md, bench/body/): fixtures, seeds and
   bars committed before any engine measurement; no engine change.
 - **bench/body bars v2**, repaired before any engine measurement: 28 weak or vacuous bars now need exact or bounded
