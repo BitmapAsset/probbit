@@ -3,6 +3,17 @@
 Status: draft for review · Target: probbit 0.10.0 (part 1), a follow-on release (part 2) · Changes: docs/persona.md (format
 1, additive) · Depends on: RFC 0001 (senses, action-addressed feedback)
 
+**Changes after the freeze** (2026-10-16; the text is not a bar, no pass value moved):
+
+1. A.3 runs in two passes per event: every need grows in declared order, then each satisfaction pays in declared order. The
+   frozen draft said "per need in declared order", which left the order of growth and payment across needs open; the bench
+   scripts had to pick one. The deficits after an event do not depend on the order, and sign(r) never does.
+2. Part 2: `pressure.s` starts at 0 and `pressure.pending` at false when the individual is made (`persona init`).
+3. A.1's example quotes `"n"`: the YAML reader refuses a bare `n` key (YAML 1.1 reads it as false).
+4. Found by the build (wave 1a): `r_cap` above `drives.expectation.win_max` is refused with N-R5 (a need's win joins its
+   goal's wins, which are at most `win_max`), and one need satisfied twice in one event is refused with N-E1. `drv_expect`
+   reads the same E the turn's surprise is measured against (after the event's decay, before its win).
+
 ## Summary
 
 1. Six optional blocks or keys in part 1 (`needs`, `goals[].expect_by_hours`, `surprise`, `pace`, `dispositions`,
@@ -60,7 +71,7 @@ al. 2020; Matthews et al. 2019; Kidd & Hayden 2015).
 
 ```yaml
 needs:                              # optional; needs a drives block; 1-8 items
-  drive: {n: 4, m: 3}               # required, n > m > 1 (the stand-in's values)
+  drive: {"n": 4, "m": 3}           # required, n > m > 1 (the stand-in's values; "n" quoted, YAML 1.1 reads a bare n as false)
   pursue: {want: 2, cap: 3}         # the pursue term: weight, and |term| <= cap nats (the stand-in's values)
   success: {rate: 0.2, init: 1}     # the bound goal's success rate s: its step per win or omission (the stand-in's), its start
   r_cap: 1                          # required: |win| <= r_cap
@@ -101,13 +112,15 @@ block, `needs` is an undeclared input in `ignored`, as today.
 
 ### A.3 The needs step
 
-After the sense step and before the drive step, per need in declared order (genes g_w, g_gr; h = `elapsed_hours`; every
-line rounded to 6 decimals):
+After the sense step and before the drive step, in two passes (genes g_w, g_gr; h = `elapsed_hours`; every line rounded to
+6 decimals):
 
 ```
+pass 1, every need in declared order:
 x     = clip(x + g_gr × (per_hour × h + per_reading.rate × reading), 0, cap)   # reading = the sense's raw value this event
 D(x)  = (Σ_i w_i g_w,i × x_i^n)^(1/m)                                      # over all needs
-r     = clip(D(x) − D(x with x_j ← |x_j − a|), −r_cap, +r_cap)            # need j satisfied this event by amount a
+pass 2, every need satisfied this event (need j, amount a), in declared order:
+r     = clip(D(x) − D(x with x_j ← |x_j − a|), −r_cap, +r_cap)
 x_j   = |x_j − a|, then clip to [0, cap]
 ```
 
@@ -387,7 +400,7 @@ h >= gap_hours:  if S >= θ: rest line (Δ ← round(ρ × Δ, 6); |Δ| < ε ←
 A rest line is its own strand line, chained like a control line, and never shares an event with a learning step: if the
 event carries feedback, the line waits for the next event without it (`pressure.pending`). x → ρx is increasing, so the
 order of a trait's learned weights is kept. The state key `rest` is taken (§5.1, the resting stance), so the state is
-`pressure: {s, pending}`. Stand-in: a capped learner re-learned a reversal in 5 turns instead of 11 at ρ = 0.5 (8 at 0.75);
+`pressure: {s, pending}`; `pressure.s` starts at 0 and `pressure.pending` at false when the individual is made. Stand-in: a capped learner re-learned a reversal in 5 turns instead of 11 at ρ = 0.5 (8 at 0.75);
 a floor exempting reinforced levels gave back a third of the gain and protected nothing extra.
 
 **Public:** "During idle time it scales its learned weights down in proportion, keeping their order."

@@ -397,9 +397,37 @@ it, an expected win moves nothing. With `pursue` in `learning.traits`, interests
 never past ±total_cap. Learning still writes the Δ table and nothing else; W, A, E, deadlines and `since` are state, outside
 its reach.
 
+**Omission windows** (RFC 0002 A.4). A goal may declare `expect_by_hours: H` (> 0): after a released stance pursues the goal its
+window opens at H hours (if not already open); each event counts it down by its stamped hours in the decay (step 1); a win of the
+goal (m > 0) closes it in step 2; an event at which it reaches 0 without a win fires it once: `d = -min(E, pe_cap)` and
+`E <- E + rate x (0 - E)` (E after its decay), the window closes and `why` says `an expected win did not come (<the goal's
+say>)`. The omitted d joins the turn's summed surprise, so `effects.surprise` and valence act on it, and the optional
+`effects.omission` map, per unit of min(the omitted E, pe_cap) (the input `drv_omit`); it does not join the learning sign (it is
+about the stance that opened the window, and as feedback it would trip B-R1 whenever another decision is open). A goal a need
+binds must declare a window (section 2.12). The state keeps `drives.window` (per goal with a window: hours left, or null) and the
+stance's `drives` shows it.
+
+**Valence and liking** (RFC 0002 Design E, a simulation):
+
+```yaml
+drives:
+  valence:   {mood: valence, expect: 0.2, surprise: 0.6}   # replaces effects.surprise; 0 < expect < surprise, both required
+  afterglow: {half_life_hours: 3, cap: 2, liking: 0.5, liking_spread: 0.3}   # liking >= 0 (default 0); spread 0..3
+```
+
+With `valence` the named mood's evidence is `expect x E` of the goal the previous stance pursued (its expectation after this
+event's decay, before its win: the input `drv_expect`, in [0, win_max]) plus `surprise x` the turn's summed prediction error
+(through `drv_surprise` and `drv_letdown`, as `effects.surprise` would): valence moves with expected value and with outcomes
+better or worse than expected, including expected wins that do not come. Both weights are declared (no default: the sources
+fix their signs and order only, Rutledge et al. 2014). The mood's inertia k plays the forgetting factor: at k = 0.61 an event
+five events back keeps 0.0845 of its push (half-life 1.402 events). `liking` adds a gain on the win itself to afterglow:
+`A <- A + k x (liking_g x m + max(d, 0))`, liking_g = liking x exp(liking_spread x z(name, seed, "liking")) (the gene
+`drives.genes.liking`, 4 decimals; spread 0 stores none). `liking: 0` is the afterglow of before.
+
 The block reserves the input ids `drv_want`, `drv_glow`, `drv_surprise`, `drv_letdown` and `drv_c<N>` (the compiled form of the
-aggregates and goal conditions): inputs, habit conditions, properties and `learning.from` may not use them. A persona without the
-block gives every document byte for byte as before the block existed; `goals` in its inputs is listed in `ignored`.
+aggregates and goal conditions), `drv_expect` with `valence` and `drv_omit` with a window: inputs, habit conditions, properties
+and `learning.from` may not use them. A persona without the block gives every document byte for byte as before the block
+existed; `goals` in its inputs is listed in `ignored`. Without `valence`, `liking` and a window the documents are those of before.
 
 ### 2.10 Reward provenance (optional)
 
@@ -543,6 +571,99 @@ existed. A refused reading changes nothing (P3 holds with readings: 40 individua
 readings, `self`, `clock` and out-of-range values). A source is the host's word: a forged `env` label passes every check;
 readings are logged and replayed, not shown true.
 
+### 2.12 Needs (optional)
+
+A need is a number with a setpoint: use or time grows its deficit, and an event that reduces it pays a win sized by how much it
+reduced the drive. It changes which goal the stance pursues (RFC 0002 Design A; Keramati & Gutkin 2014).
+
+```yaml
+needs:                              # needs a drives block; 1-8 items
+  drive: {"n": 4, "m": 3}           # required, n > m > 1 (quoted: the YAML reader refuses a bare n, YAML 1.1's false)
+  pursue: {want: 2, cap: 3}         # the pursue term: its weight, and |term| <= cap nats (defaults shown)
+  success: {rate: 0.2, init: 1}     # the bound goal's success rate s: its step per win or omission, its start (defaults shown)
+  r_cap: 1                          # required: |win| <= r_cap (at most drives.expectation.win_max)
+  items:
+    - id: context                   # at most 32 characters; reserves the input id need_context
+      say: context budget           # default: the id, _ as spaces
+      unit: token_share             # 1-24 characters
+      cap: 1                        # the deficit stays in [0, cap]
+      weight: 1                     # w > 0
+      per_hour: 0                   # growth per stamped hour (>= 0)
+      per_reading: {sense: tokens, rate: 1}   # optional: growth per unit of a number sense's raw reading (section 2.11)
+      satisfy_from: [env]           # required: env and/or human
+      amount: 0.6                   # K: the typical satisfying amount, 0 < K <= cap (the forecast's)
+      bind: compact                 # the goal its reduction pays; one need per goal; the goal needs expect_by_hours
+      horizon_hours: 0              # tau, 0-72 (default 0)
+      forecast_per_hour: 0.06       # the growth per hour the forecast assumes (default per_hour; >= 0)
+      weight_spread: 0              # gene: multiplier exp(N(0, s^2)) on weight; 0..3, default 0
+      growth_spread: 0              # gene: multiplier exp(N(0, s^2)) on per_hour and per_reading.rate; 0..3, default 0
+```
+
+**Amounts** ride in the event under `needs`, beside the ordinary inputs: `{"needs": {"context": {"amount": 0.6, "src":
+"env:compactor"}}, "src": "env:host"}`. A bare number takes the event's `src`; the source kind must be in the need's
+`satisfy_from` (never `self` or `clock`). `needs` is read, not compiled, and `inputs` echoes it as given.
+
+**The needs step** runs after the sense step and before the drive step, in two passes, every line rounded to 6 decimals (h =
+`elapsed_hours`; genes g_w and g_gr, 1 without a spread):
+
+```
+pass 1, every need in declared order:   x = clip(x + g_gr x (per_hour x h + per_reading.rate x reading), 0, cap)
+D(x) = (sum_i w_i g_w,i x_i^n)^(1/m)                                  # over all needs
+pass 2, each need satisfied this event by amount a, in declared order:
+  r   = clip(D(x) - D(x with x_j <- |x_j - a|), -r_cap, +r_cap);   then x_j = |x_j - a|, clipped to [0, cap]
+```
+
+`reading` is the sense's raw value this event (0 when it is not read; never the normal). r > 0 is a `win` of size r for the
+bound goal, r < 0 a `setback` of min(-r, 1) (added to the host's, at most 1); both join the event's goal signals, so the drive
+step treats them as any win or setback (E, wanting, afterglow, the deadline, the window). n > m > 1 gives deprivation scaling:
+the same amount 0.2 pays 2.0229 times as much at deficit 0.8 as at 0.2, and an overshoot pays less than nothing (-0.117 at
+deficit 0): sign(r) = sign(x_j - a/2). The deficits after an event do not depend on the declared order; the wins depend on it
+only through D over the other needs, never in sign.
+
+**The pursue term.** For each need, with s the bound goal's success rate and K its `amount`:
+
+```
+x^   = min(x + g_gr x forecast_per_hour x horizon_hours, cap)         # the forecast: a declared growth rate
+term = clip(want x s x (D(x^) - D(x^ with x^_j <- |x^_j - K|)), -cap, +cap)     # cap = pursue.cap
+s   <- s + rate x (1 - s) on a win of the goal;   s <- s x (1 - rate) when the goal's window fires (section 2.9)
+```
+
+It is lowered as the number input `need_<id>` (box [-pursue.cap, +pursue.cap]) with effect `{pursue: {<bind>: 1}}` (section 3,
+step 2b). Pursuit is weighted by the goal's learned success, so unanswered pursuits extinguish themselves through the omission
+let-down; at horizon 0 the term is positive exactly when x > K/2, the deficits at which the satisfaction pays a positive win.
+A horizon > 0 lets the forecast pass K/2 before the deficit does (`lint` names it). Rules may read `need.<id>.deficit` as a
+number condition (a number = at least, or `{at_least, at_most}`), so a must-do habit can fire at a deficit:
+`{id: compact_when_full, when: {need.context.deficit: {at_least: 0.9}}, then: {pursue: [compact]}}`. A rule never reads
+`need_<id>`.
+
+**Refused when the persona is read** (exit 2, at the field's path): `drive` without n > m > 1, a needs block without a drives
+block, no items or more than 8, two needs with one id, a taken `need_<id>` id (N-R1); `bind` naming an unknown goal, or two
+needs bound to one goal (N-R2); `satisfy_from` missing, empty, or naming `self` or `clock` (N-R3); `per_reading` naming an
+undeclared or flag sense, a negative `per_hour` or `rate` (N-R4); `cap`, `weight`, `amount`, `want`, `pursue.cap` or `r_cap`
+<= 0, `amount` > `cap`, `r_cap` > `win_max`, `horizon_hours` outside [0, 72], `success.rate` outside (0, 1], `success.init`
+outside [0, 1], a number with more than 6 decimals (N-R5); a need whose bound goal has no `expect_by_hours`, or a window <= 0
+hours (N-R6).
+
+**An event is refused whole** (one `{"error"}` at its path, no turn, no state change): an amount for an undeclared need, not a
+number > 0 or above the need's cap, or one need satisfied twice (N-E1, `inputs.needs.<id>`); an amount whose source kind is not
+in `satisfy_from`: missing, malformed, `self`, `clock` (N-E2, `inputs.needs.<id>.src`); an amount and its bound goal's `win` in
+one event: one outcome, one payment (N-E3, `inputs.needs.<id>`); a `need_*` or `drv_omit` input, or a deficit sent with an
+amount (N-E4: the engine owns them).
+
+**State and stance.** The state keeps `needs: {genes: {weight: {id: g}, growth: {id: g}}, deficit: {id: x}, success: {goal:
+s}}`: each deficit 0 and each s at `success.init` when the individual is made; genes `round(exp(weight_spread x z(name, seed,
+"need", id, "weight")), 4)` and the same with `"growth"` (spread 0 stores none). The stance gains `"needs": {"context":
+{"deficit": 0.55, "forecast": 0.61, "term": 1.109371}}` (the deficit after this event, the forecast and the term the field read),
+and `why` gains at most one need clause, for the pursued goal when a need binds it and its term is the largest positive one:
+`context budget deficit 0.55, above its setpoint`.
+
+What it guarantees, and what it does not. A persona without the block reads `needs` as any undeclared input (listed in
+`ignored`; `live` says so once on stderr) and every document it produces is the same, byte for byte, as before the block
+existed. A refused amount changes nothing (P3 holds with amounts: 40 individuals × 300 random events mixing sources, amounts,
+windows and payments). Amounts never come through the MCP tools (section 7). A source is the host's word: a forged `env` label
+passes every check; amounts are logged and replayed, not shown true. A need is arithmetic over logged numbers, not an inner
+state.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -566,7 +687,10 @@ For turn t of an individual (seed s), with inputs x_t:
    lo_g / hi_g are the least / most `pursue`'s couplings can add to goal g over every level of each partner. Several floor
    goals are lifted together (each lift raises the others' sums; at most 60 rounds); the lifts join the field as the
    contribution `floor` and the field is rounded again. The aggregates (wanting, afterglow, surprise) enter as number inputs
-   and the goal conditions as flag inputs of the turn; `starve_<goal>` habits follow the declared habits (step 6).
+   and the goal conditions as flag inputs of the turn; `starve_<goal>` habits follow the declared habits (step 6). With a
+   needs block (section 2.12) each need's term enters as the number input `need_<id>` (weight 1 on its bound goal, box
+   [-pursue.cap, +pursue.cap]) and each `need.<id>.deficit` condition as a flag input; with `valence` the input `drv_expect`
+   and with a window and `effects.omission` the input `drv_omit` (section 2.9) join the evidence.
 3. **Mood variable** m: `h(m,l) = ln prior(l) + gene_m x c(l) + a_t(m,l)`, where the **mood accumulator**
    `a_t = k x d x a_(t-1) + (1 - k) x e_t`, e_t = the turn's input and history effects on m (with gains), k = `inertia`,
    d = 0.5 ^ (elapsed_hours / half_life_hours) (1 without them). An event's total impact over time is e_t whatever k is;
@@ -580,6 +704,12 @@ For turn t of an individual (seed s), with inputs x_t:
    couplings and agenda structure and **no habits**, in the same program (an independent component, solved separately).
 8. Every weight is rounded to 6 decimals; the program is serialised in a fixed order. Its sha256 is the turn's `program`
    digest.
+
+**The steps of one event**, in order: validation and refusals (section 2.10, the senses' S1-S2, the credit rows, the needs'
+N-E1-N-E4); the sense step (section 2.11); the needs step (section 2.12: growth, then each satisfaction's win or setback); the
+drive step (section 2.9: decay and the windows' countdown, wins, an omission, wanting, caps); the credit step (section 2.8); the
+compile above; the solve, the stance and `why`; after the turn: `since`, a window opened for the goal a released stance
+pursues, `await`. Nothing runs between events: growth and decay use the next event's stamped hours.
 
 **The instruction is `probbit run --op decide` at fixed work** (`--seed S --sweeps N --polish-sweeps M --exact-limit X --chains C`),
 in process: the program is built as a document and handed to `probbit run`'s own parser and instruction (no text round trip, no
@@ -653,7 +783,10 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
   `"pursue": {"goal": "fun", "p": 0.44, "odds": {"chores": 0.10, "craft": 0.26, "fun": 0.44, "safety": 0.20}, "released": true,
   "say": "play", "lift": {}}` (`lift`: the floor lift per goal on this turn, empty when none was needed) and `"drives": {"want",
   "glow", "expect", "surprise", "deadline", "since"}` (per goal, as this turn read them). The line clause `pursue: <goal>: <say>`
-  ranks as a trait phrase, ahead of the other traits unless `line.order` places it; `inputs` echoes `goals` as given.
+  ranks as a trait phrase, ahead of the other traits unless `line.order` places it; `inputs` echoes `goals` as given. With a
+  window (section 2.9) `drives` adds `"window": {"report": 1.5}` per goal with `expect_by_hours` (hours left, or null).
+- With a needs block (section 2.12): `"needs": {"context": {"deficit": 0.55, "forecast": 0.61, "term": 1.109371}}` per need
+  (after this event's needs step); `inputs` echoes `needs` as given.
 - Timing is never part of the stance: `--timing` adds a separate, non-canonical `timing` object (compile, engine and decode ms,
   engine calls, the 1-minute load average).
 
@@ -673,7 +806,10 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
  "credit": {"verbosity": [-0.08, -0.36, 0.44]},                     # with a learning block: the last stance's onehot - odds
  "drives": {"genes": {"interest": {"fun": 0.12}, "gain": {"fun": 1.08}},   # with a drives block (section 2.9), per goal:
             "want": {"fun": 0.61}, "glow": {"fun": 0}, "expect": {"fun": 0},   # wanting, afterglow, expectation, the last
-            "surprise": {"fun": 0}, "deadline": {"fun": null}, "since": {"fun": 0}},   # error, deadline hours, turns since
+            "surprise": {"fun": 0}, "deadline": {"fun": null}, "since": {"fun": 0},    # error, deadline hours, turns since,
+            "window": {"fun": null}},                                       # and (expect_by_hours) the omission windows
+ "needs": {"genes": {"weight": {}, "growth": {"contact": 1.0914}},            # with a needs block (section 2.12): genes,
+           "deficit": {"context": 0.3, "contact": 0.12}, "success": {"compact": 1, "report": 0.8}},   # deficits, s per goal
  "senses": {"genes": {"gain": {"tool_fail": 1.19}, "threshold": {"tool_fail": -0.17}, "habituation": {"tool_fail": 1.46}},
             "norm": {"tool_fail": {"mean": 0.3, "var": 0.2, "n": 10}}},  # with a senses block (section 2.11): per sense
  "learned_from": {"caution": {"rewards": 3, "corrections": 2}},     # with learning and line.why_past: feedback turns by sign
@@ -693,7 +829,9 @@ Each normal starts at its prior with n = 0; a persona without the block refuses 
 block (section 2.8) the state keeps `open_credit` (the decisions awaiting an outcome: at most `max_open`, turns increasing and
 before the state's turn, credits within ±1, a stance digest each), `prev_stance` (the previous stance's digest, null before any
 turn) and `control_closed` (decisions a control line closed, listed by the next stance); a persona without the block
-refuses a state with any of them.
+refuses a state with any of them. With a needs block the state is refused, even with a recomputed digest, when a deficit
+leaves [0, cap], a success rate leaves [0, 1], a window leaves [0, `expect_by_hours`] or null, the need set or the bound goals
+differ from the persona's, or a need gene misses its seed; a persona without the block refuses a state with a `needs` field.
 
 ### 5.2 Canonical JSON and the number rule
 
@@ -844,6 +982,14 @@ numbers on `--grid` × the range, one reading repeated 1, 5 and 20 times, and th
 `sense_<id>_up/down` input as a box [0, zcap] × gain and each sense condition both ways, so a habit on `sense.<id>.raw` holds
 by construction for a rule with the same condition. A rule reads the sense conditions the persona's habits use.
 
+**Needs in fuzz and prove** (section 2.12). `fuzz` adds amounts to its events (nested in `needs`) on `--grid` × (0, cap] per
+need, each amount repeated 1, 5 and 20 times (satisfactions past the deficit overshoot), and each window's length as idle hours
+over 6 events (a pursued goal's window expires); the hours alphabet gains the windows' lengths. An event that pays a need and
+its bound goal's own win at once is refused (N-E3) and skipped. `prove` reads each `need_<id>` input as a box [-pursue.cap,
++pursue.cap] on its bound goal, `drv_expect` as [0, win_max] and `drv_omit` as [0, pe_cap] in their moods' and traits' boxes,
+and each `need.<id>.deficit` condition both ways, so a habit on `need.<id>.deficit` holds by construction for a rule with the
+same condition (`examples/persona/body-props.json`).
+
 **Payments in fuzz** (section 2.8, with a credit block). `fuzz` adds `await` to its events and payments resolved against the
 state each event runs on: `for` the oldest open decision (late), the newest (reordered), the previous stance, a past turn no
 longer open (a duplicate, or a payment after a cancel or an expiry), a turn still to come (unknown), or an open decision bound
@@ -927,7 +1073,7 @@ Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,
 events per second.
 
 **Unsupported is not diverges.** A newer engine's strand can carry what this engine does not know: a header key, a persona
-block or field (`senses` and `learning.credit` for 0.8.2; RFC 0002's `needs` for this one), a state field, a line kind (a `rest`
+block or field (`senses` and `learning.credit` for 0.8.2; RFC 0002 part 2's `load` for this one), a state field, a line kind (a `rest`
 line) or a field on a known line. `verify` stops at the earliest such line, prints
 `{"engine":"<this engine>","line":n,"ok":false,"strand_engine":"<the header's engine>","unsupported":"<field>"}`, says
 `probbit: live verify: line n: unsupported by this engine: <field> (written by <the header's engine>; this engine is <this
@@ -1018,6 +1164,14 @@ its source, and `verify` recomputes the normals from the logged readings: its su
 persona without the block lists `senses` in `ignored`, as before, and `live` says so once on stderr, at the earliest event
 that carries it: `probbit: live: events[i]: this persona has no senses block: ...`. The documents and the strand are unchanged.
 
+**Needs in live** (section 2.12). An event carries `needs` as `persona turn` does; the strand logs each amount as given, with its
+source, and `verify` recomputes the deficits, the success rates and the windows from the logged amounts, readings and stamped
+hours: its summary adds `"needs": {"<id>": {"deficit", "at_cap_hours"}}`, the deficit now and the stamped hours of the events
+that found it at its cap (it sat there since the event before; the monitor alerts while it does). A persona without the block
+lists `needs` in `ignored`, as before, and `live` says so once on stderr, at the earliest event that carries it: `probbit: live:
+events[i]: this persona has no needs block: ...`. Nothing runs between events, so a later rest line (RFC 0002 part 2) is its own
+strand line, replayed as a control line is.
+
 **Credit in live** (section 2.8). Events carry `await`, `for` and `cancel` as `persona turn` does, and the strand logs them as
 given; `verify` recomputes the open decisions with everything else and adds `"open": [turns]` (the decisions still awaiting
 an outcome) to its summary. `live verify STRAND --actions FILE` also reads the host's action log, one `{"turn": T, "action":
@@ -1069,7 +1223,8 @@ sense not read keeps its normal), and an alert when a normal moved over drift_ca
 in force, the ones that bound in colour, and the violations counter (0 by construction, section 2.5). The learned deltas per
 level as centred bars within ±total_cap (with a learning block, section 2.8), and with a credit block a CREDIT row: the open
 decisions with the eligibility a payment at the next event would get, this event's payment (turn, e, sign, absorbed) and the
-decisions it closed. The drives, when a document carries `pursue` or
+decisions it closed. With a needs block a NEEDS row per need: its deficit as a bar over [0, cap], its term and its goal's
+window (hours left or closed), and an alert while a deficit sits at its cap. The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
 
 **Checkpoints and control lines.** A strand with checkpoint lines (section 5.7) is replayed from its last checkpoint, not from
@@ -1174,6 +1329,9 @@ flag, a port that cannot be had, or a file that cannot be read or is not a stran
 - A sense is arithmetic, not an inner state: a normal is a mean, a variance and a count, kept by fixed arithmetic from the
   readings the host logs. A reading is the host's word (a forged `env` label passes every check), and a normal follows what it is shown:
   the drift cap bounds how far, it does not make the readings true. No test can see an inner state, and none is claimed.
+- A need is arithmetic, not a motive: a deficit is a number the host's amounts, readings and stamped hours move by fixed rules,
+  and its term is capped (`pursue.cap`) and weighted by the goal's success rate, so a mis-declared need is bounded and a goal
+  never paid stops being pursued. An amount is the host's word, like a reading.
 - It does not guarantee the model follows the line. Whether a given model writes in the stance it is given has to be
   measured per model (the stance is model-independent; the obedience is not).
 
@@ -1207,10 +1365,10 @@ previous event, the restart included). `probbit_live_event` (MCP) and Python's `
 | `probbit persona replay PERSONA [--seed N] --script JSON\|FILE [--out TRACE] [--no-inertia] [--timing]` | `init`, then every turn of a script: one stance per line; stderr: the trace's sha256 and the final state digest |
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
-| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
+| `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; with a needs block, `needs`: each horizon whose forecast can pass K/2 before the deficit does and every habit that can exclude a bound goal (notes, not errors); exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
-| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids; the learning block with its credit block) |
+| `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids; the learning block with its credit block; needs: the drive's n and m, the pursue term, the success rate, per need its unit, cap, weight, growth, sources, amount, bound goal, horizon, spreads and reserved id; the windows, valence's weights and liking) |
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
@@ -1237,7 +1395,9 @@ never change a document. The persona's own `engine.chains` is used whatever `PRO
   (rule S7, section 2.11: readings come from the host's instruments, never through the agent's channel); a persona without
   the block lists `senses` in `ignored`, as before. For a persona with a credit block they refuse an event that carries
   `cancel` (section 2.8: a cancel comes from the executor or a person, never through the agent's channel, so the agent cannot
-  cancel a decision to dodge its correction); `await` and `for` pass.
+  cancel a decision to dodge its correction); `await` and `for` pass. For a persona with a needs block they refuse an event
+  that carries `needs` amounts, from any source (section 2.12: an amount comes from the host's `satisfy_from` sources, never
+  through the agent's channel, so the agent cannot pay its own needs); a persona without the block lists `needs` in `ignored`.
   A persona with a drives block takes `goals` in `inputs` / `event` (section 2.9); the schemas declare it.
   Stateless; the documents are the CLI's. A refusal, a fallback, a counterexample, a divergent strand or an unsupported one is
   an answer; a bad persona, state, input, event or rule is a tool error carrying the error object.

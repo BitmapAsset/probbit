@@ -5,11 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.10.0 - unreleased
 
+- Development builds print `0.10.0-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
+  strand header tells them from 0.9.0.
 - **RFC 0002 draft and bench/body frozen** (docs/rfcs/0002-neuromodulators-and-body.md, bench/body/): fixtures, seeds and
   bars committed before any engine measurement; no engine change.
 - **bench/body bars v2**, repaired before any engine measurement: 28 weak or vacuous bars now need exact or bounded
   magnitudes, coverage and executable nulls; `bench/body/nulls.py` plays a competent plain-Python null against every bar
   (each is rejected); the v1 bars stay as `fixtures/bars-v1.md` and `bars-v1.json`.
+- **Needs, the omission let-down, valence** (docs/persona.md §2.9, §2.12): optional blocks. A need is a deficit over a
+  setpoint that grows with use or time; an event that reduces it pays a win sized by the drive reduction and the expected
+  reduction moves `pursue`, weighted by the goal's success rate, which an expected win that does not come lowers. Valence can
+  follow expected value and prediction errors. Amounts from `self`, `clock` or MCP are refused. A persona without the blocks
+  gives byte-identical documents.
+- Goals take `expect_by_hours` (the omission window: it opens when a released stance pursues the goal, fires once when it
+  runs out without a win, and closes on one); `drives.valence` and `afterglow.liking` (with its gene); rules read
+  `need.<id>.deficit`. `live verify` summarises the needs (`needs`: the deficit and the hours it sat at its cap); `monitor`
+  draws a row per need with its window and an at-cap alert; `lint` notes horizons whose forecast passes K/2 before the
+  deficit does and habits that exclude a bound goal; `fuzz` sends amounts, repeated and overshooting satisfactions and
+  expiring windows; `prove` boxes `need_<id>`, `drv_expect` and `drv_omit`; `describe` lists the needs, windows and valence.
+  `examples/persona/body.yaml` (with its golden and rules) is new.
+- `live` says once on stderr when a persona without a needs block receives a `needs` key (still an undeclared input,
+  listed in `ignored`).
 
 ## 0.9.0 - 2026-10-17
 

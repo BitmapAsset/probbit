@@ -323,3 +323,8 @@ choice is fixed here and frozen with the rest:
   1 h the deficit is 0.1 and the amount 0.2 overshoots it back to 0.1, so a correct engine shows no change and would have
   failed the bar. Found by a dry run of `needs.py` against a Python model of RFC 0002 A.3-A.4 (not the engine); the bar's
   pass value and text are unchanged.
+- **Wave 1a, n7's MCP control** (2026-10-16, on the engine's real bytes): `needs.py` sent the persona to both MCP tools as
+  YAML text in `persona`, and the tools take a persona document (JSON) or `persona_path`, so both refused it as "must be an
+  object" before reading the event: the 2/2 was vacuous (an engine without the MCP refusal passed it). The script now sends
+  `persona_path`; on the wave 1a engine both tools refuse at `arguments.inputs.needs` and `arguments.event.needs`, and the
+  same event without the amount is accepted. MANIFEST regenerated for `needs.py` only; pass values and bar text unchanged.

@@ -1,0 +1,6 @@
+{
+ "props": [
+  {"id": "no_reports_in_quiet_hours", "when": {"quiet": true}, "then": {"pursue": {"not": ["report"]}}},
+  {"id": "compacts_a_full_context", "when": {"need.context.deficit": {"at_least": 0.9}}, "then": {"pursue": ["compact"]}}
+ ]
+}

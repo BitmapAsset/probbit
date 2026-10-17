@@ -113,14 +113,13 @@ def n7_bars(tmp):
     _, d_plain, _ = common.live(p, [base[0], base[2], base[2]], seed=0)
     live_env_changes = (len(d_base) == 3 and len(d_plain) == 3 and "error" not in d_base[1]
                         and deficits(d_base[1]).get("fuel") != deficits(d_plain[1]).get("fuel"))
-    # MCP refuses any amount (RFC 0002 CLI and MCP surface), both tools
-    with open(p, encoding="utf-8") as f:
-        persona_text = f.read()
+    # MCP refuses any amount (RFC 0002 CLI and MCP surface), both tools; the tools read a persona document (JSON) or a
+    # persona_path, so the fixture goes by its path (README "Changes after the freeze": YAML text was refused as not a document)
     with open(st, encoding="utf-8") as f:
         state_doc = json.loads(f.read())
     ev = {"elapsed_hours": 1, "needs": {"fuel": 0.2}, "src": "env:host"}
-    m1 = common.mcp_call("probbit_persona_turn", {"persona": persona_text, "state": state_doc, "inputs": ev})
-    m2 = common.mcp_call("probbit_live_event", {"persona": persona_text, "state": state_doc, "event": ev})
+    m1 = common.mcp_call("probbit_persona_turn", {"persona_path": p, "state": state_doc, "inputs": ev})
+    m2 = common.mcp_call("probbit_live_event", {"persona_path": p, "state": state_doc, "event": ev})
     return {"n7_refused_turn": "%d/4" % refused_turn, "n7_refused_live": "%d/4" % refused_live, "n7_run_equals_run_without": same,
             "n7_env_control_changes_state": {"turn": turn_env_changes, "live": live_env_changes},
             "n7_mcp_refused": "%d/2" % (int(bool(m1.get("isError"))) + int(bool(m2.get("isError"))))}

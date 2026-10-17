@@ -257,7 +257,7 @@ pub(crate) static COMMANDS: &[Command] = &[
         subs: &[
             Sub { name: "init", args: "PERSONA [--seed N] [--out STATE]", help: "a new individual (genes from the seed, resting stance); stdout or --out",
                 flags: &[F_P_SEED, Flag { name: "--out", arg: "STATE", help: "write the state to STATE instead of stdout" }] },
-            Sub { name: "turn", args: "PERSONA --state STATE [--inputs JSON|FILE] [--out STATE2] [--timing] [--no-inertia]", help: "the stance on stdout; the new state replaces STATE (or goes to --out)",
+            Sub { name: "turn", args: "PERSONA --state STATE [--inputs JSON|FILE] [--out STATE2] [--timing] [--no-inertia]", help: "the stance on stdout; the new state replaces STATE (or goes to --out). With a needs block the inputs carry `needs` amounts ({\"needs\": {\"context\": {\"amount\": 0.6, \"src\": \"env:compactor\"}}}) and the stance adds `needs` (deficit, forecast, term per need) and `drives.window` (docs/persona.md §2.12)",
                 flags: &[F_P_STATE, F_P_INPUTS, Flag { name: "--out", arg: "STATE2", help: "write the new state to STATE2 instead of replacing STATE" }, F_P_TIMING, F_P_NO_INERTIA] },
             Sub { name: "replay", args: "PERSONA [--seed N] --script JSON|FILE [--out TRACE] [--no-inertia] [--timing]", help: "init, then every turn of the script: one stance per line (JSONL)",
                 flags: &[F_P_SEED, F_P_SCRIPT, Flag { name: "--out", arg: "TRACE", help: "write the JSONL trace to TRACE instead of stdout" }, F_P_NO_INERTIA, F_P_TIMING] },
@@ -268,7 +268,7 @@ pub(crate) static COMMANDS: &[Command] = &[
                     Flag { name: "--other", arg: "PERSONA2", help: "the second individual's persona (default: the same persona)" },
                     Flag { name: "--seed2", arg: "B", help: "the second individual's seed (default: its persona's seed)" }, F_P_SCRIPT] },
             Sub { name: "lint", args: "PERSONA [--never RULE | --props FILE] [--seeds 0-99] [--threads N]",
-                help: "contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample, exit 3 when a rule stays unknown and the search finds none (\"unproven\": not broken, not proved either)",
+                help: "contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with a needs block, `needs` notes: horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample, exit 3 when a rule stays unknown and the search finds none (\"unproven\": not broken, not proved either)",
                 flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS, F_P_THREADS] },
             Sub { name: "fuzz", args: "PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json] [--fixture-src env:synthetic|human:synthetic]",
                 help: "search event scripts for the shortest one whose stance breaks a rule (habit syntax: {when: {...}, then: {...}}); shrunk (§5.6). --fixture-src explicitly authorizes synthetic-source fixtures for strict replay; never use them to relabel production events. The persona must allow that source.",
@@ -286,7 +286,7 @@ pub(crate) static COMMANDS: &[Command] = &[
                 flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS, F_P_THREADS, F_P_JSON] },
             Sub { name: "check", args: "PERSONA", help: "valid? digest and sizes", flags: &[] },
             Sub { name: "compile", args: "PERSONA --state STATE [--inputs JSON|FILE]", help: "the turn's probbit-ir program (its sha256 = engine.program)", flags: &[F_P_STATE, F_P_INPUTS] },
-            Sub { name: "describe", args: "PERSONA", help: "traits, moods, inputs, habits, agenda", flags: &[] },
+            Sub { name: "describe", args: "PERSONA", help: "traits, moods, inputs, habits, agenda, and the blocks it declares (learning, drives with windows and valence, senses, needs)", flags: &[] },
         ],
         list_subs: false, shared: true,
         after: &[("scripts", "a script is a JSON list of per-turn input objects, or {\"turns\": [...]}. Resource controls as for run (PROBBIT_THREADS, ...)."), ("exit", EXIT_PERSONA)],
@@ -854,7 +854,7 @@ fn live_cmd(args: &[String]) {
         if !lock.as_ref().is_some_and(live::Lock::held) { refuse("live: ", json::InErr { code: "locked", path: "strand".into(), msg: format!("the writer lock {f}.lock is no longer this run's (removed or taken over): stopped before writing") }) }
         live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
     if let Some(h) = &header { log(&[h]); }
-    let (mut bad, mut refused, mut warned, mut warned_credit) = (0, 0, false, false);
+    let (mut bad, mut refused, mut warned, mut warned_credit, mut warned_needs) = (0, 0, false, false, false);
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
         let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| {
             // readings sent to a persona without a senses block are an undeclared input (listed in `ignored`): say so once
@@ -863,6 +863,9 @@ fn live_cmd(args: &[String]) {
             // so are `await`, `for` and `cancel` without a credit block (docs/persona.md §2.8): say so once
             if !warned_credit && !lv.p.has_credit() && ["await", "for", "cancel"].iter().any(|k| ev.get(k).is_some()) { warned_credit = true;
                 err_line(&format!("probbit: live: events[{i}]: this persona has no credit block: `await`, `for` and `cancel` are undeclared inputs (listed in ignored), feedback pays the previous stance")); }
+            // and `needs` without a needs block (docs/persona.md §2.12): say so once
+            if !warned_needs && !lv.p.has_needs() && ev.get("needs").is_some() { warned_needs = true;
+                err_line(&format!("probbit: live: events[{i}]: this persona has no needs block: `needs` is an undeclared input (listed in ignored), no amount is paid")); }
             lv.event(&ev, eng) });
         match res {
             Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
@@ -900,6 +903,8 @@ fn lint_report(args: &[String], path: &str, p: &persona::Persona, depth: usize, 
     let (mut broken, mut unproven) = (0, vec![]);
     // drives (§2.9): habits that outrank a goal floor, floors whose lift can reach 50
     if let Some(mut n) = persona::floor_notes(p) { n.extend(persona::floor_reach(p, &seeds)); doc.push(("floors", Json::Arr(n))); }
+    // needs (RFC 0002): horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal
+    if let Some(n) = persona::needs_notes(p) { doc.push(("needs", Json::Arr(n))); }
     // with rules (§5.6): prove each one, then fuzz the ones the bound leaves unknown
     if args.iter().any(|a| a == "--never" || a == "--props") {
         let props = rules_arg(args, p); let threads = arg(args, "--threads", std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, 1024);

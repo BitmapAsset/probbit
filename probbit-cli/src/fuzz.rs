@@ -38,6 +38,8 @@ fn step(p: &Persona, st: &State, e: &Event, eng: persona::Engine, turns: &Atomic
     match persona::turn_any_source(p, st, &persona::event_json(&ev), false, eng, false) {
         Ok((doc, ns)) => Some((doc, ns, ev)),
         Err(x) if p.has_credit() && ["inputs.for", "inputs.cancel"].iter().any(|k| x.path.starts_with(k)) => None,
+        // a needs amount and its bound goal's own win in one event (RFC 0002 N-E3): refused, the search moves on
+        Err(x) if p.has_needs() && x.path.starts_with("inputs.needs") => None,
         Err(x) => panic!("the fuzzer's inputs are valid: {}: {}", x.path, x.msg) }
 }
 /// The earliest turn of `script` (run from `st0`) whose stance breaks the property
@@ -131,6 +133,11 @@ fn individual(p: &Persona, props: &[Prop], seed: u64, s: &Search, eng: persona::
     for (id, vals, (lo, hi)) in persona::sense_patterns(p, &s.grid) {
         for v in &vals { for k in [1usize, 5, 20] { search(&vec![vec![(id.clone(), v.clone())]; k], &mut best); } }
         search(&(0..20).map(|i| vec![(id.clone(), if i % 2 == 0 { lo.clone() } else { hi.clone() })]).collect::<Vec<Event>>(), &mut best); }
+    // needs (RFC 0002): each amount repeated 1, 5 and 20 times (satisfactions past the deficit overshoot), and each window's
+    // length as idle hours over 6 events (a pursued goal's window expires)
+    for (id, _, vals) in persona::alphabet(p, &s.grid, &s.hours).into_iter().filter(|(_, k, _)| *k == "need") {
+        for v in &vals { for k in [1usize, 5, 20] { search(&vec![vec![(id.clone(), v.clone())]; k], &mut best); } } }
+    for h in persona::window_hours(p) { search(&vec![vec![("elapsed_hours".to_string(), Json::Num(h))]; 6], &mut best); }
     if s.beam > 0 { for (i, pr) in props.iter().enumerate() { let limit = best[i].as_ref().map_or(s.depth, |b| b.len() - 1);
         if let Some(sc) = beam(p, pr, &st0, limit, s, eng, turns) { best[i] = Some(sc); } } }
     props.iter().zip(best).map(|(pr, b)| b.map(|sc| shrink(p, pr, &st0, sc, eng, turns))).collect()
@@ -149,7 +156,7 @@ pub fn authorize_fixtures(p: &Persona, seeds: &[u64], res: &mut [Vec<Option<Foun
     if !matches!(source, "env:synthetic" | "human:synthetic") {
         return Err(persona::perr("fixture_src", "env:synthetic | human:synthetic; an explicit test-source assumption, never production provenance"));
     }
-    if !persona::has_reward_sources(p) { return Err(persona::perr("fixture_src", "requires a persona with reward_from or senses")); }
+    if !persona::has_reward_sources(p) { return Err(persona::perr("fixture_src", "requires a persona with reward_from, senses, a credit block or needs")); }
     for per in res {
         for (seed, f) in seeds.iter().zip(per) {
             let Some(f) = f else { continue };

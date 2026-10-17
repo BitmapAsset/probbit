@@ -146,9 +146,9 @@ class Live(unittest.TestCase):
         import subprocess, tempfile
         this = subprocess.run([probbit.find_binary(), "version"], capture_output=True, encoding="utf-8").stdout.strip()
         self.assertTrue(probbit.live_verify(os.path.join(ST, "sensed-credit-0.9.0-dev.strand"))["ok"])
-        for name, line, field in (("next-needs.strand", 1, "needs"), ("next-rest.strand", 8, "rest")):
+        for name, line, field in (("next-load.strand", 1, "load"), ("next-rest.strand", 8, "rest")):
             self.assertEqual(probbit.live_verify(os.path.join(ST, name)),
-                             {"ok": False, "line": line, "unsupported": field, "engine": this, "strand_engine": "probbit 0.10.0-dev"})
+                             {"ok": False, "line": line, "unsupported": field, "engine": this, "strand_engine": "probbit 0.11.0-dev"})
         with open(os.path.join(ST, "next-rest.strand"), encoding="utf-8") as f:
             lines = f.read().splitlines()
         del lines[3]  # event 3 removed: line 4 no longer chains to the line before it

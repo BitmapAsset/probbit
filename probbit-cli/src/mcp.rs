@@ -153,8 +153,8 @@ fn call(name: &str, args: Option<&Json>) -> Result<(String, Option<Json>, bool),
 fn persona_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, bool) {
     let t0 = std::time::Instant::now();
     let eng = crate::persona_engine();
-    // readings (docs/persona.md §2.11, S7) and cancels (§2.8) never come through the agent's channel
-    let r = if name == "probbit_persona_turn" { crate::persona::mcp_refuses_readings(args, "inputs").and_then(|_| crate::persona::mcp_refuses_cancel(args, "inputs")) } else { Ok(()) }
+    // readings (docs/persona.md §2.11, S7), cancels (§2.8) and needs amounts (§2.12) never come through the agent's channel
+    let r = if name == "probbit_persona_turn" { crate::persona::mcp_refuses_readings(args, "inputs").and_then(|_| crate::persona::mcp_refuses_cancel(args, "inputs")).and_then(|_| crate::persona::mcp_refuses_amounts(args, "inputs")) } else { Ok(()) }
         .and_then(|_| crate::persona::tool(name, args, &eng, true));
     let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
     log(&format!("tools/call {name} -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
@@ -175,7 +175,7 @@ fn fuzz_tool(args: &[(String, Json)]) -> (String, Option<Json>, bool) {
 fn live_tool(name: &str, args: &[(String, Json)]) -> (String, Option<Json>, bool) {
     let t0 = std::time::Instant::now();
     let eng = crate::persona_engine();
-    let r = if name == "probbit_live_event" { crate::persona::mcp_refuses_readings(args, "event").and_then(|_| crate::persona::mcp_refuses_cancel(args, "event")) } else { Ok(()) }
+    let r = if name == "probbit_live_event" { crate::persona::mcp_refuses_readings(args, "event").and_then(|_| crate::persona::mcp_refuses_cancel(args, "event")).and_then(|_| crate::persona::mcp_refuses_amounts(args, "event")) } else { Ok(()) }
         .and_then(|_| crate::live::tool(name, args, &eng));
     let (doc, is_error) = match r { Ok(d) => (d, false), Err(e) => (e.to_json(), true) };
     log(&format!("tools/call {name} -> {}, {:.1} ms", if is_error { "error" } else { "ok" }, t0.elapsed().as_secs_f64() * 1e3));
