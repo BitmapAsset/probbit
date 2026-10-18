@@ -3,6 +3,11 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.10.1 - unreleased
+
+- Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
+  strand header tells them from 0.10.0.
+
 ## 0.10.0 - 2026-10-18
 
 RFC 0002 part 1, the body (docs/rfcs/0002-neuromodulators-and-body.md). Every new block is opt-in.
