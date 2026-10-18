@@ -3,15 +3,11 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.10.0 - unreleased
+## 0.10.0 - 2026-10-18
 
-- Development builds print `0.10.0-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
-  strand header tells them from 0.9.0.
-- **RFC 0002 draft and bench/body frozen** (docs/rfcs/0002-neuromodulators-and-body.md, bench/body/): fixtures, seeds and
-  bars committed before any engine measurement; no engine change.
-- **bench/body bars v2**, repaired before any engine measurement: 28 weak or vacuous bars now need exact or bounded
-  magnitudes, coverage and executable nulls; `bench/body/nulls.py` plays a competent plain-Python null against every bar
-  (each is rejected); the v1 bars stay as `fixtures/bars-v1.md` and `bars-v1.json`.
+RFC 0002 part 1, the body (docs/rfcs/0002-neuromodulators-and-body.md). Every new block is opt-in.
+
+### Added
 - **Needs, the omission let-down, valence** (docs/persona.md §2.9, §2.12): optional blocks. A need is a deficit over a
   setpoint that grows with use or time; an event that reduces it pays a win sized by the drive reduction and the expected
   reduction moves `pursue`, weighted by the goal's success rate, which an expected win that does not come lowers. Valence can
@@ -24,8 +20,6 @@ All notable changes to this project are documented here. The format follows
   deficit does and habits that exclude a bound goal; `fuzz` sends amounts, repeated and overshooting satisfactions and
   expiring windows; `prove` boxes `need_<id>`, `drv_expect` and `drv_omit`; `describe` lists the needs, windows and valence.
   `examples/persona/body.yaml` (with its golden and rules) is new.
-- `live` says once on stderr when a persona without a needs block receives a `needs` key (still an undeclared input,
-  listed in `ignored`).
 - **Surprise, pace, dispositions** (docs/persona.md §2.13, §2.14, §2.15): optional blocks. The learned step grows after a run
   of surprising feedback (at most 3×, never past `total_cap`); average reward over the last hours sets a pace level; optimism,
   patience and volatility are genes. A persona without the blocks gives byte-identical documents.
@@ -35,6 +29,27 @@ All notable changes to this project are documented here. The format follows
   largest field shift and warns over 1; `fuzz` sends reward bursts and alternating feedback; `prove` boxes `pace_up` and
   `pace_down`; `describe` prints the gate's settings, pace's closed form and the genes. `examples/persona/pacer.yaml` (with
   its golden) is new.
+- **RFC 0002 draft and bench/body frozen** (docs/rfcs/0002-neuromodulators-and-body.md, bench/body/): fixtures, seeds and
+  bars committed before any engine measurement; no engine change.
+- **bench/body bars v2**, repaired before any engine measurement: 28 weak or vacuous bars now need exact or bounded
+  magnitudes, coverage and executable nulls; `bench/body/nulls.py` plays a competent plain-Python null against every bar
+  (each is rejected); the v1 bars stay as `fixtures/bars-v1.md` and `bars-v1.json`.
+
+### Changed
+- The version is 0.10.0 (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a strand header tells a
+  0.10.0 strand from a 0.9.0 one.
+- `live` says once on stderr when a persona without a needs block receives a `needs` key (still an undeclared input,
+  listed in `ignored`).
+  **Upgrade note:** a persona without `needs`, `drives.valence`, `surprise`, `pace` or `dispositions` gives the documents
+  0.9.0 gave, byte for byte (the P0 corpus: 653 outputs, 0 differ; BENCHMARKS.md §12, n6); this notice is its one new
+  output.
+
+### Known
+- Two of the 31 bench/body bars fail (BENCHMARKS.md §12); both are design findings, and neither bar was changed. n10: a 2 h
+  horizon cuts the hours a day the context need sits at its cap from 0.7771 to 0.4914 (−37 %), the bar asks for half. n11:
+  0.02 report pursuits a day on the second day of an absence (2 of 100 lives), the bar asks for 0. The fix is planned for 0.10.1.
+- A new learner's surprise gate starts open (v = 0, r = 1: g = 2.5 at the default; docs/persona.md §2.13), so `why` can say "learning
+  fast: feedback changed" before any feedback has changed. Its starting value is an open decision for a later release.
 
 ## 0.9.0 - 2026-10-17
 
