@@ -1380,6 +1380,21 @@ window (hours left or closed), and an alert while a deficit sits at its cap. Wit
 over [0, cap] with an r0 tick, and the level; with a surprise block a GAIN row per learned trait: its gain g (1 when closed). The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
 
+**The panel.** Under the rows, a PANEL block (and in the browser an Instrument panel of dials) gives every field one line of
+fixed words: `<label>: <level>, <size>, <direction>`, with the number its dial shows beside the words, never in them. The fields:
+each trait (and `pursue`), each mood, each need, each surprise gate, pace, each disposition gene, each learned trait, credit
+open, habits in force, each sense, and room left in the learning bound. Size words come from buckets (`slightly`, `clearly`,
+`strongly`: the chosen level's odds under 0.5, under 0.8, from 0.8; other fields thirds of a magnitude over its cap); direction
+words compare with the event before (`leaning toward <level>` for a trait whose odds moved by 0.02 of the level range, `rising` /
+`falling` for moods and numbers, `holding` under the step, `first event` with no event before; `fixed` for genes; `above` /
+`below` / `at its normal` for a sense read). A block the persona does not declare reads `not declared in this persona`; room
+left in the bound reads `not computed (E1 pending)` until the engine computes the bound (RFC 0004). The map is one pure
+function (`probbit-cli/src/monitor/panel.rs`): a field's words change exactly when its level, size bucket or direction bucket
+changes, every bucket of every field has its own words (a test enumerates them), and the words describe arithmetic over the
+replayed document and state: nothing predictive, no claim of an inner life. The page's frames carry the lines as `words`
+(`key`, `label`, `level`, `size`, `dir`, `text`, `dial` in [0, 1] or null, `value`); the panel reads nothing the stance
+document and state do not already hold, and changes no document.
+
 **Checkpoints and control lines.** A strand with checkpoint lines (section 5.7) is replayed from its last checkpoint, not from
 the header (`--once`, and the first read of `--follow` and `--serve`): the board starts at the checkpoint's event (its stance
 is in the line) and the badge says "replay verified from checkpoint n". A paused or retired individual says so next to the

@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.10.1 - unreleased
 
+- **Monitor panel words** (docs/persona.md §5.8): `probbit monitor` prints a PANEL block and the `--serve` page an Instrument
+  panel: every field of the individual (traits, moods, needs, surprise gates, pace, dispositions, learned traits, credit,
+  habits, senses, room left in the bound) as a dial with fixed words for its level, size and direction since the event before.
+  One pure map, unit-tested for zero ambiguity over every bucket; page frames carry `words`. No stance document changes.
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
   strand header tells them from 0.10.0.
 
