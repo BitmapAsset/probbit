@@ -328,3 +328,7 @@ choice is fixed here and frozen with the rest:
   object" before reading the event: the 2/2 was vacuous (an engine without the MCP refusal passed it). The script now sends
   `persona_path`; on the wave 1a engine both tools refuse at `arguments.inputs.needs` and `arguments.event.needs`, and the
   same event without the amount is accepted. MANIFEST regenerated for `needs.py` only; pass values and bar text unchanged.
+- **0.10.1, n10 and n11's rules** (R126, after the 0.10.0 engine measurement; engine rule changes, not bar repairs): the
+  pursue term's forecast is no longer clipped at the need's cap (x̂ = x + g_gr × forecast_per_hour × τ), and the k-th omission
+  in a run without a win multiplies the success rate by max(1 − k × rate, 0) (RFC 0002 A.3, A.4 as amended). `nulls.py`'s `RFCRule`
+  reference follows both rules. Pass values and bar text unchanged; MANIFEST regenerated for `nulls.py`.

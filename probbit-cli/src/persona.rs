@@ -582,7 +582,7 @@ pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
     if p.credit().is_some() && get(raw, "cancel").is_some() { src_form(raw)?; cancel_src(get(raw, "src"))?; }
     // a need's amount (RFC 0002 N-E2): its source, its own or the event's, of a kind in its satisfy_from
     if let Some((d, nb)) = p.drives.as_ref().and_then(|d| d.needs.as_ref().map(|nb| (d, nb))) { src_form(raw)?;
-        let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()] }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
+        let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], misses: vec![0.0; nb.items.len()] }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
     Ok(())
 }
 /// A persona whose events need a source: rewards (`reward_from`), readings (a senses block), cancels (a credit block) or needs
@@ -684,9 +684,10 @@ struct Need { id: String, say: String, unit: String, cap: f64, weight: f64, per_
 /// the win cap; the needs in declared order
 #[derive(Clone)]
 struct Needs { n: f64, m: f64, want: f64, cap: f64, rate: f64, init: f64, r_cap: f64, items: Vec<Need> }
-/// The needs state (RFC 0002 A.3): genes, then per need (declared order) its deficit and its bound goal's success rate
+/// The needs state (RFC 0002 A.3): genes, then per need (declared order) its deficit, its bound goal's success rate and (0.10.1) the
+/// run of omissions since that goal's last win (stored only when above 0)
 #[derive(Clone)]
-struct NState { genes: Json, deficit: Vec<f64>, success: Vec<f64> }
+struct NState { genes: Json, deficit: Vec<f64>, success: Vec<f64>, misses: Vec<f64> }
 /// The drive state of an individual: genes, then per goal (declared order) wanting, afterglow, expectation, the last turn's prediction
 /// error, the deadline (hours left), the turns since it was pursued and the omission window (hours left; RFC 0002 A.4); with a needs
 /// block the needs state. `omit` (the expectation of each goal whose window fired this turn) and `ev` (the expectation of the goal
@@ -698,7 +699,7 @@ struct DState { genes: Json, want: Vec<f64>, glow: Vec<f64>, expect: Vec<f64>, s
 impl DState {
     fn zero(p: &Persona, d: &Drives, seed: u64) -> DState {
         let n = d.goals.len();
-        let nd = d.needs.as_ref().map(|nb| NState { genes: need_genes(p, nb, seed), deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()] });
+        let nd = d.needs.as_ref().map(|nb| NState { genes: need_genes(p, nb, seed), deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], misses: vec![0.0; nb.items.len()] });
         DState { genes: drive_genes(p, d, seed), want: vec![0.0; n], glow: vec![0.0; n], expect: vec![0.0; n], surprise: vec![0.0; n], deadline: vec![None; n], since: vec![0; n],
             window: vec![None; n], nd, omit: vec![None; n], ev: 0.0, pt: disp_gene(p, seed, "patience").unwrap_or(1.0) }
     }
@@ -746,24 +747,30 @@ impl DState {
 impl NState {
     fn to_json(&self, d: &Drives, nb: &Needs) -> Json {
         let per = |f: &dyn Fn(usize) -> Json| Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (x.id.clone(), f(i))).collect());
-        Json::Obj(vec![("genes".into(), self.genes.clone()), ("deficit".into(), per(&|i| Json::Num(self.deficit[i]))),
-            ("success".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.success[i]))).collect()))])
+        let o = Json::Obj(vec![("genes".into(), self.genes.clone()), ("deficit".into(), per(&|i| Json::Num(self.deficit[i]))),
+            ("success".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.success[i]))).collect()))]);
+        let m: Vec<(String, Json)> = nb.items.iter().enumerate().filter(|(i, _)| self.misses[*i] > 0.0).map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.misses[i]))).collect();
+        match (o, m.is_empty()) { (Json::Obj(mut v), false) => { v.push(("misses".into(), Json::Obj(m))); Json::Obj(v) } (o, _) => o }
     }
     /// `state.needs`, strictly (RFC 0002 A.5): the genes of the seed, the persona's needs and bound goals exactly, each deficit in
-    /// [0, cap], each success rate in [0, 1]
+    /// [0, cap], each success rate in [0, 1]; `misses` (0.10.1, optional) only for bound goals, each a whole number from 1 to 10^6
     fn read(p: &Persona, d: &Drives, nb: &Needs, j: &Json, seed: u64) -> R<NState> {
-        let kv = keys(j, "state.needs", &["genes", "deficit", "success"], &["genes", "deficit", "success"])?;
+        let kv = keys(j, "state.needs", &["genes", "deficit", "success", "misses"], &["genes", "deficit", "success"])?;
         need(canon(get(kv, "genes").unwrap()) == canon(&need_genes(p, nb, seed)), "state.needs.genes", "need genes do not match the seed")?;
         let ids: Vec<&str> = nb.items.iter().map(|x| x.id.as_str()).collect(); let goals: Vec<&str> = nb.items.iter().map(|x| d.goals[x.bind].id.as_str()).collect();
         let dk = get(kv, "deficit").and_then(Json::as_obj).filter(|o| o.len() == ids.len() && ids.iter().all(|i| get(o, i).is_some()))
             .ok_or_else(|| perr("state.needs.deficit", format!("one deficit per need of the persona ({})", ids.join(", "))))?;
         let sk = get(kv, "success").and_then(Json::as_obj).filter(|o| o.len() == goals.len() && goals.iter().all(|g| get(o, g).is_some()))
             .ok_or_else(|| perr("state.needs.success", format!("one success rate per bound goal ({})", goals.join(", "))))?;
-        let mut st = NState { genes: get(kv, "genes").unwrap().clone(), deficit: vec![], success: vec![] };
+        let mut st = NState { genes: get(kv, "genes").unwrap().clone(), deficit: vec![], success: vec![], misses: vec![] };
         // the state keeps 6 decimals: a value clamped to a bound can round half a unit past it
         for (x, g) in nb.items.iter().zip(&goals) {
             st.deficit.push(get(dk, &x.id).and_then(Json::as_f64).filter(|v| *v >= 0.0 && *v <= x.cap + 5e-7).ok_or_else(|| perr(&at("state.needs.deficit", &x.id), format!("a deficit in [0, {}] (cap)", pyn(x.cap))))?);
             st.success.push(get(sk, g).and_then(Json::as_f64).filter(|v| *v >= 0.0 && *v <= 1.0 + 5e-7).ok_or_else(|| perr(&at("state.needs.success", g), "a success rate in [0, 1]"))?); }
+        st.misses = vec![0.0; goals.len()];
+        if let Some(mj) = get(kv, "misses") { let mo = mj.as_obj().ok_or_else(|| perr("state.needs.misses", "an object of bound goals"))?;
+            for (g, v) in mo { let i = goals.iter().position(|x| x == g).ok_or_else(|| perr(&at("state.needs.misses", g), "not a bound goal"))?;
+                st.misses[i] = v.as_f64().filter(|k| *k >= 1.0 && *k <= 1e6 && k.fract() == 0.0).ok_or_else(|| perr(&at("state.needs.misses", g), "a whole number of omissions from 1 to 1000000"))?; } }
         Ok(st)
     }
 }
@@ -1016,11 +1023,11 @@ fn need_drive(nb: &Needs, nd: &NState, xs: &[f64]) -> f64 {
 fn need_gene(nd: &NState, k: &str, id: &str) -> f64 { nd.genes.get(k).and_then(|o| o.get(id)).and_then(Json::as_f64).unwrap_or(1.0) }
 /// `xs` with entry `j` set to `v`
 fn with(xs: &[f64], j: usize, v: f64) -> Vec<f64> { let mut y = xs.to_vec(); y[j] = v; y }
-/// The pursue terms (RFC 0002 A.3) on a stepped state: per need (declared order) the forecast x̂ = min(x + g_gr × forecast_per_hour ×
-/// τ, cap) and term = clip(want × s × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), ±pursue.cap), 6 decimals; none without a needs block
+/// The pursue terms (RFC 0002 A.3) on a stepped state: per need (declared order) the forecast x̂ = x + g_gr × forecast_per_hour × τ
+/// (0.10.1: not clipped at the cap, so a need at its cap still forecasts the growth its horizon brings; the deficit stays clipped) and term = clip(want × s × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), ±pursue.cap), 6 decimals; none without a needs block
 fn need_terms(d: &Drives, ds: &DState) -> Vec<(f64, f64)> {
     let (Some(nb), Some(nd)) = (&d.needs, &ds.nd) else { return vec![] };
-    let xh: Vec<f64> = nb.items.iter().enumerate().map(|(i, x)| r6((nd.deficit[i] + need_gene(nd, "growth", &x.id) * x.forecast * x.horizon).min(x.cap))).collect();
+    let xh: Vec<f64> = nb.items.iter().enumerate().map(|(i, x)| r6(nd.deficit[i] + need_gene(nd, "growth", &x.id) * x.forecast * x.horizon)).collect();
     nb.items.iter().enumerate().map(|(j, x)| { let red = need_drive(nb, nd, &xh) - need_drive(nb, nd, &with(&xh, j, (xh[j] - x.amount).abs()));
         (xh[j], r6((nb.want * nd.success[j] * red).max(-nb.cap).min(nb.cap))) }).collect()
 }
@@ -1097,7 +1104,8 @@ fn alpha(rate: f64, o: Option<f64>, up: bool) -> f64 { o.map_or(rate, |o| (rate 
 /// win itself; a full win meets the deadline; a win closes the goal's omission window), else an open window counts down by the hours
 /// and at 0 fires the omission let-down once (RFC 0002 A.4: d = −min(E, pe_cap), E ← E + α⁻ × (0 − E), the window closed); then the
 /// wanting evidence; per goal in declared order, each number capped and rounded to 6 decimals. With a needs block each bound goal's
-/// success rate then steps (A.3): s + rate × (1 − s) on a win, s × (1 − rate) when its window fired. `pg` = the goal the previous
+/// success rate then steps (A.3): s + rate × (1 − s) on a win (the run of omissions back to 0), and when its window fired the run k
+/// grows by 1 and s ← s × max(1 − k × rate, 0) (0.10.1: the k-th omission in a run without a win cuts k times as deep). `pg` = the goal the previous
 /// stance pursued: its expectation after the decay is the turn's expected value (Design E's `drv_expect`).
 fn drive_step(d: &Drives, ds: &DState, raw: &[(String, Json)], pg: Option<usize>, o: Option<f64>) -> R<DState> {
     let n = d.goals.len(); let mut ev: Vec<Vec<(String, Option<f64>)>> = vec![vec![]; n];
@@ -1138,7 +1146,8 @@ fn drive_step(d: &Drives, ds: &DState, raw: &[(String, Json)], pg: Option<usize>
         ns.want[i] = r6(want.max(0.0).min(d.cap_w)); ns.glow[i] = r6(glow.max(0.0).min(d.cap_a)); ns.expect[i] = r6(ex.max(0.0).min(d.win_max));
         ns.deadline[i] = dl.map(r6); ns.surprise[i] = r6(delta); ns.window[i] = wnd.map(r6); }
     if let (Some(nb), Some(nd)) = (&d.needs, ns.nd.as_mut()) { for (j, x) in nb.items.iter().enumerate() { let s = nd.success[j];
-        if won[x.bind] { nd.success[j] = r6((s + nb.rate * (1.0 - s)).min(1.0)); } else if ns.omit[x.bind].is_some() { nd.success[j] = r6((s * (1.0 - nb.rate)).max(0.0)); } } }
+        if won[x.bind] { nd.success[j] = r6((s + nb.rate * (1.0 - s)).min(1.0)); nd.misses[j] = 0.0; }
+        else if ns.omit[x.bind].is_some() { nd.misses[j] = (nd.misses[j] + 1.0).min(1e6); nd.success[j] = r6((s * (1.0 - nb.rate * nd.misses[j]).max(0.0)).max(0.0)); } } }
     Ok(ns)
 }
 /// What a stepped drive state gives the compiler: `pursue`'s drive terms (genes, wanting, afterglow, deadline urgency), the turn's
@@ -3034,7 +3043,7 @@ fn doc_inputs(p: &Persona, doc: &Json) -> Option<Vec<(String, Json)>> {
     let nums = |k: &str| -> Option<Vec<f64>> { per(k)?.iter().map(Json::as_f64).collect() };
     // the needs' deficits from the stance's `needs` (what a need.<id>.deficit condition reads; RFC 0002 A.6)
     let nd = match &d.needs { None => None, Some(nb) => { let nj = doc.get("needs")?;
-        Some(NState { genes: Json::Null, deficit: nb.items.iter().map(|x| nj.get(&x.id).and_then(|e| e.get("deficit")).and_then(Json::as_f64)).collect::<Option<Vec<f64>>>()?, success: vec![0.0; nb.items.len()] }) } };
+        Some(NState { genes: Json::Null, deficit: nb.items.iter().map(|x| nj.get(&x.id).and_then(|e| e.get("deficit")).and_then(Json::as_f64)).collect::<Option<Vec<f64>>>()?, success: vec![0.0; nb.items.len()], misses: vec![0.0; nb.items.len()] }) } };
     let n = d.goals.len();
     let ds = DState { genes: Json::Null, want: nums("want")?, glow: nums("glow")?, expect: nums("expect")?, surprise: nums("surprise")?,
         deadline: per("deadline")?.iter().map(Json::as_f64).collect(), since: nums("since")?.iter().map(|x| *x as u64).collect(), window: vec![None; n], nd, omit: vec![None; n], ev: 0.0, pt: 1.0 };
@@ -4220,6 +4229,10 @@ mod tests {
         let (d3, _) = ok_turn(&q, &init(&q, Some(3), true, &run), r#"{"elapsed_hours":5,"senses":{"tokens":0.7},"src":"env"}"#);
         assert_eq!(g(&d3, &["needs", "context", "forecast"]).as_f64(), Some(0.82));
         let t = g(&d3, &["needs", "context", "term"]).as_f64().unwrap(); assert_eq!(t, r6(2.0 * (drive_of(&[0.82, 0.2]) - drive_of(&[0.22, 0.2]))));
+        // 0.10.1 (n10): at the cap the forecast still adds the horizon's growth (1 + 0.12), the deficit stays at 1
+        let (dc, _) = ok_turn(&q, &init(&q, Some(3), true, &run), r#"{"elapsed_hours":5,"senses":{"tokens":1},"src":"env"}"#);
+        assert_eq!((g(&dc, &["needs", "context", "deficit"]).as_f64(), g(&dc, &["needs", "context", "forecast"]).as_f64()), (Some(1.0), Some(1.12)));
+        assert_eq!(g(&dc, &["needs", "context", "term"]).as_f64(), Some(r6((2.0 * (drive_of(&[1.12, 0.2]) - drive_of(&[0.52, 0.2]))).min(3.0))));
         // the stance's term is the pursue field's: ln(odds_compact / odds_work) = ln 0.6 + term_compact (glow 0, no other signal)
         let (o_c, o_w) = (g(&d3, &["pursue", "odds", "compact"]).as_f64().unwrap(), g(&d3, &["pursue", "odds", "work"]).as_f64().unwrap());
         assert!(((o_c / o_w).ln() - (0.6f64.ln() + t)).abs() < 1e-3, "the term enters pursue at weight 1: {o_c} / {o_w}, term {t}");
@@ -4227,8 +4240,8 @@ mod tests {
 
     /// A.4 on the engine: after a released stance pursues `task` (window 2 h) the window counts down by the stamped hours, fires once
     /// at 0 without a win (d = -min(E, pe_cap), E <- E (1 - rate), `why` says so), and a win inside it closes it; the omitted d joins
-    /// the summed surprise and drv_omit but not the learning sign; a bound need's success rate falls by (1 - rate) when its window
-    /// fires and rises by rate (1 - s) on a win
+    /// the summed surprise and drv_omit but not the learning sign; a bound need's success rate falls by a factor max(1 - k rate, 0) at the k-th
+    /// window fired in a run without a win (0.10.1, n11) and rises by rate (1 - s) on a win, which ends the run
     #[test]
     fn the_omission_window_opens_counts_down_fires_once_and_closes_on_a_win() {
         let p = val_with(r#""valence":{"mood":"valence","expect":0.2,"surprise":0.6}"#, r#""valence":{"mood":"valence","expect":0.2,"surprise":0.6},"learn_from_surprise":0.5,"effects":{"omission":{"tone":0.4}}"#).unwrap();
@@ -4256,12 +4269,18 @@ mod tests {
                 s = ns; }
             assert_eq!(fired, if case[0].1.is_some() { 0 } else { 1 }, "{case:?}: fires once, never after a win");
         }
-        // the success rate of a bound need: x 0.8 per window fired, + 0.2 (1 - s) per win
+        // the success rate of a bound need: x (1 - 0.2 k) at the k-th window fired in a run, + 0.2 (1 - s) per win (the run back to 0)
         let q = need1(); let mut s = init(&q, Some(0), true, &run); let mut sr = vec![];
         for ev in [r#"{"elapsed_hours":3,"src":"env"}"#, r#"{"elapsed_hours":2,"src":"env"}"#, r#"{"elapsed_hours":2,"src":"env"}"#, r#"{"elapsed_hours":5,"needs":{"fuel":0.2},"src":"env"}"#] {
-            let (doc, ns) = ok_turn(&q, &s, ev); s = ns; sr.push((g(&s.to_json(&q), &["needs", "success", "refuel"]).as_f64().unwrap(), g(&doc, &["pursue", "goal"]).as_str().unwrap().to_string())); }
+            let (doc, ns) = ok_turn(&q, &s, ev); s = ns; let sj = s.to_json(&q);
+            sr.push((g(&sj, &["needs", "success", "refuel"]).as_f64().unwrap(), g(&doc, &["pursue", "goal"]).as_str().unwrap().to_string(), sj.get("needs").unwrap().get("misses").map(canon))); }
         assert_eq!(sr[0].1, "refuel", "the need's term pursues refuel at deficit 0.3: {sr:?}");
-        assert_eq!(sr.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1.0, 0.8, 0.64, r6(0.64 + 0.2 * 0.36)], "{sr:?}");
+        assert_eq!(sr.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1.0, 0.8, 0.48, r6(0.48 + 0.2 * 0.52)], "{sr:?}");
+        assert_eq!(sr.iter().map(|x| x.2.clone()).collect::<Vec<_>>(), vec![None, Some(r#"{"refuel":1}"#.into()), Some(r#"{"refuel":2}"#.into()), None], "{sr:?}");
+        // the run is state: a 0.10.0 state without `misses` reads as 0; a bad run is refused at its path
+        assert!(s.to_json(&q).get("needs").unwrap().get("misses").is_none());
+        for (k, at) in [(1.5, Some("state.needs.misses.refuel")), (3.0, None)] { let mut s2 = s.clone(); s2.drives.as_mut().unwrap().nd.as_mut().unwrap().misses[0] = k; s2.seal(&q);
+            assert_eq!(State::read(&q, &s2.to_json(&q)).err().map(|e| e.path), at.map(String::from), "misses {k}"); }
     }
 
     /// Design E: the push of valence is (1 - k) x (w_e x E of the goal the previous stance pursued + w_p x d) on top of k x the carry:

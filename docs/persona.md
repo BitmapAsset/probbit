@@ -628,10 +628,17 @@ only through D over the other needs, never in sign.
 **The pursue term.** For each need, with s the bound goal's success rate and K its `amount`:
 
 ```
-x^   = min(x + g_gr x forecast_per_hour x horizon_hours, cap)         # the forecast: a declared growth rate
+x^   = x + g_gr x forecast_per_hour x horizon_hours                  # the forecast: a declared growth rate, not clipped at cap
 term = clip(want x s x (D(x^) - D(x^ with x^_j <- |x^_j - K|)), -cap, +cap)     # cap = pursue.cap
-s   <- s + rate x (1 - s) on a win of the goal;   s <- s x (1 - rate) when the goal's window fires (section 2.9)
+s   <- s + rate x (1 - s) on a win of the goal, and k <- 0
+s   <- s x max(1 - k x rate, 0) when the goal's window fires, k <- k + 1 first   # k: omissions since the last win (section 2.9)
 ```
+
+Since 0.10.1 the forecast is not clipped at the cap: the deficit stays in [0, cap], but a need sitting at its cap still forecasts
+the growth its horizon brings, so the horizon also raises the term at the cap (before, x^ = x there and a horizon changed
+nothing once the deficit had reached it; bench/body n10). And omissions in a run cut deeper: the k-th unanswered pursuit in a row
+multiplies s by 1 - k x rate, so a run of 1/rate omissions (5 at rate 0.2) takes s to 0, while isolated omissions between wins
+still cost 1 - rate each (n11); a win ends the run. The state keeps the run as `needs.misses: {<goal>: k}` for goals with k > 0 (absent when every run is 0).
 
 It is lowered as the number input `need_<id>` (box [-pursue.cap, +pursue.cap]) with effect `{pursue: {<bind>: 1}}` (section 3,
 step 2b). Pursuit is weighted by the goal's learned success, so unanswered pursuits extinguish themselves through the omission
