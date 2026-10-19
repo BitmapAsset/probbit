@@ -923,11 +923,11 @@ fn stdout_matches_the_pacer_golden() {
     let (c, rep, e) = probbit(&["persona", "replay", &p, "--script", &ex("golden/pacer/day.json")], ""); assert_eq!(c, 0, "{e}"); assert_eq!(rep, gold, "replay");
     let (c, lint, e) = probbit(&["persona", "lint", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(lint, g("lint.json"), "lint");
     let (c, d, e) = probbit(&["persona", "describe", &p], ""); assert_eq!(c, 0, "{e}"); assert_eq!(d, g("describe.json"), "describe");
-    // a new learner's gain 2.5 and its clause; consistent praise closes the gate and the reversal opens it; pace brisk after the
-    // bursts and slow after the 12 h gap
-    assert!(lines[0].contains(r#""surprise":{"initiative":2.5}"#) && lines[0].contains("learning fast: feedback changed"), "{}", lines[0]);
-    assert!(lines[3].contains(r#""surprise":{}"#) && !lines[3].contains("learning fast"), "{}", lines[3]);
+    // a new learner's gate starts closed (0.10.1): no gain and no clause before feedback changes; the reversal opens it (turn 7)
+    // and consistent feedback closes it again; pace brisk after the bursts and slow after the 12 h gap
+    for i in 0..7 { assert!(lines[i].contains(r#""surprise":{}"#) && !lines[i].contains("learning fast"), "turn {i}: {}", lines[i]); }
+    assert!(lines[7].contains("learning fast: feedback changed") && lines[17].contains(r#""surprise":{}"#), "{}", lines[7]);
     assert!(lines[11].contains(r#""pace":{"level":"brisk","rbar":1.683403}"#) && lines[11].contains("pace brisk: average reward 1.68 an hour"), "{}", lines[11]);
-    assert!(lines[15].contains(r#""level":"slow""#) && lines[8].contains(r#""initiative":1.900694"#), "{}", lines[15]);
+    assert!(lines[15].contains(r#""level":"slow""#) && lines[8].contains(r#""initiative":1.770138"#), "{}", lines[15]);
     let _ = std::fs::remove_file(&st);
 }
