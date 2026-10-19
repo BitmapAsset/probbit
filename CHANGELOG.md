@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.10.1 - unreleased
 
+### Added
+- **Rest and load** (RFC 0002 part 2, docs/rfcs/0002-neuromodulators-and-body.md): two opt-in blocks. `rest` keeps a
+  pressure S that rises over active hours and falls over idle gaps; an idle gap at S ≥ threshold brings a rest line, its own
+  strand line, that scales every learned weight by `downscale` (prune below `prune`), keeping their order, and never shares an
+  event with feedback (`pressure.pending`). Each learned trait's surprise gate is left unchanged. `load` keeps a slow L
+  raised by aversive evidence (learning flags, declared senses, credit expiries) and a held mood, relaxing with its half-life,
+  capped; it enters the field as the engine-owned number input `load_level` (box [0, cap]), refused when sent. State
+  `pressure: {s, pending}` and `load: {l}`; refusals W-R1 and L-R1. `live verify` recomputes rest lines. bench/body P6
+  (r0-r5) and P7 (l1-l5) measured by the engine for the first time (numbers in the PR). A persona without the blocks gives
+  byte-identical documents.
+
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
   strand header tells them from 0.10.0.
 
