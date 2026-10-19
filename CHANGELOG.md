@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.10.1 - unreleased
 
+### Changed
+- A new learner's surprise gate starts closed (docs/persona.md §2.13, RFC 0002 Design B): v = 0, r = r_ref, g = 1, so the
+  opening step equals the fixed rate's (0.10.0 started at g = 2.5 and stepped 1.67× at the opening feedback, bench/body s3), and
+  `why` says `learning fast: feedback changed` only after a gate step whose volatility passed v0. `r_ref` above `r_max` is
+  refused (V-R2). Re-measured bars: PR body (bench/body s1-s4).
+
+### Other
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
   strand header tells them from 0.10.0.
 

@@ -435,6 +435,7 @@ fn build_body(doc: &Json) -> R<Persona> {
         need((0.0..1.0).contains(&v0), "surprise.v0", "in [0, 1): the volatility at which the gate opens")?;
         need(r_ref >= 1.0, "surprise.r_ref", "must be >= 1 (the run length at which the gain is 1)")?;
         need(r_max >= 1.0, "surprise.r_max", "must be >= 1 (the cap on the run length)")?;
+        need(r_ref <= r_max, "surprise.r_ref", "must be <= r_max (a run length capped below r_ref keeps the gain above 1 for good)")?;
         need(g_max > 1.0 && g_max <= 3.0, "surprise.g_max", "in (1, 3]: the gate at most triples the step")?;
         let precision = match get(sk, "precision") { None | Some(Json::Null) => false, Some(Json::Bool(b)) => *b, Some(_) => return Err(perr("surprise.precision", "true | false")) };
         need(!precision || has("senses"), "surprise.precision", "precision weighting scales the senses' effect gains: it needs a senses block")?;
@@ -1877,10 +1878,12 @@ impl Gate {
     fn to_json(&self) -> Json { Json::Obj(vec![("v".into(), Json::Num(self.v)), ("r".into(), Json::Num(self.r)), ("g".into(), Json::Num(self.g)),
         ("counts".into(), Json::Arr(self.counts.iter().map(|c| Json::Arr(vec![Json::Num(c[0]), Json::Num(c[1])])).collect()))]) }
 }
-/// A new learner's gates (RFC 0002 Design B): v 0, r̂ 1, g = (1 + 0) / (1 + 1) × (r_ref + 1) within [1, g_max], no counts
+/// A new learner's gates (RFC 0002 Design B, closed at the start since 0.10.1): v 0, r̂ = r_ref, so g = (1 + 0) / (r_ref + 1) ×
+/// (r_ref + 1) = 1, the fixed rate; no counts. g rises above 1 only after a gate step with Ω > 0 (v past v0'), so `why` cannot
+/// say `learning fast` before feedback has changed
 fn gate0(p: &Persona) -> Option<Vec<(String, Gate)>> {
-    let (sp, l) = (p.surprise.as_ref()?, p.learning.as_ref()?); let g = r6(((sp.r_ref + 1.0) / 2.0).clamp(1.0, sp.g_max));
-    Some(l.traits.iter().map(|t| (t.clone(), Gate { v: 0.0, r: 1.0, g, counts: vec![[0.0, 0.0]; p.var(t).map_or(0, |v| v.levels.len())] })).collect())
+    let (sp, l) = (p.surprise.as_ref()?, p.learning.as_ref()?); let (r, g) = (r6(sp.r_ref), 1.0);
+    Some(l.traits.iter().map(|t| (t.clone(), Gate { v: 0.0, r, g, counts: vec![[0.0, 0.0]; p.var(t).map_or(0, |v| v.levels.len())] })).collect())
 }
 /// `state.surprise` (RFC 0002 Design B), strictly: one gate per learned trait; v in [0, 1], r̂ in [1, r_max], g in [1, g_max], one
 /// [plus, minus] pair of counts >= 0 per level; every number to 6 decimals
@@ -2897,7 +2900,7 @@ pub fn describe(p: &Persona) -> Json {
     // and the genes at the persona's seed
     if let (Json::Obj(v), Some(sp)) = (&mut d, &p.surprise) { let n = Json::Num; let g0 = gate0(p).and_then(|g| g.first().map(|x| x.1.g)).unwrap_or(1.0);
         v.push(("surprise".into(), Json::Obj(vec![("volatility_rate".into(), n(sp.a)), ("v0".into(), n(sp.v0)), ("r_ref".into(), n(sp.r_ref)), ("r_max".into(), n(sp.r_max)),
-            ("g_max".into(), n(sp.g_max)), ("precision".into(), Json::Bool(sp.precision)), ("start".into(), Json::Obj(vec![("v".into(), n(0.0)), ("r".into(), n(1.0)), ("g".into(), n(g0))]))]))); }
+            ("g_max".into(), n(sp.g_max)), ("precision".into(), Json::Bool(sp.precision)), ("start".into(), Json::Obj(vec![("v".into(), n(0.0)), ("r".into(), n(r6(sp.r_ref))), ("g".into(), n(g0))]))]))); }
     if let (Json::Obj(v), Some(pc)) = (&mut d, &p.pace) { let n = Json::Num; let k = r6(1.0 - 0.5f64.powf(1.0 / pc.hl));
         v.push(("pace".into(), Json::Obj(vec![("half_life_hours".into(), n(pc.hl)), ("cap".into(), n(pc.cap)), ("r0".into(), n(pc.r0)),
             ("levels".into(), Json::Obj(vec![("slow_below".into(), n(pc.slow)), ("brisk_above".into(), n(pc.brisk))])),
@@ -4490,24 +4493,24 @@ mod tests {
     fn body_with(base: &str, from: &str, to: &str) -> R<Persona> { assert!(base.contains(from), "{from}"); build(&json::parse(&base.replacen(from, to, 1)).unwrap()) }
     fn gnum(j: &Json, path: &[&str]) -> f64 { path.iter().fold(j, |a, k| a.get(k).unwrap_or_else(|| panic!("{k}"))).as_f64().unwrap() }
 
-    /// RFC 0002 Design B on the engine: a new learner's gate (v 0, r̂ 1, g 2.5) and its stance key and clause; the opening paid step at
-    /// (v, r̂, g) = (0.15, 2, 1.666667) with its learned weights and counts (s3); over a lesson and its reversal every state keeps v in
+    /// RFC 0002 Design B on the engine: a new learner's gate starts closed (v 0, r̂ = r_ref 4, g 1: no stance gain, no clause); the
+    /// opening paid step at (v, r̂, g) = (0.15, 5, 1) with its learned weights and counts (s3); over a lesson and its reversal every state keeps v in
     /// [0, 1], r̂ in [1, r_max], g in [1, g_max] and every step within g_max × step_cap; consistent feedback closes the gate to g 1 and
     /// the reversal opens it
     #[test]
     fn the_surprise_gate_follows_its_closed_forms() {
         let p = build(&json::parse(GATE).unwrap()).unwrap(); let st0 = init(&p, Some(0), true, &run);
-        assert_eq!(st0.to_json(&p).get("surprise").map(canon), Some(r#"{"approach":{"counts":[[0,0],[0,0],[0,0]],"g":2.5,"r":1,"v":0}}"#.to_string()));
+        assert_eq!(st0.to_json(&p).get("surprise").map(canon), Some(r#"{"approach":{"counts":[[0,0],[0,0],[0,0]],"g":1,"r":4,"v":0}}"#.to_string()));
         let (d0, st1) = ok_turn(&p, &st0, r#"{"await":true,"src":"human"}"#);
-        assert_eq!(d0.get("surprise").map(canon), Some(r#"{"approach":2.5}"#.to_string()));
-        assert!(d0.get("why").and_then(Json::as_str).unwrap().contains("learning fast: feedback changed"));
+        assert_eq!(d0.get("surprise").map(canon), Some("{}".to_string()));
+        assert!(!d0.get("why").and_then(Json::as_str).unwrap().contains("learning fast"));
         let lv = ["low", "mid", "high"]; let a0 = d0.get("stance").unwrap().get("approach").unwrap();
         let taken = lv.iter().position(|l| a0.get("level").and_then(Json::as_str) == Some(*l)).unwrap();
         let odds: Vec<f64> = lv.iter().map(|l| gnum(a0, &["odds", l])).collect();
         let (_, st2) = ok_turn(&p, &st1, r#"{"criticism":true,"for":0,"src":"human"}"#);
         let s2 = st2.to_json(&p);
-        assert_eq!([gnum(&s2, &["surprise", "approach", "v"]), gnum(&s2, &["surprise", "approach", "r"]), gnum(&s2, &["surprise", "approach", "g"])], [0.15, 2.0, 1.666667]);
-        let g = 1.666667; let c: Vec<f64> = (0..3).map(|l| (if l == taken { 1.0 } else { 0.0 }) - odds[l]).collect();
+        assert_eq!([gnum(&s2, &["surprise", "approach", "v"]), gnum(&s2, &["surprise", "approach", "r"]), gnum(&s2, &["surprise", "approach", "g"])], [0.15, 5.0, 1.0]);
+        let g = 1.0; let c: Vec<f64> = (0..3).map(|l| (if l == taken { 1.0 } else { 0.0 }) - odds[l]).collect();
         let step: Vec<f64> = c.iter().map(|x| (-1.0 * 0.5 * g * x).clamp(-0.2 * g, 0.2 * g)).collect(); let mu = step.iter().fold(0.0, |a, b| a + b) / 3.0;
         let got: Vec<f64> = s2.get("learned").unwrap().get("approach").unwrap().as_arr().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
         assert_eq!(got, step.iter().map(|x| r6(x - mu)).collect::<Vec<f64>>(), "the opening gated step");
@@ -4528,6 +4531,48 @@ mod tests {
             if i == 39 { g_end_a = gt.g; } if i >= 40 { g_max_b = g_max_b.max(gt.g); fast_b |= d.get("why").and_then(Json::as_str).unwrap().contains("learning fast"); }
             let _ = target; prev = d; st = ns; }
         assert_eq!(g_end_a, 1.0, "consistent feedback closes the gate"); assert!(g_max_b > 1.0 && fast_b, "the reversal opens it: {g_max_b}");
+    }
+
+    /// 0.10.1 (R126 bars A-a, A-b): a new learner's gate starts closed. (a) The opening paid step of a gated learner equals its
+    /// fixed-rate twin's (the persona without `surprise`), praised and criticised: ratio 1.0. (b) Over 40 turns of consistent
+    /// feedback `why` never says `learning fast`; over 20 seeded lives of random feedback it says so only at or after a turn whose
+    /// gate step had Ω > 0 (v past v0), and a reversal after a lesson opens it
+    #[test]
+    fn a_new_learners_gate_starts_closed() {
+        let p = build(&json::parse(GATE).unwrap()).unwrap();
+        let fixed = build(&json::parse(&GATE.replace(r#","surprise":{"volatility_rate":0.3,"v0":0.45,"r_ref":4,"r_max":20,"g_max":3}"#, "")).unwrap()).unwrap();
+        assert!(fixed.surprise.is_none());
+        for fb in ["praise", "criticism"] {
+            let ev = format!(r#"{{"{fb}":true,"for":0,"src":"human"}}"#);
+            let (s0g, s0f) = (init(&p, Some(0), true, &run), init(&fixed, Some(0), true, &run));
+            let (_, s1g) = ok_turn(&p, &s0g, r#"{"await":true,"src":"human"}"#); let (_, s1f) = ok_turn(&fixed, &s0f, r#"{"await":true,"src":"human"}"#);
+            let (_, s2g) = ok_turn(&p, &s1g, &ev); let (_, s2f) = ok_turn(&fixed, &s1f, &ev);
+            let (dg, df) = (&s2g.learned[0].1, &s2f.learned[0].1);
+            let big = |d: &Vec<f64>| d.iter().fold(0.0f64, |a, x| a.max(x.abs()));
+            assert!(big(df) > 0.0 && big(dg) <= 1.0 * big(df), "{fb}: gated {dg:?} vs fixed {df:?}");
+            assert_eq!(dg, df, "{fb}: the opening gated step is the fixed rate's");
+            assert_eq!(s2g.gate.as_ref().unwrap()[0].1.g, 1.0); }
+        let lv = ["low", "mid", "high"]; let level = |d: &Json| d.get("stance").unwrap().get("approach").unwrap().get("level").and_then(Json::as_str).unwrap().to_string();
+        let fast = |d: &Json| d.get("why").and_then(Json::as_str).unwrap().contains("learning fast");
+        // consistent: praise whatever the stance took, 40 turns
+        let (mut st, mut prev) = (init(&p, Some(0), true, &run), String::new());
+        for i in 0..40 { let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else { format!(r#"{{"await":true,"praise":true,"for":{},"src":"human"}}"#, i - 1) };
+            let (d, ns) = ok_turn(&p, &st, &ev); assert!(!fast(&d), "turn {i}: {prev}"); prev = level(&d); st = ns; }
+        // random feedback, 20 seeded lives: the clause only at or after a gate step with v > v0 (Ω > 0)
+        let mut opened = 0;
+        for seed in 0..20u64 { let (mut st, mut x, mut changed) = (init(&p, Some(seed), true, &run), seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407), false);
+            for i in 0..60 { x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else { format!(r#"{{"await":true,"{}":true,"for":{},"src":"human"}}"#, if (x >> 33) % 2 == 0 { "praise" } else { "criticism" }, i - 1) };
+                let (d, ns) = ok_turn(&p, &st, &ev); changed |= ns.gate.as_ref().unwrap()[0].1.v > 0.45;
+                assert!(!fast(&d) || changed, "seed {seed} turn {i}: learning fast before any change"); if fast(&d) { opened += 1; } st = ns; } }
+        // a lesson (praise `mid`) then its reversal (praise `high`) opens the gate
+        let (mut st, mut prev, mut seen) = (init(&p, Some(0), true, &run), Json::Null, (false, false));
+        for i in 0..80 { let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else {
+                let good = level(&prev) == lv[if i - 1 < 40 { 1 } else { 2 }];
+                format!(r#"{{"await":true,"{}":true,"for":{},"src":"human"}}"#, if good { "praise" } else { "criticism" }, i - 1) };
+            let (d, ns) = ok_turn(&p, &st, &ev); if i < 40 { seen.0 |= fast(&d) && ns.gate.as_ref().unwrap()[0].1.r >= 4.0; } else { seen.1 |= fast(&d); } prev = d; st = ns; }
+        assert!(!seen.0, "no clause while r̂ >= r_ref in phase A"); assert!(seen.1, "the reversal opens the gate");
+        let _ = opened;
     }
 
     /// RFC 0002 Design C on the engine: R̄'s event form (a win of 1 from 0 is 1 − 0.5^(1/6)), offered stakes move nothing, the
@@ -4614,7 +4659,7 @@ mod tests {
         // V-R2
         for (f, t, at) in [(r#""volatility_rate":0.3"#, r#""volatility_rate":0"#, "surprise.volatility_rate"), (r#""volatility_rate":0.3"#, r#""volatility_rate":1"#, "surprise.volatility_rate"),
             (r#""v0":0.45"#, r#""v0":1"#, "surprise.v0"), (r#""v0":0.45"#, r#""v0":-0.1"#, "surprise.v0"), (r#""r_ref":4"#, r#""r_ref":0.5"#, "surprise.r_ref"),
-            (r#""r_max":20"#, r#""r_max":0"#, "surprise.r_max"), (r#""g_max":3"#, r#""g_max":1"#, "surprise.g_max"), (r#""g_max":3"#, r#""g_max":3.5"#, "surprise.g_max")] {
+            (r#""r_max":20"#, r#""r_max":0"#, "surprise.r_max"), (r#""r_max":20"#, r#""r_max":3"#, "surprise.r_ref"), (r#""g_max":3"#, r#""g_max":1"#, "surprise.g_max"), (r#""g_max":3"#, r#""g_max":3.5"#, "surprise.g_max")] {
             assert_eq!(path(g(f, t)), at, "{t}"); }
         // P-R1, P-R2, P-R3
         assert_eq!(pc(r#""reward_from":["env"],"#, ""), "pace: a pace block needs reward_from (only accepted rewards move the average)");
@@ -4681,7 +4726,7 @@ mod tests {
     #[test]
     fn the_wave_1b_surfaces_say_what_the_blocks_do() {
         let p = build(&json::parse(BODYB).unwrap()).unwrap(); let d = describe(&p);
-        assert_eq!(d.get("surprise").map(canon), Some(r#"{"g_max":3,"precision":false,"r_max":20,"r_ref":4,"start":{"g":2.5,"r":1,"v":0},"v0":0.45,"volatility_rate":0.3}"#.to_string()));
+        assert_eq!(d.get("surprise").map(canon), Some(r#"{"g_max":3,"precision":false,"r_max":20,"r_ref":4,"start":{"g":1,"r":4,"v":0},"v0":0.45,"volatility_rate":0.3}"#.to_string()));
         let pc = d.get("pace").unwrap();
         assert_eq!(pc.get("closed_form").and_then(Json::as_str), Some("rbar = clip(rbar * 0.5^(h / 6) + 0.109101 * r_t, 0, 4); r_t = the accepted wins + 1 per reward flag on"));
         assert_eq!((gnum(pc, &["largest_field_shift"]), pc.get("reserved").map(canon)), (0.9, Some(r#"["pace_up","pace_down"]"#.to_string())));
@@ -4693,7 +4738,7 @@ mod tests {
         let alpha = alphabet(&p, &[0.5, 1.0], &[1.0]);
         assert!(alpha.iter().all(|a| !PACE_IDS.contains(&a.0.as_str())), "the host's alphabet");
         assert_eq!(burst_events(&p).len(), 3); assert!(alternating(&p).is_some() && alternating(&q).is_none() && burst_events(&need1()).is_empty());
-        assert_eq!(gate_gains(&p, &init(&p, Some(0), false, &run)), vec![("approach".to_string(), 2.5, 3.0)]);
+        assert_eq!(gate_gains(&p, &init(&p, Some(0), false, &run)), vec![("approach".to_string(), 1.0, 3.0)]);   // 0.10.1: a new learner's gate starts closed
         assert_eq!(pace_rbar(&p, &init(&p, Some(0), false, &run)), Some((0.0, 1.0, 4.0)));
     }
 
