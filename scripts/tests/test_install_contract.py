@@ -40,6 +40,12 @@ class InstallRouting(unittest.TestCase):
             ("Darwin", "x86_64", "", "x86_64-apple-darwin"),
             ("Linux", "x86_64", "glibc 2.35", "x86_64-unknown-linux-gnu"),
             ("Linux", "x86_64", "musl libc", "x86_64-unknown-linux-musl"),
+            # the gnu build needs glibc >= 2.34; an older one gets the static musl build
+            ("Linux", "x86_64", "ldd (Ubuntu GLIBC 2.35-0ubuntu3) 2.35", "x86_64-unknown-linux-gnu"),
+            ("Linux", "x86_64", "ldd (GNU libc) 2.34", "x86_64-unknown-linux-gnu"),
+            ("Linux", "x86_64", "ldd (Ubuntu GLIBC 2.31-0ubuntu9.16) 2.31", "x86_64-unknown-linux-musl"),
+            ("Linux", "x86_64", "ldd (GNU libc) 2.28", "x86_64-unknown-linux-musl"),
+            ("Linux", "x86_64", "ldd (GNU libc) 2.17", "x86_64-unknown-linux-musl"),
             ("Linux", "aarch64", "glibc 2.35", "aarch64-unknown-linux-musl"),
         ]:
             with self.subTest(target=target):

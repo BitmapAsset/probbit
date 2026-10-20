@@ -24,6 +24,9 @@ for (const [platform, arch, glibc, target] of [
   ['darwin', 'x64', null, 'x86_64-apple-darwin'],
   ['linux', 'x64', '2.35', 'x86_64-unknown-linux-gnu'],
   ['linux', 'x64', null, 'x86_64-unknown-linux-musl'],
+  ['linux', 'x64', '2.34', 'x86_64-unknown-linux-gnu'],
+  ['linux', 'x64', '2.31', 'x86_64-unknown-linux-musl'],
+  ['linux', 'x64', '2.28', 'x86_64-unknown-linux-musl'],
   ['linux', 'arm64', '2.35', 'aarch64-unknown-linux-musl'],
   ['win32', 'x64', null, 'x86_64-pc-windows-msvc'],
   ['win32', 'arm64', null, 'x86_64-pc-windows-msvc'],
@@ -41,6 +44,14 @@ test('unsupported architecture fails without fetching', async () => {
   await assert.rejects(fixture.install(() => {}), /no prebuilt/);
   assert.equal(fixture.urls.length, 0);
 });
+
+for (const [platform, arch] of [['linux', 'arm'], ['freebsd', 'x64'], ['linux', 'ppc64']]) {
+  test(`unsupported platform ${platform}/${arch}: a clear message, not "fetched on first run"`, async () => {
+    const fixture = installer(platform, arch, null);
+    await assert.rejects(fixture.install(() => {}), e => e instanceof fixture.UnsupportedError && /no prebuilt probbit for .*PROBBIT_BINARY/.test(e.message));
+    assert.equal(fixture.urls.length, 0);
+  });
+}
 
 for (const env of [{ PROBBIT_VERSION: '../bad' }, { PROBBIT_TARGET: '../../bad' }]) {
   test(`invalid download selector: ${Object.keys(env)[0]}`, async () => {

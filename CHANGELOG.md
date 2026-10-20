@@ -9,6 +9,13 @@ All notable changes to this project are documented here. The format follows
   panel: every field of the individual (traits, moods, needs, surprise gates, pace, dispositions, learned traits, credit,
   habits, senses, room left in the bound) as a dial with fixed words for its level, size and direction since the event before.
   One pure map, unit-tested for zero ambiguity over every bucket; page frames carry `words`. No stance document changes.
+- Portability: a strand with a leading UTF-8 byte-order mark (a Windows editor's save) replays and monitors like the bytes
+  without it, as CRLF line endings already did (`live verify` used to report a divergence at line 1). `monitor --serve` sends
+  `X-Accel-Buffering: no` on the event stream (a reverse proxy would hold it in its buffer) and, when the port is taken, says
+  so with what to do. The page no longer uses `Array.prototype.at` (Safari before 15.4 lacked it and the page stopped after
+  its first frame). A cut line at a terminal under `NO_COLOR` no longer ends in a bare reset escape. `install.sh` and the
+  npm package pick the static musl build on Linux x86_64 with glibc older than 2.34 (the gnu build does not run there), and
+  the npm package says plainly when a platform has no prebuilt binary instead of promising a fetch on first run.
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
   strand header tells them from 0.10.0.
 

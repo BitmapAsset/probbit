@@ -778,7 +778,9 @@ fn doc_of(w: &Watch) -> (u64, String) { w.last.as_ref().map_or((0, String::new()
 /// `--serve`: listen on 127.0.0.1:`port` (0: a free port), say the URL on stdout, open the browser if asked, serve every
 /// connection on its own thread, and run `feed` (it publishes the frames; it never returns)
 fn serve(port: u16, open: bool, feed: &mut dyn FnMut(&Hub)) -> ! {
-    let l = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap_or_else(|e| crate::fail(&format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}")));
+    let l = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap_or_else(|e| crate::fail(&if e.kind() == std::io::ErrorKind::AddrInUse {
+        format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}: another program holds this port; pick another with --port N, or leave --port out for a free one")
+    } else { format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}") }));
     let port = l.local_addr().map_or(port, |a| a.port());
     let url = format!("http://127.0.0.1:{port}/");
     out(&format!("{url}\n"));
@@ -877,7 +879,8 @@ fn busy(mut c: TcpStream) { let _ = c.set_write_timeout(Some(Duration::from_secs
 /// a new layout before the frame when the strand starts over as another, and a heartbeat comment after `beat` quiet (15 s)
 fn events(mut c: TcpStream, hub: &Hub, beat: Duration) {
     let _ = c.set_nodelay(true);
-    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{SAFE}\r\n");
+    // X-Accel-Buffering: a reverse proxy (nginx) would otherwise hold the stream in its buffer
+    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{SAFE}X-Accel-Buffering: no\r\n\r\n");
     if c.write_all(head.as_bytes()).and_then(|_| c.flush()).is_err() { return; }
     let (mut layout, mut seq) = (0u64, 0u64);
     loop {

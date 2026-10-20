@@ -286,9 +286,11 @@ impl Replay {
         Json::Obj(v)
     }
 }
-/// A strand's text -> its lines without their line endings (a final newline ends the last line; it does not start another)
+/// A strand's text -> its lines without their line endings (a final newline ends the last line; it does not start another).
+/// One leading UTF-8 byte-order mark is skipped, as `\r` before `\n` is: a Windows editor adds both on save, and neither is
+/// part of the line text the chain hashes.
 pub fn lines(text: &str) -> Vec<&str> {
-    let mut lines: Vec<&str> = text.split('\n').map(bare).collect();
+    let mut lines: Vec<&str> = text.strip_prefix('\u{feff}').unwrap_or(text).split('\n').map(bare).collect();
     if lines.last() == Some(&"") { lines.pop(); }
     lines
 }
