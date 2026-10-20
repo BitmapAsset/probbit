@@ -819,6 +819,16 @@ by probing the box's vertices. It bounds the stance at rest, not the stance mid-
 writes. It is not a safety gate and grants nothing. Above 12 searched coordinates in a trait's component it prints the coarse
 ceiling (sound, not tight), never sampled vertices.
 
+**History.** A `recent` feature whose effects reach the trait's component, or which a habit's `when` names, is enumerated
+by its values, not by stored sequences. The rest probe's own flag is false, so a feature reads min(`cap`, trues in the
+last `window` − 1 stored turns) and a `streak` reads 0; the stored turns of a flag are split at each of its features'
+window boundaries and every count of trues per segment is probed once per distinct tuple of capped values. Every tuple is
+reachable and nothing else of the stored turns enters the rest probe, so this is the exact maximum over histories (equal,
+in the test, to the search over every stored sequence). Pepe's praise (window 4) and wins (window 6, cap 3) give 4 × 4 =
+16 combinations instead of 256. Epsilon then includes what the history moves on its own (`ceiling` prints null). Limit:
+more than 4096 combinations per trait and seed prints the coarse value 1 (sound), and `--audit` refuses with
+`<trait>: more than 4096 enumerated history combinations: the audit needs an exact epsilon` (exit 2).
+
 In words for a reader: "Its learned character has a published limit: no sequence of messages can move the odds of any trait
 at rest by more than epsilon, a number computed from its file that anyone can recompute. The limit is arithmetic over
 declared numbers. It covers the stance at rest, not the words a model writes, and it is published with how fast the limit
@@ -827,7 +837,9 @@ can be reached."
 **Audit.** `probbit persona bound PERSONA --audit STRAND` replays a recorded life and reports, per learned trait, the room
 used (resting TV between the individual and the same individual with its learned weights at 0, divided by epsilon at the
 strand's seed): the most at any event, at which event, now, and the distance to the ceiling now; exit 1 on an exceedance
-(impossible by the theorem; the audit shows it on the recorded life).
+(impossible by the theorem; the audit shows it on the recorded life). The room used counts the learned weights only, at the
+individual's own history; epsilon is the whole resting change, history included, so on a trait an enumerated history
+reaches the room used is the learned share of that limit.
 
 **Erasure.** `probbit live control STRAND erase --by human:ID --reason TEXT` appends a chained control line that returns
 every learned weight to 0 (and closes the open credits, as every control line does); replay applies it, the next event's

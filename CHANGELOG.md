@@ -7,7 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 - RFC 0004 `bound` (docs/rfcs/0004-bound.md, docs/persona.md §2.16): an optional block and `probbit persona bound`, the
   certified ceiling epsilon per learned trait on how far any event sequence can move its odds at rest (exact over the
-  learned-weight box by vertex probes; history enumerated; counted moods searched; decayed channels as the residue r), with
+  learned-weight box by vertex probes; history enumerated by feature value, A8, up to 4096 combinations; counted moods
+  searched; decayed channels as the residue r), with
   `speed` and the proved `speed_floor`. The block stays out of the persona digest: states, strands and turns are unchanged.
 - `probbit persona bound PERSONA --audit STRAND`: the room each learned trait used over a recorded life, most and now.
 - `probbit live control STRAND erase`: a chained control line that returns the learned weights to 0.

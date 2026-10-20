@@ -775,7 +775,7 @@ pub fn bound_audit(text: &str, b: &persona::bound::Bound, eng: Engine) -> Result
     let st0 = persona::init(&p, Some(seed), true, eng); let p0 = persona::bound::rest_odds(&p, &st0, rest, eng).map_err(e)?;
     let mut eps = vec![]; let mut rr = vec![];
     for (k, t) in traits.iter().enumerate() { let sc = persona::bound::scope(&p, b, t, rest, Some(&st0));
-        let bs = persona::bound::bases(&sc, &st0).ok_or((0, format!("{t}: more than 64 enumerated histories: the audit needs an exact epsilon")))?;
+        let bs = persona::bound::bases(&p, &sc, &st0).ok_or((0, format!("{t}: more than {} enumerated history combinations: the audit needs an exact epsilon", persona::bound::MAX_HISTORY)))?;
         eps.push(persona::bound::search(&p, k, &sc.coords, cap, &bs, &p0[k], rest, eng).map_err(e)?.0); rr.push((sc.d_r / 4.0).tanh()); }
     let nt = traits.len(); let (mut maxr, mut at_n, mut cur, mut exceed) = (vec![0.0f64; nt], vec![0u64; nt], vec![0.0f64; nt], 0usize);
     let (mut events, mut feedback, mut erasures) = (0u64, 0u64, 0u64); let mut last = persona::bound::learned_of(&r.live.st);

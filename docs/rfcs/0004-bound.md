@@ -22,10 +22,11 @@ read-only subcommand with an audit, one control line · Depends on: section 2.8 
    otherwise). The PERSONA file supplies the `bound` settings; the persona itself is read from the strand's header.
 4. **A4, the scope rule in this build.** Searched: learned weights, and moods named in `count` (their accumulator box per
    level, inputs at their extremes and the seed's input gains of at least 1, history features at 0 and their cap).
-   Enumerated: history: every stored sequence of a flag a `recent` feature reads (window − 1 turns), when that feature's
-   effects reach the component or a habit's `when` names it; a streak is 0 at the rest probe; more than 64 sequences give
-   the coarse value 1. With an enumerated channel the printed `ceiling` is null: epsilon then includes what the history
-   channel moves on its own, which the tilt ceiling does not cover. Decayed: moods with `half_life_hours` and `pace`, with
+   Enumerated: history `recent` features, when the feature's effects reach the component or a habit's `when` names it,
+   by their values (amendment A8; the first build enumerated stored sequences up to 64 and gave the coarse value 1 above
+   that, which left Pepe's humour and hype coarse); a streak is 0 at the rest probe. With an enumerated channel the
+   printed `ceiling` is null: epsilon then includes what the history channel moves on its own, which the tilt ceiling
+   does not cover. Decayed: moods with `half_life_hours` and `pace`, with
    r = tanh(D_r / 4). Named uncounted (exit 1), not yet searched by this build: a mood without `half_life_hours` and not
    counted, prev-relative habits in force at rest, `vouch`/`hold` in the component, drives and needs reaching `pursue`
    (also when counted: the deadline and need terms are a wait). BO-R8 (the sampler tier) is not checked yet: every
@@ -37,6 +38,20 @@ read-only subcommand with an audit, one control line · Depends on: section 2.8 
    epsilon is computed from printed odds. A campaign's printed resting TV can therefore sit up to about 1e-6 above the
    printed epsilon: seen once in 4,100 bo1 cases (reference persona, seed 3, initiative: 0.457017 against 0.457016), inside
    the bar's 1e-6 tolerance. Publishing epsilon rounded up by the level set's size × 1e-6 is a wait.
+8. **A8, history by value (exact, no 64 cap).** E's combinations are the distinct tuples of capped `recent` feature
+   values, not stored sequences. The rest probe's own flag is false, so a `recent` feature reads min(cap, trues in the
+   last window − 1 stored turns) and a streak reads 0: the stored turns enter the probe only through those values. Per
+   flag, the stored turns are split at each of its features' window boundaries; every count of trues per segment is
+   probed once per distinct value tuple; the product over flags is E. Each tuple is reachable (any flag sequence is), so
+   the maximum over E equals the maximum over every stored sequence (step 4; the unit test
+   `history_values_equal_every_stored_sequence` checks equality against all 2^10 sequences). Pepe (v0.3.1): praise
+   (window 4, cap 3) gives 4 values, wins (window 6, cap 3) 4, so 16 combinations against 256 sequences, and humour and
+   hype now print exact epsilons. Limit: more than 4096 combinations per trait and seed (`MAX_HISTORY`) prints the
+   coarse value 1, and `--audit` refuses with `<trait>: more than 4096 enumerated history combinations: the audit needs
+   an exact epsilon` (exit 2). Windows and caps are at most 100, so one flag with one feature never reaches it.
+   Consequence for the audit (A3): its room used counts the learned weights at the individual's own history, while
+   epsilon is the whole resting change with history included; on a trait an enumerated history reaches, the room used
+   is the learned share of that limit and reads lower than against the empty-history probe.
 
 ## Summary
 
@@ -115,7 +130,8 @@ bound on decayed channels' residue), and epsilon_t is the exact maximum of that 
    other coordinates' vertices are searched: (2^L − 2) · 2^V probes per seed and combination, L = t's levels, V = |Q|
    minus L.
 4. *Total variation.* TV(odds, p0) = max over S of (p_S − p0_S). Coordinates outside t's component do not enter t's
-   marginal; E is finite and enumerated; every reachable state lies in the box. So the change is at most epsilon_t, and
+   marginal; E is finite and enumerated by value (A8: the stored turns enter the probe only through the capped feature
+   values, each tuple reachable); every reachable state lies in the box. So the change is at most epsilon_t, and
    the maximum over the box is a probed vertex. A decayed channel's residue tilts the family by at most D_r nats
    (oscillation), which moves any p_S by at most r = tanh(D_r / 4).
 5. *Rounding.* The engine rounds each field to 6 decimals; rounding is non-decreasing, so monotonicity survives it.
@@ -194,7 +210,7 @@ counted; otherwise it is named uncounted.
 | `learned` | searched | the box ±`total_cap` |
 | a mood with `half_life_hours`; drives' W, A, E; `pace` | decayed | value × 0.5^(rest_hours / half-life); the residue joins r, which must be ≤ 1e-6 |
 | a mood without `half_life_hours` | uncounted, or counted | the rest event carries k·a, and a stays within each level's least and most one-event effect (inputs at their extremes, the seed's gains): box k·[min(0, lo), max(0, hi)] |
-| history `recent`; `prev` for prev-relative habits in force at rest | enumerated | 0 to min(cap, window − 1); each level (`streak` is 0 at the probe) |
+| history `recent`; `prev` for prev-relative habits in force at rest | enumerated | 0 to min(cap, window − 1); per flag each distinct tuple of its features' values (A8; `streak` is 0 at the probe) |
 | drives' deadlines and `since`; needs' deficits | uncounted, or counted | deadline term [0, `pursue.deadline`], need term ±`pursue.cap`, their conditions enumerated |
 | `vouch` / `hold` in the component | conservative | the held one-hot joins the candidates (sound, possibly loose, labelled) |
 | `pursue` with floor goals and a searched term | outside the theorem | the floor lift depends on that term: no epsilon there (exit 1) |

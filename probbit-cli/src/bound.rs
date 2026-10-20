@@ -109,13 +109,31 @@ pub fn scope(p: &Persona, b: &Bound, t: &str, rest: f64, st: Option<&State>) -> 
     if p.has_needs() && (comp.iter().any(|x| x == "pursue") || t == "pursue") { uncounted.push(if b.count.iter().any(|x| x == "needs") { "needs (counted; not yet searched by this build)".into() } else { "needs".into() }); }
     Scope { coords, flags, d_r, uncounted, comp, others }
 }
-/// Every enumerated history at the rest probe, as copies of `st0` (one when nothing is enumerated); None above 64 combinations
-pub fn bases(sc: &Scope, st0: &State) -> Option<Vec<State>> {
-    let bits: usize = sc.flags.iter().map(|(_, n)| *n).sum(); if bits > 6 { return None; }
-    Some((0..1u64 << bits).map(|m| { let mut s = st0.clone(); let mut b = 0;
-        for (f, n) in &sc.flags { let seq: Vec<bool> = (0..*n).map(|i| m >> (b + i) & 1 == 1).collect(); b += n;
-            match s.history.iter_mut().find(|(k, _)| k == f) { Some(e) => e.1 = seq, None => s.history.push((f.clone(), seq)) } }
-        s }).collect())
+/// The most enumerated history combinations per trait and seed; above it `bound` prints the coarse value 1 and `--audit` refuses
+pub const MAX_HISTORY: usize = 4096;
+/// One stored sequence (oldest first, `n` turns) per distinct tuple of the flag's `recent` feature values at the rest probe.
+/// The probe's own flag is false, so a feature reads min(cap, trues in the last window − 1 stored turns) and a streak is 0:
+/// split the suffix at each window boundary, enumerate the trues per segment, keep the first sequence of each tuple
+fn flag_values(p: &Persona, f: &str, n: usize) -> Option<Vec<Vec<bool>>> {
+    let feats: Vec<&Hist> = p.history.iter().filter(|h| h.of == f && !h.streak).collect();
+    let mut cuts: Vec<usize> = feats.iter().map(|h| h.window.saturating_sub(1).min(n)).chain([0, n]).collect(); cuts.sort_unstable(); cuts.dedup();
+    let segs: Vec<usize> = cuts.windows(2).map(|w| w[1] - w[0]).collect();
+    if segs.iter().try_fold(1usize, |a, l| a.checked_mul(l + 1).filter(|x| *x <= 1 << 20)).is_none() { return None; }
+    let (mut ks, mut seen, mut out) = (vec![0usize; segs.len()], std::collections::HashSet::new(), vec![]);
+    loop { let mut seq = vec![false; n]; // segment j covers the stored turns cuts[j]..cuts[j+1] back from the newest
+        for (j, k) in ks.iter().enumerate() { for i in 0..*k { seq[n - 1 - cuts[j] - i] = true; } }
+        let vals: Vec<usize> = feats.iter().map(|h| seq[n - h.window.saturating_sub(1).min(n)..].iter().filter(|&&b| b).count().min(h.cap)).collect();
+        if seen.insert(vals) { out.push(seq); if out.len() > MAX_HISTORY { return None; } }
+        let mut j = 0; loop { if j == ks.len() { return Some(out) } if ks[j] < segs[j] { ks[j] += 1; break } ks[j] = 0; j += 1; } }
+}
+/// Every enumerated history combination at the rest probe (the product over flags of their feature-value tuples), as copies
+/// of `st0` (one when nothing is enumerated); None above MAX_HISTORY combinations
+pub fn bases(p: &Persona, sc: &Scope, st0: &State) -> Option<Vec<State>> {
+    let mut out = vec![st0.clone()];
+    for (f, n) in &sc.flags { let reps = flag_values(p, f, *n)?; if out.len().checked_mul(reps.len()).map_or(true, |x| x > MAX_HISTORY) { return None; }
+        out = out.iter().flat_map(|s| reps.iter().map(move |seq| { let mut s = s.clone();
+            match s.history.iter_mut().find(|(k, _)| k == f) { Some(e) => e.1 = seq.clone(), None => s.history.push((f.clone(), seq.clone())) } s })).collect(); }
+    Some(out)
 }
 /// The proper non-empty level sets of an n-level trait, as bit masks
 fn sets(n: usize) -> impl Iterator<Item = u32> { 1..(1u32 << n) - 1 }
@@ -147,7 +165,7 @@ pub fn publish(p: &Persona, b: &Bound, seeds_flag: Option<Vec<u64>>, eng: Engine
         let sc = scope(p, b, t, rest, None); let lv = &p.var(t).unwrap().levels; let n_coords = lv.len() + sc.coords.len();
         let d = 2.0 * c * (1 + sc.others) as f64 + sc.coords.iter().map(|x| if let Coord::M(_, _, lo, hi) = x { hi - lo } else { 0.0 }).sum::<f64>();
         let ceiling = r6((d / 4.0).tanh()); let r = (sc.d_r / 4.0).tanh();
-        let per_seed: Vec<Option<(Scope, Vec<State>)>> = base.iter().map(|(st0, _)| { let sc = scope(p, b, t, rest, Some(st0)); let bs = bases(&sc, st0)?; Some((sc, bs)) }).collect();
+        let per_seed: Vec<Option<(Scope, Vec<State>)>> = base.iter().map(|(st0, _)| { let sc = scope(p, b, t, rest, Some(st0)); let bs = bases(p, &sc, st0)?; Some((sc, bs)) }).collect();
         let coarse = n_coords > MAX_COORDS || per_seed.iter().any(Option::is_none);
         let (mut eps, mut arg, mut at_seed, mut probes) = (0.0f64, 0u32, seeds[0], 0usize);
         if coarse { eps = if per_seed.iter().any(Option::is_none) || !sc.flags.is_empty() { 1.0 } else { ceiling }; } else {
@@ -285,6 +303,32 @@ mod tests {
         let d = json::parse(&REF.replace(r#","half_life_hours":6"#, "").replace("BOUND", r#","bound":{"seeds":"0"}"#)).unwrap(); let p = build(&d).unwrap();
         let (j, ok) = publish(&p, &of_doc(&d, &p).unwrap().unwrap(), None, &run).unwrap(); assert!(!ok);
         assert_eq!(canon(j.get("traits").and_then(Json::as_arr).unwrap()[1].get("uncounted").unwrap()), r#"["moods[0]"]"#);
+    }
+    /// History enumerated per feature value equals the search over every stored sequence (2^10 here, above the old 64 cap):
+    /// two features of different windows and caps on one flag, one on another, a habit reading one; and above MAX_HISTORY
+    /// (windows and caps at the engine's 100: about 390 praise tuples x 100 loss values) `bases` refuses and `bound` is coarse
+    #[test]
+    fn history_values_equal_every_stored_sequence() {
+        let src = REF.replace(r#""learning""#, r#""history":[{"id":"praise_short","of":"praise","kind":"recent","window":4,"cap":2,"effects":{"humour":[0,0.3,0.6]}},
+            {"id":"praise_long","of":"praise","kind":"recent","window":6,"cap":3,"effects":{"valence":[-0.2,0,0.4]}},{"id":"losses","of":"loss","kind":"recent","window":6,"cap":4,"effects":{"humour":[0.5,0,-0.5]}},
+            {"id":"loss_streak","of":"loss","kind":"streak","cap":3,"effects":{"humour":[1,0,-1]}}],
+            "habits":[{"id":"quiet_after_losses","when":{"losses":{"at_least":3}},"then":{"verbosity":["terse","short"]}}],"learning""#)
+            .replace("BOUND", r#","bound":{"seeds":"0","rest_hours":200}"#); let d = json::parse(&src).unwrap();
+        let p = build(&d).unwrap(); let b = of_doc(&d, &p).unwrap().unwrap();
+        for seed in 0..2u64 { let st0 = init(&p, Some(seed), true, &run); let p0 = rest_odds(&p, &st0, 200.0, &run).unwrap();
+            for (k, t) in ["verbosity", "humour"].iter().enumerate() { let sc = scope(&p, &b, t, 200.0, Some(&st0));
+                // verbosity: only the habit's `losses`; humour: both flags. praise: 8 (short, long) tuples of 6 sequences x 4 values; loss: 0..4
+                let (flags, n) = if k == 0 { (vec![("loss".to_string(), 5)], 5) } else { (vec![("praise".to_string(), 5), ("loss".to_string(), 5)], 40) };
+                assert_eq!(sc.flags, flags); let bs = bases(&p, &sc, &st0).unwrap(); assert_eq!(bs.len(), n);
+                let mut every = vec![]; for m in 0..1u32 << 10 { let mut s = st0.clone();
+                    s.history = vec![("praise".into(), (0..5).map(|i| m >> i & 1 == 1).collect()), ("loss".into(), (5..10).map(|i| m >> i & 1 == 1).collect())]; every.push(s); }
+                let (v, _, _) = search(&p, k, &sc.coords, 1.0, &bs, &p0[k], 200.0, &run).unwrap();
+                let (w, _, _) = search(&p, k, &sc.coords, 1.0, &every, &p0[k], 200.0, &run).unwrap();
+                assert_eq!(v, w, "seed {seed} {t}: per value {v} vs every sequence {w}");
+                let (e0, _, _) = search(&p, k, &sc.coords, 1.0, &[st0.clone()], &p0[k], 200.0, &run).unwrap(); if *t == "humour" { assert!(v > e0 + 1e-3, "the history channel moves humour"); } } }
+        let wide = json::parse(&src.replace(r#""window":6,"cap":4"#, r#""window":100,"cap":100"#).replace(r#""window":4,"cap":2"#, r#""window":100,"cap":100"#)).unwrap(); let pw = build(&wide).unwrap(); let bw = of_doc(&wide, &pw).unwrap().unwrap();
+        let st0 = init(&pw, Some(0), true, &run); assert!(bases(&pw, &scope(&pw, &bw, "humour", 200.0, Some(&st0)), &st0).is_none());
+        let (j, _) = publish(&pw, &bw, Some(vec![0]), &run).unwrap(); assert_eq!(j.get("traits").and_then(Json::as_arr).unwrap()[1].get("coarse"), Some(&Json::Bool(true)));
     }
     #[test]
     fn erase_zeroes_learned_weights() {
