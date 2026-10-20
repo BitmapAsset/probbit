@@ -15,7 +15,9 @@ All notable changes to this project are documented here. The format follows
   so with what to do. The page no longer uses `Array.prototype.at` (Safari before 15.4 lacked it and the page stopped after
   its first frame). A cut line at a terminal under `NO_COLOR` no longer ends in a bare reset escape. `install.sh` and the
   npm package pick the static musl build on Linux x86_64 with glibc older than 2.34 (the gnu build does not run there), and
-  the npm package says plainly when a platform has no prebuilt binary instead of promising a fetch on first run.
+  the npm package says plainly when a platform has no prebuilt binary instead of promising a fetch on first run, and names
+  `NODE_USE_ENV_PROXY=1` when a fetch fails with a proxy set (Node's fetch ignores `HTTPS_PROXY` without it). An argument
+  that is not valid UTF-8 (a legacy-encoded file name) is refused with exit 2 instead of a panic.
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
   strand header tells them from 0.10.0.
 
