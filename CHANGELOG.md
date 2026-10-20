@@ -3,6 +3,20 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.11.0 - unreleased
+
+- RFC 0004 `bound` (docs/rfcs/0004-bound.md, docs/persona.md §2.16): an optional block and `probbit persona bound`, the
+  certified ceiling epsilon per learned trait on how far any event sequence can move its odds at rest (exact over the
+  learned-weight box by vertex probes; history enumerated; counted moods searched; decayed channels as the residue r), with
+  `speed` and the proved `speed_floor`. The block stays out of the persona digest: states, strands and turns are unchanged.
+- `probbit persona bound PERSONA --audit STRAND`: the room each learned trait used over a recorded life, most and now.
+- `probbit live control STRAND erase`: a chained control line that returns the learned weights to 0.
+- `probbit persona check` runs the certificate when the block declares `max_epsilon`.
+- `probbit persona lint PERSONA --host MANIFEST [--strict]`: the dead-rule lint, each habit whose `when` needs an input or
+  sense the host never supplies is reported `dead on this host` (a warning; an error with `--strict`); manifests for two real
+  hosts under `examples/hosts/`.
+- bench/bound: fixtures and `run.py` (bars bo1, bo2, bo3, bo5 through the engine).
+
 ## 0.10.1 - unreleased
 
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a

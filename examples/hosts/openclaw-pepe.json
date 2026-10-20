@@ -1,0 +1,1 @@
+{"host": "openclaw-pepe", "inputs": ["praise", "correction", "failure", "security", "gary_upset", "win", "wants_energy", "elapsed_hours"], "senses": [], "source": "an OpenClaw stance plugin: its classifier sets the flags praise, correction, failure, gary_upset, security, win, wants_energy, and its event line always carries elapsed_hours; no senses read yet"}

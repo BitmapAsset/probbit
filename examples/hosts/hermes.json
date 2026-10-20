@@ -1,0 +1,1 @@
+{"host": "hermes", "inputs": ["destructive_authorized", "praise", "correction"], "senses": ["idle", "tool_fail", "task_latency"], "source": "the Hermes panel's INPUTS line (destructive_authorized, claim_done, praise, correction) with claim_done never set by the integration; senses idle, tool_fail, task_latency"}

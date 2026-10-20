@@ -31,6 +31,8 @@ impl Status {
         match (what, self) {
             (_, Status::Retired) => Err(refusal(Status::Retired)),
             ("pause", Status::Active) => Ok(Status::Paused), ("resume", Status::Paused) => Ok(Status::Active), ("retire", _) => Ok(Status::Retired),
+            // RFC 0004 amendment A2: `erase` returns the learned weights to zero and leaves the status as it was
+            ("erase", s) => Ok(s),
             ("pause", _) => Err(perr("control", "already paused")), ("resume", _) => Err(perr("control", "not paused (resume follows a pause)")),
             _ => Err(perr("control", "pause | resume | retire")) }
     }
@@ -92,7 +94,7 @@ impl Live {
     pub fn control(&mut self, what: &str, by: &str, reason: &str, at: &str) -> Result<String, InErr> {
         let to = self.status.after(what)?;
         let line = control_line(&self.prev, what, by, reason, at)?;
-        self.st = self.st.zero_credit(&self.p); self.status = to; self.controls += 1; self.prev = persona::digest_of(&line);
+        self.st = self.st.zero_credit(&self.p); if what == "erase" { self.st = self.st.erased(&self.p); } self.status = to; self.controls += 1; self.prev = persona::digest_of(&line);
         Ok(line)
     }
     /// A checkpoint line after event n: the event count, the whole state after it and that event's stance document, chained ->
@@ -108,7 +110,7 @@ impl Live {
 /// A control line after the line whose sha256 is `prev` (canonical JSON: at, by, control, prev, reason). `by` names who: a
 /// person or a sensor, never the individual or the clock; the reason is 1-500 characters.
 pub fn control_line(prev: &str, what: &str, by: &str, reason: &str, at: &str) -> Result<String, InErr> {
-    if !["pause", "resume", "retire"].contains(&what) { return Err(perr("control", "pause | resume | retire")); }
+    if !["pause", "resume", "retire", "erase"].contains(&what) { return Err(perr("control", "pause | resume | retire")); }
     if !matches!(persona::src_kind(by), Some("human" | "env")) { return Err(perr("control.by", "who: human[:id] or env[:id] (id: 1-64 of A-Z a-z 0-9 _ . - @ / :); the individual cannot control itself")); }
     if reason.trim().is_empty() || reason.chars().count() > 500 { return Err(perr("control.reason", "1-500 characters")); }
     if at.is_empty() || at.len() > 64 { return Err(perr("control.at", "a time stamp, 1-64 characters (RFC 3339 by default)")); }
@@ -760,6 +762,41 @@ fn draw(th: crate::theme::Theme, r: &Row, drawn: usize, name: &str, rest: &str, 
     crate::tui::err_write(&s); b.len()
 }
 
+/// The audit of a recorded life (`probbit persona bound PERSONA --audit STRAND`): the strand replayed line by line; after every
+/// event and control line, per learned trait the resting TV between the individual and the same individual with its learned
+/// weights at zero, as a share of its epsilon (the room used). An exceedance is impossible by the theorem; the audit shows it
+/// on the recorded life.
+pub fn bound_audit(text: &str, b: &persona::bound::Bound, eng: Engine) -> Result<(Json, bool), (usize, String)> {
+    let lines = lines(text);
+    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+    let p = r.live.p.clone(); let (traits, cap) = persona::bound::learned_traits(&p).ok_or((1, "the strand's persona has no learning block: nothing to audit".to_string()))?;
+    let rest = b.rest_hours.unwrap_or_else(|| persona::bound::default_rest(&p)); let seed = r.live.st.seed;
+    let e = |x: InErr| (0usize, format!("{}: {}", x.path, x.msg));
+    let st0 = persona::init(&p, Some(seed), true, eng); let p0 = persona::bound::rest_odds(&p, &st0, rest, eng).map_err(e)?;
+    let mut eps = vec![]; let mut rr = vec![];
+    for (k, t) in traits.iter().enumerate() { let sc = persona::bound::scope(&p, b, t, rest, Some(&st0));
+        let bs = persona::bound::bases(&sc, &st0).ok_or((0, format!("{t}: more than 64 enumerated histories: the audit needs an exact epsilon")))?;
+        eps.push(persona::bound::search(&p, k, &sc.coords, cap, &bs, &p0[k], rest, eng).map_err(e)?.0); rr.push((sc.d_r / 4.0).tanh()); }
+    let nt = traits.len(); let (mut maxr, mut at_n, mut cur, mut exceed) = (vec![0.0f64; nt], vec![0u64; nt], vec![0.0f64; nt], 0usize);
+    let (mut events, mut feedback, mut erasures) = (0u64, 0u64, 0u64); let mut last = persona::bound::learned_of(&r.live.st);
+    let measure = |st: &persona::State| -> Result<Vec<f64>, (usize, String)> { let a = persona::bound::rest_odds(&p, st, rest, eng).map_err(e)?;
+        let z = persona::bound::rest_odds(&p, &persona::bound::with_learned(&p, st, &persona::bound::learned_of(st).iter().map(|d| vec![0.0; d.len()]).collect::<Vec<_>>()), rest, eng).map_err(e)?;
+        Ok(a.iter().zip(&z).map(|(x, y)| persona::bound::tv(x, y)).collect()) };
+    for l in lines.iter().skip(1) { if l.trim().is_empty() { continue; }
+        let was_event = r.step(l, eng)?.is_some(); if was_event { events += 1; } else if l.contains(r#""control":"erase""#) { erasures += 1; }
+        let now = persona::bound::learned_of(&r.live.st); if now != last { if was_event { feedback += 1; } last = now; }
+        let tvs = measure(&r.live.st)?;
+        for k in 0..nt { cur[k] = tvs[k]; if eps[k] > 0.0 && tvs[k] / eps[k] > maxr[k] { maxr[k] = tvs[k] / eps[k]; at_n[k] = r.live.n; } if tvs[k] > eps[k] + rr[k] + 1e-6 { exceed += 1; } } }
+    let s = |x: &str| Json::Str(x.to_string());
+    let rows: Vec<Json> = traits.iter().enumerate().map(|(k, t)| Json::Obj(vec![("trait".into(), s(t)), ("epsilon".into(), Json::Num(eps[k])),
+        ("room_used_max".into(), Json::Num(persona::r6(maxr[k]))), ("at_event".into(), Json::Num(at_n[k] as f64)), ("room_used_now".into(), Json::Num(persona::r6(if eps[k] > 0.0 { cur[k] / eps[k] } else { 0.0 }))),
+        ("distance_to_ceiling".into(), Json::Num(persona::r6(eps[k] - cur[k]))), ("tv_now".into(), Json::Num(persona::r6(cur[k])))])).collect();
+    let ok = exceed == 0;
+    Ok((Json::Obj(vec![("persona".into(), s(&p.name)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(seed as f64)), ("rest_hours".into(), Json::Num(rest)),
+        ("events".into(), Json::Num(events as f64)), ("feedback_events".into(), Json::Num(feedback as f64)), ("erasures".into(), Json::Num(erasures as f64)),
+        ("traits".into(), Json::Arr(rows)), ("exceedances".into(), Json::Num(exceed as f64)), ("ok".into(), Json::Bool(ok))]), ok))
+}
+
 #[cfg(test)]
 mod tests {
     //! A strand replays byte for byte and a changed line diverges at that line
@@ -1358,6 +1395,27 @@ mod tests {
     /// Control lines: pause refuses every event (code `paused`, nothing changes) until resume; retire refuses every event and every
     /// control line after it, for good; no credit crosses a control line; `verify` replays them and reports the status; a changed
     /// control line diverges at its line; `resume` continues a strand that ends in control lines
+    #[test]
+    /// RFC 0004 amendment A2: `erase` is a chained control line; replay zeroes the learned weights (the next event's state
+    /// digest records it), the status is unchanged, an edited erase line diverges at the next line, and the audit reads 0
+    fn erase_control_line() {
+        let (p, doc) = kit(None); let mut r = Philox4x32::new(7, 7);
+        let (mut lv, h) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "t"); let mut text = format!("{h}\n");
+        let praise = json::parse(r#"{"praise":true}"#).unwrap();
+        for _ in 0..6 { text += &lv.event(&rnd(&mut r, &[None]), &run).unwrap().1; text.push('\n'); text += &lv.event(&praise, &run).unwrap().1; text.push('\n'); }
+        assert!(persona::bound::learned_of(&lv.st).iter().flatten().any(|x| *x != 0.0), "praise moved the learned weights");
+        assert_eq!(lv.control("erase", "self", "x", "t0").err().map(|e| e.path).as_deref(), Some("control.by"), "the individual cannot erase itself");
+        text += &lv.control("erase", "human:owner", "forget the campaign", "2026-10-20T08:00:00Z").unwrap(); text.push('\n');
+        assert_eq!(lv.status, Status::Active); assert!(persona::bound::learned_of(&lv.st).iter().flatten().all(|x| *x == 0.0));
+        let n = lines(&text).len(); text += &lv.event(&rnd(&mut r, &[None]), &run).unwrap().1; text.push('\n');
+        let v = verify(&text, &run).unwrap(); assert_eq!(v.get("final_state").and_then(Json::as_str), Some(lv.st.digest.as_str()));
+        assert_eq!(verify(&text.replacen("forget the campaign", "forget the campaigns", 1), &run).unwrap_err().0, n + 1, "an edited erase line diverges at the next line");
+        assert!(verify(&text.replacen(r#""control":"erase""#, r#""control":"pause""#, 1), &run).is_err(), "erase turned into pause: the replay refuses");
+        let b = persona::bound::Bound { rest_hours: Some(24.0), max_epsilon: None, seeds: None, count: vec![] };
+        let (a, ok) = bound_audit(&text, &b, &run).unwrap(); assert!(ok);
+        let rows = a.get("traits").and_then(Json::as_arr).unwrap(); assert!(rows.iter().all(|t| t.get("room_used_now").and_then(Json::as_f64) == Some(0.0)));
+        assert!(rows.iter().any(|t| t.get("room_used_max").and_then(Json::as_f64).unwrap() > 0.0), "the life used some room before the erase");
+    }
     #[test]
     fn control_lines_pause_resume_retire() {
         let (p, doc) = kit(None); let mut r = Philox4x32::new(5, 5);

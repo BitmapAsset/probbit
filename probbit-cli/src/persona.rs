@@ -12,6 +12,12 @@
 use crate::json::{self, at, ix, InErr, Json};
 use probbit_core::rt::Instant;
 use std::collections::HashMap;
+/// RFC 0004 `bound`: the certified ceiling on resting movement, its audit and the `erase` control line
+#[path = "bound.rs"]
+pub mod bound;
+/// The dead-rule lint: habits a host can never bring into force (`persona lint --host`)
+#[path = "hostlint.rs"]
+pub mod hostlint;
 
 const RULE_KEYS: [&str; 6] = ["caps", "implies", "tables", "precedes", "linear", "all_different"];
 const RESERVED_LEVELS: [&str; 9] = ["true", "false", "null", "yes", "no", "on", "off", "y", "n"];
@@ -277,6 +283,10 @@ pub fn parse_doc(t: &str, is_json: bool) -> Result<Json, String> {
 
 /// The strict validator: document -> persona (every field type-checked, unknown fields refused at their path).
 pub fn build(doc: &Json) -> R<Persona> {
+    // RFC 0004: a `bound` block is read against the persona built without it, and it stays out of the digest, so adding it to a
+    // persona with a recorded life leaves every state, strand and turn byte for byte the same (amendment A1)
+    if let Some(b) = doc.get("bound") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "bound"); }
+        let p = build(&d)?; bound::spec(b, &p)?; return Ok(p); }
     const TOP: [&str; 20] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "learning", "drives", "reward_from", "senses", "needs",
         "surprise", "pace", "dispositions", "comment"];
     let kv = keys(doc, "", &TOP, &["probbit_persona", "identity", "traits"])?;
