@@ -42,7 +42,19 @@ function glibcAtLeast(v, major, minor) {
 }
 
 async function get(url) {
-  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  let res;
+  try {
+    res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  } catch (e) {
+    // Node's fetch goes direct unless NODE_USE_ENV_PROXY=1, even with HTTPS_PROXY set (npm's own proxy config does not apply)
+    const env = process.env;
+    const proxy = env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy;
+    if (proxy && env.NODE_USE_ENV_PROXY !== '1') {
+      throw new Error(`${e.message}; a proxy is set but Node's fetch ignores it: retry with NODE_USE_ENV_PROXY=1 (recent Node releases), `
+        + 'or download the archive yourself and reinstall with PROBBIT_BINARY=/path/to/probbit');
+    }
+    throw e;
+  }
   if (!res.ok) throw new Error(`GET ${url}: HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
