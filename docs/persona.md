@@ -824,7 +824,7 @@ by its values, not by stored sequences. The rest probe's own flag is false, so a
 last `window` − 1 stored turns) and a `streak` reads 0; the stored turns of a flag are split at each of its features'
 window boundaries and every count of trues per segment is probed once per distinct tuple of capped values. Every tuple is
 reachable and nothing else of the stored turns enters the rest probe, so this is the exact maximum over histories (equal,
-in the test, to the search over every stored sequence). Pepe's praise (window 4) and wins (window 6, cap 3) give 4 × 4 =
+in the test, to the search over every stored sequence). A chat persona's praise (window 4) and wins (window 6, cap 3) give 4 × 4 =
 16 combinations instead of 256. Epsilon then includes what the history moves on its own (`ceiling` prints null). Limit:
 more than 4096 combinations per trait and seed prints the coarse value 1 (sound), and `--audit` refuses with
 `<trait>: more than 4096 enumerated history combinations: the audit needs an exact epsilon` (exit 2).

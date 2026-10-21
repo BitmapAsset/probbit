@@ -24,7 +24,7 @@ read-only subcommand with an audit, one control line · Depends on: section 2.8 
    level, inputs at their extremes and the seed's input gains of at least 1, history features at 0 and their cap).
    Enumerated: history `recent` features, when the feature's effects reach the component or a habit's `when` names it,
    by their values (amendment A8; the first build enumerated stored sequences up to 64 and gave the coarse value 1 above
-   that, which left Pepe's humour and hype coarse); a streak is 0 at the rest probe. With an enumerated channel the
+   that, which left a chat persona's humour and hype coarse); a streak is 0 at the rest probe. With an enumerated channel the
    printed `ceiling` is null: epsilon then includes what the history channel moves on its own, which the tilt ceiling
    does not cover. Decayed: moods with `half_life_hours` and `pace`, with
    r = tanh(D_r / 4). Named uncounted (exit 1), not yet searched by this build: a mood without `half_life_hours` and not
@@ -44,7 +44,7 @@ read-only subcommand with an audit, one control line · Depends on: section 2.8 
    flag, the stored turns are split at each of its features' window boundaries; every count of trues per segment is
    probed once per distinct value tuple; the product over flags is E. Each tuple is reachable (any flag sequence is), so
    the maximum over E equals the maximum over every stored sequence (step 4; the unit test
-   `history_values_equal_every_stored_sequence` checks equality against all 2^10 sequences). Pepe (v0.3.1): praise
+   `history_values_equal_every_stored_sequence` checks equality against all 2^10 sequences). A chat persona: praise
    (window 4, cap 3) gives 4 values, wins (window 6, cap 3) 4, so 16 combinations against 256 sequences, and humour and
    hype now print exact epsilons. Limit: more than 4096 combinations per trait and seed (`MAX_HISTORY`) prints the
    coarse value 1, and `--audit` refuses with `<trait>: more than 4096 enumerated history combinations: the audit needs

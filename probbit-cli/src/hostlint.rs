@@ -58,12 +58,12 @@ mod tests {
         assert!(manifest(&json::parse(r#"{"host":"x","inputs":["a"],"senses":["s"]}"#).unwrap()).is_ok());
         let e = manifest(&json::parse(r#"{"host":"x","input":["a"]}"#).unwrap()).unwrap_err(); assert_eq!(e.path, "host.input");
     }
-    /// The shipped manifests against the habit both harnesses carry (Pepe: verify_before_done; Hermes: verify_before_report),
+    /// The shipped manifests against the habit both harnesses carry (the chat host: verify_before_done; the task agent: verify_before_report),
     /// each `when: {claim_done: true}`: dead under both, in force once a manifest supplies claim_done
     #[test]
     fn shipped_manifests_find_the_claim_done_habit_dead() {
         let p = build(&json::parse(&DOC.replace("busy", "failure")).unwrap()).unwrap();
-        for m in [include_str!("../../examples/hosts/openclaw-pepe.json"), include_str!("../../examples/hosts/hermes.json")] {
+        for m in [include_str!("../../examples/hosts/chat-stance.json"), include_str!("../../examples/hosts/task-agent.json")] {
             let (_, ins, sns) = manifest(&json::parse(m).unwrap()).unwrap();
             let d = dead(&p, &ins, &sns, &run).unwrap(); assert_eq!(d[0].get("habit").and_then(Json::as_str), Some("verify_before_done"));
             let mut plus = ins.clone(); plus.push("claim_done".into());
