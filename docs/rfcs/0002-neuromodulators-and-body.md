@@ -245,8 +245,10 @@ step(l) = e × clip(sign × rate × g × c(l), −step_cap × g, +step_cap × g)
 ```
 
 g never goes below 1, so the gate never slows learning below today's rate; `total_cap` is untouched, so the learned box
-`prove` uses is unchanged. A new learner starts at v = 0, r̂ = 1 (g = 2.5) and reaches g = 1 after a few consistent feedback
-turns. Precision weighting (Yu & Dayan 2005) is opt-in because it changes every sensed document's bytes. State: `surprise:
+`prove` uses is unchanged. A new learner's gate starts closed (amended in 0.10.1): v = 0, r̂ = r_ref, so g = 1, the fixed rate.
+While Ω = 0, r̂ only grows and g stays at 1, so g rises above 1 only after a gate step with Ω > 0 (v past v0'), and `why` cannot
+say `learning fast` before feedback has changed. (0.10.0 started at r̂ = 1, g = (r_ref + 1)/2 = 2.5 at the defaults: a new
+learner stepped up to 1.67 times the fixed rate before any feedback had changed.) V-R2 also refuses r_ref above r_max. Precision weighting (Yu & Dayan 2005) is opt-in because it changes every sensed document's bytes. State: `surprise:
 {trait: {v, r, g, counts: [[plus, minus], …]}}`. Stance: `surprise: {trait: g}` for traits whose g > 1; `why`: `learning
 fast: feedback changed` while any g > 1.
 
@@ -344,7 +346,7 @@ Refused when the persona is read (exit 2, at the field's path); a refused person
 | row | refused |
 |---|---|
 | V-R1 | a `surprise` block without a learning block; `precision: true` without a senses block |
-| V-R2 | `volatility_rate` outside (0, 1); `v0` outside [0, 1); `r_ref` or `r_max` below 1; `g_max` outside (1, 3] |
+| V-R2 | `volatility_rate` outside (0, 1); `v0` outside [0, 1); `r_ref` or `r_max` below 1; `r_ref` above `r_max` (0.10.1); `g_max` outside (1, 3] |
 | P-R1 | a `pace` block without `reward_from` (no self-reward can move pace) |
 | P-R2 | `cap` or `half_life_hours` ≤ 0; `r0` outside (0, cap); `levels` not ordered within [0, cap]; missing `levels` or `effects` |
 | P-R3 | a pace effect on `pursue` or on an unknown trait or mood; a taken `pace_up` or `pace_down` id |

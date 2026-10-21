@@ -74,7 +74,7 @@ fn pace_and_gain_rows() {
     let (c, _, err) = probbit(&["live", "../examples/persona/pacer.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
     let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
     let pace = out.lines().find(|l| l.starts_with("PACE    ")).expect(&out); assert!(pace.ends_with("]  rbar 1.68/4 | r0 1 | brisk"), "{pace}");
-    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.90  learning fast"), "{gain}");
+    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.77  learning fast"), "{gain}");
     let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("PACE    ") && !out.contains("GAIN    "), "no rows without the blocks");
     for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
 }

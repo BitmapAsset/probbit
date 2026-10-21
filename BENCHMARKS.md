@@ -1249,6 +1249,12 @@ sign is readable in 100 of 100 individuals, E follows the asymmetric closed form
 the gene stay identical until their earliest win and then diverge (mean distance 0.0028; a different released goal in 18 of 20
 pairs). A spread of 0 gives today's bytes, and the valence bars re-measured on this build pass as before.
 
+0.10.1 development build, the gate starts closed (R126, the same command, `PROBBIT_THREADS=1`, load 12-30): s1 gated / fixed
+0.5 to 0.6667 in every cell (T60 noise 0.20: 0.625 → 0.6667, 8.0 vs 12.0 turns; the other eight cells unchanged) and every
+same-budget constant gain slower; s2 1.0000 to 1.0530 (was 1.0343 to 1.0719; 1.0000 in the three noise-0 cells, where the
+opening step no longer moves the stable phase); s3 1800/1800 lives within the caps and the opening step and (v, r, g) =
+(0.15, 5, 1) within 0.0; s4 1800 gate strands, 0 verify failures, 0 third-copy and 0 split-copy differences, the planted
+changes refused; the p0 part (n6, o5, s5, r5, l5) 5/5 and the P0 corpus 653 outputs, 0 differ.
 0.10.1 development build, n10 and n11 (R126, the same command, `PROBBIT_THREADS=1`, load 12-30): with the forecast not
 clipped at the cap and the k-th omission of a run cutting the success rate by 1 − k × rate (RFC 0002 A.3-A.4 as amended), n10
 context at cap 0.8536 h a day at τ 0 and 0.0186 at τ 2 (−97.8 %; 0 overshoots; 100/100 seeds paid) and n11 report pursuits

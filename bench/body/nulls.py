@@ -266,7 +266,7 @@ def flip_life(sr, noise, g, gated=False):
     """One flip life (gate.py's host) for a constant gain g (0 = frozen) or the gate (RFC 0002 B), in plain Python."""
     T = sr["T"]
     targets = [1] * T + [2] * T
-    D, v, rr, cnt = [0.0, 0.0, 0.0], 0.0, 1.0, [[0.0, 0.0] for _ in range(3)]
+    D, v, rr, cnt = [0.0, 0.0, 0.0], 0.0, 4.0, [[0.0, 0.0] for _ in range(3)]   # 0.10.1: the gate starts closed (r = r_ref)
     tops, moved, prev = [], 0.0, None
     for i in range(2 * T):
         if prev is not None:
@@ -324,10 +324,13 @@ def surprise_rows(b):
     c0 = cells(lambda r, n: flip_life(r, n, 0.0))
     _, s2f = gate.gate_cells(c0, b["surprise"])
     row("s2", "frozen learning (degenerate)", "movement 0, phase A's lesson never learned", True, s2f)
-    want, _ = A.gate_first(-1, A.third, 0)
-    null, _ = A.gate_first(-1, A.third, 0, gated=False)
-    err = max(abs(x - y) for x, y in zip(want, null))
-    row("s3", "constant gain 1 (today's rate) on a new learner", "opening step off by %.6f" % err, True, err <= gate.FIRST_TOL)
+    # 0.10.1: the closed start makes the gate's opening step the fixed rate's, so "constant gain 1" no longer differs there; the
+    # null s3 must reject is 0.10.0's open start (r 1: the opening step at g 5/3)
+    want, wv = A.gate_first(-1, A.third, 0)
+    null, nv = A.gate_first(-1, A.third, 0, r0=1.0)
+    err = max([abs(x - y) for x, y in zip(want, null)] + [abs(x - y) for x, y in zip(wv, nv)])
+    row("s3", "the open start of 0.10.0 (r 1, g 5/3 at the opening step)", "opening step and (v, r, g) off by %.6f" % err, True,
+        err <= gate.FIRST_TOL)
     gt = cells(lambda r, n: flip_life(r, n, 1.0, gated=True))
     s1g, s2g = gate.gate_cells(gt, b["surprise"])
     row("s1+s2", "reference: the RFC's gate in Python",

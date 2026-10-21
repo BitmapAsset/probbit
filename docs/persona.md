@@ -703,9 +703,10 @@ rounded to 6 decimals):
     r       = min((1 - Ω) x (r + 1) + Ω, r_max)
     g       = clip((1 + Ω x r) / (r + 1) x (r_ref + 1), 1, g_max)
 
-and the learner's step carries g (section 2.8). A new learner starts at v = 0, r = 1, so g = (r_ref + 1) / 2 (2.5 at the
-defaults) until its opening feedback, which at the defaults leaves (v, r, g) = (0.15, 2, 1.666667); consistent feedback raises
-r and brings g to 1 within a few turns, and a run of contrary feedback (a lesson reversed) raises v past v0 and g with it. g
+and the learner's step carries g (section 2.8). A new learner's gate starts closed (since 0.10.1): v = 0, r = r_ref, so g = 1,
+the fixed rate, and its opening feedback at the defaults leaves (v, r, g) = (0.15, 5, 1). While Ω = 0, r only grows, so g stays
+at 1; g rises above 1 only after a gate step with Ω > 0, that is once a run of contrary feedback (a lesson reversed) has raised v
+past v0. Consistent feedback after that raises r and brings g back to 1 within a few turns. g
 never goes below 1, so the gate never learns slower than `rate` alone; `total_cap` is untouched, so the learned box `prove`
 uses is the same. The volatility average is slow on purpose: it needs a run of surprises, which a real change produces and
 noise rarely does. bench/body's bars s1-s3 measure the re-learning turns, the stable-phase movement and the caps
@@ -720,8 +721,8 @@ pair per level. The stance gains `"surprise": {"<trait>": g}` for the learned tr
 is closed), and `why` says `learning fast: feedback changed` while any gain is above 1.
 
 Refused when the persona is read (exit 2, at the field's path): a surprise block without a learning block, `precision: true`
-without a senses block (V-R1); `volatility_rate` outside (0, 1), `v0` outside [0, 1), `r_ref` or `r_max` below 1, `g_max`
-outside (1, 3] (V-R2). A state is refused, even with a recomputed digest, when v leaves [0, 1], r leaves [1, r_max], g leaves
+without a senses block (V-R1); `volatility_rate` outside (0, 1), `v0` outside [0, 1), `r_ref` or `r_max` below 1, `r_ref` above `r_max`
+(a run length capped below r_ref would keep g above 1 for good), `g_max` outside (1, 3] (V-R2). A state is refused, even with a recomputed digest, when v leaves [0, 1], r leaves [1, r_max], g leaves
 [1, g_max], a count is negative, the pairs do not match the trait's levels, or a number has more than 6 decimals.
 
 ### 2.14 Pace (optional)
