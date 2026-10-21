@@ -33,9 +33,28 @@ function binaryPath() {
 }
 
 class ChecksumError extends Error {}
+class UnsupportedError extends Error {}
+
+// The x86_64 gnu build needs glibc >= 2.34 (release.yml); an older glibc (Debian 11, Ubuntu 20.04, RHEL 8) gets the static musl one
+function glibcAtLeast(v, major, minor) {
+  const m = /^(\d+)\.(\d+)/.exec(String(v));
+  return !!m && (Number(m[1]) > major || (Number(m[1]) === major && Number(m[2]) >= minor));
+}
 
 async function get(url) {
-  const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  let res;
+  try {
+    res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(30000) });
+  } catch (e) {
+    // Node's fetch goes direct unless NODE_USE_ENV_PROXY=1, even with HTTPS_PROXY set (npm's own proxy config does not apply)
+    const env = process.env;
+    const proxy = env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy;
+    if (proxy && env.NODE_USE_ENV_PROXY !== '1') {
+      throw new Error(`${e.message}; a proxy is set but Node's fetch ignores it: retry with NODE_USE_ENV_PROXY=1 (recent Node releases), `
+        + 'or download the archive yourself and reinstall with PROBBIT_BINARY=/path/to/probbit');
+    }
+    throw e;
+  }
   if (!res.ok) throw new Error(`GET ${url}: HTTP ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
 }
@@ -65,11 +84,11 @@ async function install(log = (m) => process.stderr.write(`${m}\n`)) {
     return dest;
   }
   const glibc = process.platform === 'linux' && process.report && process.report.getReport().header.glibcVersionRuntime;
-  const detected = process.platform === 'linux' && process.arch === 'x64' && !glibc
+  const detected = process.platform === 'linux' && process.arch === 'x64' && !glibcAtLeast(glibc, 2, 34)
     ? 'x86_64-unknown-linux-musl' : TARGETS[`${process.platform}-${process.arch}`];
   const target = env.PROBBIT_TARGET || detected;
   if (!target) {
-    throw new Error(`no prebuilt probbit for ${process.platform}-${process.arch}; build one (cargo build --release -p probbit-cli) `
+    throw new UnsupportedError(`no prebuilt probbit for ${process.platform}-${process.arch}; build one (cargo build --release -p probbit-cli) `
       + 'and reinstall with PROBBIT_BINARY=/path/to/probbit');
   }
   let tag = env.PROBBIT_VERSION || `v${pkg.version}`;
@@ -105,10 +124,15 @@ async function install(log = (m) => process.stderr.write(`${m}\n`)) {
   return dest;
 }
 
-module.exports = { install, binaryPath, ChecksumError };
+module.exports = { install, binaryPath, ChecksumError, UnsupportedError };
 
 if (require.main === module) {
   install().catch((e) => {
+    if (e instanceof UnsupportedError) {
+      // not a network problem: a later run cannot fetch it either; npm install itself still succeeds
+      process.stderr.write(`probbit: ${e.message}\n`);
+      return;
+    }
     if (e instanceof ChecksumError) {
       process.stderr.write(`probbit: ${e.message}; nothing was installed\n`);
       process.exit(1);

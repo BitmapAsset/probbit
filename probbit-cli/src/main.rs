@@ -1124,7 +1124,10 @@ fn help_cmd(args: &[String]) {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // an argument that is not valid Unicode (a file name in a legacy encoding on Linux, an unpaired surrogate on Windows) is
+    // refused by name; std::env::args would panic on it
+    let args: Vec<String> = std::env::args_os().skip(1).enumerate().map(|(i, a)| a.into_string().unwrap_or_else(|a|
+        fail(&format!("argument {} is not valid UTF-8 ({}); rename the file or pass a UTF-8 path", i + 1, a.to_string_lossy())))).collect();
     JSON_FLAG.store(args.iter().any(|a| a == "--json"), std::sync::atomic::Ordering::Relaxed);
     // `probbit CMD [SUB] ... --help`: the command's help, or the subcommand's when the word after the command is one of its subcommands
     if args.len() >= 2 && args[1..].iter().any(|a| a == "--help" || a == "-h") { if let Some(c) = command(&args[0]) {

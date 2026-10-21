@@ -628,10 +628,17 @@ only through D over the other needs, never in sign.
 **The pursue term.** For each need, with s the bound goal's success rate and K its `amount`:
 
 ```
-x^   = min(x + g_gr x forecast_per_hour x horizon_hours, cap)         # the forecast: a declared growth rate
+x^   = x + g_gr x forecast_per_hour x horizon_hours                  # the forecast: a declared growth rate, not clipped at cap
 term = clip(want x s x (D(x^) - D(x^ with x^_j <- |x^_j - K|)), -cap, +cap)     # cap = pursue.cap
-s   <- s + rate x (1 - s) on a win of the goal;   s <- s x (1 - rate) when the goal's window fires (section 2.9)
+s   <- s + rate x (1 - s) on a win of the goal, and k <- 0
+s   <- s x max(1 - k x rate, 0) when the goal's window fires, k <- k + 1 first   # k: omissions since the last win (section 2.9)
 ```
+
+Since 0.10.1 the forecast is not clipped at the cap: the deficit stays in [0, cap], but a need sitting at its cap still forecasts
+the growth its horizon brings, so the horizon also raises the term at the cap (before, x^ = x there and a horizon changed
+nothing once the deficit had reached it; bench/body n10). And omissions in a run cut deeper: the k-th unanswered pursuit in a row
+multiplies s by 1 - k x rate, so a run of 1/rate omissions (5 at rate 0.2) takes s to 0, while isolated omissions between wins
+still cost 1 - rate each (n11); a win ends the run. The state keeps the run as `needs.misses: {<goal>: k}` for goals with k > 0 (absent when every run is 0).
 
 It is lowered as the number input `need_<id>` (box [-pursue.cap, +pursue.cap]) with effect `{pursue: {<bind>: 1}}` (section 3,
 step 2b). Pursuit is weighted by the goal's learned success, so unanswered pursuits extinguish themselves through the omission
@@ -696,9 +703,10 @@ rounded to 6 decimals):
     r       = min((1 - Ω) x (r + 1) + Ω, r_max)
     g       = clip((1 + Ω x r) / (r + 1) x (r_ref + 1), 1, g_max)
 
-and the learner's step carries g (section 2.8). A new learner starts at v = 0, r = 1, so g = (r_ref + 1) / 2 (2.5 at the
-defaults) until its opening feedback, which at the defaults leaves (v, r, g) = (0.15, 2, 1.666667); consistent feedback raises
-r and brings g to 1 within a few turns, and a run of contrary feedback (a lesson reversed) raises v past v0 and g with it. g
+and the learner's step carries g (section 2.8). A new learner's gate starts closed (since 0.10.1): v = 0, r = r_ref, so g = 1,
+the fixed rate, and its opening feedback at the defaults leaves (v, r, g) = (0.15, 5, 1). While Ω = 0, r only grows, so g stays
+at 1; g rises above 1 only after a gate step with Ω > 0, that is once a run of contrary feedback (a lesson reversed) has raised v
+past v0. Consistent feedback after that raises r and brings g back to 1 within a few turns. g
 never goes below 1, so the gate never learns slower than `rate` alone; `total_cap` is untouched, so the learned box `prove`
 uses is the same. The volatility average is slow on purpose: it needs a run of surprises, which a real change produces and
 noise rarely does. bench/body's bars s1-s3 measure the re-learning turns, the stable-phase movement and the caps
@@ -713,8 +721,8 @@ pair per level. The stance gains `"surprise": {"<trait>": g}` for the learned tr
 is closed), and `why` says `learning fast: feedback changed` while any gain is above 1.
 
 Refused when the persona is read (exit 2, at the field's path): a surprise block without a learning block, `precision: true`
-without a senses block (V-R1); `volatility_rate` outside (0, 1), `v0` outside [0, 1), `r_ref` or `r_max` below 1, `g_max`
-outside (1, 3] (V-R2). A state is refused, even with a recomputed digest, when v leaves [0, 1], r leaves [1, r_max], g leaves
+without a senses block (V-R1); `volatility_rate` outside (0, 1), `v0` outside [0, 1), `r_ref` or `r_max` below 1, `r_ref` above `r_max`
+(a run length capped below r_ref would keep g above 1 for good), `g_max` outside (1, 3] (V-R2). A state is refused, even with a recomputed digest, when v leaves [0, 1], r leaves [1, r_max], g leaves
 [1, g_max], a count is negative, the pairs do not match the trait's levels, or a number has more than 6 decimals.
 
 ### 2.14 Pace (optional)
@@ -1432,6 +1440,21 @@ decisions it closed. With a needs block a NEEDS row per need: its deficit as a b
 window (hours left or closed), and an alert while a deficit sits at its cap. With a pace block a PACE row: the average as a dot
 over [0, cap] with an r0 tick, and the level; with a surprise block a GAIN row per learned trait: its gain g (1 when closed). The drives, when a document carries `pursue` or
 `drives`: documents without them draw no row, so a strand of a later engine lights them up. The stance line, and why.
+
+**The panel.** Under the rows, a PANEL block (and in the browser an Instrument panel of dials) gives every field one line of
+fixed words: `<label>: <level>, <size>, <direction>`, with the number its dial shows beside the words, never in them. The fields:
+each trait (and `pursue`), each mood, each need, each surprise gate, pace, each disposition gene, each learned trait, credit
+open, habits in force, each sense, and room left in the learning bound. Size words come from buckets (`slightly`, `clearly`,
+`strongly`: the chosen level's odds under 0.5, under 0.8, from 0.8; other fields thirds of a magnitude over its cap); direction
+words compare with the event before (`leaning toward <level>` for a trait whose odds moved by 0.02 of the level range, `rising` /
+`falling` for moods and numbers, `holding` under the step, `first event` with no event before; `fixed` for genes; `above` /
+`below` / `at its normal` for a sense read). A block the persona does not declare reads `not declared in this persona`; room
+left in the bound reads `not computed (E1 pending)` until the engine computes the bound (RFC 0004). The map is one pure
+function (`probbit-cli/src/monitor/panel.rs`): a field's words change exactly when its level, size bucket or direction bucket
+changes, every bucket of every field has its own words (a test enumerates them), and the words describe arithmetic over the
+replayed document and state: nothing predictive, no claim of an inner life. The page's frames carry the lines as `words`
+(`key`, `label`, `level`, `size`, `dir`, `text`, `dial` in [0, 1] or null, `value`); the panel reads nothing the stance
+document and state do not already hold, and changes no document.
 
 **Checkpoints and control lines.** A strand with checkpoint lines (section 5.7) is replayed from its last checkpoint, not from
 the header (`--once`, and the first read of `--follow` and `--serve`): the board starts at the checkpoint's event (its stance
