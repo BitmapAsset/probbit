@@ -3,10 +3,21 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.11.0 - unreleased
+## 0.11.0 - 2026-10-21
 
-RFC 0008, viability (docs/rfcs/0008-viability.md, draft). Every new key is opt-in: a persona without them gives every
-document byte for byte as 0.10.1.
+RFC 0008, viability (docs/rfcs/0008-viability.md), and RFC 0004, the persuadability bound (docs/rfcs/0004-bound.md), in the
+engine, with the 0.10.1 development line, which was not released on its own. Every new key is opt-in: a persona without them
+gives every document byte for byte as the 0.10.1 development build (the P0 corpus: 653 outputs, 0 differ). Measured:
+BENCHMARKS.md §13 (V2 fails as registered) and §12.
+
+Merged pull requests:
+- #44 fix: a new learner's surprise gate starts closed (0.10.1, RFC 0002 Design B)
+- #45 fix: needs n10 and n11 pass: an unclipped forecast and a deepening omission run (0.10.1, RFC 0002 A.3-A.4)
+- #46 RFC 0002 part 2: rest and load (opt-in blocks)
+- #47 monitor: panel words, every field of the individual as a dial with fixed words (0.10.1)
+- #48 portability: BOM strands, proxy-safe monitor stream, Safari 15 page, old-glibc installs
+- #49 RFC 0004 bound in the engine: certificate, audit, erase + dead-rule lint
+- #50 RFC 0008 viability: bounds, graded pressure, need valence, stance.block
 
 ### Added
 - **Viability bounds** (docs/persona.md §2.12): `viable: {at_most, events}` per need. The stance reports per need its `margin`
@@ -40,9 +51,7 @@ document byte for byte as 0.10.1.
 - N-R4 is relaxed: `per_reading` takes a number sense with `rate` or a flag sense with `per_event` (a flag sense with `rate` is
   refused at `per_reading.rate`, no longer at `per_reading.sense`).
 
-## 0.10.1 - unreleased
-
-### Added
+### From the 0.10.1 development line (not released on its own): added
 - **Rest and load** (RFC 0002 part 2, docs/rfcs/0002-neuromodulators-and-body.md): two opt-in blocks. `rest` keeps a
   pressure S that rises over active hours and falls over idle gaps; an idle gap at S ≥ threshold brings a rest line, its own
   strand line, that scales every learned weight by `downscale` (prune below `prune`), keeping their order, and never shares an
@@ -57,7 +66,7 @@ document byte for byte as 0.10.1.
   habits, senses, room left in the bound) as a dial with fixed words for its level, size and direction since the event before.
   One pure map, unit-tested for zero ambiguity over every bucket; page frames carry `words`. No stance document changes.
 
-### Changed
+### From the 0.10.1 development line: the 0.10.1 fixes
 - A new learner's surprise gate starts closed (docs/persona.md §2.13, RFC 0002 Design B): v = 0, r = r_ref, g = 1, so the
   opening step equals the fixed rate's (0.10.0 started at g = 2.5 and stepped 1.67× at the opening feedback, bench/body s3), and
   `why` says `learning fast: feedback changed` only after a gate step whose volatility passed v0. `r_ref` above `r_max` is
@@ -77,8 +86,12 @@ document byte for byte as 0.10.1.
   that is not valid UTF-8 (a legacy-encoded file name) is refused with exit 2 instead of a panic.
 
 ### Other
-- Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
-  strand header tells them from 0.10.0.
+- The version is 0.11.0 (`probbit --version`, the strand header's `engine`, MCP `serverInfo`); development builds of the
+  0.10.1 line printed `0.10.1-dev`.
+  **Upgrade note** (from 0.10.0): a persona with a `surprise` block gives different documents, because a new learner's gate
+  now starts closed; a persona with a needs block and a forecast horizon or omission windows can pursue differently (the n10
+  and n11 fixes). A persona without those blocks and without the new keys gives the documents 0.10.0 gave; its strands differ
+  only in the header's `engine` and the hash chain that follows from it.
 
 ## 0.10.0 - 2026-10-18
 

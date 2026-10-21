@@ -1,6 +1,6 @@
 # RFC 0008 (draft): viability bands and need-coupled valence and pressure
 
-Status: draft, implemented in this PR (feat/0011-viability; 0.11.0-dev), for review · Target: a 0.11 release · Changes: docs/persona.md §2.12
+Status: draft, implemented and shipped in 0.11.0 (PR #50), for review · Changes: docs/persona.md §2.12
 (format 1, additive) · Depends on: RFC 0002 part 1 (needs, as shipped in 0.10.1-dev @ a5d9c26)
 
 Mechanism and simulation only. The claim this RFC makes possible is "the individual registers deviation from its own
@@ -104,7 +104,7 @@ deviation. Lowered as `need_tonic` in [0, 1] and `need_phasic` in [−r_cap, r_c
 Learning of bounds (bounds are declared, never learned); multi-agent needs; anything about experience. The welfare stance
 that §4 asks for should exist before this ships.
 
-## Implementation notes (this PR, 0.11.0-dev)
+## Implementation notes (PR #50, shipped in 0.11.0)
 
 Decisions the draft left open, as built:
 

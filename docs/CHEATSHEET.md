@@ -1,4 +1,4 @@
-# probbit cheat sheet (0.10.0)
+# probbit cheat sheet (0.11.0)
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 
@@ -105,7 +105,7 @@ The exact tiers run before the sampler:
 ## Surprise, pace, dispositions (0.10.0, docs/persona.md §2.13 to §2.15)
 - `surprise: {volatility_rate: 0.3, v0: 0.45, r_ref: 4, r_max: 20, g_max: 3}` (needs a learning block; the defaults shown):
   per learned trait a gain g in [1, g_max] multiplies the step and its cap; a run of contrary feedback raises it, consistent
-  feedback brings it back to 1; a new learner starts closed at g 1 (0.10.1). Stance `surprise: {trait: g}` while g > 1; `why`: "learning
+  feedback brings it back to 1; a new learner starts closed at g 1 (0.11.0). Stance `surprise: {trait: g}` while g > 1; `why`: "learning
   fast: feedback changed". `precision: true` (with senses) scales each sense's effect by 1 − var / var_cap.
 - `pace: {half_life_hours: 6, cap: 4, r0: 1, levels: [0.5, 1.5], effects: {initiative: 0.5, verbosity: -0.3}}` (needs
   `reward_from`): R̄ ← clip(R̄ × 0.5^(h/6) + 0.109101 × r_t, 0, 4) after the drive step, r_t = the accepted wins + 1 per

@@ -1,6 +1,6 @@
 # RFC 0004: Bound, the persuadability certificate
 
-Status: implemented in 0.11.0-dev (branch `feat/rfc-0004-bound`) · Changes: docs/persona.md (format 1, additive), one
+Status: implemented, shipped in 0.11.0 (PR #49) · Changes: docs/persona.md (format 1, additive), one
 read-only subcommand with an audit, one control line · Depends on: section 2.8 learning; RFC 0002 and RFC 0003 where present
 
 **Amendments (written with the implementation, 2026-10-20; no bar's pass value moved):**
