@@ -1,6 +1,6 @@
 # probbit and welfare words: what the arithmetic is, and what is not claimed
 
-Status: **draft for owner review** (written with RFC 0008, 0.11.0-dev; not yet reviewed by the project owner). One page.
+Status: **draft for owner review** (written with RFC 0008, shipped in 0.11.0; not yet reviewed by the project owner). One page.
 
 probbit's needs, bounds and valence borrow words from physiology and from the study of how animals keep themselves in range.
 The words are short handles for arithmetic. This page fixes what each one means in the engine, so that a reader, a host and a

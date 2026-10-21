@@ -634,7 +634,7 @@ s   <- s + rate x (1 - s) on a win of the goal, and k <- 0
 s   <- s x max(1 - k x rate, 0) when the goal's window fires, k <- k + 1 first   # k: omissions since the last win (section 2.9)
 ```
 
-Since 0.10.1 the forecast is not clipped at the cap: the deficit stays in [0, cap], but a need sitting at its cap still forecasts
+Since 0.11.0 the forecast is not clipped at the cap: the deficit stays in [0, cap], but a need sitting at its cap still forecasts
 the growth its horizon brings, so the horizon also raises the term at the cap (before, x^ = x there and a horizon changed
 nothing once the deficit had reached it; bench/body n10). And omissions in a run cut deeper: the k-th unanswered pursuit in a row
 multiplies s by 1 - k x rate, so a run of 1/rate omissions (5 at rate 0.2) takes s to 0, while isolated omissions between wins
@@ -766,7 +766,7 @@ rounded to 6 decimals):
     r       = min((1 - Ω) x (r + 1) + Ω, r_max)
     g       = clip((1 + Ω x r) / (r + 1) x (r_ref + 1), 1, g_max)
 
-and the learner's step carries g (section 2.8). A new learner's gate starts closed (since 0.10.1): v = 0, r = r_ref, so g = 1,
+and the learner's step carries g (section 2.8). A new learner's gate starts closed (since 0.11.0): v = 0, r = r_ref, so g = 1,
 the fixed rate, and its opening feedback at the defaults leaves (v, r, g) = (0.15, 5, 1). While Ω = 0, r only grows, so g stays
 at 1; g rises above 1 only after a gate step with Ω > 0, that is once a run of contrary feedback (a lesson reversed) has raised v
 past v0. Consistent feedback after that raises r and brings g back to 1 within a few turns. g
@@ -1321,7 +1321,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.10.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.11.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",

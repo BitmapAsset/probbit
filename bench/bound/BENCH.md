@@ -1,6 +1,6 @@
 # Benchmark: bound, the persuadability certificate (`bench/bound/`)
 
-**State in 0.11.0-dev (2026-10-20):** this is the frozen R116 bench text. In the tree: `fixtures/*.yaml`, `run.py`
+**State in 0.11.0 (as of 2026-10-20):** this is the frozen R116 bench text. In the tree: `fixtures/*.yaml`, `run.py`
 (bo1, bo2, bo5 and, through the cap fixtures, bo3), `arith_0004.py` (57 checks); bo6 is the Rust test
 `bo6_coupled_vertex_equals_grid` (`cargo test --release -- --ignored bo6`), the erase line is `live::tests::erase_control_line`.
 `fixtures/MANIFEST`, `nulls.py`, `manifest_check.py` and `fixtures/gen.py` are not in the tree yet; bo4, bo7 and bo8 were run
