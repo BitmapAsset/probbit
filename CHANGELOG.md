@@ -5,10 +5,32 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.10.1 - unreleased
 
+### Added
+- **Rest and load** (RFC 0002 part 2, docs/rfcs/0002-neuromodulators-and-body.md): two opt-in blocks. `rest` keeps a
+  pressure S that rises over active hours and falls over idle gaps; an idle gap at S ≥ threshold brings a rest line, its own
+  strand line, that scales every learned weight by `downscale` (prune below `prune`), keeping their order, and never shares an
+  event with feedback (`pressure.pending`). Each learned trait's surprise gate is left unchanged. `load` keeps a slow L
+  raised by aversive evidence (learning flags, declared senses, credit expiries) and a held mood, relaxing with its half-life,
+  capped; it enters the field as the engine-owned number input `load_level` (box [0, cap]), refused when sent. State
+  `pressure: {s, pending}` and `load: {l}`; refusals W-R1 and L-R1. `live verify` recomputes rest lines. bench/body P6
+  (r0-r5) and P7 (l1-l5) measured by the engine for the first time (numbers in the PR). A persona without the blocks gives
+  byte-identical documents.
 - **Monitor panel words** (docs/persona.md §5.8): `probbit monitor` prints a PANEL block and the `--serve` page an Instrument
   panel: every field of the individual (traits, moods, needs, surprise gates, pace, dispositions, learned traits, credit,
   habits, senses, room left in the bound) as a dial with fixed words for its level, size and direction since the event before.
   One pure map, unit-tested for zero ambiguity over every bucket; page frames carry `words`. No stance document changes.
+
+### Changed
+- A new learner's surprise gate starts closed (docs/persona.md §2.13, RFC 0002 Design B): v = 0, r = r_ref, g = 1, so the
+  opening step equals the fixed rate's (0.10.0 started at g = 2.5 and stepped 1.67× at the opening feedback, bench/body s3), and
+  `why` says `learning fast: feedback changed` only after a gate step whose volatility passed v0. `r_ref` above `r_max` is
+  refused (V-R2). Re-measured bars: PR body (bench/body s1-s4).
+- Needs (docs/persona.md §2.12, RFC 0002 A.3-A.4): the pursue term's forecast is no longer clipped at the need's cap, and the
+  k-th omission in a run without a win multiplies the bound goal's success rate by max(1 − k × rate, 0) (state `needs.misses`,
+  only while a run is open). bench/body n10: context at cap 0.8536 → 0.0186 h a day at τ 2 (bar ≤ 0.5×); n11: 0 report pursuits
+  on away days 2-5, 1.58 a day before and 1.215 on return days 2-3 (bars 0, ≥ 0.5, ≥ 0.5); neither bar was changed.
+
+### Other
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
   strand header tells them from 0.10.0.
 
