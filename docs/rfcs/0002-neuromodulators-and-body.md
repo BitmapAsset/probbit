@@ -132,10 +132,21 @@ r > 0 becomes a `win` of size r for the bound goal, r < 0 a `setback` of min(−
 so the drive step treats them as any win or setback. **The pursue term** (section 3, step 2b) for the bound goal g:
 
 ```
-x̂     = min(x + g_gr × forecast_per_hour × τ, cap)                        # the forecast: a declared growth rate
+x̂     = x + g_gr × forecast_per_hour × τ                                 # the forecast: a declared growth rate (0.10.1: not clipped at cap)
 term  = clip(want × s_g × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), −cap, +cap)
-s_g   ← s_g + success.rate × (1 − s_g) on a win of g;  s_g ← s_g × (1 − success.rate) when g's window fires (A.4)
+s_g   ← s_g + success.rate × (1 − s_g) on a win of g, and k_g ← 0
+s_g   ← s_g × max(1 − k_g × success.rate, 0) when g's window fires, k_g ← k_g + 1 first   # 0.10.1: the k-th omission in a run (A.4)
 ```
+
+Amended in 0.10.1 (R126; bench/body n10 and n11 failed on 0.10.0 as design findings, BENCHMARKS.md §12). The forecast was
+`min(x + …, cap)`: at the cap x̂ = x, so a horizon added nothing once the deficit had reached it, and with two needs at their
+caps the compact term (2 × (D(1, 1) − D(0.4, 1)) = 0.503) stayed under the interest gap ln(1/0.6) = 0.511 (the nulls.py
+reference: every at-cap hour it kept on `work` had both deficits at 1 and s = 1). The deficit stays clipped; only the forecast
+reads the growth the horizon brings. And an omission lowered s by a constant factor, so two omissions on the first away day
+left s = 0.485, enough to pursue once more the next morning (2 of 100 lives, n11). Now the k-th omission of a run multiplies
+s by 1 − k × rate: a run of 1/rate unanswered pursuits extinguishes pursuit, and the same life's third pursuit sees s = 0.364
+(a geometric run, (1 − rate)^k, left 0.388 and a field margin of 0.004 on the engine: R126 cycle B-E1, not kept). The run k_g is state
+(`needs.misses: {goal: k}`, only for k > 0; a state is refused when a run is not a whole number in [1, 10⁶]).
 
 It is lowered as the number input `need_<id>` (box [−cap, +cap]) with effect `{pursue: {<bind>: 1}}`. Pursuit is
 weighted by the goal's learned success, so unanswered pursuits extinguish themselves through the omission let-down (A.4).
@@ -162,7 +173,8 @@ Omission of an expected reward is a negative prediction error (Schultz 2016) tha
 
 The omitted d joins the turn's summed surprise (so `effects.surprise` and `drv_letdown` act on it) and the optional
 `drives.effects.omission` map, lowered as the number input `drv_omit` = min(Σ omitted E, pe_cap) (default: no effects).
-It does **not** join the learning sign (question 1), and it lowers the bound need's success rate (A.3).
+It does **not** join the learning sign (question 1), and it lowers the bound need's success rate (A.3), by the factor 1 − k × rate
+(at least 0) at the k-th omission in a run without a win (0.10.1).
 
 ### A.5 Refusals
 
@@ -233,8 +245,10 @@ step(l) = e × clip(sign × rate × g × c(l), −step_cap × g, +step_cap × g)
 ```
 
 g never goes below 1, so the gate never slows learning below today's rate; `total_cap` is untouched, so the learned box
-`prove` uses is unchanged. A new learner starts at v = 0, r̂ = 1 (g = 2.5) and reaches g = 1 after a few consistent feedback
-turns. Precision weighting (Yu & Dayan 2005) is opt-in because it changes every sensed document's bytes. State: `surprise:
+`prove` uses is unchanged. A new learner's gate starts closed (amended in 0.10.1): v = 0, r̂ = r_ref, so g = 1, the fixed rate.
+While Ω = 0, r̂ only grows and g stays at 1, so g rises above 1 only after a gate step with Ω > 0 (v past v0'), and `why` cannot
+say `learning fast` before feedback has changed. (0.10.0 started at r̂ = 1, g = (r_ref + 1)/2 = 2.5 at the defaults: a new
+learner stepped up to 1.67 times the fixed rate before any feedback had changed.) V-R2 also refuses r_ref above r_max. Precision weighting (Yu & Dayan 2005) is opt-in because it changes every sensed document's bytes. State: `surprise:
 {trait: {v, r, g, counts: [[plus, minus], …]}}`. Stance: `surprise: {trait: g}` for traits whose g > 1; `why`: `learning
 fast: feedback changed` while any g > 1.
 
@@ -332,7 +346,7 @@ Refused when the persona is read (exit 2, at the field's path); a refused person
 | row | refused |
 |---|---|
 | V-R1 | a `surprise` block without a learning block; `precision: true` without a senses block |
-| V-R2 | `volatility_rate` outside (0, 1); `v0` outside [0, 1); `r_ref` or `r_max` below 1; `g_max` outside (1, 3] |
+| V-R2 | `volatility_rate` outside (0, 1); `v0` outside [0, 1); `r_ref` or `r_max` below 1; `r_ref` above `r_max` (0.10.1); `g_max` outside (1, 3] |
 | P-R1 | a `pace` block without `reward_from` (no self-reward can move pace) |
 | P-R2 | `cap` or `half_life_hours` ≤ 0; `r0` outside (0, cap); `levels` not ordered within [0, cap]; missing `levels` or `effects` |
 | P-R3 | a pace effect on `pursue` or on an unknown trait or mood; a taken `pace_up` or `pace_down` id |

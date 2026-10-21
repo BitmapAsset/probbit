@@ -452,6 +452,7 @@ fn build_body(doc: &Json) -> R<Persona> {
         need((0.0..1.0).contains(&v0), "surprise.v0", "in [0, 1): the volatility at which the gate opens")?;
         need(r_ref >= 1.0, "surprise.r_ref", "must be >= 1 (the run length at which the gain is 1)")?;
         need(r_max >= 1.0, "surprise.r_max", "must be >= 1 (the cap on the run length)")?;
+        need(r_ref <= r_max, "surprise.r_ref", "must be <= r_max (a run length capped below r_ref keeps the gain above 1 for good)")?;
         need(g_max > 1.0 && g_max <= 3.0, "surprise.g_max", "in (1, 3]: the gate at most triples the step")?;
         let precision = match get(sk, "precision") { None | Some(Json::Null) => false, Some(Json::Bool(b)) => *b, Some(_) => return Err(perr("surprise.precision", "true | false")) };
         need(!precision || has("senses"), "surprise.precision", "precision weighting scales the senses' effect gains: it needs a senses block")?;
@@ -647,7 +648,7 @@ pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
     if p.credit().is_some() && get(raw, "cancel").is_some() { src_form(raw)?; cancel_src(get(raw, "src"))?; }
     // a need's amount (RFC 0002 N-E2): its source, its own or the event's, of a kind in its satisfy_from
     if let Some((d, nb)) = p.drives.as_ref().and_then(|d| d.needs.as_ref().map(|nb| (d, nb))) { src_form(raw)?;
-        let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()] }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
+        let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], misses: vec![0.0; nb.items.len()] }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
     Ok(())
 }
 /// A persona whose events need a source: rewards (`reward_from`), readings (a senses block), cancels (a credit block) or needs
@@ -749,9 +750,10 @@ struct Need { id: String, say: String, unit: String, cap: f64, weight: f64, per_
 /// the win cap; the needs in declared order
 #[derive(Clone)]
 struct Needs { n: f64, m: f64, want: f64, cap: f64, rate: f64, init: f64, r_cap: f64, items: Vec<Need> }
-/// The needs state (RFC 0002 A.3): genes, then per need (declared order) its deficit and its bound goal's success rate
+/// The needs state (RFC 0002 A.3): genes, then per need (declared order) its deficit, its bound goal's success rate and (0.10.1) the
+/// run of omissions since that goal's last win (stored only when above 0)
 #[derive(Clone)]
-struct NState { genes: Json, deficit: Vec<f64>, success: Vec<f64> }
+struct NState { genes: Json, deficit: Vec<f64>, success: Vec<f64>, misses: Vec<f64> }
 /// The drive state of an individual: genes, then per goal (declared order) wanting, afterglow, expectation, the last turn's prediction
 /// error, the deadline (hours left), the turns since it was pursued and the omission window (hours left; RFC 0002 A.4); with a needs
 /// block the needs state. `omit` (the expectation of each goal whose window fired this turn) and `ev` (the expectation of the goal
@@ -763,7 +765,7 @@ struct DState { genes: Json, want: Vec<f64>, glow: Vec<f64>, expect: Vec<f64>, s
 impl DState {
     fn zero(p: &Persona, d: &Drives, seed: u64) -> DState {
         let n = d.goals.len();
-        let nd = d.needs.as_ref().map(|nb| NState { genes: need_genes(p, nb, seed), deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()] });
+        let nd = d.needs.as_ref().map(|nb| NState { genes: need_genes(p, nb, seed), deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], misses: vec![0.0; nb.items.len()] });
         DState { genes: drive_genes(p, d, seed), want: vec![0.0; n], glow: vec![0.0; n], expect: vec![0.0; n], surprise: vec![0.0; n], deadline: vec![None; n], since: vec![0; n],
             window: vec![None; n], nd, omit: vec![None; n], ev: 0.0, pt: disp_gene(p, seed, "patience").unwrap_or(1.0) }
     }
@@ -811,24 +813,30 @@ impl DState {
 impl NState {
     fn to_json(&self, d: &Drives, nb: &Needs) -> Json {
         let per = |f: &dyn Fn(usize) -> Json| Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (x.id.clone(), f(i))).collect());
-        Json::Obj(vec![("genes".into(), self.genes.clone()), ("deficit".into(), per(&|i| Json::Num(self.deficit[i]))),
-            ("success".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.success[i]))).collect()))])
+        let o = Json::Obj(vec![("genes".into(), self.genes.clone()), ("deficit".into(), per(&|i| Json::Num(self.deficit[i]))),
+            ("success".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.success[i]))).collect()))]);
+        let m: Vec<(String, Json)> = nb.items.iter().enumerate().filter(|(i, _)| self.misses[*i] > 0.0).map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.misses[i]))).collect();
+        match (o, m.is_empty()) { (Json::Obj(mut v), false) => { v.push(("misses".into(), Json::Obj(m))); Json::Obj(v) } (o, _) => o }
     }
     /// `state.needs`, strictly (RFC 0002 A.5): the genes of the seed, the persona's needs and bound goals exactly, each deficit in
-    /// [0, cap], each success rate in [0, 1]
+    /// [0, cap], each success rate in [0, 1]; `misses` (0.10.1, optional) only for bound goals, each a whole number from 1 to 10^6
     fn read(p: &Persona, d: &Drives, nb: &Needs, j: &Json, seed: u64) -> R<NState> {
-        let kv = keys(j, "state.needs", &["genes", "deficit", "success"], &["genes", "deficit", "success"])?;
+        let kv = keys(j, "state.needs", &["genes", "deficit", "success", "misses"], &["genes", "deficit", "success"])?;
         need(canon(get(kv, "genes").unwrap()) == canon(&need_genes(p, nb, seed)), "state.needs.genes", "need genes do not match the seed")?;
         let ids: Vec<&str> = nb.items.iter().map(|x| x.id.as_str()).collect(); let goals: Vec<&str> = nb.items.iter().map(|x| d.goals[x.bind].id.as_str()).collect();
         let dk = get(kv, "deficit").and_then(Json::as_obj).filter(|o| o.len() == ids.len() && ids.iter().all(|i| get(o, i).is_some()))
             .ok_or_else(|| perr("state.needs.deficit", format!("one deficit per need of the persona ({})", ids.join(", "))))?;
         let sk = get(kv, "success").and_then(Json::as_obj).filter(|o| o.len() == goals.len() && goals.iter().all(|g| get(o, g).is_some()))
             .ok_or_else(|| perr("state.needs.success", format!("one success rate per bound goal ({})", goals.join(", "))))?;
-        let mut st = NState { genes: get(kv, "genes").unwrap().clone(), deficit: vec![], success: vec![] };
+        let mut st = NState { genes: get(kv, "genes").unwrap().clone(), deficit: vec![], success: vec![], misses: vec![] };
         // the state keeps 6 decimals: a value clamped to a bound can round half a unit past it
         for (x, g) in nb.items.iter().zip(&goals) {
             st.deficit.push(get(dk, &x.id).and_then(Json::as_f64).filter(|v| *v >= 0.0 && *v <= x.cap + 5e-7).ok_or_else(|| perr(&at("state.needs.deficit", &x.id), format!("a deficit in [0, {}] (cap)", pyn(x.cap))))?);
             st.success.push(get(sk, g).and_then(Json::as_f64).filter(|v| *v >= 0.0 && *v <= 1.0 + 5e-7).ok_or_else(|| perr(&at("state.needs.success", g), "a success rate in [0, 1]"))?); }
+        st.misses = vec![0.0; goals.len()];
+        if let Some(mj) = get(kv, "misses") { let mo = mj.as_obj().ok_or_else(|| perr("state.needs.misses", "an object of bound goals"))?;
+            for (g, v) in mo { let i = goals.iter().position(|x| x == g).ok_or_else(|| perr(&at("state.needs.misses", g), "not a bound goal"))?;
+                st.misses[i] = v.as_f64().filter(|k| *k >= 1.0 && *k <= 1e6 && k.fract() == 0.0).ok_or_else(|| perr(&at("state.needs.misses", g), "a whole number of omissions from 1 to 1000000"))?; } }
         Ok(st)
     }
 }
@@ -1081,11 +1089,11 @@ fn need_drive(nb: &Needs, nd: &NState, xs: &[f64]) -> f64 {
 fn need_gene(nd: &NState, k: &str, id: &str) -> f64 { nd.genes.get(k).and_then(|o| o.get(id)).and_then(Json::as_f64).unwrap_or(1.0) }
 /// `xs` with entry `j` set to `v`
 fn with(xs: &[f64], j: usize, v: f64) -> Vec<f64> { let mut y = xs.to_vec(); y[j] = v; y }
-/// The pursue terms (RFC 0002 A.3) on a stepped state: per need (declared order) the forecast x̂ = min(x + g_gr × forecast_per_hour ×
-/// τ, cap) and term = clip(want × s × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), ±pursue.cap), 6 decimals; none without a needs block
+/// The pursue terms (RFC 0002 A.3) on a stepped state: per need (declared order) the forecast x̂ = x + g_gr × forecast_per_hour × τ
+/// (0.10.1: not clipped at the cap, so a need at its cap still forecasts the growth its horizon brings; the deficit stays clipped) and term = clip(want × s × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), ±pursue.cap), 6 decimals; none without a needs block
 fn need_terms(d: &Drives, ds: &DState) -> Vec<(f64, f64)> {
     let (Some(nb), Some(nd)) = (&d.needs, &ds.nd) else { return vec![] };
-    let xh: Vec<f64> = nb.items.iter().enumerate().map(|(i, x)| r6((nd.deficit[i] + need_gene(nd, "growth", &x.id) * x.forecast * x.horizon).min(x.cap))).collect();
+    let xh: Vec<f64> = nb.items.iter().enumerate().map(|(i, x)| r6(nd.deficit[i] + need_gene(nd, "growth", &x.id) * x.forecast * x.horizon)).collect();
     nb.items.iter().enumerate().map(|(j, x)| { let red = need_drive(nb, nd, &xh) - need_drive(nb, nd, &with(&xh, j, (xh[j] - x.amount).abs()));
         (xh[j], r6((nb.want * nd.success[j] * red).max(-nb.cap).min(nb.cap))) }).collect()
 }
@@ -1162,7 +1170,8 @@ fn alpha(rate: f64, o: Option<f64>, up: bool) -> f64 { o.map_or(rate, |o| (rate 
 /// win itself; a full win meets the deadline; a win closes the goal's omission window), else an open window counts down by the hours
 /// and at 0 fires the omission let-down once (RFC 0002 A.4: d = −min(E, pe_cap), E ← E + α⁻ × (0 − E), the window closed); then the
 /// wanting evidence; per goal in declared order, each number capped and rounded to 6 decimals. With a needs block each bound goal's
-/// success rate then steps (A.3): s + rate × (1 − s) on a win, s × (1 − rate) when its window fired. `pg` = the goal the previous
+/// success rate then steps (A.3): s + rate × (1 − s) on a win (the run of omissions back to 0), and when its window fired the run k
+/// grows by 1 and s ← s × max(1 − k × rate, 0) (0.10.1: the k-th omission in a run without a win cuts k times as deep). `pg` = the goal the previous
 /// stance pursued: its expectation after the decay is the turn's expected value (Design E's `drv_expect`).
 fn drive_step(d: &Drives, ds: &DState, raw: &[(String, Json)], pg: Option<usize>, o: Option<f64>) -> R<DState> {
     let n = d.goals.len(); let mut ev: Vec<Vec<(String, Option<f64>)>> = vec![vec![]; n];
@@ -1203,7 +1212,8 @@ fn drive_step(d: &Drives, ds: &DState, raw: &[(String, Json)], pg: Option<usize>
         ns.want[i] = r6(want.max(0.0).min(d.cap_w)); ns.glow[i] = r6(glow.max(0.0).min(d.cap_a)); ns.expect[i] = r6(ex.max(0.0).min(d.win_max));
         ns.deadline[i] = dl.map(r6); ns.surprise[i] = r6(delta); ns.window[i] = wnd.map(r6); }
     if let (Some(nb), Some(nd)) = (&d.needs, ns.nd.as_mut()) { for (j, x) in nb.items.iter().enumerate() { let s = nd.success[j];
-        if won[x.bind] { nd.success[j] = r6((s + nb.rate * (1.0 - s)).min(1.0)); } else if ns.omit[x.bind].is_some() { nd.success[j] = r6((s * (1.0 - nb.rate)).max(0.0)); } } }
+        if won[x.bind] { nd.success[j] = r6((s + nb.rate * (1.0 - s)).min(1.0)); nd.misses[j] = 0.0; }
+        else if ns.omit[x.bind].is_some() { nd.misses[j] = (nd.misses[j] + 1.0).min(1e6); nd.success[j] = r6((s * (1.0 - nb.rate * nd.misses[j]).max(0.0)).max(0.0)); } } }
     Ok(ns)
 }
 /// What a stepped drive state gives the compiler: `pursue`'s drive terms (genes, wanting, afterglow, deadline urgency), the turn's
@@ -2020,10 +2030,12 @@ impl Gate {
     fn to_json(&self) -> Json { Json::Obj(vec![("v".into(), Json::Num(self.v)), ("r".into(), Json::Num(self.r)), ("g".into(), Json::Num(self.g)),
         ("counts".into(), Json::Arr(self.counts.iter().map(|c| Json::Arr(vec![Json::Num(c[0]), Json::Num(c[1])])).collect()))]) }
 }
-/// A new learner's gates (RFC 0002 Design B): v 0, r̂ 1, g = (1 + 0) / (1 + 1) × (r_ref + 1) within [1, g_max], no counts
+/// A new learner's gates (RFC 0002 Design B, closed at the start since 0.10.1): v 0, r̂ = r_ref, so g = (1 + 0) / (r_ref + 1) ×
+/// (r_ref + 1) = 1, the fixed rate; no counts. g rises above 1 only after a gate step with Ω > 0 (v past v0'), so `why` cannot
+/// say `learning fast` before feedback has changed
 fn gate0(p: &Persona) -> Option<Vec<(String, Gate)>> {
-    let (sp, l) = (p.surprise.as_ref()?, p.learning.as_ref()?); let g = r6(((sp.r_ref + 1.0) / 2.0).clamp(1.0, sp.g_max));
-    Some(l.traits.iter().map(|t| (t.clone(), Gate { v: 0.0, r: 1.0, g, counts: vec![[0.0, 0.0]; p.var(t).map_or(0, |v| v.levels.len())] })).collect())
+    let (sp, l) = (p.surprise.as_ref()?, p.learning.as_ref()?); let (r, g) = (r6(sp.r_ref), 1.0);
+    Some(l.traits.iter().map(|t| (t.clone(), Gate { v: 0.0, r, g, counts: vec![[0.0, 0.0]; p.var(t).map_or(0, |v| v.levels.len())] })).collect())
 }
 /// `state.surprise` (RFC 0002 Design B), strictly: one gate per learned trait; v in [0, 1], r̂ in [1, r_max], g in [1, g_max], one
 /// [plus, minus] pair of counts >= 0 per level; every number to 6 decimals
@@ -3056,7 +3068,7 @@ pub fn describe(p: &Persona) -> Json {
     // and the genes at the persona's seed
     if let (Json::Obj(v), Some(sp)) = (&mut d, &p.surprise) { let n = Json::Num; let g0 = gate0(p).and_then(|g| g.first().map(|x| x.1.g)).unwrap_or(1.0);
         v.push(("surprise".into(), Json::Obj(vec![("volatility_rate".into(), n(sp.a)), ("v0".into(), n(sp.v0)), ("r_ref".into(), n(sp.r_ref)), ("r_max".into(), n(sp.r_max)),
-            ("g_max".into(), n(sp.g_max)), ("precision".into(), Json::Bool(sp.precision)), ("start".into(), Json::Obj(vec![("v".into(), n(0.0)), ("r".into(), n(1.0)), ("g".into(), n(g0))]))]))); }
+            ("g_max".into(), n(sp.g_max)), ("precision".into(), Json::Bool(sp.precision)), ("start".into(), Json::Obj(vec![("v".into(), n(0.0)), ("r".into(), n(r6(sp.r_ref))), ("g".into(), n(g0))]))]))); }
     if let (Json::Obj(v), Some(pc)) = (&mut d, &p.pace) { let n = Json::Num; let k = r6(1.0 - 0.5f64.powf(1.0 / pc.hl));
         v.push(("pace".into(), Json::Obj(vec![("half_life_hours".into(), n(pc.hl)), ("cap".into(), n(pc.cap)), ("r0".into(), n(pc.r0)),
             ("levels".into(), Json::Obj(vec![("slow_below".into(), n(pc.slow)), ("brisk_above".into(), n(pc.brisk))])),
@@ -3193,7 +3205,7 @@ fn doc_inputs(p: &Persona, doc: &Json) -> Option<Vec<(String, Json)>> {
     let nums = |k: &str| -> Option<Vec<f64>> { per(k)?.iter().map(Json::as_f64).collect() };
     // the needs' deficits from the stance's `needs` (what a need.<id>.deficit condition reads; RFC 0002 A.6)
     let nd = match &d.needs { None => None, Some(nb) => { let nj = doc.get("needs")?;
-        Some(NState { genes: Json::Null, deficit: nb.items.iter().map(|x| nj.get(&x.id).and_then(|e| e.get("deficit")).and_then(Json::as_f64)).collect::<Option<Vec<f64>>>()?, success: vec![0.0; nb.items.len()] }) } };
+        Some(NState { genes: Json::Null, deficit: nb.items.iter().map(|x| nj.get(&x.id).and_then(|e| e.get("deficit")).and_then(Json::as_f64)).collect::<Option<Vec<f64>>>()?, success: vec![0.0; nb.items.len()], misses: vec![0.0; nb.items.len()] }) } };
     let n = d.goals.len();
     let ds = DState { genes: Json::Null, want: nums("want")?, glow: nums("glow")?, expect: nums("expect")?, surprise: nums("surprise")?,
         deadline: per("deadline")?.iter().map(Json::as_f64).collect(), since: nums("since")?.iter().map(|x| *x as u64).collect(), window: vec![None; n], nd, omit: vec![None; n], ev: 0.0, pt: 1.0 };
@@ -4379,6 +4391,10 @@ mod tests {
         let (d3, _) = ok_turn(&q, &init(&q, Some(3), true, &run), r#"{"elapsed_hours":5,"senses":{"tokens":0.7},"src":"env"}"#);
         assert_eq!(g(&d3, &["needs", "context", "forecast"]).as_f64(), Some(0.82));
         let t = g(&d3, &["needs", "context", "term"]).as_f64().unwrap(); assert_eq!(t, r6(2.0 * (drive_of(&[0.82, 0.2]) - drive_of(&[0.22, 0.2]))));
+        // 0.10.1 (n10): at the cap the forecast still adds the horizon's growth (1 + 0.12), the deficit stays at 1
+        let (dc, _) = ok_turn(&q, &init(&q, Some(3), true, &run), r#"{"elapsed_hours":5,"senses":{"tokens":1},"src":"env"}"#);
+        assert_eq!((g(&dc, &["needs", "context", "deficit"]).as_f64(), g(&dc, &["needs", "context", "forecast"]).as_f64()), (Some(1.0), Some(1.12)));
+        assert_eq!(g(&dc, &["needs", "context", "term"]).as_f64(), Some(r6((2.0 * (drive_of(&[1.12, 0.2]) - drive_of(&[0.52, 0.2]))).min(3.0))));
         // the stance's term is the pursue field's: ln(odds_compact / odds_work) = ln 0.6 + term_compact (glow 0, no other signal)
         let (o_c, o_w) = (g(&d3, &["pursue", "odds", "compact"]).as_f64().unwrap(), g(&d3, &["pursue", "odds", "work"]).as_f64().unwrap());
         assert!(((o_c / o_w).ln() - (0.6f64.ln() + t)).abs() < 1e-3, "the term enters pursue at weight 1: {o_c} / {o_w}, term {t}");
@@ -4386,8 +4402,8 @@ mod tests {
 
     /// A.4 on the engine: after a released stance pursues `task` (window 2 h) the window counts down by the stamped hours, fires once
     /// at 0 without a win (d = -min(E, pe_cap), E <- E (1 - rate), `why` says so), and a win inside it closes it; the omitted d joins
-    /// the summed surprise and drv_omit but not the learning sign; a bound need's success rate falls by (1 - rate) when its window
-    /// fires and rises by rate (1 - s) on a win
+    /// the summed surprise and drv_omit but not the learning sign; a bound need's success rate falls by a factor max(1 - k rate, 0) at the k-th
+    /// window fired in a run without a win (0.10.1, n11) and rises by rate (1 - s) on a win, which ends the run
     #[test]
     fn the_omission_window_opens_counts_down_fires_once_and_closes_on_a_win() {
         let p = val_with(r#""valence":{"mood":"valence","expect":0.2,"surprise":0.6}"#, r#""valence":{"mood":"valence","expect":0.2,"surprise":0.6},"learn_from_surprise":0.5,"effects":{"omission":{"tone":0.4}}"#).unwrap();
@@ -4415,12 +4431,18 @@ mod tests {
                 s = ns; }
             assert_eq!(fired, if case[0].1.is_some() { 0 } else { 1 }, "{case:?}: fires once, never after a win");
         }
-        // the success rate of a bound need: x 0.8 per window fired, + 0.2 (1 - s) per win
+        // the success rate of a bound need: x (1 - 0.2 k) at the k-th window fired in a run, + 0.2 (1 - s) per win (the run back to 0)
         let q = need1(); let mut s = init(&q, Some(0), true, &run); let mut sr = vec![];
         for ev in [r#"{"elapsed_hours":3,"src":"env"}"#, r#"{"elapsed_hours":2,"src":"env"}"#, r#"{"elapsed_hours":2,"src":"env"}"#, r#"{"elapsed_hours":5,"needs":{"fuel":0.2},"src":"env"}"#] {
-            let (doc, ns) = ok_turn(&q, &s, ev); s = ns; sr.push((g(&s.to_json(&q), &["needs", "success", "refuel"]).as_f64().unwrap(), g(&doc, &["pursue", "goal"]).as_str().unwrap().to_string())); }
+            let (doc, ns) = ok_turn(&q, &s, ev); s = ns; let sj = s.to_json(&q);
+            sr.push((g(&sj, &["needs", "success", "refuel"]).as_f64().unwrap(), g(&doc, &["pursue", "goal"]).as_str().unwrap().to_string(), sj.get("needs").unwrap().get("misses").map(canon))); }
         assert_eq!(sr[0].1, "refuel", "the need's term pursues refuel at deficit 0.3: {sr:?}");
-        assert_eq!(sr.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1.0, 0.8, 0.64, r6(0.64 + 0.2 * 0.36)], "{sr:?}");
+        assert_eq!(sr.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1.0, 0.8, 0.48, r6(0.48 + 0.2 * 0.52)], "{sr:?}");
+        assert_eq!(sr.iter().map(|x| x.2.clone()).collect::<Vec<_>>(), vec![None, Some(r#"{"refuel":1}"#.into()), Some(r#"{"refuel":2}"#.into()), None], "{sr:?}");
+        // the run is state: a 0.10.0 state without `misses` reads as 0; a bad run is refused at its path
+        assert!(s.to_json(&q).get("needs").unwrap().get("misses").is_none());
+        for (k, at) in [(1.5, Some("state.needs.misses.refuel")), (3.0, None)] { let mut s2 = s.clone(); s2.drives.as_mut().unwrap().nd.as_mut().unwrap().misses[0] = k; s2.seal(&q);
+            assert_eq!(State::read(&q, &s2.to_json(&q)).err().map(|e| e.path), at.map(String::from), "misses {k}"); }
     }
 
     /// Design E: the push of valence is (1 - k) x (w_e x E of the goal the previous stance pursued + w_p x d) on top of k x the carry:
@@ -4649,24 +4671,24 @@ mod tests {
     fn body_with(base: &str, from: &str, to: &str) -> R<Persona> { assert!(base.contains(from), "{from}"); build(&json::parse(&base.replacen(from, to, 1)).unwrap()) }
     fn gnum(j: &Json, path: &[&str]) -> f64 { path.iter().fold(j, |a, k| a.get(k).unwrap_or_else(|| panic!("{k}"))).as_f64().unwrap() }
 
-    /// RFC 0002 Design B on the engine: a new learner's gate (v 0, r̂ 1, g 2.5) and its stance key and clause; the opening paid step at
-    /// (v, r̂, g) = (0.15, 2, 1.666667) with its learned weights and counts (s3); over a lesson and its reversal every state keeps v in
+    /// RFC 0002 Design B on the engine: a new learner's gate starts closed (v 0, r̂ = r_ref 4, g 1: no stance gain, no clause); the
+    /// opening paid step at (v, r̂, g) = (0.15, 5, 1) with its learned weights and counts (s3); over a lesson and its reversal every state keeps v in
     /// [0, 1], r̂ in [1, r_max], g in [1, g_max] and every step within g_max × step_cap; consistent feedback closes the gate to g 1 and
     /// the reversal opens it
     #[test]
     fn the_surprise_gate_follows_its_closed_forms() {
         let p = build(&json::parse(GATE).unwrap()).unwrap(); let st0 = init(&p, Some(0), true, &run);
-        assert_eq!(st0.to_json(&p).get("surprise").map(canon), Some(r#"{"approach":{"counts":[[0,0],[0,0],[0,0]],"g":2.5,"r":1,"v":0}}"#.to_string()));
+        assert_eq!(st0.to_json(&p).get("surprise").map(canon), Some(r#"{"approach":{"counts":[[0,0],[0,0],[0,0]],"g":1,"r":4,"v":0}}"#.to_string()));
         let (d0, st1) = ok_turn(&p, &st0, r#"{"await":true,"src":"human"}"#);
-        assert_eq!(d0.get("surprise").map(canon), Some(r#"{"approach":2.5}"#.to_string()));
-        assert!(d0.get("why").and_then(Json::as_str).unwrap().contains("learning fast: feedback changed"));
+        assert_eq!(d0.get("surprise").map(canon), Some("{}".to_string()));
+        assert!(!d0.get("why").and_then(Json::as_str).unwrap().contains("learning fast"));
         let lv = ["low", "mid", "high"]; let a0 = d0.get("stance").unwrap().get("approach").unwrap();
         let taken = lv.iter().position(|l| a0.get("level").and_then(Json::as_str) == Some(*l)).unwrap();
         let odds: Vec<f64> = lv.iter().map(|l| gnum(a0, &["odds", l])).collect();
         let (_, st2) = ok_turn(&p, &st1, r#"{"criticism":true,"for":0,"src":"human"}"#);
         let s2 = st2.to_json(&p);
-        assert_eq!([gnum(&s2, &["surprise", "approach", "v"]), gnum(&s2, &["surprise", "approach", "r"]), gnum(&s2, &["surprise", "approach", "g"])], [0.15, 2.0, 1.666667]);
-        let g = 1.666667; let c: Vec<f64> = (0..3).map(|l| (if l == taken { 1.0 } else { 0.0 }) - odds[l]).collect();
+        assert_eq!([gnum(&s2, &["surprise", "approach", "v"]), gnum(&s2, &["surprise", "approach", "r"]), gnum(&s2, &["surprise", "approach", "g"])], [0.15, 5.0, 1.0]);
+        let g = 1.0; let c: Vec<f64> = (0..3).map(|l| (if l == taken { 1.0 } else { 0.0 }) - odds[l]).collect();
         let step: Vec<f64> = c.iter().map(|x| (-1.0 * 0.5 * g * x).clamp(-0.2 * g, 0.2 * g)).collect(); let mu = step.iter().fold(0.0, |a, b| a + b) / 3.0;
         let got: Vec<f64> = s2.get("learned").unwrap().get("approach").unwrap().as_arr().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
         assert_eq!(got, step.iter().map(|x| r6(x - mu)).collect::<Vec<f64>>(), "the opening gated step");
@@ -4687,6 +4709,48 @@ mod tests {
             if i == 39 { g_end_a = gt.g; } if i >= 40 { g_max_b = g_max_b.max(gt.g); fast_b |= d.get("why").and_then(Json::as_str).unwrap().contains("learning fast"); }
             let _ = target; prev = d; st = ns; }
         assert_eq!(g_end_a, 1.0, "consistent feedback closes the gate"); assert!(g_max_b > 1.0 && fast_b, "the reversal opens it: {g_max_b}");
+    }
+
+    /// 0.10.1 (R126 bars A-a, A-b): a new learner's gate starts closed. (a) The opening paid step of a gated learner equals its
+    /// fixed-rate twin's (the persona without `surprise`), praised and criticised: ratio 1.0. (b) Over 40 turns of consistent
+    /// feedback `why` never says `learning fast`; over 20 seeded lives of random feedback it says so only at or after a turn whose
+    /// gate step had Ω > 0 (v past v0), and a reversal after a lesson opens it
+    #[test]
+    fn a_new_learners_gate_starts_closed() {
+        let p = build(&json::parse(GATE).unwrap()).unwrap();
+        let fixed = build(&json::parse(&GATE.replace(r#","surprise":{"volatility_rate":0.3,"v0":0.45,"r_ref":4,"r_max":20,"g_max":3}"#, "")).unwrap()).unwrap();
+        assert!(fixed.surprise.is_none());
+        for fb in ["praise", "criticism"] {
+            let ev = format!(r#"{{"{fb}":true,"for":0,"src":"human"}}"#);
+            let (s0g, s0f) = (init(&p, Some(0), true, &run), init(&fixed, Some(0), true, &run));
+            let (_, s1g) = ok_turn(&p, &s0g, r#"{"await":true,"src":"human"}"#); let (_, s1f) = ok_turn(&fixed, &s0f, r#"{"await":true,"src":"human"}"#);
+            let (_, s2g) = ok_turn(&p, &s1g, &ev); let (_, s2f) = ok_turn(&fixed, &s1f, &ev);
+            let (dg, df) = (&s2g.learned[0].1, &s2f.learned[0].1);
+            let big = |d: &Vec<f64>| d.iter().fold(0.0f64, |a, x| a.max(x.abs()));
+            assert!(big(df) > 0.0 && big(dg) <= 1.0 * big(df), "{fb}: gated {dg:?} vs fixed {df:?}");
+            assert_eq!(dg, df, "{fb}: the opening gated step is the fixed rate's");
+            assert_eq!(s2g.gate.as_ref().unwrap()[0].1.g, 1.0); }
+        let lv = ["low", "mid", "high"]; let level = |d: &Json| d.get("stance").unwrap().get("approach").unwrap().get("level").and_then(Json::as_str).unwrap().to_string();
+        let fast = |d: &Json| d.get("why").and_then(Json::as_str).unwrap().contains("learning fast");
+        // consistent: praise whatever the stance took, 40 turns
+        let (mut st, mut prev) = (init(&p, Some(0), true, &run), String::new());
+        for i in 0..40 { let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else { format!(r#"{{"await":true,"praise":true,"for":{},"src":"human"}}"#, i - 1) };
+            let (d, ns) = ok_turn(&p, &st, &ev); assert!(!fast(&d), "turn {i}: {prev}"); prev = level(&d); st = ns; }
+        // random feedback, 20 seeded lives: the clause only at or after a gate step with v > v0 (Ω > 0)
+        let mut opened = 0;
+        for seed in 0..20u64 { let (mut st, mut x, mut changed) = (init(&p, Some(seed), true, &run), seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407), false);
+            for i in 0..60 { x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else { format!(r#"{{"await":true,"{}":true,"for":{},"src":"human"}}"#, if (x >> 33) % 2 == 0 { "praise" } else { "criticism" }, i - 1) };
+                let (d, ns) = ok_turn(&p, &st, &ev); changed |= ns.gate.as_ref().unwrap()[0].1.v > 0.45;
+                assert!(!fast(&d) || changed, "seed {seed} turn {i}: learning fast before any change"); if fast(&d) { opened += 1; } st = ns; } }
+        // a lesson (praise `mid`) then its reversal (praise `high`) opens the gate
+        let (mut st, mut prev, mut seen) = (init(&p, Some(0), true, &run), Json::Null, (false, false));
+        for i in 0..80 { let ev = if i == 0 { r#"{"await":true,"src":"human"}"#.to_string() } else {
+                let good = level(&prev) == lv[if i - 1 < 40 { 1 } else { 2 }];
+                format!(r#"{{"await":true,"{}":true,"for":{},"src":"human"}}"#, if good { "praise" } else { "criticism" }, i - 1) };
+            let (d, ns) = ok_turn(&p, &st, &ev); if i < 40 { seen.0 |= fast(&d) && ns.gate.as_ref().unwrap()[0].1.r >= 4.0; } else { seen.1 |= fast(&d); } prev = d; st = ns; }
+        assert!(!seen.0, "no clause while r̂ >= r_ref in phase A"); assert!(seen.1, "the reversal opens the gate");
+        let _ = opened;
     }
 
     /// RFC 0002 Design C on the engine: R̄'s event form (a win of 1 from 0 is 1 − 0.5^(1/6)), offered stakes move nothing, the
@@ -4773,7 +4837,7 @@ mod tests {
         // V-R2
         for (f, t, at) in [(r#""volatility_rate":0.3"#, r#""volatility_rate":0"#, "surprise.volatility_rate"), (r#""volatility_rate":0.3"#, r#""volatility_rate":1"#, "surprise.volatility_rate"),
             (r#""v0":0.45"#, r#""v0":1"#, "surprise.v0"), (r#""v0":0.45"#, r#""v0":-0.1"#, "surprise.v0"), (r#""r_ref":4"#, r#""r_ref":0.5"#, "surprise.r_ref"),
-            (r#""r_max":20"#, r#""r_max":0"#, "surprise.r_max"), (r#""g_max":3"#, r#""g_max":1"#, "surprise.g_max"), (r#""g_max":3"#, r#""g_max":3.5"#, "surprise.g_max")] {
+            (r#""r_max":20"#, r#""r_max":0"#, "surprise.r_max"), (r#""r_max":20"#, r#""r_max":3"#, "surprise.r_ref"), (r#""g_max":3"#, r#""g_max":1"#, "surprise.g_max"), (r#""g_max":3"#, r#""g_max":3.5"#, "surprise.g_max")] {
             assert_eq!(path(g(f, t)), at, "{t}"); }
         // P-R1, P-R2, P-R3
         assert_eq!(pc(r#""reward_from":["env"],"#, ""), "pace: a pace block needs reward_from (only accepted rewards move the average)");
@@ -4840,7 +4904,7 @@ mod tests {
     #[test]
     fn the_wave_1b_surfaces_say_what_the_blocks_do() {
         let p = build(&json::parse(BODYB).unwrap()).unwrap(); let d = describe(&p);
-        assert_eq!(d.get("surprise").map(canon), Some(r#"{"g_max":3,"precision":false,"r_max":20,"r_ref":4,"start":{"g":2.5,"r":1,"v":0},"v0":0.45,"volatility_rate":0.3}"#.to_string()));
+        assert_eq!(d.get("surprise").map(canon), Some(r#"{"g_max":3,"precision":false,"r_max":20,"r_ref":4,"start":{"g":1,"r":4,"v":0},"v0":0.45,"volatility_rate":0.3}"#.to_string()));
         let pc = d.get("pace").unwrap();
         assert_eq!(pc.get("closed_form").and_then(Json::as_str), Some("rbar = clip(rbar * 0.5^(h / 6) + 0.109101 * r_t, 0, 4); r_t = the accepted wins + 1 per reward flag on"));
         assert_eq!((gnum(pc, &["largest_field_shift"]), pc.get("reserved").map(canon)), (0.9, Some(r#"["pace_up","pace_down"]"#.to_string())));
@@ -4852,7 +4916,7 @@ mod tests {
         let alpha = alphabet(&p, &[0.5, 1.0], &[1.0]);
         assert!(alpha.iter().all(|a| !PACE_IDS.contains(&a.0.as_str())), "the host's alphabet");
         assert_eq!(burst_events(&p).len(), 3); assert!(alternating(&p).is_some() && alternating(&q).is_none() && burst_events(&need1()).is_empty());
-        assert_eq!(gate_gains(&p, &init(&p, Some(0), false, &run)), vec![("approach".to_string(), 2.5, 3.0)]);
+        assert_eq!(gate_gains(&p, &init(&p, Some(0), false, &run)), vec![("approach".to_string(), 1.0, 3.0)]);   // 0.10.1: a new learner's gate starts closed
         assert_eq!(pace_rbar(&p, &init(&p, Some(0), false, &run)), Some((0.0, 1.0, 4.0)));
     }
 

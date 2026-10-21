@@ -125,17 +125,19 @@ class RFCRule(object):
 
     def __init__(self, tau=0.0):
         self.tau, self.s, self.win = tau, {"compact": 1.0, "report": 1.0}, {"compact": None, "report": None}
+        self.k = {"compact": 0, "report": 0}   # 0.10.1: the run of omissions since the goal's last win
 
     def __call__(self, t, q, x, sr, prev, answered, wins=None):
         h = 0.0 if t == 0 else 1.0
         for g, need in (("compact", "context"), ("report", "contact")):
             if (wins or {}).get(need, 0) > 1e-12:
-                self.s[g], self.win[g] = R6(self.s[g] + 0.2 * (1 - self.s[g])), None
+                self.s[g], self.win[g], self.k[g] = R6(self.s[g] + 0.2 * (1 - self.s[g])), None, 0
             elif self.win[g] is not None:
                 self.win[g] = max(self.win[g] - h, 0.0)
-                if self.win[g] <= 0:
-                    self.s[g], self.win[g] = R6(self.s[g] * 0.8), None
-        xh = [min(x["context"] + 0.06 * self.tau, 1.0), x["contact"]]
+                if self.win[g] <= 0:   # 0.10.1: the k-th omission in a run multiplies s by max(1 - k rate, 0)
+                    self.k[g] += 1
+                    self.s[g], self.win[g] = R6(self.s[g] * max(1 - 0.2 * self.k[g], 0.0)), None
+        xh = [x["context"] + 0.06 * self.tau, x["contact"]]   # 0.10.1: the forecast is not clipped at the cap
         term = {"compact": max(min(2 * self.s["compact"] * common.reduction(xh, 0, 0.6), 3.0), -3.0),
                 "report": max(min(2 * self.s["report"] * common.reduction(xh, 1, 0.8), 3.0), -3.0)}
         f = needs.field(term)
@@ -264,7 +266,7 @@ def flip_life(sr, noise, g, gated=False):
     """One flip life (gate.py's host) for a constant gain g (0 = frozen) or the gate (RFC 0002 B), in plain Python."""
     T = sr["T"]
     targets = [1] * T + [2] * T
-    D, v, rr, cnt = [0.0, 0.0, 0.0], 0.0, 1.0, [[0.0, 0.0] for _ in range(3)]
+    D, v, rr, cnt = [0.0, 0.0, 0.0], 0.0, 4.0, [[0.0, 0.0] for _ in range(3)]   # 0.10.1: the gate starts closed (r = r_ref)
     tops, moved, prev = [], 0.0, None
     for i in range(2 * T):
         if prev is not None:
@@ -322,10 +324,13 @@ def surprise_rows(b):
     c0 = cells(lambda r, n: flip_life(r, n, 0.0))
     _, s2f = gate.gate_cells(c0, b["surprise"])
     row("s2", "frozen learning (degenerate)", "movement 0, phase A's lesson never learned", True, s2f)
-    want, _ = A.gate_first(-1, A.third, 0)
-    null, _ = A.gate_first(-1, A.third, 0, gated=False)
-    err = max(abs(x - y) for x, y in zip(want, null))
-    row("s3", "constant gain 1 (today's rate) on a new learner", "opening step off by %.6f" % err, True, err <= gate.FIRST_TOL)
+    # 0.10.1: the closed start makes the gate's opening step the fixed rate's, so "constant gain 1" no longer differs there; the
+    # null s3 must reject is 0.10.0's open start (r 1: the opening step at g 5/3)
+    want, wv = A.gate_first(-1, A.third, 0)
+    null, nv = A.gate_first(-1, A.third, 0, r0=1.0)
+    err = max([abs(x - y) for x, y in zip(want, null)] + [abs(x - y) for x, y in zip(wv, nv)])
+    row("s3", "the open start of 0.10.0 (r 1, g 5/3 at the opening step)", "opening step and (v, r, g) off by %.6f" % err, True,
+        err <= gate.FIRST_TOL)
     gt = cells(lambda r, n: flip_life(r, n, 1.0, gated=True))
     s1g, s2g = gate.gate_cells(gt, b["surprise"])
     row("s1+s2", "reference: the RFC's gate in Python",
