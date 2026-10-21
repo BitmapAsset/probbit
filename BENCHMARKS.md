@@ -1255,3 +1255,10 @@ same-budget constant gain slower; s2 1.0000 to 1.0530 (was 1.0343 to 1.0719; 1.0
 opening step no longer moves the stable phase); s3 1800/1800 lives within the caps and the opening step and (v, r, g) =
 (0.15, 5, 1) within 0.0; s4 1800 gate strands, 0 verify failures, 0 third-copy and 0 split-copy differences, the planted
 changes refused; the p0 part (n6, o5, s5, r5, l5) 5/5 and the P0 corpus 653 outputs, 0 differ.
+0.10.1 development build, n10 and n11 (R126, the same command, `PROBBIT_THREADS=1`, load 12-30): with the forecast not
+clipped at the cap and the k-th omission of a run cutting the success rate by 1 − k × rate (RFC 0002 A.3-A.4 as amended), n10
+context at cap 0.8536 h a day at τ 0 and 0.0186 at τ 2 (−97.8 %; 0 overshoots; 100/100 seeds paid) and n11 report pursuits
+1.22, 1.94, 1.59, 0, 0, 0, 0 (absent) and 0.19, 0.98, 1.45 (return days 8-10): both pass, neither bar changed; n1-n5, n7-n9,
+o1-o4 14/14 with them; v1-v3, om1 4/4; p1a-p6 4/4; s1 0.5000-0.6667, s2 1.0343-1.0719, s3 1800/1800, s4 1800 strands 0 verify failures (as 0.10.0: the gate has no needs);
+the p0 part 5/5 and the P0 corpus 653 outputs, 0 differ: 31/31. The nulls.py reference with the same rules:
+n10 0.8493 → 0.0214, n11 0.92, 1.63, 1.61, 0, 0, 0, 0.

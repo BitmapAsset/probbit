@@ -334,3 +334,7 @@ choice is fixed here and frozen with the rest:
   "constant gain 1 on a new learner" now equals the closed start by design (its opening step is the fixed rate's), so it is
   replaced by "0.10.0's open start (r 1)", which s3 rejects. Pass values and bar text unchanged; MANIFEST regenerated for
   `arith_0002.py`, `nulls.py` and `fixtures/bars.md`.
+- **0.10.1, n10 and n11's rules** (R126, after the 0.10.0 engine measurement; engine rule changes, not bar repairs): the
+  pursue term's forecast is no longer clipped at the need's cap (x̂ = x + g_gr × forecast_per_hour × τ), and the k-th omission
+  in a run without a win multiplies the success rate by max(1 − k × rate, 0) (RFC 0002 A.3, A.4 as amended). `nulls.py`'s `RFCRule`
+  reference follows both rules. Pass values and bar text unchanged; MANIFEST regenerated for `nulls.py`.

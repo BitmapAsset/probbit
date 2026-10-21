@@ -125,17 +125,19 @@ class RFCRule(object):
 
     def __init__(self, tau=0.0):
         self.tau, self.s, self.win = tau, {"compact": 1.0, "report": 1.0}, {"compact": None, "report": None}
+        self.k = {"compact": 0, "report": 0}   # 0.10.1: the run of omissions since the goal's last win
 
     def __call__(self, t, q, x, sr, prev, answered, wins=None):
         h = 0.0 if t == 0 else 1.0
         for g, need in (("compact", "context"), ("report", "contact")):
             if (wins or {}).get(need, 0) > 1e-12:
-                self.s[g], self.win[g] = R6(self.s[g] + 0.2 * (1 - self.s[g])), None
+                self.s[g], self.win[g], self.k[g] = R6(self.s[g] + 0.2 * (1 - self.s[g])), None, 0
             elif self.win[g] is not None:
                 self.win[g] = max(self.win[g] - h, 0.0)
-                if self.win[g] <= 0:
-                    self.s[g], self.win[g] = R6(self.s[g] * 0.8), None
-        xh = [min(x["context"] + 0.06 * self.tau, 1.0), x["contact"]]
+                if self.win[g] <= 0:   # 0.10.1: the k-th omission in a run multiplies s by max(1 - k rate, 0)
+                    self.k[g] += 1
+                    self.s[g], self.win[g] = R6(self.s[g] * max(1 - 0.2 * self.k[g], 0.0)), None
+        xh = [x["context"] + 0.06 * self.tau, x["contact"]]   # 0.10.1: the forecast is not clipped at the cap
         term = {"compact": max(min(2 * self.s["compact"] * common.reduction(xh, 0, 0.6), 3.0), -3.0),
                 "report": max(min(2 * self.s["report"] * common.reduction(xh, 1, 0.8), 3.0), -3.0)}
         f = needs.field(term)

@@ -132,10 +132,21 @@ r > 0 becomes a `win` of size r for the bound goal, r < 0 a `setback` of min(−
 so the drive step treats them as any win or setback. **The pursue term** (section 3, step 2b) for the bound goal g:
 
 ```
-x̂     = min(x + g_gr × forecast_per_hour × τ, cap)                        # the forecast: a declared growth rate
+x̂     = x + g_gr × forecast_per_hour × τ                                 # the forecast: a declared growth rate (0.10.1: not clipped at cap)
 term  = clip(want × s_g × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), −cap, +cap)
-s_g   ← s_g + success.rate × (1 − s_g) on a win of g;  s_g ← s_g × (1 − success.rate) when g's window fires (A.4)
+s_g   ← s_g + success.rate × (1 − s_g) on a win of g, and k_g ← 0
+s_g   ← s_g × max(1 − k_g × success.rate, 0) when g's window fires, k_g ← k_g + 1 first   # 0.10.1: the k-th omission in a run (A.4)
 ```
+
+Amended in 0.10.1 (R126; bench/body n10 and n11 failed on 0.10.0 as design findings, BENCHMARKS.md §12). The forecast was
+`min(x + …, cap)`: at the cap x̂ = x, so a horizon added nothing once the deficit had reached it, and with two needs at their
+caps the compact term (2 × (D(1, 1) − D(0.4, 1)) = 0.503) stayed under the interest gap ln(1/0.6) = 0.511 (the nulls.py
+reference: every at-cap hour it kept on `work` had both deficits at 1 and s = 1). The deficit stays clipped; only the forecast
+reads the growth the horizon brings. And an omission lowered s by a constant factor, so two omissions on the first away day
+left s = 0.485, enough to pursue once more the next morning (2 of 100 lives, n11). Now the k-th omission of a run multiplies
+s by 1 − k × rate: a run of 1/rate unanswered pursuits extinguishes pursuit, and the same life's third pursuit sees s = 0.364
+(a geometric run, (1 − rate)^k, left 0.388 and a field margin of 0.004 on the engine: R126 cycle B-E1, not kept). The run k_g is state
+(`needs.misses: {goal: k}`, only for k > 0; a state is refused when a run is not a whole number in [1, 10⁶]).
 
 It is lowered as the number input `need_<id>` (box [−cap, +cap]) with effect `{pursue: {<bind>: 1}}`. Pursuit is
 weighted by the goal's learned success, so unanswered pursuits extinguish themselves through the omission let-down (A.4).
@@ -162,7 +173,8 @@ Omission of an expected reward is a negative prediction error (Schultz 2016) tha
 
 The omitted d joins the turn's summed surprise (so `effects.surprise` and `drv_letdown` act on it) and the optional
 `drives.effects.omission` map, lowered as the number input `drv_omit` = min(Σ omitted E, pe_cap) (default: no effects).
-It does **not** join the learning sign (question 1), and it lowers the bound need's success rate (A.3).
+It does **not** join the learning sign (question 1), and it lowers the bound need's success rate (A.3), by the factor 1 − k × rate
+(at least 0) at the k-th omission in a run without a win (0.10.1).
 
 ### A.5 Refusals
 
