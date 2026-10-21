@@ -217,7 +217,7 @@ pub fn law_hits(s: &str) -> Vec<String> {
 mod tests {
     use super::*;
     fn lv(levels: &[&str], mood: bool) -> Field { Field::Level { levels: levels.iter().map(|s| s.to_string()).collect(), level: None, released: true, odds: vec![], mood } }
-    /// One of each field kind, with the level sets of the personas the panel runs on (Pepe's, Hermes's, the examples')
+    /// One of each field kind, with the level sets of the personas the panel runs on (two host personas and the examples')
     fn kinds() -> Vec<Field> {
         let mut v = vec![];
         for ls in [&["soft", "direct", "blunt"][..], &["calm", "steady", "keyed"], &["down", "even", "up"], &["inspect", "execute"], &["calm", "steady", "urgent"], &["follow", "suggest", "lead"]] {
