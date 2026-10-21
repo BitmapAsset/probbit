@@ -346,13 +346,14 @@ add("n3.term_max_s02", "largest term on the s02 probe (below pursue.cap 3)", "< 
 checks[-1]["ok"] = tmax_s < 3
 
 
-# s3 v2: the opening gated step of a new learner (v 0, r 1): v 0.15, Omega 0, r 2, g = 5/3 at the defaults
-def gate_first(sign, odds, taken, rate=0.5, step_cap=0.2, a=0.3, v0=0.45, r_ref=4.0, r_max=20.0, g_max=3.0, gated=True):
+# s3 v2: the opening gated step of a new learner. Since 0.10.1 the gate starts closed (v 0, r = r_ref): v 0.15, Omega 0, r 5,
+# g = 5/6 clipped to 1 at the defaults, the fixed rate's step. r0=1 gives 0.10.0's open start (r 2, g = 5/3).
+def gate_first(sign, odds, taken, rate=0.5, step_cap=0.2, a=0.3, v0=0.45, r_ref=4.0, r_max=20.0, g_max=3.0, gated=True, r0=None):
     """RFC 0002 B with RFC 0001 B.2 at e = 1: the learned weights and (v, r, g) after a learner's opening paid feedback."""
     if gated:
         v = R6(a * (1 - min(max(0.5, 0.01), 0.99)))           # mb 0 (no counts): p_same 0.5
         om = min(max((v - v0) / (1 - v0), 0.0), 1.0)
-        r = R6(min((1 - om) * (1.0 + 1) + om, r_max))
+        r = R6(min((1 - om) * ((r_ref if r0 is None else r0) + 1) + om, r_max))
         g = R6(min(max((1 + om * r) / (r + 1) * (r_ref + 1), 1.0), g_max))
     else:
         v, r, g = None, None, 1.0
@@ -365,7 +366,7 @@ def gate_first(sign, odds, taken, rate=0.5, step_cap=0.2, a=0.3, v0=0.45, r_ref=
 third = [0.333333, 0.333333, 0.333333]
 dg, vrg = gate_first(-1, third, 0)
 df, _ = gate_first(-1, third, 0, gated=False)
-add("s3.first_state", "(v, r, g) after a new gated learner's opening paid feedback", [0.15, 2.0, 1.666667], list(vrg), 1e-9,
+add("s3.first_state", "(v, r, g) after a new gated learner's opening paid feedback (closed start, 0.10.1)", [0.15, 5.0, 1.0], list(vrg), 1e-9,
     "RFC 0002 B (the listed order: v, Omega, counts, r, g, step)")
 add("s3.first_step", "learned weights after a criticised opening step on `low` at odds 1/3: gated vs fixed (g 1)", "informational",
     [dg, df], 0, "computed here", note="the constant-gain null's step differs from the gate's by %.6f" % abs(dg[0] - df[0]))

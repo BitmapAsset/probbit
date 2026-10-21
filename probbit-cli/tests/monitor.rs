@@ -57,7 +57,7 @@ fn needs_rows_and_the_at_cap_alert() {
     let (c, _, err) = probbit(&["live", "../examples/persona/body.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
     let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
     let k = out.lines().position(|l| l.starts_with("NEEDS   ")).expect(&out); let rows: Vec<&str> = out.lines().skip(k).collect();
-    assert_eq!(rows[0], "NEEDS   context  [###.....]  deficit 0.40/1 token_share  term +0.02  window compact closed", "{out}");
+    assert_eq!(rows[0], "NEEDS   context  [###.....]  deficit 0.40/1 token_share  term +0.03  window compact closed", "{out}");
     assert_eq!(rows[1], "        contact  [########]  deficit 1.00/1 share  term +0.99  window report closed", "{out}");
     assert_eq!(rows[2].trim_start(), "! contact with the principal: the deficit sits at its cap (1)", "{out}");
     let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("NEEDS"), "no row without the block");
@@ -74,7 +74,7 @@ fn pace_and_gain_rows() {
     let (c, _, err) = probbit(&["live", "../examples/persona/pacer.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
     let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
     let pace = out.lines().find(|l| l.starts_with("PACE    ")).expect(&out); assert!(pace.ends_with("]  rbar 1.68/4 | r0 1 | brisk"), "{pace}");
-    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.90  learning fast"), "{gain}");
+    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.77  learning fast"), "{gain}");
     let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("PACE    ") && !out.contains("GAIN    "), "no rows without the blocks");
     for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
 }

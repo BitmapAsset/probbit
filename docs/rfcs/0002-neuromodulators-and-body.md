@@ -132,10 +132,21 @@ r > 0 becomes a `win` of size r for the bound goal, r < 0 a `setback` of min(−
 so the drive step treats them as any win or setback. **The pursue term** (section 3, step 2b) for the bound goal g:
 
 ```
-x̂     = min(x + g_gr × forecast_per_hour × τ, cap)                        # the forecast: a declared growth rate
+x̂     = x + g_gr × forecast_per_hour × τ                                 # the forecast: a declared growth rate (0.10.1: not clipped at cap)
 term  = clip(want × s_g × (D(x̂) − D(x̂ with x̂_j ← |x̂_j − K|)), −cap, +cap)
-s_g   ← s_g + success.rate × (1 − s_g) on a win of g;  s_g ← s_g × (1 − success.rate) when g's window fires (A.4)
+s_g   ← s_g + success.rate × (1 − s_g) on a win of g, and k_g ← 0
+s_g   ← s_g × max(1 − k_g × success.rate, 0) when g's window fires, k_g ← k_g + 1 first   # 0.10.1: the k-th omission in a run (A.4)
 ```
+
+Amended in 0.10.1 (R126; bench/body n10 and n11 failed on 0.10.0 as design findings, BENCHMARKS.md §12). The forecast was
+`min(x + …, cap)`: at the cap x̂ = x, so a horizon added nothing once the deficit had reached it, and with two needs at their
+caps the compact term (2 × (D(1, 1) − D(0.4, 1)) = 0.503) stayed under the interest gap ln(1/0.6) = 0.511 (the nulls.py
+reference: every at-cap hour it kept on `work` had both deficits at 1 and s = 1). The deficit stays clipped; only the forecast
+reads the growth the horizon brings. And an omission lowered s by a constant factor, so two omissions on the first away day
+left s = 0.485, enough to pursue once more the next morning (2 of 100 lives, n11). Now the k-th omission of a run multiplies
+s by 1 − k × rate: a run of 1/rate unanswered pursuits extinguishes pursuit, and the same life's third pursuit sees s = 0.364
+(a geometric run, (1 − rate)^k, left 0.388 and a field margin of 0.004 on the engine: R126 cycle B-E1, not kept). The run k_g is state
+(`needs.misses: {goal: k}`, only for k > 0; a state is refused when a run is not a whole number in [1, 10⁶]).
 
 It is lowered as the number input `need_<id>` (box [−cap, +cap]) with effect `{pursue: {<bind>: 1}}`. Pursuit is
 weighted by the goal's learned success, so unanswered pursuits extinguish themselves through the omission let-down (A.4).
@@ -162,7 +173,8 @@ Omission of an expected reward is a negative prediction error (Schultz 2016) tha
 
 The omitted d joins the turn's summed surprise (so `effects.surprise` and `drv_letdown` act on it) and the optional
 `drives.effects.omission` map, lowered as the number input `drv_omit` = min(Σ omitted E, pe_cap) (default: no effects).
-It does **not** join the learning sign (question 1), and it lowers the bound need's success rate (A.3).
+It does **not** join the learning sign (question 1), and it lowers the bound need's success rate (A.3), by the factor 1 − k × rate
+(at least 0) at the k-th omission in a run without a win (0.10.1).
 
 ### A.5 Refusals
 
@@ -233,8 +245,10 @@ step(l) = e × clip(sign × rate × g × c(l), −step_cap × g, +step_cap × g)
 ```
 
 g never goes below 1, so the gate never slows learning below today's rate; `total_cap` is untouched, so the learned box
-`prove` uses is unchanged. A new learner starts at v = 0, r̂ = 1 (g = 2.5) and reaches g = 1 after a few consistent feedback
-turns. Precision weighting (Yu & Dayan 2005) is opt-in because it changes every sensed document's bytes. State: `surprise:
+`prove` uses is unchanged. A new learner's gate starts closed (amended in 0.10.1): v = 0, r̂ = r_ref, so g = 1, the fixed rate.
+While Ω = 0, r̂ only grows and g stays at 1, so g rises above 1 only after a gate step with Ω > 0 (v past v0'), and `why` cannot
+say `learning fast` before feedback has changed. (0.10.0 started at r̂ = 1, g = (r_ref + 1)/2 = 2.5 at the defaults: a new
+learner stepped up to 1.67 times the fixed rate before any feedback had changed.) V-R2 also refuses r_ref above r_max. Precision weighting (Yu & Dayan 2005) is opt-in because it changes every sensed document's bytes. State: `surprise:
 {trait: {v, r, g, counts: [[plus, minus], …]}}`. Stance: `surprise: {trait: g}` for traits whose g > 1; `why`: `learning
 fast: feedback changed` while any g > 1.
 
@@ -332,7 +346,7 @@ Refused when the persona is read (exit 2, at the field's path); a refused person
 | row | refused |
 |---|---|
 | V-R1 | a `surprise` block without a learning block; `precision: true` without a senses block |
-| V-R2 | `volatility_rate` outside (0, 1); `v0` outside [0, 1); `r_ref` or `r_max` below 1; `g_max` outside (1, 3] |
+| V-R2 | `volatility_rate` outside (0, 1); `v0` outside [0, 1); `r_ref` or `r_max` below 1; `r_ref` above `r_max` (0.10.1); `g_max` outside (1, 3] |
 | P-R1 | a `pace` block without `reward_from` (no self-reward can move pace) |
 | P-R2 | `cap` or `half_life_hours` ≤ 0; `r0` outside (0, cap); `levels` not ordered within [0, cap]; missing `levels` or `effects` |
 | P-R3 | a pace effect on `pursue` or on an unknown trait or mood; a taken `pace_up` or `pace_down` id |
@@ -409,6 +423,20 @@ a floor exempting reinforced levels gave back a third of the gain and protected 
 
 **Public:** "During idle time it scales its learned weights down in proportion, keeping their order."
 
+Decided by the implementation (0.10.1):
+- **Feedback** for the deferral is a learning flag on (`learning.from`), or with a drives block any goal signal in the event.
+  The pressure steps on every event (the rule above, h = the stamped hours); when an idle gap finds S ≥ θ and the event
+  carries feedback, `pressure.pending` becomes true and the line comes before the next event without feedback, whatever its
+  gap. A rest line clears `pending` and leaves S to the pressure step of its event.
+- **The line** is `{"prev", "rest": {downscale, prune, pressure, learned, gate}, "state"}`: ρ and ε, S before the line, the
+  learned weights after it, and the digest of the state after it. It is written only directly before its event's line, which
+  chains to it; `live verify` recomputes it from the state and the event and refuses a missing, extra or changed rest line
+  (exit 1). The turn applies the same downscale before step 1, so `persona turn` without a strand gives the same stance.
+- **The surprise gate at a rest line:** each learned trait's v, r̂, g and counts are left unchanged (the gate tracks
+  feedback and a rest line carries none); the line says so per learned trait (`gate: {<trait>: "unchanged: v, r, g and
+  counts kept"}`). The credit and the open decisions are left as they are too: a rest line scales the learned weights only.
+- The prune compares the rounded value: Δ ← round(ρΔ, 6), then 0 when |round(ρΔ, 6)| < ε.
+
 **`load` (simulation).** Wear accumulates when responses repeat, fail to adapt or fail to shut off (McEwen 1998; McEwen
 2006), and can leave a lasting set-point deviation (Koob & Le Moal 2001).
 
@@ -428,6 +456,18 @@ adaptation, prolonged response); the fourth, an inadequate response with compens
 interacting channels and is out of scope. State `load: {l}`.
 
 **Public:** "Repeated aversive events raise a slow load that relaxes over days."
+
+Decided by the implementation (0.10.1):
+- **Evidence a_t:** a learning flag on adds its weight × 1; `sense_<id>` (a declared sense) adds its weight × this event's
+  reading (a flag sense true = 1, false = 0, a number sense its value, no reading 0); `expired` adds its weight × the number
+  of open decisions that expire at this event (t − n − 1 ≥ 4 × the credit half-life, which the patience gene scales; 0
+  without a credit block).
+- **The hold** reads the mood accumulator at the mood's last level, as it stands before this event (the load step runs
+  before compile, where this event's mood evidence enters), so it lags the mood by one event on and off.
+- **Lowering:** `load_level` is a number input (box [0, L_cap]) with the block's `effects` (ordinal shifts per unit of L),
+  added after the declared inputs; reserved only with the block, refused when the host sends it (`inputs.load_level`), left
+  out of the stance's `inputs`; the stance adds `load: {l}` (L after this event). The load step runs right after the pace
+  step. `load.from` with `expired` and no credit block is accepted and reads 0.
 
 ## Invariants
 
