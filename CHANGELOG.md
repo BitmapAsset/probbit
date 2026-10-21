@@ -29,6 +29,15 @@ All notable changes to this project are documented here. The format follows
   k-th omission in a run without a win multiplies the bound goal's success rate by max(1 − k × rate, 0) (state `needs.misses`,
   only while a run is open). bench/body n10: context at cap 0.8536 → 0.0186 h a day at τ 2 (bar ≤ 0.5×); n11: 0 report pursuits
   on away days 2-5, 1.58 a day before and 1.215 on return days 2-3 (bars 0, ≥ 0.5, ≥ 0.5); neither bar was changed.
+- Portability: a strand with a leading UTF-8 byte-order mark (a Windows editor's save) replays and monitors like the bytes
+  without it, as CRLF line endings already did (`live verify` used to report a divergence at line 1). `monitor --serve` sends
+  `X-Accel-Buffering: no` on the event stream (a reverse proxy would hold it in its buffer) and, when the port is taken, says
+  so with what to do. The page no longer uses `Array.prototype.at` (Safari before 15.4 lacked it and the page stopped after
+  its first frame). A cut line at a terminal under `NO_COLOR` no longer ends in a bare reset escape. `install.sh` and the
+  npm package pick the static musl build on Linux x86_64 with glibc older than 2.34 (the gnu build does not run there), and
+  the npm package says plainly when a platform has no prebuilt binary instead of promising a fetch on first run, and names
+  `NODE_USE_ENV_PROXY=1` when a fetch fails with a proxy set (Node's fetch ignores `HTTPS_PROXY` without it). An argument
+  that is not valid UTF-8 (a legacy-encoded file name) is refused with exit 2 instead of a panic.
 
 ### Other
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a

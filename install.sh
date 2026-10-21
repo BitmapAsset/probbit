@@ -42,6 +42,14 @@ sha256() {
     fi
 }
 
+# The x86_64 gnu build needs glibc >= 2.34 (release.yml): an older glibc (Debian 11, Ubuntu 20.04, RHEL 8) gets the static musl
+# build. The version is the last number on the first line of `ldd --version`; none found keeps the gnu build.
+glibc_before_2_34() {
+    v=$( (ldd --version 2>&1 || true) | head -n 1 | sed -n 's/.*[^0-9.]\([0-9][0-9]*\)\.\([0-9][0-9]*\)[^ ]*$/\1 \2/p')
+    [ -n "$v" ] || return 1
+    set -- $v
+    [ "$1" -lt 2 ] || { [ "$1" -eq 2 ] && [ "$2" -lt 34 ]; }
+}
 detect_target() {
     os=$(uname -s)
     arch=$(uname -m)
@@ -59,6 +67,8 @@ detect_target() {
             case "$arch" in
                 x86_64 | amd64)
                     if (ldd --version 2>&1 || true) | grep -qi musl; then
+                        echo x86_64-unknown-linux-musl
+                    elif glibc_before_2_34; then
                         echo x86_64-unknown-linux-musl
                     else
                         echo x86_64-unknown-linux-gnu
