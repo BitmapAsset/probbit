@@ -3,6 +3,31 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.11.0 - unreleased
+
+RFC 0008, viability (docs/rfcs/0008-viability.md, draft). Every new key is opt-in: a persona without them gives every
+document byte for byte as 0.10.1.
+
+### Added
+- **Viability bounds** (docs/persona.md §2.12): `viable: {at_most, events}` per need. The stance reports per need its `margin`
+  (1 at the setpoint, 0 at the bound) and `beyond`, and `viability: {worst, margin_min, status}`; the state keeps `beyond` and
+  `viability` (`lost` once a need stays beyond its bound for its declared run). Rules read `need.<id>.margin` and
+  `needs.margin_min`. `why` names the worst need while its margin is under 0.25.
+- **Graded pressure and need valence**: `needs.pressure {mood, gain, shape: linear}` moves a mood by `gain x (1 -
+  margin_min)`; `needs.valence {mood, tonic, phasic}` by `-tonic x D(x)/D(cap) + phasic x` the event's drive reduction. They
+  lower to the reserved inputs `need_pressure`, `need_tonic`, `need_phasic`, which `prove` boxes.
+- **Flag senses grow needs**: `per_reading: {sense: <flag>, per_event: g}` (a tool failure can grow a need with no parallel
+  number sense).
+- **`stance.block`**: the text a host injects verbatim, every declared trait and mood once as `name level` plus the viability
+  line; in the stance with a bound, a coupling or `line.block: true`. `live verify --blocks FILE` renders it for any strand.
+- `live verify` summarises `viability: {margin_min_seen, lost_at}`; `monitor` draws a VIABILITY line with margin bars, the worst
+  need highlighted. `examples/persona/viable.yaml` is new. `docs/welfare-stance.md` (draft for owner review) fixes what need,
+  viability and damage mean as arithmetic and what is not claimed.
+
+### Changed
+- N-R4 is relaxed: `per_reading` takes a number sense with `rate` or a flag sense with `per_event` (a flag sense with `rate` is
+  refused at `per_reading.rate`, no longer at `per_reading.sense`).
+
 ## 0.10.1 - unreleased
 
 - Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a

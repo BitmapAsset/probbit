@@ -345,3 +345,20 @@ fn served_demo_labels_its_restart() {
     assert!(buf.contains(r#""demo_kind":"drives""#), "{buf}");
     assert!(buf.contains(r#""pursue":{"#) && buf.contains(r#""drives":{"#), "{buf}");
 }
+
+/// RFC 0008 E: with a bound, a VIABILITY line (worst, margin_min, status) and one row per bounded need under it, its margin as a
+/// bar over [0, 1] and its run beyond the bound; the worst need's row says so; a persona without a bound has no such row
+#[test]
+fn viability_rows_and_the_worst_need() {
+    let f = tmp("viable"); let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
+    let ev = format!("{f}.events"); std::fs::write(&ev, format!("{}\n", r#"{"elapsed_hours":1,"senses":{"tokens":0.3,"tool_fail":true},"src":"env:host"}"#).repeat(2)).unwrap();
+    let (c, _, err) = probbit(&["live", "../examples/persona/viable.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
+    let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
+    let k = out.lines().position(|l| l.starts_with("VIABILITY  ")).expect(&out); let rows: Vec<&str> = out.lines().skip(k).collect();
+    assert_eq!(rows[0], "VIABILITY  worst context | margin_min 0.29 | viable", "{out}");
+    assert!(rows[1].trim_start().starts_with("context") && rows[1].ends_with("margin 0.29  beyond 0  worst"), "{}", rows[1]);
+    assert!(rows[2].trim_start().starts_with("contact") && rows[2].ends_with("margin 0.89  beyond 0"), "{}", rows[2]);
+    assert!(rows[3].trim_start().starts_with("integrity") && rows[3].ends_with("margin 0.80  beyond 0"), "{}", rows[3]);
+    let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("VIABILITY"), "no row without a bound");
+    for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
+}

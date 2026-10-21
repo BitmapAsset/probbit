@@ -160,7 +160,7 @@ type Table = Vec<(String, Vec<f64>)>;
 pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub digest: String, vars: Vec<Var>, steps: Vec<String>, slots: Vec<String>, say_order: bool,
     prefer: Eff, couplings: Vec<(String, String, Vec<Vec<f64>>)>, inputs: Vec<Input>, history: Vec<Hist>, habits: Vec<Habit>, eng: Eng, max_tokens: usize, order: Vec<String>, prefix: String,
     learning: Option<Learning>, drives: Option<Drives>, reward: Option<Vec<(String, Option<Vec<String>>)>>, senses: Option<Senses>, why_past: Option<bool>,
-    surprise: Option<Surprise>, pace: Option<Pace>, disp: Option<Disp> }
+    surprise: Option<Surprise>, pace: Option<Pace>, disp: Option<Disp>, block: bool }
 impl Persona {
     /// `line.why_past` (§2.11): `why` names what the learned weights came from; default on with a senses block, off without
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
@@ -172,6 +172,11 @@ impl Persona {
     pub fn has_credit(&self) -> bool { self.credit().is_some() }
     /// A `needs` block (RFC 0002 Design A): `needs` amounts are read on every event, each with a `satisfy_from` source
     pub fn has_needs(&self) -> bool { self.drives.as_ref().is_some_and(|d| d.needs.is_some()) }
+    /// RFC 0008: the needs block, when declared
+    fn needs(&self) -> Option<&Needs> { self.drives.as_ref().and_then(|d| d.needs.as_ref()) }
+    /// RFC 0008 E: the stance document carries `block` (with `line.block`, or a bound, pressure or valence: keys that did not exist
+    /// before 0.11, so a document without them is as before)
+    pub fn has_block(&self) -> bool { self.block || self.needs().is_some_and(|nb| nb.bounded() || nb.pressure.is_some() || nb.valence.is_some()) }
     /// `pace_up` or `pace_down` with a pace block (RFC 0002 Design C): the engine sets them from R̄
     fn is_pace(&self, id: &str) -> bool { self.pace.is_some() && PACE_IDS.contains(&id) }
     fn var(&self, id: &str) -> Option<&Var> { self.vars.iter().find(|v| v.id == id) }
@@ -399,7 +404,9 @@ pub fn build(doc: &Json) -> R<Persona> {
                 _ => eng.chains = num(Some(x), &p, Some(1.0), Some(MAX_CHAINS), true)? as usize,
             } } }
     // line
-    let lkv: &[(String, Json)] = match get_t(kv, "line") { Some(l) => keys(l, "line", &["max_tokens", "order", "prefix", "why_past", "comment"], &[])?, None => &[] };
+    let lkv: &[(String, Json)] = match get_t(kv, "line") { Some(l) => keys(l, "line", &["max_tokens", "order", "prefix", "why_past", "block", "comment"], &[])?, None => &[] };
+    // RFC 0008 E: `line.block` puts the engine-rendered block in every stance document (a persona with a bound or a coupling has it)
+    let block = match get(lkv, "block") { None | Some(Json::Null) => false, Some(Json::Bool(b)) => *b, Some(_) => return Err(perr("line.block", "true | false")) };
     let why_past = match get(lkv, "why_past") { None | Some(Json::Null) => None, Some(Json::Bool(b)) => Some(*b), Some(_) => return Err(perr("line.why_past", "true | false")) };
     let order = match get_t(lkv, "order") { None => vars.iter().filter(|v| !v.mood).map(|v| v.id.clone()).collect(), Some(o) => strs(o).ok_or_else(|| perr("line.order", "a list of trait ids"))? };
     for k in &order { need(vars.iter().any(|v| v.id == *k), "line.order", &format!("unknown trait or mood {k:?}"))?; }
@@ -407,7 +414,7 @@ pub fn build(doc: &Json) -> R<Persona> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None };
+    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, block };
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -582,7 +589,7 @@ pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
     if p.credit().is_some() && get(raw, "cancel").is_some() { src_form(raw)?; cancel_src(get(raw, "src"))?; }
     // a need's amount (RFC 0002 N-E2): its source, its own or the event's, of a kind in its satisfy_from
     if let Some((d, nb)) = p.drives.as_ref().and_then(|d| d.needs.as_ref().map(|nb| (d, nb))) { src_form(raw)?;
-        let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()] }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
+        let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], beyond: vec![0; nb.items.len()], lost: false, phasic: 0.0 }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
     Ok(())
 }
 /// A persona whose events need a source: rewards (`reward_from`), readings (a senses block), cancels (a credit block) or needs
@@ -676,17 +683,29 @@ impl Drives {
     fn windows(&self) -> bool { self.goals.iter().any(|g| g.expect_by.is_some()) }
 }
 /// One need of the `needs` block (RFC 0002 A.1): a deficit over a setpoint in [0, cap] that grows per stamped hour and per unit of a
-/// number sense's raw reading, and that an amount from a `satisfy_from` source reduces, paying the bound goal
+/// number sense's raw reading (or, RFC 0008 D, by `per_event` per true reading of a flag sense: `reading` = (sense, rate, flag)), and
+/// that an amount from a `satisfy_from` source reduces, paying the bound goal. `viable` (RFC 0008 A) = (the deficit bound x_b, the
+/// run of events beyond it that ends viability).
 #[derive(Clone)]
-struct Need { id: String, say: String, unit: String, cap: f64, weight: f64, per_hour: f64, reading: Option<(usize, f64)>, src: Vec<String>, amount: f64, bind: usize,
-    horizon: f64, forecast: f64, weight_spread: f64, growth_spread: f64 }
+struct Need { id: String, say: String, unit: String, cap: f64, weight: f64, per_hour: f64, reading: Option<(usize, f64, bool)>, src: Vec<String>, amount: f64, bind: usize,
+    horizon: f64, forecast: f64, weight_spread: f64, growth_spread: f64, viable: Option<(f64, u64)> }
 /// The `needs` block: D(x) = (Σ w_i g_i x_i^n)^(1/m); the pursue term's weight `want` and box `cap`; the success rate's step and start;
-/// the win cap; the needs in declared order
+/// the win cap; the needs in declared order; RFC 0008 B `pressure` = (mood, gain) and C `valence` = (mood, tonic, phasic)
 #[derive(Clone)]
-struct Needs { n: f64, m: f64, want: f64, cap: f64, rate: f64, init: f64, r_cap: f64, items: Vec<Need> }
-/// The needs state (RFC 0002 A.3): genes, then per need (declared order) its deficit and its bound goal's success rate
+struct Needs { n: f64, m: f64, want: f64, cap: f64, rate: f64, init: f64, r_cap: f64, items: Vec<Need>, pressure: Option<(String, f64)>, valence: Option<(String, f64, f64)> }
+impl Needs {
+    /// A need declares `viable` (RFC 0008 A): the state then keeps `beyond` and `viability`
+    fn bounded(&self) -> bool { self.items.iter().any(|x| x.viable.is_some()) }
+    /// The input ids the RFC 0008 couplings reserve (need_pressure, need_tonic, need_phasic), whether or not a term lowers them
+    fn coupled(&self) -> Vec<&'static str> {
+        [(self.pressure.is_some(), &["need_pressure"][..]), (self.valence.is_some(), &["need_tonic", "need_phasic"][..])].iter().filter(|x| x.0).flat_map(|x| x.1.iter().copied()).collect()
+    }
+}
+/// The needs state (RFC 0002 A.3): genes, then per need (declared order) its deficit and its bound goal's success rate; with a bound
+/// (RFC 0008 A) per bounded need the run of events beyond its bound (capped at `events`) and whether viability was lost. `phasic`
+/// (D before the event's pass 1 minus D after its pass 2, RFC 0008 C) belongs to the turn and is not stored.
 #[derive(Clone)]
-struct NState { genes: Json, deficit: Vec<f64>, success: Vec<f64> }
+struct NState { genes: Json, deficit: Vec<f64>, success: Vec<f64>, beyond: Vec<u64>, lost: bool, phasic: f64 }
 /// The drive state of an individual: genes, then per goal (declared order) wanting, afterglow, expectation, the last turn's prediction
 /// error, the deadline (hours left), the turns since it was pursued and the omission window (hours left; RFC 0002 A.4); with a needs
 /// block the needs state. `omit` (the expectation of each goal whose window fired this turn) and `ev` (the expectation of the goal
@@ -698,7 +717,7 @@ struct DState { genes: Json, want: Vec<f64>, glow: Vec<f64>, expect: Vec<f64>, s
 impl DState {
     fn zero(p: &Persona, d: &Drives, seed: u64) -> DState {
         let n = d.goals.len();
-        let nd = d.needs.as_ref().map(|nb| NState { genes: need_genes(p, nb, seed), deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()] });
+        let nd = d.needs.as_ref().map(|nb| NState { genes: need_genes(p, nb, seed), deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], beyond: vec![0; nb.items.len()], lost: false, phasic: 0.0 });
         DState { genes: drive_genes(p, d, seed), want: vec![0.0; n], glow: vec![0.0; n], expect: vec![0.0; n], surprise: vec![0.0; n], deadline: vec![None; n], since: vec![0; n],
             window: vec![None; n], nd, omit: vec![None; n], ev: 0.0, pt: disp_gene(p, seed, "patience").unwrap_or(1.0) }
     }
@@ -746,24 +765,37 @@ impl DState {
 impl NState {
     fn to_json(&self, d: &Drives, nb: &Needs) -> Json {
         let per = |f: &dyn Fn(usize) -> Json| Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (x.id.clone(), f(i))).collect());
-        Json::Obj(vec![("genes".into(), self.genes.clone()), ("deficit".into(), per(&|i| Json::Num(self.deficit[i]))),
-            ("success".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.success[i]))).collect()))])
+        let mut v = vec![("genes".into(), self.genes.clone()), ("deficit".into(), per(&|i| Json::Num(self.deficit[i]))),
+            ("success".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (d.goals[x.bind].id.clone(), Json::Num(self.success[i]))).collect()))];
+        // RFC 0008 A: only with a bound, so a state without one is as before
+        if nb.bounded() { v.push(("beyond".into(), Json::Obj(nb.items.iter().enumerate().filter(|(_, x)| x.viable.is_some()).map(|(i, x)| (x.id.clone(), Json::Num(self.beyond[i] as f64))).collect())));
+            v.push(("viability".into(), Json::Str(if self.lost { "lost" } else { "viable" }.into()))); }
+        Json::Obj(v)
     }
     /// `state.needs`, strictly (RFC 0002 A.5): the genes of the seed, the persona's needs and bound goals exactly, each deficit in
     /// [0, cap], each success rate in [0, 1]
     fn read(p: &Persona, d: &Drives, nb: &Needs, j: &Json, seed: u64) -> R<NState> {
-        let kv = keys(j, "state.needs", &["genes", "deficit", "success"], &["genes", "deficit", "success"])?;
+        let ks: &[&str] = if nb.bounded() { &["genes", "deficit", "success", "beyond", "viability"] } else { &["genes", "deficit", "success"] };
+        let kv = keys(j, "state.needs", ks, ks)?;
         need(canon(get(kv, "genes").unwrap()) == canon(&need_genes(p, nb, seed)), "state.needs.genes", "need genes do not match the seed")?;
         let ids: Vec<&str> = nb.items.iter().map(|x| x.id.as_str()).collect(); let goals: Vec<&str> = nb.items.iter().map(|x| d.goals[x.bind].id.as_str()).collect();
         let dk = get(kv, "deficit").and_then(Json::as_obj).filter(|o| o.len() == ids.len() && ids.iter().all(|i| get(o, i).is_some()))
             .ok_or_else(|| perr("state.needs.deficit", format!("one deficit per need of the persona ({})", ids.join(", "))))?;
         let sk = get(kv, "success").and_then(Json::as_obj).filter(|o| o.len() == goals.len() && goals.iter().all(|g| get(o, g).is_some()))
             .ok_or_else(|| perr("state.needs.success", format!("one success rate per bound goal ({})", goals.join(", "))))?;
-        let mut st = NState { genes: get(kv, "genes").unwrap().clone(), deficit: vec![], success: vec![] };
+        let mut st = NState { genes: get(kv, "genes").unwrap().clone(), deficit: vec![], success: vec![], beyond: vec![0; nb.items.len()], lost: false, phasic: 0.0 };
         // the state keeps 6 decimals: a value clamped to a bound can round half a unit past it
         for (x, g) in nb.items.iter().zip(&goals) {
             st.deficit.push(get(dk, &x.id).and_then(Json::as_f64).filter(|v| *v >= 0.0 && *v <= x.cap + 5e-7).ok_or_else(|| perr(&at("state.needs.deficit", &x.id), format!("a deficit in [0, {}] (cap)", pyn(x.cap))))?);
             st.success.push(get(sk, g).and_then(Json::as_f64).filter(|v| *v >= 0.0 && *v <= 1.0 + 5e-7).ok_or_else(|| perr(&at("state.needs.success", g), "a success rate in [0, 1]"))?); }
+        // RFC 0008 A: per bounded need a whole number of events in [0, events]; the status viable | lost
+        if nb.bounded() { let bounded: Vec<&Need> = nb.items.iter().filter(|x| x.viable.is_some()).collect();
+            let bk = get(kv, "beyond").and_then(Json::as_obj).filter(|o| o.len() == bounded.len() && bounded.iter().all(|x| get(o, &x.id).is_some()))
+                .ok_or_else(|| perr("state.needs.beyond", format!("one count per need with a bound ({})", bounded.iter().map(|x| x.id.as_str()).collect::<Vec<_>>().join(", "))))?;
+            for (i, x) in nb.items.iter().enumerate() { let Some((_, ev)) = x.viable else { continue };
+                st.beyond[i] = get(bk, &x.id).and_then(Json::as_f64).filter(|v| *v >= 0.0 && v.fract() == 0.0 && *v <= ev as f64)
+                    .ok_or_else(|| perr(&at("state.needs.beyond", &x.id), format!("a whole number of events in [0, {ev}] (viable.events)")))? as u64; }
+            st.lost = match get(kv, "viability").and_then(Json::as_str) { Some("viable") => false, Some("lost") => true, _ => return Err(perr("state.needs.viability", "viable | lost")) }; }
         Ok(st)
     }
 }
@@ -794,19 +826,27 @@ fn drive_block<'a>(dkv: &'a [(String, Json)], k: &str, f: &[(&str, f64, f64, f64
     Ok((v, sub.and_then(|s| get(bkv, s)).filter(|x| !x.is_null())))
 }
 /// A goal condition `key` (`goal.<id>.<signal>` or `since_pursued.<id>`) with range `rng` -> (goal index, signal, lo, hi); with a
-/// needs block also `need.<id>.deficit` (RFC 0002 A.3, a number condition) -> (the need's index, "deficit", lo, hi)
-fn parse_goal_cond(key: &str, rng: &Json, path: &str, goals: &[Goal], needs: &[String]) -> R<(usize, String, f64, f64)> {
+/// needs block also `need.<id>.deficit` (RFC 0002 A.3, a number condition) -> (the need's index, "deficit", lo, hi); with a bound
+/// (RFC 0008 A, `bounded` = the ids of the needs with one) `need.<id>.margin` -> (the need's index, "margin", lo, hi) and
+/// `needs.margin_min` -> (0, "margin_min", lo, hi)
+fn parse_goal_cond(key: &str, rng: &Json, path: &str, goals: &[Goal], needs: &[String], bounded: &[String]) -> R<(usize, String, f64, f64)> {
     let parts: Vec<&str> = key.split('.').collect();
-    let gi = if parts[0] == "need" && !needs.is_empty() {
-        need(parts.len() == 3 && parts[2] == "deficit", path, "a need condition is need.<id>.deficit")?;
-        needs.iter().position(|x| x == parts[1]).ok_or_else(|| perr(path, format!("unknown need {:?}", parts[1])))?
+    let mut sig_n = "deficit";
+    let gi = if parts[0] == "needs" && !bounded.is_empty() {
+        need(parts.len() == 2 && parts[1] == "margin_min", path, "a needs condition is needs.margin_min")?; sig_n = "margin_min"; 0
+    } else if parts[0] == "need" && !needs.is_empty() {
+        let bound_ok = !bounded.is_empty();
+        need(parts.len() == 3 && (parts[2] == "deficit" || (bound_ok && parts[2] == "margin")), path, if bound_ok { "a need condition is need.<id>.deficit or need.<id>.margin" } else { "a need condition is need.<id>.deficit" })?;
+        let i = needs.iter().position(|x| x == parts[1]).ok_or_else(|| perr(path, format!("unknown need {:?}", parts[1])))?;
+        if parts[2] == "margin" { need(bounded.iter().any(|x| x == parts[1]), path, &format!("need {} has no viable bound (a margin needs viable {{at_most, events}})", parts[1]))?; sig_n = "margin"; }
+        i
     } else {
         let (goal, sig) = if parts[0] == "since_pursued" && parts.len() == 2 { (parts[1], "since_pursued") } else {
             need(parts[0] == "goal" && parts.len() == 3, path, "a goal condition is goal.<id>.<signal> or since_pursued.<id>")?; (parts[1], parts[2]) };
         let gi = goals.iter().position(|g| g.id == goal).ok_or_else(|| perr(path, format!("unknown goal {goal:?}")))?;
         need(COND_SIGNALS.contains(&sig), path, &format!("signal must be one of {}", COND_SIGNALS.join(", ")))?; gi
     };
-    let sig = if parts[0] == "need" && !needs.is_empty() { "deficit" } else if parts[0] == "since_pursued" { "since_pursued" } else { parts[2] };
+    let sig = if (parts[0] == "need" && !needs.is_empty()) || (parts[0] == "needs" && !bounded.is_empty()) { sig_n } else if parts[0] == "since_pursued" { "since_pursued" } else { parts[2] };
     let (lo, hi) = match rng { Json::Num(t) => (*t, f64::INFINITY), _ => {
         let kv = rng.as_obj().filter(|kv| !kv.is_empty() && kv.iter().all(|(k, _)| k == "at_least" || k == "at_most")).ok_or_else(|| perr(path, "a number (at least) or {at_least, at_most}"))?;
         for (k, x) in kv { num(Some(x), &at(path, k), None, None, false)?; }
@@ -815,14 +855,16 @@ fn parse_goal_cond(key: &str, rng: &Json, path: &str, goals: &[Goal], needs: &[S
 }
 /// A goal condition as text: `goal.chores.deadline_hours <= 24`, `since_pursued.chores >= 12`, `goal.fun.want in [0.5, 2]`
 fn cond_text(d: &Drives, c: &GoalCond) -> String {
-    let key = if c.sig == "since_pursued" { format!("since_pursued.{}", d.goals[c.goal].id) } else if c.sig == "deficit" { format!("need.{}.deficit", d.needs.as_ref().map_or("", |nb| nb.items[c.goal].id.as_str())) }
+    let key = if c.sig == "since_pursued" { format!("since_pursued.{}", d.goals[c.goal].id) } else if c.sig == "deficit" || c.sig == "margin" { format!("need.{}.{}", d.needs.as_ref().map_or("", |nb| nb.items[c.goal].id.as_str()), c.sig) }
+        else if c.sig == "margin_min" { "needs.margin_min".to_string() }
         else { format!("goal.{}.{}", d.goals[c.goal].id, c.sig) };
     match (c.lo.is_finite(), c.hi.is_finite()) { (true, false) => format!("{key} >= {}", pyn(c.lo)), (false, true) => format!("{key} <= {}", pyn(c.hi)),
         (true, true) => format!("{key} in [{}, {}]", pyn(c.lo), pyn(c.hi)), _ => key }
 }
 /// A goal condition `key` with range `rng` -> the id of its flag input (one per distinct goal, signal and range)
-fn goal_cond(key: &str, rng: &Json, path: &str, goals: &[Goal], needs: &[String], conds: &mut Vec<GoalCond>, ins: &mut Vec<Json>, origins: &mut Vec<String>) -> R<String> {
-    let (gi, sig, lo, hi) = parse_goal_cond(key, rng, path, goals, needs)?;
+#[allow(clippy::too_many_arguments)]
+fn goal_cond(key: &str, rng: &Json, path: &str, goals: &[Goal], needs: &[String], bounded: &[String], conds: &mut Vec<GoalCond>, ins: &mut Vec<Json>, origins: &mut Vec<String>) -> R<String> {
+    let (gi, sig, lo, hi) = parse_goal_cond(key, rng, path, goals, needs, bounded)?;
     if let Some(c) = conds.iter().find(|c| c.goal == gi && c.sig == sig && c.lo == lo && c.hi == hi) { return Ok(c.id.clone()); }
     let id = format!("drv_c{}", conds.len());
     synth(ins, origins, Json::Obj(vec![("id".into(), Json::Str(id.clone())), ("kind".into(), Json::Str("flag".into())), ("say".into(), Json::Str(key.into()))]), path)?;
@@ -838,8 +880,8 @@ fn synth(ins: &mut Vec<Json>, origins: &mut Vec<String>, spec: Json, origin: &st
 }
 /// The `needs` block (RFC 0002 A.1), read strictly: the rows N-R1 to N-R6 refuse it at the field's path. `senses` = the persona's
 /// senses (a need may grow per reading of a number sense); `win_max` bounds the win a need can pay.
-fn needs_spec(nj: &Json, goals: &[Goal], senses: &[Sense], win_max: f64) -> R<Needs> {
-    let kv = keys(nj, "needs", &["drive", "pursue", "success", "r_cap", "items", "comment"], &[])?;
+fn needs_spec(nj: &Json, goals: &[Goal], senses: &[Sense], win_max: f64, moods: &[String]) -> R<Needs> {
+    let kv = keys(nj, "needs", &["drive", "pursue", "success", "r_cap", "items", "pressure", "valence", "comment"], &[])?;
     let six = |x: f64, path: &str| need(r6(x) == x, path, "at most 6 decimals");
     let pos = |x: Option<&Json>, path: &str| -> R<f64> { let v = num(x, path, None, None, false)?; need(v > 0.0, path, "must be > 0")?; six(v, path)?; Ok(v) };
     // N-R1: drive with n > m > 1 (required)
@@ -858,7 +900,7 @@ fn needs_spec(nj: &Json, goals: &[Goal], senses: &[Sense], win_max: f64) -> R<Ne
     let mut items: Vec<Need> = vec![];
     for (i, x) in il.iter().enumerate() { let path = ix("needs.items", i);
         let xk = keys(x, &path, &["id", "say", "unit", "cap", "weight", "per_hour", "per_reading", "satisfy_from", "amount", "bind", "horizon_hours", "forecast_per_hour",
-            "weight_spread", "growth_spread", "comment"], &["id", "unit", "cap", "weight", "per_hour", "satisfy_from", "amount", "bind"])?;
+            "weight_spread", "growth_spread", "viable", "comment"], &["id", "unit", "cap", "weight", "per_hour", "satisfy_from", "amount", "bind"])?;
         let id = ident(get(xk, "id"), &at(&path, "id"), "id")?;
         need(id.len() <= 32, &at(&path, "id"), "at most 32 characters (a need reserves the input id need_<id>)")?;
         need(!items.iter().any(|y| y.id == id), &at(&path, "id"), "need ids must be distinct")?;
@@ -869,10 +911,13 @@ fn needs_spec(nj: &Json, goals: &[Goal], senses: &[Sense], win_max: f64) -> R<Ne
         need(amount <= ncap, &ap, "at most the need's cap")?;
         let hp = at(&path, "per_hour"); let per_hour = num(get(xk, "per_hour"), &hp, None, None, false)?; need(per_hour >= 0.0, &hp, "must be >= 0")?; six(per_hour, &hp)?;
         let reading = match get(xk, "per_reading") { None | Some(Json::Null) => None, Some(r) => { let rp = at(&path, "per_reading");
-            let rk = keys(r, &rp, &["sense", "rate", "comment"], &["sense", "rate"])?; let sid = get(rk, "sense").and_then(Json::as_str).unwrap_or("");
+            let rk = keys(r, &rp, &["sense", "rate", "per_event", "comment"], &["sense"])?; let sid = get(rk, "sense").and_then(Json::as_str).unwrap_or("");
             let si = senses.iter().position(|y| y.id == sid).ok_or_else(|| perr(&at(&rp, "sense"), format!("not a declared sense ({})", if senses.is_empty() { "the persona has no senses block".to_string() } else { senses.iter().map(|y| y.id.as_str()).collect::<Vec<_>>().join(", ") })))?;
-            need(!senses[si].flag, &at(&rp, "sense"), "a number sense (a need grows per unit of its raw reading)")?;
-            let r8 = num(get(rk, "rate"), &at(&rp, "rate"), None, None, false)?; need(r8 >= 0.0, &at(&rp, "rate"), "must be >= 0")?; six(r8, &at(&rp, "rate"))?; Some((si, r8)) } };
+            // N-R4 (RFC 0008 D): a number sense with `rate`, or a flag sense with `per_event`
+            let (k, other) = if senses[si].flag { ("per_event", "rate") } else { ("rate", "per_event") };
+            need(get(rk, other).is_none(), &at(&rp, other), if senses[si].flag { "a flag sense grows a need by per_event per true reading (not rate)" } else { "a number sense grows a need by rate per unit of its raw reading (not per_event)" })?;
+            let kp = at(&rp, k); let r8 = num(Some(get(rk, k).ok_or_else(|| perr(&kp, format!("required: {k}")))?), &kp, None, None, false)?;
+            need(r8 >= 0.0, &kp, "must be >= 0")?; six(r8, &kp)?; Some((si, r8, senses[si].flag)) } };
         let fp = at(&path, "satisfy_from");
         let src = strs(get(xk, "satisfy_from").unwrap()).filter(|v| !v.is_empty()).ok_or_else(|| perr(&fp, "required: a list of source kinds: env, human"))?;
         for (j, k) in src.iter().enumerate() { let q = ix(&fp, j);
@@ -885,8 +930,31 @@ fn needs_spec(nj: &Json, goals: &[Goal], senses: &[Sense], win_max: f64) -> R<Ne
         let horizon = num_or(xk, "horizon_hours", 0.0, &path, Some(0.0), Some(72.0), false)?; six(horizon, &at(&path, "horizon_hours"))?;
         let forecast = num_or(xk, "forecast_per_hour", per_hour, &path, Some(0.0), None, false)?; six(forecast, &at(&path, "forecast_per_hour"))?;
         let spread = |k: &str| -> R<f64> { let v = num_or(xk, k, 0.0, &path, Some(0.0), Some(3.0), false)?; six(v, &at(&path, k))?; Ok(v) };
-        items.push(Need { id, say, unit, cap: ncap, weight, per_hour, reading, src, amount, bind, horizon, forecast, weight_spread: spread("weight_spread")?, growth_spread: spread("growth_spread")? }); }
-    Ok(Needs { n, m, want, cap, rate, init, r_cap, items })
+        // RFC 0008 A (V8-R1): the bound at_most in (0, cap], the run of events 1..10000
+        let viable = match get(xk, "viable") { None | Some(Json::Null) => None, Some(vj) => { let vp = at(&path, "viable");
+            let vk = keys(vj, &vp, &["at_most", "events", "comment"], &["at_most", "events"])?;
+            let b = num(get(vk, "at_most"), &at(&vp, "at_most"), None, None, false)?; need(b > 0.0 && b <= ncap, &at(&vp, "at_most"), &format!("in (0, {}] (the need's cap)", pyn(ncap)))?; six(b, &at(&vp, "at_most"))?;
+            let ev = num(get(vk, "events"), &at(&vp, "events"), Some(1.0), Some(10000.0), true)?; Some((b, ev as u64)) } };
+        items.push(Need { id, say, unit, cap: ncap, weight, per_hour, reading, src, amount, bind, horizon, forecast, weight_spread: spread("weight_spread")?, growth_spread: spread("growth_spread")?, viable }); }
+    let mood = |m: Option<&Json>, path: &str| -> R<String> { m.and_then(Json::as_str).filter(|m| moods.iter().any(|x| x == m)).map(str::to_string)
+        .ok_or_else(|| perr(path, format!("a declared mood ({})", if moods.is_empty() { "none".to_string() } else { moods.join(", ") }))) };
+    let w = |x: Option<&Json>, path: &str| -> R<f64> { let v = num(x, path, Some(0.0), Some(50.0), false)?; six(v, path)?; Ok(v) };
+    // RFC 0008 B: graded pressure on one mood from the worst margin; one gain, one shape (linear), a bound needed
+    let pressure = match get(kv, "pressure") { None | Some(Json::Null) => None, Some(pj) => {
+        let pk = keys(pj, "needs.pressure", &["mood", "gain", "shape", "comment"], &["mood", "gain"])?;
+        need(items.iter().any(|x| x.viable.is_some()), "needs.pressure", "pressure reads the worst margin: a need needs viable {at_most, events}")?;
+        let g = w(get(pk, "gain"), "needs.pressure.gain")?; need(g > 0.0, "needs.pressure.gain", "must be > 0")?;
+        need(get(pk, "shape").map_or(true, |x| x.as_str() == Some("linear")), "needs.pressure.shape", "linear (c(u) = u, the one shape)")?;
+        Some((mood(get(pk, "mood"), "needs.pressure.mood")?, g)) } };
+    // RFC 0008 C: the tonic and phasic terms on one mood, both weights >= 0
+    let valence = match get(kv, "valence") { None | Some(Json::Null) => None, Some(vj) => {
+        let vk = keys(vj, "needs.valence", &["mood", "tonic", "phasic", "comment"], &["mood", "tonic", "phasic"])?;
+        Some((mood(get(vk, "mood"), "needs.valence.mood")?, w(get(vk, "tonic"), "needs.valence.tonic")?, w(get(vk, "phasic"), "needs.valence.phasic")?)) } };
+    let nb = Needs { n, m, want, cap, rate, init, r_cap, items, pressure, valence };
+    // a need's own input need_<id> must not take an id a coupling reserves
+    for (i, x) in nb.items.iter().enumerate() { let id = format!("need_{}", x.id);
+        need(!nb.coupled().contains(&id.as_str()), &at(&ix("needs.items", i), "id"), &format!("{id} is reserved by needs.{}", if id == "need_pressure" { "pressure" } else { "valence" }))?; }
+    Ok(nb)
 }
 /// A persona with a `drives` block: the block read strictly, then lowered (see `Drives`) and read as a 0.7.0 persona; the digest is
 /// the whole document's, the block included. A goal floor needs `pursue` free of multi-variable rules (the lift's soundness, §2.9).
@@ -967,25 +1035,34 @@ fn build_drives(doc: &Json, senses: &[Sense]) -> R<Persona> {
     if let Some(x) = get_t(&eff, "omission") { synthetic_num(&mut ins, &mut origins, "drv_omit", e[2], "an expected win that did not come", x.clone(), "drives.effects.omission")?; }
     // RFC 0002 A.1-A.3: the needs block, read strictly; each need lowers to the number input need_<id> (box [-pursue.cap, +pursue.cap])
     // carrying its term into its bound goal's level of `pursue`
-    let needs = match get(kv, "needs") { None => None, Some(nj) => Some(needs_spec(nj, &goals, senses, e[3])?) };
+    let needs = match get(kv, "needs") { None => None, Some(nj) => Some(needs_spec(nj, &goals, senses, e[3], &moods)?) };
     let need_ids: Vec<String> = needs.as_ref().map_or(vec![], |nb| nb.items.iter().map(|x| x.id.clone()).collect());
+    let coupled: Vec<&str> = needs.as_ref().map_or(vec![], |nb| nb.coupled());
+    let bounded: Vec<String> = needs.as_ref().map_or(vec![], |nb| nb.items.iter().filter(|x| x.viable.is_some()).map(|x| x.id.clone()).collect());
     if let Some(nb) = &needs {
         for (j, x) in ins[..n_decl].iter().enumerate() { if let Some(id) = x.get("id").and_then(Json::as_str) {
             need(!nb.items.iter().any(|y| format!("need_{}", y.id) == id), &format!("inputs[{j}].id"), "reserved by a need (need_<id>)")?; } }
         for (i, x) in nb.items.iter().enumerate() {
-            synthetic_num(&mut ins, &mut origins, &format!("need_{}", x.id), nb.cap, &x.say, Json::Obj(vec![("pursue".into(), Json::Obj(vec![(goals[x.bind].id.clone(), Json::Num(1.0))]))]), &ix("needs.items", i))?; } }
+            synthetic_num(&mut ins, &mut origins, &format!("need_{}", x.id), nb.cap, &x.say, Json::Obj(vec![("pursue".into(), Json::Obj(vec![(goals[x.bind].id.clone(), Json::Num(1.0))]))]), &ix("needs.items", i))?; }
+        // RFC 0008 B, C: need_pressure = 1 − margin_min (box [0, 1]) with weight gain, need_tonic = D(x)/D(cap) (box [0, 1]) with weight
+        // −tonic, need_phasic = the drive reduction (box [−r_cap, r_cap]) with weight phasic; a weight of 0 lowers no input
+        let o = |mood: &str, w: f64| Json::Obj(vec![(mood.to_string(), Json::Num(w))]);
+        if let Some((mood, g)) = &nb.pressure { synthetic_num(&mut ins, &mut origins, "need_pressure", 1.0, "need pressure", o(mood, *g), "needs.pressure")?; }
+        if let Some((mood, t, ph)) = &nb.valence {
+            if *t > 0.0 { synthetic_num(&mut ins, &mut origins, "need_tonic", 1.0, "distance from the setpoints", o(mood, -t), "needs.valence")?; }
+            if *ph > 0.0 { synthetic_num(&mut ins, &mut origins, "need_phasic", nb.r_cap, "drive reduction", o(mood, *ph), "needs.valence")?; } } }
     let mut habits: Vec<Json> = list(get(&d2, "habits"), "habits")?.to_vec();
     for (i, h) in habits.iter_mut().enumerate() {
         let Json::Obj(hkv) = h else { continue }; let Some((_, Json::Obj(w))) = hkv.iter_mut().find(|(k, _)| k == "when") else { continue };
-        if !w.iter().any(|(k, _)| k.contains('.') || is_drv(k) || need_ids.iter().any(|x| format!("need_{x}") == *k)) { continue; }
+        if !w.iter().any(|(k, _)| k.contains('.') || is_drv(k) || need_ids.iter().any(|x| format!("need_{x}") == *k) || coupled.contains(&k.as_str())) { continue; }
         let mut nw: Vec<(String, Json)> = vec![];
         for (k, v) in w.iter() { need(!is_drv(k) || ins[..n_decl].iter().any(|x| x.get("id").and_then(Json::as_str) == Some(k.as_str())), &format!("habits[{i}].when.{k}"), "reserved for the drives block")?;
-            need(!need_ids.iter().any(|x| format!("need_{x}") == *k), &format!("habits[{i}].when.{k}"), "reserved for the needs block (a rule reads need.<id>.deficit)")?;
-            if k.contains('.') { let f = goal_cond(k, v, &format!("habits[{i}].when.{k}"), &goals, &need_ids, &mut conds, &mut ins, &mut origins)?;
+            need(!need_ids.iter().any(|x| format!("need_{x}") == *k) && !coupled.contains(&k.as_str()), &format!("habits[{i}].when.{k}"), "reserved for the needs block (a rule reads need.<id>.deficit)")?;
+            if k.contains('.') { let f = goal_cond(k, v, &format!("habits[{i}].when.{k}"), &goals, &need_ids, &bounded, &mut conds, &mut ins, &mut origins)?;
             if !nw.iter().any(|(x, _)| *x == f) { nw.push((f, Json::Bool(true))); } } else { nw.push((k.clone(), v.clone())); } }
         *w = nw; }
     for (g, (sa, pri)) in goals.iter().zip(&starve) { let Some(n) = sa else { continue };
-        let f = goal_cond(&format!("since_pursued.{}", g.id), &Json::Obj(vec![("at_least".into(), Json::Num(*n))]), &format!("drives.goals.{}.starve_after", g.id), &goals, &need_ids, &mut conds, &mut ins, &mut origins)?;
+        let f = goal_cond(&format!("since_pursued.{}", g.id), &Json::Obj(vec![("at_least".into(), Json::Num(*n))]), &format!("drives.goals.{}.starve_after", g.id), &goals, &need_ids, &bounded, &mut conds, &mut ins, &mut origins)?;
         habits.push(Json::Obj(vec![("id".into(), Json::Str(format!("starve_{}", g.id))), ("when".into(), Json::Obj(vec![(f, Json::Bool(true))])),
             ("then".into(), Json::Obj(vec![("pursue".into(), Json::Arr(vec![s(&g.id)]))])), ("say".into(), Json::Str(format!("pursue {} now (overdue)", g.id))), ("priority".into(), Json::Num(*pri))])); }
     if !habits.is_empty() { let hi = slot(&mut d2, "habits"); d2[hi].1 = Json::Arr(habits); }
@@ -1003,7 +1080,9 @@ fn build_drives(doc: &Json, senses: &[Sense]) -> R<Persona> {
     if let Some(rf) = get(kv, "reward_from").filter(|x| !x.is_null()) { let mut bearing = p.learning.as_ref().map_or(vec![], |l| l.from.clone());
         bearing.extend(goals.iter().map(|g| format!("goals.{}.win", g.id))); p.reward = Some(reward_spec(rf, &bearing, &p.inputs)?); }
     // the need terms' box is [-pursue.cap, +pursue.cap]: the one lowered input that can push a goal down
-    if let Some(nb) = &needs { for x in p.inputs.iter_mut().filter(|x| nb.items.iter().any(|y| format!("need_{}", y.id) == x.id)) { x.min = -nb.cap; } }
+    if let Some(nb) = &needs { for x in p.inputs.iter_mut().filter(|x| nb.items.iter().any(|y| format!("need_{}", y.id) == x.id)) { x.min = -nb.cap; }
+        // RFC 0008 C: the phasic term's box is [−r_cap, r_cap]
+        for x in p.inputs.iter_mut().filter(|x| x.id == "need_phasic") { x.min = -nb.r_cap; } }
     p.drives = Some(Drives { goals, hl_w: w[0], cap_w: w[1], drain: w[2], sig, hl_a: a[0], cap_a: a[1], rate: e[0], hl_e: e[1], pe_cap: e[2], win_max: e[3],
         w_want: pw[0], w_glow: pw[1], w_deadline: pw[2], tau: pw[3], kappa, synthetic, conds, liking: a[2], liking_spread: a[3], valence, needs });
     Ok(p)
@@ -1014,6 +1093,17 @@ fn need_drive(nb: &Needs, nd: &NState, xs: &[f64]) -> f64 {
 }
 /// A need's gene (`weight` or `growth`): its multiplier, 1 without one
 fn need_gene(nd: &NState, k: &str, id: &str) -> f64 { nd.genes.get(k).and_then(|o| o.get(id)).and_then(Json::as_f64).unwrap_or(1.0) }
+/// RFC 0008 A: per need with a bound its margin round(clip(1 − x / x_b, 0, 1), 6) (1 at the setpoint, 0 at the bound), None without one
+fn margins(nb: &Needs, xs: &[f64]) -> Vec<Option<f64>> { nb.items.iter().zip(xs).map(|(x, v)| x.viable.map(|(b, _)| r6((1.0 - v / b).clamp(0.0, 1.0)))).collect() }
+/// RFC 0008 A: the worst need (the smallest margin; ties: declared order) and its margin, None without a bound
+fn worst(nb: &Needs, xs: &[f64]) -> Option<(usize, f64)> {
+    margins(nb, xs).iter().enumerate().filter_map(|(i, m)| m.map(|m| (i, m))).fold(None, |b: Option<(usize, f64)>, (i, m)| if b.map_or(true, |b| m < b.1) { Some((i, m)) } else { b })
+}
+/// RFC 0008 C: D(x) / D(cap), the tonic input in [0, 1], 6 decimals
+fn need_tonic(nb: &Needs, nd: &NState) -> f64 {
+    let caps: Vec<f64> = nb.items.iter().map(|x| x.cap).collect(); let top = need_drive(nb, nd, &caps);
+    if top > 0.0 { r6((need_drive(nb, nd, &nd.deficit) / top).clamp(0.0, 1.0)) } else { 0.0 }
+}
 /// `xs` with entry `j` set to `v`
 fn with(xs: &[f64], j: usize, v: f64) -> Vec<f64> { let mut y = xs.to_vec(); y[j] = v; y }
 /// The pursue terms (RFC 0002 A.3) on a stepped state: per need (declared order) the forecast x̂ = min(x + g_gr × forecast_per_hour ×
@@ -1033,6 +1123,7 @@ fn need_terms(d: &Drives, ds: &DState) -> Vec<(f64, f64)> {
 /// goal's signals. -> (the stepped needs state, the event's inputs for the drive step: without `needs`, the goals joined)
 fn needs_step(d: &Drives, nb: &Needs, nd: &NState, read: &[Option<SRead>], raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(NState, Vec<(String, Json)>)> {
     for x in &nb.items { let k = format!("need_{}", x.id); need(get(raw, &k).is_none(), &format!("inputs.{k}"), "the engine computes a need's term from its deficit (N-E4)")?; }
+    for k in nb.coupled() { need(get(raw, k).is_none(), &format!("inputs.{k}"), "the engine computes it from the deficits (N-E4)")?; }
     if d.windows() { need(get(raw, "drv_omit").is_none(), "inputs.drv_omit", "the engine computes the omission let-down (N-E4)")?; }
     let goals_in = get_t(raw, "goals"); let mut amt: Vec<Option<f64>> = vec![None; nb.items.len()];
     if let Some(nj) = get_t(raw, "needs") {
@@ -1066,7 +1157,8 @@ fn needs_step(d: &Drives, nb: &Needs, nd: &NState, read: &[Option<SRead>], raw: 
     let h = num(Some(get(raw, "elapsed_hours").unwrap_or(&Json::Num(0.0))), "inputs.elapsed_hours", Some(0.0), None, false)?;
     let mut ns = nd.clone();
     for (i, x) in nb.items.iter().enumerate() {
-        let (reading, rate) = x.reading.map_or((0.0, 0.0), |(si, r)| (read.get(si).and_then(Option::as_ref).and_then(|q| q.raw.as_f64()).unwrap_or(0.0), r));
+        // a number sense: its raw value; a flag sense (RFC 0008 D): 1 for a true reading, else 0
+        let (reading, rate) = x.reading.map_or((0.0, 0.0), |(si, r, flag)| (read.get(si).and_then(Option::as_ref).and_then(|q| if flag { Some(if q.raw == Json::Bool(true) { 1.0 } else { 0.0 }) } else { q.raw.as_f64() }).unwrap_or(0.0), r));
         ns.deficit[i] = r6((nd.deficit[i] + need_gene(nd, "growth", &x.id) * (x.per_hour * h + rate * reading)).max(0.0).min(x.cap)); }
     // pass 2: each satisfaction pays, in declared order (RFC 0002 A.3, two passes)
     let mut paid: Vec<(usize, f64)> = vec![];
@@ -1074,6 +1166,12 @@ fn needs_step(d: &Drives, nb: &Needs, nd: &NState, read: &[Option<SRead>], raw: 
         let after = with(&ns.deficit, j, (ns.deficit[j] - a).abs());
         let r = r6((need_drive(nb, &ns, &ns.deficit) - need_drive(nb, &ns, &after)).max(-nb.r_cap).min(nb.r_cap));
         ns.deficit[j] = r6(after[j].max(0.0).min(x.cap)); if r != 0.0 { paid.push((x.bind, r)); } }
+    // RFC 0008 A: per bounded need the run of events beyond its bound (capped at `events`); viability is lost once, when a run
+    // reaches its `events`, and stays lost
+    for (i, x) in nb.items.iter().enumerate() { let Some((b, ev)) = x.viable else { continue };
+        ns.beyond[i] = if ns.deficit[i] > b { (nd.beyond[i] + 1).min(ev) } else { 0 }; if ns.beyond[i] >= ev { ns.lost = true; } }
+    // RFC 0008 C: the event's drive reduction, D(x before pass 1) − D(x after pass 2), within ±r_cap
+    ns.phasic = if nb.valence.is_some() { r6((need_drive(nb, nd, &nd.deficit) - need_drive(nb, &ns, &ns.deficit)).max(-nb.r_cap).min(nb.r_cap)) } else { 0.0 };
     let mut out: Vec<(String, Json)> = raw.iter().filter(|(k, _)| k != "needs").cloned().collect();
     if paid.is_empty() { return Ok((ns, out)); }
     // the wins and setbacks join the goals' signals (a malformed `goals` is left for the drive step to refuse)
@@ -1163,11 +1261,18 @@ fn host_inputs(d: &Drives, ds: &DState, c: &DriveCtx, raw: &[(String, Json)]) ->
     for id in &d.synthetic { let v = match id.as_str() { "drv_want" => Json::Num(r6(max(&ds.want))), "drv_glow" => Json::Num(r6(max(&ds.glow))),
             "drv_surprise" => Json::Num(r6(c.surprise.max(0.0))), "drv_letdown" => Json::Num(r6((-c.surprise).max(0.0))),
             "drv_expect" => Json::Num(ds.ev), "drv_omit" => Json::Num(c.omit),
+            // RFC 0008 B, C (a needs block declares them, so the needs state is there)
+            "need_pressure" if d.needs.as_ref().is_some_and(|nb| nb.pressure.is_some()) => { let (nb, nd) = (d.needs.as_ref().unwrap(), ds.nd.as_ref().unwrap());
+                Json::Num(r6(1.0 - worst(nb, &nd.deficit).map_or(1.0, |w| w.1))) }
+            "need_tonic" if d.needs.as_ref().is_some_and(|nb| nb.valence.is_some()) => Json::Num(need_tonic(d.needs.as_ref().unwrap(), ds.nd.as_ref().unwrap())),
+            "need_phasic" if d.needs.as_ref().is_some_and(|nb| nb.valence.is_some()) => Json::Num(ds.nd.as_ref().unwrap().phasic),
             _ if id.starts_with("need_") => { let j = d.needs.as_ref().and_then(|nb| nb.items.iter().position(|x| format!("need_{}", x.id) == *id)).unwrap_or(0);
                 Json::Num(terms.get(j).map_or(0.0, |t| t.1)) }
             _ => { let Some(q) = d.conds.iter().find(|q| q.id == *id) else { continue }; let g = q.goal;
                 let v = match q.sig.as_str() { "deadline_hours" => ds.deadline[g], "want" => Some(ds.want[g]), "glow" => Some(ds.glow[g]), "expect" => Some(ds.expect[g]),
-                    "deficit" => ds.nd.as_ref().map(|nd| nd.deficit[g]), _ => Some(ds.since[g] as f64) };
+                    "deficit" => ds.nd.as_ref().map(|nd| nd.deficit[g]),
+                    "margin" => d.needs.as_ref().zip(ds.nd.as_ref()).and_then(|(nb, nd)| margins(nb, &nd.deficit)[g]),
+                    "margin_min" => d.needs.as_ref().zip(ds.nd.as_ref()).and_then(|(nb, nd)| worst(nb, &nd.deficit)).map(|w| w.1), _ => Some(ds.since[g] as f64) };
                 Json::Bool(v.is_some_and(|v| v >= q.lo && v <= q.hi)) } };
         x.push((id.clone(), v)); }
     Ok(x)
@@ -1363,8 +1468,14 @@ fn stance_drives(j: &mut Json, d: &Drives, ds: &DState, lift: &[(String, f64)], 
     v.push(("pursue".into(), pursue)); v.push(("drives".into(), Json::Obj(drives)));
     // RFC 0002 A.6: per need its deficit after the event, the forecast the term read and the term
     if let (Some(nb), Some(nd)) = (&d.needs, &ds.nd) { let t = need_terms(d, ds);
-        v.push(("needs".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| (x.id.clone(), Json::Obj(vec![("deficit".into(), Json::Num(nd.deficit[i])),
-            ("forecast".into(), Json::Num(t[i].0)), ("term".into(), Json::Num(t[i].1))]))).collect()))); }
+        let mg = margins(nb, &nd.deficit);
+        v.push(("needs".into(), Json::Obj(nb.items.iter().enumerate().map(|(i, x)| { let mut f = vec![("deficit".into(), Json::Num(nd.deficit[i])),
+            ("forecast".into(), Json::Num(t[i].0)), ("term".into(), Json::Num(t[i].1))];
+            // RFC 0008 E: per bounded need its margin and its run beyond the bound
+            if let Some(m) = mg[i] { f.push(("margin".into(), Json::Num(m))); f.push(("beyond".into(), Json::Num(nd.beyond[i] as f64))); }
+            (x.id.clone(), Json::Obj(f)) }).collect())));
+        if let Some((w, m)) = worst(nb, &nd.deficit) { v.push(("viability".into(), Json::Obj(vec![("worst".into(), Json::Str(nb.items[w].id.clone())), ("margin_min".into(), Json::Num(m)),
+            ("status".into(), Json::Str(if nd.lost { "lost" } else { "viable" }.into()))]))); } }
 }
 /// The stance keys of RFC 0002 Designs B and C: `pace: {level, rbar}` (slow / steady / brisk by `levels`, R̄ after this event) for
 /// the host's scheduler, and `surprise: {trait: g}` for the learned traits whose gain is above 1; pace's inputs leave `inputs`
@@ -2350,6 +2461,9 @@ fn why(p: &Persona, st: &State, meta: &Meta, bound: &[String], status: &str, sta
             let t = need_terms(d, ds); let best = (0..t.len()).filter(|&j| t[j].1 > 0.0).fold(None, |b: Option<usize>, j| if b.map_or(true, |b| t[j].1 > t[b].1) { Some(j) } else { b });
             if let Some(j) = best.filter(|&j| d.goals[nb.items[j].bind].id == e.level) {
                 parts.push(format!("{} deficit {}, above its setpoint", nb.items[j].say, pyn(round_to(nd.deficit[j], 2)))); } }
+        // RFC 0008 E: the viability clause while the worst margin is under 0.25
+        if let Some((w, m)) = d.needs.as_ref().zip(ds.nd.as_ref()).and_then(|(nb, nd)| worst(nb, &nd.deficit)).filter(|w| w.1 < 0.25) {
+            parts.push(format!("{} margin {}, nearest its bound", d.needs.as_ref().unwrap().items[w].say, pyn(round_to(m, 2)))); }
         // A.4: the omission clause when a window fired this event
         let fired: Vec<&str> = d.goals.iter().zip(&ds.omit).filter(|(_, o)| o.is_some()).map(|(g, _)| g.say.as_str()).collect();
         if !fired.is_empty() { parts.push(format!("an expected win did not come ({})", fired.join(", "))); } }
@@ -2551,9 +2665,31 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
     stance_body(&mut j, p, st);
     if let (Some(s), Json::Obj(v)) = (src, &mut j) { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.push(("src".into(), s)); } }
     if let (Some(k), Some(d)) = (&pay, settled) { ns = settle(p, &mut j, ns, k, d); }
+    if p.has_block() { let b = block(p, &j); if let Json::Obj(v) = &mut j { v.push(("block".into(), Json::Str(b))); } }
     Ok((j, ns))
 }
 
+/// RFC 0008 E: the block a host injects verbatim, rendered from a stance document: every declared trait, then every mood, once
+/// each as `name level` (declared order, "; " between), then with a needs block one viability line: `viability: worst <need>,
+/// margin <m>` (2 decimals; `viability: lost, worst ...` once lost; `viability: no bounds declared` without one)
+pub fn block(p: &Persona, doc: &Json) -> String {
+    let level = |group: &str, id: &str| doc.get(group).and_then(|g| g.get(id)).and_then(|e| e.get("level")).and_then(Json::as_str).unwrap_or("?").to_string();
+    let mut parts: Vec<String> = p.vars.iter().filter(|v| !v.mood && !(p.drives.is_some() && v.id == "pursue")).map(|v| format!("{} {}", v.id, level("stance", &v.id))).collect();
+    parts.extend(p.vars.iter().filter(|v| v.mood).map(|v| format!("{} {}", v.id, level("mood", &v.id))));
+    let mut b = parts.join("; ");
+    if p.has_needs() { b.push_str("\nviability: ");
+        match doc.get("viability") {
+            Some(vj) => { let m = vj.get("margin_min").and_then(Json::as_f64).unwrap_or(0.0);
+                if vj.get("status").and_then(Json::as_str) == Some("lost") { b.push_str("lost, "); }
+                b.push_str(&format!("worst {}, margin {}", vj.get("worst").and_then(Json::as_str).unwrap_or("?"), pyn(round_to(m, 2)))); }
+            None => b.push_str("no bounds declared") } }
+    b
+}
+/// RFC 0008 A: a state's viability: (the worst need's id, margin_min, lost); none without a bound
+pub fn viability(p: &Persona, st: &State) -> Option<(String, f64, bool)> {
+    let (nb, nd) = (p.needs()?, st.drives.as_ref().and_then(|ds| ds.nd.as_ref())?);
+    worst(nb, &nd.deficit).map(|(w, m)| (nb.items[w].id.clone(), m, nd.lost))
+}
 /// The normals of a state with a senses block (§2.11), per sense in declared order: (id, mean, count, drift_cap); none without one
 pub fn normals(p: &Persona, st: &State) -> Vec<(String, f64, u64, f64)> {
     match (&p.senses, &st.senses) { (Some(sn), Some(ss)) => sn.list.iter().enumerate().map(|(i, s)| (s.id.clone(), ss.mean[i], ss.n[i], s.drift_cap)).collect(), _ => vec![] }
@@ -2873,10 +3009,14 @@ pub fn describe(p: &Persona) -> Json {
                 ("r_cap".into(), n(nb.r_cap)),
                 ("items".into(), Json::Obj(nb.items.iter().map(|x| (x.id.clone(), Json::Obj(vec![("say".into(), s(&x.say)), ("unit".into(), s(&x.unit)), ("cap".into(), n(x.cap)),
                     ("weight".into(), n(x.weight)), ("per_hour".into(), n(x.per_hour)),
-                    ("per_reading".into(), x.reading.map_or(Json::Null, |(si, r)| Json::Obj(vec![("sense".into(), s(&p.senses.as_ref().map_or(String::new(), |sn| sn.list[si].id.clone()))), ("rate".into(), n(r))]))),
+                    ("per_reading".into(), x.reading.map_or(Json::Null, |(si, r, flag)| Json::Obj(vec![("sense".into(), s(&p.senses.as_ref().map_or(String::new(), |sn| sn.list[si].id.clone()))), ((if flag { "per_event" } else { "rate" }).into(), n(r))]))),
                     ("satisfy_from".into(), jstrs(&x.src)), ("amount".into(), n(x.amount)), ("bind".into(), s(&dr.goals[x.bind].id)), ("horizon_hours".into(), n(x.horizon)),
                     ("forecast_per_hour".into(), n(x.forecast)), ("spreads".into(), Json::Obj(vec![("weight".into(), n(x.weight_spread)), ("growth".into(), n(x.growth_spread))])),
-                    ("reserved".into(), s(&format!("need_{}", x.id)))]))).collect()))]))); } }
+                    ("reserved".into(), s(&format!("need_{}", x.id)))].into_iter().chain(x.viable.map(|(b, ev)| ("viable".to_string(), Json::Obj(vec![("at_most".into(), n(b)), ("events".into(), n(ev as f64))])))).collect()))).collect()))]))); 
+            // RFC 0008 B, C: the couplings and the inputs they reserve (only when declared)
+            if let Some((_, Json::Obj(nv))) = v.last_mut() {
+                if let Some((m, g)) = &nb.pressure { nv.push(("pressure".into(), Json::Obj(vec![("mood".into(), s(m)), ("gain".into(), n(*g)), ("shape".into(), s("linear")), ("reserved".into(), s("need_pressure"))]))); }
+                if let Some((m, t, ph)) = &nb.valence { nv.push(("valence".into(), Json::Obj(vec![("mood".into(), s(m)), ("tonic".into(), n(*t)), ("phasic".into(), n(*ph)), ("reserved".into(), jstrs(&["need_tonic".to_string(), "need_phasic".to_string()]))]))); } } } }
     // reward_from (§2.10), when declared: per reward-bearing input its allowed source kinds, or "any"
     if let (Json::Obj(v), Some(rw)) = (&mut d, &p.reward) { v.push(("reward_from".into(), Json::Obj(rw.iter().map(|(k, a)| (k.clone(), a.as_ref().map_or(s("any"), |a| jstrs(a)))).collect()))); }
     // the senses block (§2.11), when there is one: per sense its unit, range, scale, sources, prior, caps, spreads, the input ids it
@@ -3005,7 +3145,8 @@ pub fn props(p: &Persona, doc: &Json, path: &str, one: &str) -> R<Vec<Prop>> {
                 need(!d.synthetic.contains(k), &cp, "reserved for the drives block")?;
                 if !k.contains('.') { nw.push((k.clone(), c.clone())); continue; }
                 let need_ids: Vec<String> = d.needs.as_ref().map_or(vec![], |nb| nb.items.iter().map(|x| x.id.clone()).collect());
-                let (gi, sig, lo, hi) = parse_goal_cond(k, c, &cp, &d.goals, &need_ids)?;
+                let bounded: Vec<String> = d.needs.as_ref().map_or(vec![], |nb| nb.items.iter().filter(|x| x.viable.is_some()).map(|x| x.id.clone()).collect());
+                let (gi, sig, lo, hi) = parse_goal_cond(k, c, &cp, &d.goals, &need_ids, &bounded)?;
                 let f = d.conds.iter().find(|q| q.goal == gi && q.sig == sig && q.lo == lo && q.hi == hi).ok_or_else(|| perr(&cp, format!("a property reads the goal conditions the persona's habits use: {}",
                     if d.conds.is_empty() { "none".to_string() } else { d.conds.iter().map(|q| cond_text(d, q)).collect::<Vec<_>>().join(", ") })))?;
                 if !nw.iter().any(|(x, _)| *x == f.id) { nw.push((f.id.clone(), Json::Bool(true))); } }
@@ -3034,7 +3175,8 @@ fn doc_inputs(p: &Persona, doc: &Json) -> Option<Vec<(String, Json)>> {
     let nums = |k: &str| -> Option<Vec<f64>> { per(k)?.iter().map(Json::as_f64).collect() };
     // the needs' deficits from the stance's `needs` (what a need.<id>.deficit condition reads; RFC 0002 A.6)
     let nd = match &d.needs { None => None, Some(nb) => { let nj = doc.get("needs")?;
-        Some(NState { genes: Json::Null, deficit: nb.items.iter().map(|x| nj.get(&x.id).and_then(|e| e.get("deficit")).and_then(Json::as_f64)).collect::<Option<Vec<f64>>>()?, success: vec![0.0; nb.items.len()] }) } };
+        Some(NState { genes: Json::Null, deficit: nb.items.iter().map(|x| nj.get(&x.id).and_then(|e| e.get("deficit")).and_then(Json::as_f64)).collect::<Option<Vec<f64>>>()?, success: vec![0.0; nb.items.len()],
+            beyond: vec![0; nb.items.len()], lost: false, phasic: 0.0 }) } };
     let n = d.goals.len();
     let ds = DState { genes: Json::Null, want: nums("want")?, glow: nums("glow")?, expect: nums("expect")?, surprise: nums("surprise")?,
         deadline: per("deadline")?.iter().map(Json::as_f64).collect(), since: nums("since")?.iter().map(|x| *x as u64).collect(), window: vec![None; n], nd, omit: vec![None; n], ev: 0.0, pt: 1.0 };
@@ -3318,6 +3460,7 @@ fn drive_name(p: &Persona, id: &str) -> Option<String> {
     let d = p.drives.as_ref().filter(|d| d.synthetic.iter().any(|x| x == id))?;
     Some(match id { "drv_want" => "want (largest)".into(), "drv_glow" => "glow (largest)".into(), "drv_surprise" => "surprise (above expectation)".into(),
         "drv_letdown" => "surprise (below expectation)".into(), "drv_expect" => "expected value (the pursued goal)".into(), "drv_omit" => "omitted expected win".into(),
+        "need_pressure" | "need_tonic" | "need_phasic" if d.needs.as_ref().is_some_and(|nb| nb.coupled().contains(&id)) => format!("{} (needs)", id.strip_prefix("need_").unwrap_or(id)),
         _ if id.starts_with("need_") && d.needs.is_some() => format!("{} term", id.strip_prefix("need_").unwrap_or(id)),
         _ => d.conds.iter().find(|q| q.id == id).map_or_else(|| id.to_string(), |q| cond_text(d, q)) })
 }
@@ -4319,7 +4462,7 @@ mod tests {
         // N-R4: per_reading of an undeclared or flag sense; a negative per_hour or rate
         assert_eq!(bad(r#""sense":"tokens""#, r#""sense":"latency""#), "needs.items[0].per_reading.sense: not a declared sense (tokens)");
         assert_eq!(err(build(&json::parse(&NEED.replace(r#""drift_cap":0.5}]"#, r#""drift_cap":0.5},{"id":"fail","kind":"flag","unit":"event","src":["env"],"prior":{"mean":0.05,"var":0.05},"drift_cap":0.25}]"#)
-            .replace(r#""sense":"tokens""#, r#""sense":"fail""#)).unwrap())), "needs.items[0].per_reading.sense: a number sense (a need grows per unit of its raw reading)");
+            .replace(r#""sense":"tokens""#, r#""sense":"fail""#)).unwrap())), "needs.items[0].per_reading.rate: a flag sense grows a need by per_event per true reading (not rate)"); // RFC 0008 D relaxed N-R4
         assert_eq!(err(build(&json::parse(&NEED1.replace(r#""per_hour":0.1,"#, r#""per_hour":0.1,"per_reading":{"sense":"tokens","rate":1},"#)).unwrap())), "needs.items[0].per_reading.sense: not a declared sense (the persona has no senses block)");
         assert_eq!(bad(r#""per_hour":0.04"#, r#""per_hour":-0.04"#), "needs.items[1].per_hour: must be >= 0");
         assert_eq!(bad(r#""rate":1}"#, r#""rate":-1}"#), "needs.items[0].per_reading.rate: must be >= 0");
