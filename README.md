@@ -782,6 +782,16 @@ What it does **not** do, also measured:
 - **0 of 247** persuasion campaigns exceed the certified bound; **1,240** replayed strands verify, 0 failed; the P0 corpus,
   **653** recorded outputs, 0 differ.
 
+### Results: 0.11 viability (simulation)
+
+<a href="docs/results/0.11/README.md"><img src="docs/results/0.11/media/monitor-0.11.gif" alt="probbit monitor on a simulated strand: needs and viability margins" width="480" align="right"></a>
+
+Bars registered before the run, 1,000 simulated episodes per arm: survival **0.922 vs 0.000** for the same policy on a
+constant stance (V4 PASS); pressure tracks the distance to the bound at median Spearman **0.816** with no deficit habits
+(V1 PASS); **0 of 247** campaigns exceed the certified bound (V6 PASS). Valence tracks at +0.839 but fails V2's ablation
+clause. Figures, monitor captures and every bar: [docs/results/0.11](docs/results/0.11/README.md).
+<br clear="right">
+
 ## Known failure modes
 The full list, with the exact commands and numbers, is in BENCHMARKS ["Known failure modes"](BENCHMARKS.md#known-failure-modes)
 and §6 "Where it loses". In short:
