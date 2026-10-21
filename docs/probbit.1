@@ -10,8 +10,8 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         [\-\-checkpoint\-every K]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N] [\-\-strand FILE] [\-\-plain]
 \fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-\fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
-        [\-\-at TIME]
+\fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
+        TEXT [\-\-at TIME]
 \fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
         [\-\-depth N] [\-\-hours LIST] [\-\-json]
 \fBprobbit\fR monitor STRAND [\-\-follow] [\-\-once] [\-\-plain] [\-\-fps N] [\-\-serve]
@@ -141,7 +141,7 @@ the second individual's seed (default: its persona's seed)
 the turns: a JSON list of per\-turn input objects, or {"turns": [...]}; inline or a file
 .RE
 .TP
-\fBlint\fR PERSONA [\-\-never RULE | \-\-props FILE] [\-\-seeds 0\-99] [\-\-threads N]
+\fBlint\fR PERSONA [\-\-never RULE | \-\-props FILE] [\-\-seeds 0\-99] [\-\-threads N] [\-\-host MANIFEST [\-\-strict]]
 contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with a needs block, `needs` notes: horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal; with a pace block, `pace`: the largest field shift pace can cause, with a warning over 1; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample, exit 3 when a rule stays unknown and the search finds none ("unproven": not broken, not proved either)
 .RS 4
 .TP
@@ -156,6 +156,12 @@ the individuals: 0\-99 (default), 7, 1,4,9 or 0\-9,20\-29; seeds 0 to 2^53, at m
 .TP
 \fB\-\-threads\fR \fIN\fR
 search threads, 1 to 1024 (default: the logical CPUs)
+.TP
+\fB\-\-host\fR \fIMANIFEST\fR
+a host manifest ({"host": NAME, "inputs": [ids], "senses": [ids]}; examples/hosts/): `dead` lists each habit whose `when` needs an input or sense this host never supplies (a warning)
+.TP
+\fB\-\-strict\fR
+with \-\-host: a dead habit is an error (exit 1)
 .RE
 .TP
 \fBfuzz\fR PERSONA (\-\-never RULE | \-\-props FILE) [\-\-seeds 0\-99] [\-\-fuzz\-seed N] [\-\-scripts N] [\-\-depth N] [\-\-beam N] [\-\-grid LIST] [\-\-hours LIST] [\-\-threads N] [\-\-json] [\-\-fixture\-src env:synthetic|human:synthetic]
@@ -220,7 +226,21 @@ the JSON document instead of the readable report
 .RE
 .TP
 \fBcheck\fR PERSONA
-valid? digest and sizes
+valid? digest and sizes; with a bound block that declares max_epsilon, the certificate too (exit 1 when it fails)
+.TP
+\fBbound\fR PERSONA [\-\-seeds LIST] [\-\-json] [\-\-audit STRAND]
+RFC 0004, read\-only: per learned trait epsilon (no event sequence moves its odds at rest by more, in total variation: exact over the learned\-weight box), the ceiling, the attaining level set and seed, speed, speed_floor, the residue r and every uncounted channel; exit 1 on an uncounted channel or an epsilon above max_epsilon. \-\-audit STRAND replays a recorded life and reports per trait the room used (resting TV of the learned weights / epsilon), the most at any event and now; exit 1 on an exceedance
+.RS 4
+.TP
+\fB\-\-seeds\fR \fILIST\fR
+the individuals: 0\-99 (default), 7, 1,4,9 or 0\-9,20\-29; seeds 0 to 2^53, at most 100000
+.TP
+\fB\-\-json\fR
+the JSON document instead of the readable report
+.TP
+\fB\-\-audit\fR \fISTRAND\fR
+replay this strand and report the room each learned trait used
+.RE
 .TP
 \fBcompile\fR PERSONA \-\-state STATE [\-\-inputs JSON|FILE]
 the turn's probbit\-ir program (its sha256 = engine.program)
@@ -258,8 +278,8 @@ a resident individual: JSONL events in, one stance per event out
         [\-\-checkpoint\-every K]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N] [\-\-strand FILE] [\-\-plain]
 \fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-\fBprobbit\fR live control STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT
-        [\-\-at TIME]
+\fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
+        TEXT [\-\-at TIME]
 .fi
 .PP
 A resident individual (docs/persona.md \[u00A7]5.7): JSONL events (one object of inputs per line) from \-\-events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e\-6 h), so moods decay by their half\-lives between events; feedback moves the learned deltas of a persona with a learning block (\[u00A7]2.8).
@@ -311,8 +331,8 @@ start at the last checkpoint instead of the header
 the host's action log, one {"turn": T, "action": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs
 .RE
 .TP
-\fBcontrol\fR STRAND pause|resume|retire \-\-by WHO \-\-reason TEXT [\-\-at TIME]
-pause, resume or retire an individual; appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status
+\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME]
+pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status
 .RS 4
 .TP
 \fB\-\-by\fR \fIWHO\fR

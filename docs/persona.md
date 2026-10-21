@@ -800,6 +800,59 @@ and every document it produces is the same, byte for byte, as before the blocks 
 to 6 decimals (genes to 4) and recomputed by `live verify` from logged feedback, wins and stamped hours. The gate, the average
 and the genes are arithmetic over logged numbers, not inner states.
 
+### 2.16 Bound (optional; RFC 0004)
+
+A certificate, not a behaviour: `bound` adds no state and no per-turn cost, and it stays out of the persona digest, so adding
+it to a persona with a recorded life changes no state, strand line or turn (RFC 0004, amendment A1).
+
+```yaml
+bound:
+  rest_hours: 200      # the rest probe: one event of this many idle hours, no inputs (default 30 x the longest half-life; 24 if none)
+  max_epsilon: 0.5     # optional: `persona check` fails above it, or on an uncounted channel
+  seeds: 0-9           # the individuals epsilon is the worst case over (default 0-99)
+  count: [arousal]     # optional: moods without half_life_hours to search instead of naming them uncounted
+```
+
+`probbit persona bound PERSONA [--seeds LIST] [--json]` prints, per learned trait, **epsilon**, the attaining level set and
+seed, the `ceiling` tanh(D / 4), `speed` (the built-in greedy persuader's feedback events to epsilon / 2, a witness),
+`speed_floor` (proved: no shorter sequence reaches epsilon / 2), the residue `r` of decayed channels, the enumerated history
+and every uncounted channel at its path. Exit 0 when every channel is searched, decayed or enumerated; 1 on an uncounted
+channel or an epsilon above `max_epsilon`; 2 on a refusal (BO-R1 to BO-R6: an unknown key, `max_epsilon` outside (0, 1),
+malformed `seeds`, no `learning` block, `rest_hours` outside (0, 1e6], a bad `count` entry).
+
+**The claim, exactly** (a theorem about the engine's arithmetic, labelled mechanism): no event sequence moves a learned
+trait's odds at rest (`rest_hours` idle, no inputs) by more than epsilon + r in total variation; epsilon is the exact maximum
+of that change over the learned-weight box ±`total_cap` (and the counted and enumerated channels), computed from this file
+by probing the box's vertices. It bounds the stance at rest, not the stance mid-conversation and not the words a model
+writes. It is not a safety gate and grants nothing. Above 12 searched coordinates in a trait's component it prints the coarse
+ceiling (sound, not tight), never sampled vertices.
+
+**History.** A `recent` feature whose effects reach the trait's component, or which a habit's `when` names, is enumerated
+by its values, not by stored sequences. The rest probe's own flag is false, so a feature reads min(`cap`, trues in the
+last `window` − 1 stored turns) and a `streak` reads 0; the stored turns of a flag are split at each of its features'
+window boundaries and every count of trues per segment is probed once per distinct tuple of capped values. Every tuple is
+reachable and nothing else of the stored turns enters the rest probe, so this is the exact maximum over histories (equal,
+in the test, to the search over every stored sequence). A chat persona's praise (window 4) and wins (window 6, cap 3) give 4 × 4 =
+16 combinations instead of 256. Epsilon then includes what the history moves on its own (`ceiling` prints null). Limit:
+more than 4096 combinations per trait and seed prints the coarse value 1 (sound), and `--audit` refuses with
+`<trait>: more than 4096 enumerated history combinations: the audit needs an exact epsilon` (exit 2).
+
+In words for a reader: "Its learned character has a published limit: no sequence of messages can move the odds of any trait
+at rest by more than epsilon, a number computed from its file that anyone can recompute. The limit is arithmetic over
+declared numbers. It covers the stance at rest, not the words a model writes, and it is published with how fast the limit
+can be reached."
+
+**Audit.** `probbit persona bound PERSONA --audit STRAND` replays a recorded life and reports, per learned trait, the room
+used (resting TV between the individual and the same individual with its learned weights at 0, divided by epsilon at the
+strand's seed): the most at any event, at which event, now, and the distance to the ceiling now; exit 1 on an exceedance
+(impossible by the theorem; the audit shows it on the recorded life). The room used counts the learned weights only, at the
+individual's own history; epsilon is the whole resting change, history included, so on a trait an enumerated history
+reaches the room used is the learned share of that limit.
+
+**Erasure.** `probbit live control STRAND erase --by human:ID --reason TEXT` appends a chained control line that returns
+every learned weight to 0 (and closes the open credits, as every control line does); replay applies it, the next event's
+state digest records it, and the audit then reports a room used of 0.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -1542,6 +1595,8 @@ previous event, the restart included). `probbit_live_event` (MCP) and Python's `
 | `probbit persona explain PERSONA [--seed N] --script ... --turn K` | turn K in words: every contribution to every field, the joint odds, the habit-free twin, the line, the why |
 | `probbit persona diff PERSONA [--seed A] [--other PERSONA2] [--seed2 B] --script ...` | the distance between two individuals (section 5.4) and their most different turn |
 | `probbit persona lint PERSONA [--props FILE \| --never RULE] [--seeds 0-99] [--threads N]` | contradicting habits and planned levels that are not their trait's most likely one (section 5.5); with rules, prove them and fuzz the unknown ones (section 5.6); with a drives block, `floors`: the habits that can exclude a floor goal and the floors whose lift can reach 50; with a needs block, `needs`: each horizon whose forecast can pass K/2 before the deficit does and every habit that can exclude a bound goal (notes, not errors); with a pace block, `pace`: the largest field shift pace can cause, with a warning over 1; exit 1 if a contradiction is unresolved or a rule breaks, 3 if a rule is unproven (unknown, no counterexample found) |
+| `probbit persona lint PERSONA --host MANIFEST [--strict]` | the dead-rule lint: `dead` lists each habit whose `when` needs an input or sense the host never supplies (that input stays at its default, a history feature of it at 0, so the condition never holds): `dead on this host`, a warning, an error with `--strict` (exit 1). A manifest is `{"host": NAME, "inputs": [ids], "senses": [ids]}`; `examples/hosts/` has two derived from real integrations |
+| `probbit persona bound PERSONA [--seeds LIST] [--json] [--audit STRAND]` | RFC 0004 (section 2.16): the certificate per learned trait, read-only; `--audit` replays a recorded life and reports the room used; exit 1 on an uncounted channel, an epsilon above `max_epsilon` or an exceedance |
 | `probbit persona fuzz PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json]` | search event scripts for each individual's shortest counterexample to a character property, shrunk and replayable (section 5.6); exit 1 if one is found |
 | `probbit persona prove PERSONA (--never RULE \| --props FILE) [--seeds 0-99] [--threads N] [--json]` | per rule: held by construction, proved for every event sequence, or unknown with the cell that failed (section 5.6); exit 1 if one is unknown |
 | `probbit persona check PERSONA` / `describe PERSONA` | valid, its digest and sizes / its traits, moods, inputs, habits and agenda (and senses: unit, range, scale, sources, prior, caps, spreads, reserved ids; the learning block with its credit block; needs: the drive's n and m, the pursue term, the success rate, per need its unit, cap, weight, growth, sources, amount, bound goal, horizon, spreads and reserved id; the windows, valence's weights and liking; surprise's settings and a new learner's start; pace's closed form, levels, effects, gain and largest field shift; the disposition spreads and genes) |
