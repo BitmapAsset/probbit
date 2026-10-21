@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
   `pressure: {s, pending}` and `load: {l}`; refusals W-R1 and L-R1. `live verify` recomputes rest lines. bench/body P6
   (r0-r5) and P7 (l1-l5) measured by the engine for the first time (numbers in the PR). A persona without the blocks gives
   byte-identical documents.
+- **Monitor panel words** (docs/persona.md §5.8): `probbit monitor` prints a PANEL block and the `--serve` page an Instrument
+  panel: every field of the individual (traits, moods, needs, surprise gates, pace, dispositions, learned traits, credit,
+  habits, senses, room left in the bound) as a dial with fixed words for its level, size and direction since the event before.
+  One pure map, unit-tested for zero ambiguity over every bucket; page frames carry `words`. No stance document changes.
 
 ### Changed
 - A new learner's surprise gate starts closed (docs/persona.md §2.13, RFC 0002 Design B): v = 0, r = r_ref, g = 1, so the
