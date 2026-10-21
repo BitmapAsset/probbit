@@ -267,9 +267,11 @@ pub(crate) static COMMANDS: &[Command] = &[
                 flags: &[Flag { name: "--seed", arg: "A", help: "the first individual's seed (default: the persona's seed)" },
                     Flag { name: "--other", arg: "PERSONA2", help: "the second individual's persona (default: the same persona)" },
                     Flag { name: "--seed2", arg: "B", help: "the second individual's seed (default: its persona's seed)" }, F_P_SCRIPT] },
-            Sub { name: "lint", args: "PERSONA [--never RULE | --props FILE] [--seeds 0-99] [--threads N]",
+            Sub { name: "lint", args: "PERSONA [--never RULE | --props FILE] [--seeds 0-99] [--threads N] [--host MANIFEST [--strict]]",
                 help: "contradicting habits (every conditional habit and pair, every prev level); warnings: planned levels that are not their trait's most likely one; with a needs block, `needs` notes: horizons whose forecast can pass K/2 before the deficit does, habits that exclude a bound goal; with a pace block, `pace`: the largest field shift pace can cause, with a warning over 1; with rules: prove each one, fuzz the unknown ones; exit 1 on a counterexample, exit 3 when a rule stays unknown and the search finds none (\"unproven\": not broken, not proved either)",
-                flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS, F_P_THREADS] },
+                flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS, F_P_THREADS,
+                    Flag { name: "--host", arg: "MANIFEST", help: "a host manifest ({\"host\": NAME, \"inputs\": [ids], \"senses\": [ids]}; examples/hosts/): `dead` lists each habit whose `when` needs an input or sense this host never supplies (a warning)" },
+                    Flag { name: "--strict", arg: "", help: "with --host: a dead habit is an error (exit 1)" }] },
             Sub { name: "fuzz", args: "PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--fuzz-seed N] [--scripts N] [--depth N] [--beam N] [--grid LIST] [--hours LIST] [--threads N] [--json] [--fixture-src env:synthetic|human:synthetic]",
                 help: "search event scripts for the shortest one whose stance breaks a rule (habit syntax: {when: {...}, then: {...}}); shrunk (§5.6). --fixture-src explicitly authorizes synthetic-source fixtures for strict replay; never use them to relabel production events. The persona must allow that source.",
                 flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS,
@@ -284,7 +286,10 @@ pub(crate) static COMMANDS: &[Command] = &[
             Sub { name: "prove", args: "PERSONA (--never RULE | --props FILE) [--seeds 0-99] [--threads N] [--json]",
                 help: "per rule: held by construction (a habit implies it), proved for every event sequence (a sound bound), or unknown (the cell it fails; fuzz it) (§5.6)",
                 flags: &[F_P_NEVER, F_P_PROPS, F_P_SEEDS, F_P_THREADS, F_P_JSON] },
-            Sub { name: "check", args: "PERSONA", help: "valid? digest and sizes", flags: &[] },
+            Sub { name: "check", args: "PERSONA", help: "valid? digest and sizes; with a bound block that declares max_epsilon, the certificate too (exit 1 when it fails)", flags: &[] },
+            Sub { name: "bound", args: "PERSONA [--seeds LIST] [--json] [--audit STRAND]",
+                help: "RFC 0004, read-only: per learned trait epsilon (no event sequence moves its odds at rest by more, in total variation: exact over the learned-weight box), the ceiling, the attaining level set and seed, speed, speed_floor, the residue r and every uncounted channel; exit 1 on an uncounted channel or an epsilon above max_epsilon. --audit STRAND replays a recorded life and reports per trait the room used (resting TV of the learned weights / epsilon), the most at any event and now; exit 1 on an exceedance",
+                flags: &[F_P_SEEDS, F_P_JSON, Flag { name: "--audit", arg: "STRAND", help: "replay this strand and report the room each learned trait used" }] },
             Sub { name: "compile", args: "PERSONA --state STATE [--inputs JSON|FILE]", help: "the turn's probbit-ir program (its sha256 = engine.program)", flags: &[F_P_STATE, F_P_INPUTS] },
             Sub { name: "describe", args: "PERSONA", help: "traits, moods, inputs, habits, agenda, and the blocks it declares (learning, drives with windows and valence, senses, needs, surprise, pace with its closed form, the disposition genes)", flags: &[] },
         ],
@@ -298,7 +303,7 @@ pub(crate) static COMMANDS: &[Command] = &[
         usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]",
             "live PERSONA --demo week [--seed N] [--strand FILE] [--plain]",
             "live verify STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]",
-            "live control STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]"],
+            "live control STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]"],
         about: "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n--strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.",
         before: &[],
         flags: &[&[
@@ -317,8 +322,8 @@ pub(crate) static COMMANDS: &[Command] = &[
                 flags: &[Flag { name: "--from-checkpoint", arg: "", help: "start at the last checkpoint instead of the header" },
                     Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" },
                     Flag { name: "--blocks", arg: "FILE", help: "write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {\"block\", \"n\"} per line; replays from the header" }] },
-            Sub { name: "control", args: "STRAND pause|resume|retire --by WHO --reason TEXT [--at TIME]",
-                help: "pause, resume or retire an individual; appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status",
+            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]",
+                help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status",
                 flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required)" },
                     Flag { name: "--reason", arg: "TEXT", help: "why (required)" },
                     Flag { name: "--at", arg: "TIME", help: "when (default: now, UTC)" }] },
@@ -773,7 +778,7 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
     if res.iter().any(|per| per.iter().any(Option::is_some)) { std::process::exit(1) }
 }
 /// `probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]`;
-/// `probbit live PERSONA --demo week`; `probbit live verify STRAND [--from-checkpoint] [--actions FILE]`; `probbit live control STRAND pause|resume|retire --by WHO --reason TEXT`
+/// `probbit live PERSONA --demo week`; `probbit live verify STRAND [--from-checkpoint] [--actions FILE]`; `probbit live control STRAND pause|resume|retire|erase --by WHO --reason TEXT`
 fn live_cmd(args: &[String]) {
     let engine = persona_engine(); let eng: persona::Engine = &engine;
     let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
@@ -823,7 +828,7 @@ fn live_cmd(args: &[String]) {
     }
     if args.get(1).map(String::as_str) == Some("control") {
         let mut a = vec!["live control".to_string()]; a.extend(args.iter().skip(4).cloned()); let (v, w) = sub_flags("live", "control").unwrap(); check_flags(&a, &v, &w);
-        let usage = "live control: probbit live control STRAND pause|resume|retire --by human:ID --reason TEXT";
+        let usage = "live control: probbit live control STRAND pause|resume|retire|erase --by human:ID --reason TEXT";
         let (Some(path), Some(what)) = (args.get(2).filter(|a| !a.starts_with("--")), args.get(3).filter(|a| !a.starts_with("--"))) else { fail(usage) };
         let (Some(by), Some(reason)) = (opt("--by"), opt("--reason")) else { fail(&format!("{usage} (--by and --reason are required)")) };
         match live::control_cmd(path, what, &by, &reason, &opt("--at").unwrap_or_else(live::utc_now)) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
@@ -1020,8 +1025,9 @@ fn persona_cmd(args: &[String]) {
     let mut a = vec![format!("persona {sub}")]; a.extend(args[3..].iter().cloned()); check_flags(&a, &vals, &switches);
     let need = |f: &str| -> String { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned().unwrap_or_else(|| fail(&format!("persona {sub}: {f} is required"))) };
     let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
-    let (p, _) = persona::load(path).unwrap_or_else(|e| bad_input("persona: ", e));
+    let (p, pdoc) = persona::load(path).unwrap_or_else(|e| bad_input("persona: ", e));
     let engine = persona_engine(); let eng: persona::Engine = &engine;
+    let bound = || persona::bound::of_doc(&pdoc, &p).unwrap_or_else(|e| bad_input("persona: ", e));
     let no_inertia = args.iter().any(|x| x == "--no-inertia");
     let state = |f: &str| -> persona::State { let s = need(f);
         let t = std::fs::read_to_string(&s).unwrap_or_else(|e| bad_input("persona: ", persona::perr("state", format!("cannot read {s}: {e} (make one with `probbit persona init`)"))));
@@ -1048,11 +1054,35 @@ fn persona_cmd(args: &[String]) {
             emit(&persona_text(&persona::diff(&p, sa, &q, sb, &turns(), eng).unwrap_or_else(|e| bad_input("persona: ", e)), pretty)); }
         "compile" => { let st = state("--state"); let text = persona::program(&p, &st, &inputs()).unwrap_or_else(|e| bad_input("persona: ", e));
             if pretty { emit(&json::write(&json::parse(&text).expect("compiled program JSON"), true)); } else { emit(&text); } }
-        "check" => emit(&persona_text(&persona::check(&p, eng).unwrap_or_else(|e| bad_input("persona: ", e)), pretty)),
+        "check" => { let mut doc = persona::check(&p, eng).unwrap_or_else(|e| bad_input("persona: ", e)); let mut ok = true;
+            // RFC 0004: a declared max_epsilon makes the certificate part of the check
+            if let Some(b) = bound().filter(|b| b.max_epsilon.is_some()) { let (cert, k) = persona::bound::publish(&p, &b, None, eng).unwrap_or_else(|e| bad_input("persona: ", e));
+                ok = k; if let Json::Obj(v) = &mut doc { v.push(("bound".into(), cert)); v.iter_mut().filter(|(k, _)| k == "ok").for_each(|(_, x)| *x = Json::Bool(ok)); } }
+            emit(&persona_text(&doc, pretty)); if !ok { std::process::exit(1) } }
+        "bound" => { let b = bound().unwrap_or(persona::bound::Bound { rest_hours: None, max_epsilon: None, seeds: None, count: vec![] });
+            let json_out = args.iter().any(|x| x == "--json") || pretty;
+            if let Some(s) = opt("--audit") {
+                let text = std::fs::read_to_string(&s).unwrap_or_else(|e| bad_input("persona: ", persona::perr("--audit", format!("cannot read {s}: {e}"))));
+                match live::bound_audit(&text, &b, eng) {
+                    Ok((doc, ok)) => { emit(&persona_text(&doc, pretty)); if !ok { std::process::exit(1) } }
+                    Err((line, why)) => bad_input("persona: ", persona::perr("--audit", format!("line {line}: {why}"))) }
+                return; }
+            let seeds = opt("--seeds").map(|v| persona::bound::seeds_text(&v).unwrap_or_else(|| bad_input("persona: ", persona::perr("--seeds", "a range a-b or a list a,b,c of whole numbers in 0..2147483647 (a <= b, at most 10000 seeds)"))));
+            let (doc, ok) = persona::bound::publish(&p, &b, seeds, eng).unwrap_or_else(|e| bad_input("persona: ", e));
+            if json_out { emit(&persona_text(&doc, pretty)); } else { emit(&persona::bound::text(&doc)); }
+            if !ok { std::process::exit(1) } }
         "describe" => emit(&persona_text(&persona::describe(&p), pretty)),
         "fuzz" | "prove" => fuzz_cmd(args, path, &p, &engine),
-        _ => { let Lint { doc, unresolved, broken, unproven } = lint_report(args, path, &p, 8, vec![1.0, 12.0, 48.0]);
+        _ => { let Lint { mut doc, unresolved, broken, unproven } = lint_report(args, path, &p, 8, vec![1.0, 12.0, 48.0]);
+            // the dead-rule lint: habits this host can never bring into force (a warning; an error with --strict)
+            let mut dead = 0;
+            if let Some(h) = opt("--host") { let j = json_arg(&h, "host"); let (name, ins, sns) = persona::hostlint::manifest(&j).unwrap_or_else(|e| bad_input("persona: ", e));
+                let d = persona::hostlint::dead(&p, &ins, &sns, eng).unwrap_or_else(|e| bad_input("persona: ", e)); dead = d.len();
+                for x in &d { err_line(&format!("lint: {} {} on host {name} ({})", x.get("habit").and_then(Json::as_str).unwrap_or(""), "dead", x.get("needs").and_then(Json::as_str).unwrap_or(""))); }
+                if let Json::Obj(v) = &mut doc { v.push(("host".into(), Json::Str(name))); v.push(("dead".into(), Json::Arr(d))); } }
+            else if args.iter().any(|x| x == "--strict") { fail("persona lint: --strict needs --host MANIFEST") }
             emit(&persona_text(&doc, pretty));
+            if dead > 0 && args.iter().any(|x| x == "--strict") { std::process::exit(1) }
             if !unproven.is_empty() {
                 let ids: Vec<&str> = unproven.iter().filter_map(|u| u.get("id").and_then(Json::as_str)).collect();
                 err_line(&format!("lint: {} rule{} unproven, not broken: {} (the bound left {} unknown and the search found no counterexample; `probbit persona prove` names the cell)",
@@ -1104,7 +1134,10 @@ fn help_cmd(args: &[String]) {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // an argument that is not valid Unicode (a file name in a legacy encoding on Linux, an unpaired surrogate on Windows) is
+    // refused by name; std::env::args would panic on it
+    let args: Vec<String> = std::env::args_os().skip(1).enumerate().map(|(i, a)| a.into_string().unwrap_or_else(|a|
+        fail(&format!("argument {} is not valid UTF-8 ({}); rename the file or pass a UTF-8 path", i + 1, a.to_string_lossy())))).collect();
     JSON_FLAG.store(args.iter().any(|a| a == "--json"), std::sync::atomic::Ordering::Relaxed);
     // `probbit CMD [SUB] ... --help`: the command's help, or the subcommand's when the word after the command is one of its subcommands
     if args.len() >= 2 && args[1..].iter().any(|a| a == "--help" || a == "-h") { if let Some(c) = command(&args[0]) {

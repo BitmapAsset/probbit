@@ -57,7 +57,7 @@ fn needs_rows_and_the_at_cap_alert() {
     let (c, _, err) = probbit(&["live", "../examples/persona/body.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
     let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
     let k = out.lines().position(|l| l.starts_with("NEEDS   ")).expect(&out); let rows: Vec<&str> = out.lines().skip(k).collect();
-    assert_eq!(rows[0], "NEEDS   context  [###.....]  deficit 0.40/1 token_share  term +0.02  window compact closed", "{out}");
+    assert_eq!(rows[0], "NEEDS   context  [###.....]  deficit 0.40/1 token_share  term +0.03  window compact closed", "{out}");
     assert_eq!(rows[1], "        contact  [########]  deficit 1.00/1 share  term +0.99  window report closed", "{out}");
     assert_eq!(rows[2].trim_start(), "! contact with the principal: the deficit sits at its cap (1)", "{out}");
     let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("NEEDS"), "no row without the block");
@@ -74,7 +74,7 @@ fn pace_and_gain_rows() {
     let (c, _, err) = probbit(&["live", "../examples/persona/pacer.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
     let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
     let pace = out.lines().find(|l| l.starts_with("PACE    ")).expect(&out); assert!(pace.ends_with("]  rbar 1.68/4 | r0 1 | brisk"), "{pace}");
-    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.90  learning fast"), "{gain}");
+    let gain = out.lines().find(|l| l.starts_with("GAIN    ")).expect(&out); assert!(gain.contains("initiative") && gain.ends_with("g 1.77  learning fast"), "{gain}");
     let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("PACE    ") && !out.contains("GAIN    "), "no rows without the blocks");
     for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
 }
@@ -93,6 +93,30 @@ fn one_plain_frame_is_pinned() {
     assert!(!uni.contains('\x1b') && uni.contains("replay verified ✓") && uni.contains('█'), "{uni}");
     assert_eq!(uni.lines().count(), out.lines().count());
     let _ = std::fs::remove_file(&f);
+}
+
+/// A strand saved by a Windows editor (CRLF line endings, a leading UTF-8 byte-order mark) replays as the bytes it was written
+/// with: `live verify` agrees, and the frame is the pinned one
+#[test]
+fn crlf_and_bom_strands_replay() {
+    let text = std::fs::read_to_string(WEEK).unwrap().replace("\r\n", "\n");
+    let (c, plain, err) = probbit(&["live", "verify", WEEK]); assert_eq!(c, 0, "{err}");
+    for (tag, saved) in [("crlf", text.replace('\n', "\r\n")), ("bom", format!("\u{feff}{text}")), ("bomcrlf", format!("\u{feff}{}", text.replace('\n', "\r\n")))] {
+        let f = tmp(tag); std::fs::write(&f, saved).unwrap();
+        let (c, out, err) = probbit(&["live", "verify", &f]); assert_eq!((c, out.as_str()), (0, plain.as_str()), "{tag}: {err}");
+        let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{tag}: {err}");
+        assert_eq!(out, pinned("tutor-week.once.txt", &f), "{tag}");
+        let _ = std::fs::remove_file(&f);
+    }
+}
+
+/// The page runs on Safari 15, Firefox 102 and Chromium 100: none of the newer features those engines lack
+#[test]
+fn the_page_needs_no_recent_engine() {
+    let page = std::fs::read_to_string("src/monitor.html").unwrap();
+    for f in [".at(", "oklch(", "oklab(", "color-mix(", ":has(", "@container", "structuredClone", "??=", "||=", "&&=", ".findLast(", "Object.hasOwn(", "@layer", "dvh", "svh", "lvh"] {
+        assert!(!page.contains(f), "monitor.html uses {f}, which Safari 15.0 / Firefox 102 / Chromium 100 lack");
+    }
 }
 
 /// --demo --plain --once: the last frame of the tutor's week, the same as `live --demo week` writes it (the pinned frame of the
@@ -272,6 +296,8 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
     let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
     assert!(buf.starts_with("HTTP/1.1 200 OK\r\n") && buf.contains("Content-Type: text/event-stream"), "{buf}");
+    // through a reverse proxy: never cached, never held in the proxy's buffer
+    assert!(buf.contains("Cache-Control: no-store\r\n") && buf.contains("X-Accel-Buffering: no\r\n"), "{buf}");
     assert_eq!((evs[0].0.as_str(), evs[1].0.as_str()), ("meta", "frame"));
     assert!(evs[0].1.contains(r#""name":"Pip""#) && evs[0].1.contains(r#""id":"warmth""#), "{}", evs[0].1);
     assert!(evs[1].1.contains(r#""n":3,"#) && evs[1].1.contains(&format!(r#""doc":{},"#, docs[2])) && evs[1].1.contains(r#""diverges":null"#), "{}", evs[1].1);
@@ -280,7 +306,7 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     assert_eq!(evs[2].0, "frame"); assert!(evs[2].1.contains(r#""n":4,"#) && evs[2].1.contains(&format!(r#""doc":{},"#, docs[3])), "{}", evs[2].1);
     assert_eq!(get(port, "/doc/4", &host).2, format!("{}\n", docs[3]));
     // the port is taken: exit 2
-    let (c, _, err) = probbit(&["monitor", &f, "--serve", "--port", &port.to_string()]); assert_eq!(c, 2); assert!(err.contains(&format!("cannot listen on 127.0.0.1:{port}")), "{err}");
+    let (c, _, err) = probbit(&["monitor", &f, "--serve", "--port", &port.to_string()]); assert_eq!(c, 2); assert!(err.contains(&format!("cannot listen on 127.0.0.1:{port}")) && err.contains("another program holds this port; pick another with --port N"), "{err}");
     let _ = child.0.kill(); let mut err = String::new(); child.0.stderr.take().unwrap().read_to_string(&mut err).unwrap(); drop(child);
     assert!(err.contains("--open: no browser started"), "{err}");
     for (args, msg) in [(vec!["monitor", &f, "--serve", "--once"], "give one of them"), (vec!["monitor", &f, "--port", "8080"], "--port goes with --serve"),
