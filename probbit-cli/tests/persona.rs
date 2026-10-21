@@ -1034,7 +1034,7 @@ fn p3_holds_with_bounds() {
         let (mut all, mut good) = (String::new(), String::new());
         for _ in 0..60 { let h = [0.0, 0.5, 1.0, 2.0][r.below(4) as usize]; let tok = r.below(50) as f64 / 100.0; let fail = r.below(3) == 0;
             let ok = match r.below(5) { 0 => format!(r#"{{"elapsed_hours":{h},"needs":{{"context":{{"amount":0.6,"src":"env:compactor"}}}},"senses":{{"tokens":{tok}}},"src":"env:host"}}"#),
-                1 => format!(r#"{{"elapsed_hours":{h},"needs":{{"contact":{{"amount":0.8,"src":"human:gary"}}}},"src":"env:host"}}"#),
+                1 => format!(r#"{{"elapsed_hours":{h},"needs":{{"contact":{{"amount":0.8,"src":"human:owner"}}}},"src":"env:host"}}"#),
                 2 => format!(r#"{{"elapsed_hours":{h},"needs":{{"integrity":0.5}},"senses":{{"tool_fail":{fail}}},"src":"env:host"}}"#),
                 _ => format!(r#"{{"elapsed_hours":{h},"senses":{{"tokens":{tok},"tool_fail":{fail}}},"src":"env:host"}}"#) };
             all.push_str(&ok); all.push('\n'); good.push_str(&ok); good.push('\n');

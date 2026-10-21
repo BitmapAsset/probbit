@@ -48,4 +48,4 @@ model that reads a stance all read the same thing.
   example: who may declare bounds, whether "lost" must page a person, which words a host may inject). Until then, the default
   is the narrowest reading: arithmetic over logged numbers.
 
-Owner review: pending (Gary). Change requests go to the RFC 0008 discussion.
+Owner review: pending (the maintainer). Change requests go to the RFC 0008 discussion.

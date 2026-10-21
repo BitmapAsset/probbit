@@ -102,7 +102,7 @@ deviation. Lowered as `need_tonic` in [0, 1] and `need_phasic` in [−r_cap, r_c
 ## Not covered
 
 Learning of bounds (bounds are declared, never learned); multi-agent needs; anything about experience. The welfare stance
-the qualia brief (§4) asks for should exist before this ships.
+that §4 asks for should exist before this ships.
 
 ## Implementation notes (this PR, 0.11.0-dev)
 
