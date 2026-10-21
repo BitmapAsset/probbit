@@ -75,3 +75,15 @@ fn every_command_accepts_json() {
     }
     let (c, out, _) = probbit(&["demo", "--json"], ""); assert_eq!(c, 0); assert!(out.starts_with('{'));
 }
+
+/// A file name that is not valid UTF-8 (a legacy encoding on Linux) is refused with exit 2 and a line naming it, not a panic
+#[cfg(unix)]
+#[test]
+fn a_non_utf8_argument_is_refused_not_a_panic() {
+    use std::os::unix::ffi::OsStrExt;
+    let o = Command::new(env!("CARGO_BIN_EXE_probbit")).arg("monitor").arg(std::ffi::OsStr::from_bytes(b"bad\xff name.strand")).arg("--once")
+        .stdin(Stdio::null()).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(2), "{err}");
+    assert!(err.contains("argument 2 is not valid UTF-8 (bad\u{fffd} name.strand)") && !err.contains("panicked"), "{err}");
+}

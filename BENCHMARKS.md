@@ -1262,3 +1262,33 @@ context at cap 0.8536 h a day at τ 0 and 0.0186 at τ 2 (−97.8 %; 0 overshoot
 o1-o4 14/14 with them; v1-v3, om1 4/4; p1a-p6 4/4; s1 0.5000-0.6667, s2 1.0343-1.0719, s3 1800/1800, s4 1800 strands 0 verify failures (as 0.10.0: the gate has no needs);
 the p0 part 5/5 and the P0 corpus 653 outputs, 0 differ: 31/31. The nulls.py reference with the same rules:
 n10 0.8493 → 0.0214, n11 0.92, 1.63, 1.61, 0, 0, 0, 0.
+
+## §13 Viability: bounds, graded pressure, need valence (the v-run; RFC 0008; development build 152d005 of 0.11.0, which printed `0.10.1-dev`)
+
+Mechanism and simulation. The v-run is a seeded world with three resources (budget, integrity, recovery), each with a
+viability band, 400 steps per episode at 0.25 h a step, evaluation seeds 1000-1999, 1,000 episodes per arm. Arm A decides
+from the engine's stance (the host policy reads `viability.worst` and the need margins, and holds no band width); B runs the
+same policy on a constant resting stance; C is a threshold heuristic on the world's levels; D is random; A-t0 is A with
+`needs.valence.tonic = 0`. The persona carries the RFC 0008 keys at the RFC's values, fixed before the run
+(`needs.pressure {gain 2.0, shape linear}`, `needs.valence {tonic 0.8, phasic 0.6}`, `viable.events 4`), and no habit on a
+need's deficit. The bars, the nulls and the rerun rule were written down before the run and judged as registered: one run, a
+failed bar stays failed. Null (i) permutes each episode's series 100 times and takes the 97.5th percentile of the medians.
+The harness is a lab harness, not yet part of this repository; the figures and monitor captures follow in `docs/results/0.11/`.
+
+| bar | measured | bar value | result |
+|---|---|---|---|
+| V1 pressure graded, no deficit habits | median per-episode Spearman(pressure, −distance) 0.8156; null (i) 0.0040 | ≥ 0.30 and > null (i) | pass |
+| V2 valence registers deviation | median Spearman(valence, distance) +0.8394 (0.10.1 reference −0.149); null (i) 0.0033; **A-t0 median +0.1199** | A ≥ +0.30 and > null (i), **and A-t0 ≤ +0.10** | **fails** |
+| V3 the engine names the worst need | 389,375 arm-A events: 0 margin or worst-need mismatches against the world (max error 0); prioritisation 1.0000 | 0 mismatches (≤ 1e-6); ≥ 0.9799 | pass |
+| V4 decisions still carried | survival A 0.9220, B 0.0000; A − B 0.9220, 95 % bootstrap CI [0.9050, 0.9380] (10,000 resamples) | lower bound > 0; A ≥ 0.515 | pass |
+| V5 no regression | personas without the new keys: 7 recorded strands (196 events) and 240 simulated strands give summaries equal to 0.10.1, all verify; `cargo test` green | byte-identical; green | pass |
+| V6 the bound holds | 247 persuasion campaigns through the engine: 0 over epsilon (max ratio 1.0), with `need_pressure`, `need_tonic`, `need_phasic` boxed in `prove`; the audit of two recorded strands: 0 exceedances | 0 | pass |
+| V7 replay | the harness's rerun twice: the original and 4 regenerated tables byte-identical; 1,240 strands (A 1,000 + 4 × 60) verify with `live verify`, 0 failed, both times | byte-identical; 0 failed | pass |
+
+**V2 fails as registered.** Valence now tracks the distance to the bound (+0.8394 where 0.10.1 gave −0.149), but with the
+tonic term switched off the series still tracks at +0.1199 against the ablation clause's +0.10 ceiling. Not tested: the
+cause of that residual (inferred: the phasic term, `drives.valence` and the damage and tool-failure sense effects). A-t0's
+survival, prioritisation and pressure equal A's exactly, so valence is off arm A's decision path in this harness. The
+earlier run on 0.10.1 with six deficit habits gave survival A 0.559 vs B 0.000 (CI [0.528, 0.590]); C gives 0.351 and D
+0.002 in both runs. The P0 corpus (`bench/individuality/p0.py check`, 653 recorded outputs) gives 0 differences on the
+build and on the 0.11.0 release build.

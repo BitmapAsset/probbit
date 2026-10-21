@@ -2,10 +2,10 @@
 # probbit installer: fetches a prebuilt release archive, checks its SHA-256 and installs the `probbit` binary. Never uses sudo.
 #
 #   curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | PROBBIT_VERSION=v0.10.0 sh
+#   curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | PROBBIT_VERSION=v0.11.0 sh
 #
 # Environment (all optional):
-#   PROBBIT_VERSION        release tag, e.g. v0.10.0 (default: the latest release)
+#   PROBBIT_VERSION        release tag, e.g. v0.11.0 (default: the latest release)
 #   PROBBIT_INSTALL_DIR    where `probbit` goes (default: ~/.local/bin; never overwrites a system-wide install implicitly)
 #   PROBBIT_DOWNLOAD_BASE  the archive is fetched from $PROBBIT_DOWNLOAD_BASE/<tag>/probbit-<tag>-<target>.tar.gz
 #                       (default: https://github.com/BitmapAsset/probbit/releases/download); needs PROBBIT_VERSION
@@ -42,6 +42,14 @@ sha256() {
     fi
 }
 
+# The x86_64 gnu build needs glibc >= 2.34 (release.yml): an older glibc (Debian 11, Ubuntu 20.04, RHEL 8) gets the static musl
+# build. The version is the last number on the first line of `ldd --version`; none found keeps the gnu build.
+glibc_before_2_34() {
+    v=$( (ldd --version 2>&1 || true) | head -n 1 | sed -n 's/.*[^0-9.]\([0-9][0-9]*\)\.\([0-9][0-9]*\)[^ ]*$/\1 \2/p')
+    [ -n "$v" ] || return 1
+    set -- $v
+    [ "$1" -lt 2 ] || { [ "$1" -eq 2 ] && [ "$2" -lt 34 ]; }
+}
 detect_target() {
     os=$(uname -s)
     arch=$(uname -m)
@@ -59,6 +67,8 @@ detect_target() {
             case "$arch" in
                 x86_64 | amd64)
                     if (ldd --version 2>&1 || true) | grep -qi musl; then
+                        echo x86_64-unknown-linux-musl
+                    elif glibc_before_2_34; then
                         echo x86_64-unknown-linux-musl
                     else
                         echo x86_64-unknown-linux-gnu
@@ -92,7 +102,7 @@ main() {
 
     version="${PROBBIT_VERSION:-}"
     if [ -z "$version" ]; then
-        [ -z "${PROBBIT_DOWNLOAD_BASE:-}" ] || die "set PROBBIT_VERSION (e.g. v0.10.0) together with PROBBIT_DOWNLOAD_BASE"
+        [ -z "${PROBBIT_DOWNLOAD_BASE:-}" ] || die "set PROBBIT_VERSION (e.g. v0.11.0) together with PROBBIT_DOWNLOAD_BASE"
         version=$(latest_tag) || exit 1
         [ -n "$version" ] || die "no published release found (set PROBBIT_VERSION)"
     fi

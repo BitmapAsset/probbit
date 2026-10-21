@@ -21,4 +21,24 @@ LEARNED verbosity   terse -----|      -0.99  short      |+++++ +1.00  full -----
         humour      none -----|      -1.00  light      |+++++ +1.00  playful    --|      -0.46
 LINE    Stance: a short explanation; a light joke is welcome; warm and encouraging; suggest what to try next; ask what they think first; emoji welcome; casual.
         why: baseline (no salient input or binding habit this event; prior state still applies)
+PANEL   warmth: warm, strongly, leaning toward cool          (p 0.80)
+        directness: balanced, slightly, holding              (p 0.46)
+        verbosity: short, strongly, holding                  (p 0.84)
+        humour: light, strongly, leaning toward playful      (p 0.83)
+        formality: casual, clearly, leaning toward casual    (p 0.78)
+        initiative: suggest, slightly, holding               (p 0.49)
+        caution: measured, clearly, holding                  (p 0.52)
+        curiosity: exploring, clearly, holding               (p 0.56)
+        emoji: rich, clearly, leaning toward rich            (p 0.59)
+        valence: up, slightly, rising                        (p 0.44)
+        arousal: steady, slightly, holding                   (p 0.39)
+        needs: not declared in this persona
+        surprise gate: not declared in this persona
+        pace (average reward): not declared in this persona
+        dispositions: not declared in this persona
+        learned verbosity: toward short, strongly, holding   (+1.00/1.00)
+        learned humour: toward light, strongly, holding      (+1.00/1.00)
+        credit: not declared in this persona
+        habits: 3 in force and 0 bound, clearly, falling     (3/7)
+        room left in the bound: not computed (E1 pending)
 strand STRAND | written by probbit 0.7.0 | replay: probbit live verify STRAND

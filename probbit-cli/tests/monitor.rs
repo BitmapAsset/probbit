@@ -95,6 +95,30 @@ fn one_plain_frame_is_pinned() {
     let _ = std::fs::remove_file(&f);
 }
 
+/// A strand saved by a Windows editor (CRLF line endings, a leading UTF-8 byte-order mark) replays as the bytes it was written
+/// with: `live verify` agrees, and the frame is the pinned one
+#[test]
+fn crlf_and_bom_strands_replay() {
+    let text = std::fs::read_to_string(WEEK).unwrap().replace("\r\n", "\n");
+    let (c, plain, err) = probbit(&["live", "verify", WEEK]); assert_eq!(c, 0, "{err}");
+    for (tag, saved) in [("crlf", text.replace('\n', "\r\n")), ("bom", format!("\u{feff}{text}")), ("bomcrlf", format!("\u{feff}{}", text.replace('\n', "\r\n")))] {
+        let f = tmp(tag); std::fs::write(&f, saved).unwrap();
+        let (c, out, err) = probbit(&["live", "verify", &f]); assert_eq!((c, out.as_str()), (0, plain.as_str()), "{tag}: {err}");
+        let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{tag}: {err}");
+        assert_eq!(out, pinned("tutor-week.once.txt", &f), "{tag}");
+        let _ = std::fs::remove_file(&f);
+    }
+}
+
+/// The page runs on Safari 15, Firefox 102 and Chromium 100: none of the newer features those engines lack
+#[test]
+fn the_page_needs_no_recent_engine() {
+    let page = std::fs::read_to_string("src/monitor.html").unwrap();
+    for f in [".at(", "oklch(", "oklab(", "color-mix(", ":has(", "@container", "structuredClone", "??=", "||=", "&&=", ".findLast(", "Object.hasOwn(", "@layer", "dvh", "svh", "lvh"] {
+        assert!(!page.contains(f), "monitor.html uses {f}, which Safari 15.0 / Firefox 102 / Chromium 100 lack");
+    }
+}
+
 /// --demo --plain --once: the last frame of the tutor's week, the same as `live --demo week` writes it (the pinned frame of the
 /// fixture, all but the footer, which says the week is in memory), the same on every run
 #[test]
@@ -272,6 +296,8 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
     let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
     assert!(buf.starts_with("HTTP/1.1 200 OK\r\n") && buf.contains("Content-Type: text/event-stream"), "{buf}");
+    // through a reverse proxy: never cached, never held in the proxy's buffer
+    assert!(buf.contains("Cache-Control: no-store\r\n") && buf.contains("X-Accel-Buffering: no\r\n"), "{buf}");
     assert_eq!((evs[0].0.as_str(), evs[1].0.as_str()), ("meta", "frame"));
     assert!(evs[0].1.contains(r#""name":"Pip""#) && evs[0].1.contains(r#""id":"warmth""#), "{}", evs[0].1);
     assert!(evs[1].1.contains(r#""n":3,"#) && evs[1].1.contains(&format!(r#""doc":{},"#, docs[2])) && evs[1].1.contains(r#""diverges":null"#), "{}", evs[1].1);
@@ -280,7 +306,7 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     assert_eq!(evs[2].0, "frame"); assert!(evs[2].1.contains(r#""n":4,"#) && evs[2].1.contains(&format!(r#""doc":{},"#, docs[3])), "{}", evs[2].1);
     assert_eq!(get(port, "/doc/4", &host).2, format!("{}\n", docs[3]));
     // the port is taken: exit 2
-    let (c, _, err) = probbit(&["monitor", &f, "--serve", "--port", &port.to_string()]); assert_eq!(c, 2); assert!(err.contains(&format!("cannot listen on 127.0.0.1:{port}")), "{err}");
+    let (c, _, err) = probbit(&["monitor", &f, "--serve", "--port", &port.to_string()]); assert_eq!(c, 2); assert!(err.contains(&format!("cannot listen on 127.0.0.1:{port}")) && err.contains("another program holds this port; pick another with --port N"), "{err}");
     let _ = child.0.kill(); let mut err = String::new(); child.0.stderr.take().unwrap().read_to_string(&mut err).unwrap(); drop(child);
     assert!(err.contains("--open: no browser started"), "{err}");
     for (args, msg) in [(vec!["monitor", &f, "--serve", "--once"], "give one of them"), (vec!["monitor", &f, "--port", "8080"], "--port goes with --serve"),
@@ -344,4 +370,21 @@ fn served_demo_labels_its_restart() {
     assert!(buf.contains("complete; restarting in 5 s"), "{buf}");
     assert!(buf.contains(r#""demo_kind":"drives""#), "{buf}");
     assert!(buf.contains(r#""pursue":{"#) && buf.contains(r#""drives":{"#), "{buf}");
+}
+
+/// RFC 0008 E: with a bound, a VIABILITY line (worst, margin_min, status) and one row per bounded need under it, its margin as a
+/// bar over [0, 1] and its run beyond the bound; the worst need's row says so; a persona without a bound has no such row
+#[test]
+fn viability_rows_and_the_worst_need() {
+    let f = tmp("viable"); let _ = std::fs::remove_file(&f); let _ = std::fs::remove_file(format!("{f}.lock"));
+    let ev = format!("{f}.events"); std::fs::write(&ev, format!("{}\n", r#"{"elapsed_hours":1,"senses":{"tokens":0.3,"tool_fail":true},"src":"env:host"}"#).repeat(2)).unwrap();
+    let (c, _, err) = probbit(&["live", "../examples/persona/viable.yaml", "--clock", "fixed", "--events", &ev, "--strand", &f]); assert_eq!(c, 0, "{err}");
+    let (c, out, err) = probbit(&["monitor", &f, "--once", "--plain"]); assert_eq!(c, 0, "{err}"); assert!(out.is_ascii(), "{out}");
+    let k = out.lines().position(|l| l.starts_with("VIABILITY  ")).expect(&out); let rows: Vec<&str> = out.lines().skip(k).collect();
+    assert_eq!(rows[0], "VIABILITY  worst context | margin_min 0.29 | viable", "{out}");
+    assert!(rows[1].trim_start().starts_with("context") && rows[1].ends_with("margin 0.29  beyond 0  worst"), "{}", rows[1]);
+    assert!(rows[2].trim_start().starts_with("contact") && rows[2].ends_with("margin 0.89  beyond 0"), "{}", rows[2]);
+    assert!(rows[3].trim_start().starts_with("integrity") && rows[3].ends_with("margin 0.80  beyond 0"), "{}", rows[3]);
+    let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("VIABILITY"), "no row without a bound");
+    for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
 }

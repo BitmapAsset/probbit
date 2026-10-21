@@ -29,20 +29,30 @@ One binary of about 2 MB, zero third-party dependencies, nothing phones home. Al
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
 <p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
 
-## What's new in 0.10.0
+## What's new in 0.11.0
 
-- **The body** (RFC 0002 part 1, opt-in): **needs** with an omission window (reducing a need's deficit pays a win sized by
-  the drive reduction; an expected win that does not come lowers the goal's success rate), **valence**, a **surprise** gate on
-  the learned step (at most 3×, never past `total_cap`), a **pace** level from recent reward, and the **optimism**,
-  **patience** and **volatility** genes. A persona without the new blocks gives the documents 0.9.0 gave, byte for byte.
-- `live verify` summarises needs, pace and surprise; `monitor`, `lint`, `fuzz`, `prove` and `describe` cover every new
-  block; new examples: `examples/persona/body.yaml` and `examples/persona/pacer.yaml`.
-- **Measured** (bench/body, BENCHMARKS.md §12): 29 of the 31 bars, frozen before any engine measurement, pass; the P0 corpus
-  recorded with 0.8.2 gives 653 outputs, 0 differ. n10 (a 2 h horizon cuts the hours at the cap by 37 %, the bar asks for
-  half) and n11 (0.02 report pursuits a day on an absence's second day, the bar asks for 0) fail and are reported as findings;
-  the fix is planned for 0.10.1. [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.10.0) · [RFC 0002](docs/rfcs/0002-neuromodulators-and-body.md) · [CHANGELOG](CHANGELOG.md)
+- **A persuadability bound, computed by the engine** (RFC 0004, opt-in `bound` block): `probbit persona bound` prints, per
+  learned trait, the certified ceiling epsilon on how far any event sequence can move its odds at rest, with the attaining
+  vertex; `--audit STRAND` reports the room a recorded life used; `live control STRAND erase` returns the learned weights to 0
+  as a chained line. On the 247 recorded persuasion campaigns, 0 exceed the published epsilon (max ratio 1.0). Also new: the
+  dead-rule lint, `persona lint --host MANIFEST`.
+- **Viability** (RFC 0008, opt-in): a bound per need with a `margin` and a worst-need `viability` line in the stance;
+  **graded pressure** from the worst margin to a mood; **need valence** with a tonic term (distance from the setpoints) and
+  a phasic term (this event's drive reduction); flag senses that grow a need; **`stance.block`**, the text a host injects
+  verbatim (every trait and mood once, plus the viability line); a VIABILITY row in `monitor`.
+- **Rest and load** (RFC 0002 part 2, opt-in blocks), **panel words** in `monitor` (every field as a dial with fixed,
+  bucketed words), portability fixes (strands with a byte-order mark, a proxy-safe event stream, the page on Safari 15,
+  static builds on old glibc), and the fixes for the two 0.10.0 findings: a new learner's surprise gate starts closed, and
+  n10 and n11 now pass (BENCHMARKS.md §12). These were the 0.10.1 development line; 0.10.1 was not released on its own.
+- Every new key is opt-in: the P0 corpus recorded with 0.8.2 gives 653 outputs, 0 differ.
+  [docs/welfare-stance.md](docs/welfare-stance.md) fixes what need, viability and damage mean here as arithmetic, and what
+  is not claimed.
+- **Measured** (BENCHMARKS.md §13, bars registered before the run, 1,000 simulated episodes per arm): survival 0.922 vs 0.000
+  for the same policy on a constant stance; pressure tracks the worst margin at 0.8156 with no habits; valence tracks the
+  distance to the bound at +0.8394 (was −0.149), but the tonic-off ablation still gives +0.1199 against its ≤ 0.10 clause,
+  so **V2 fails as registered**. [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.11.0) · [RFC 0008](docs/rfcs/0008-viability.md) · [RFC 0004](docs/rfcs/0004-bound.md) · [CHANGELOG](CHANGELOG.md)
 
-0.9.0 added senses, action-addressed feedback and `probbit check` ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.9.0)).
+0.10.0 added the body: needs, valence, surprise, pace and dispositions ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.10.0)).
 
 ## probbit in two minutes
 
@@ -120,7 +130,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.10.0.
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.11.0.
 
 | how | command |
 |---|---|
@@ -551,7 +561,7 @@ numbers), and uploads the JSON report as an artifact:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: BitmapAsset/probbit@v0.10.0    # the action needs probbit 0.9.0 or later
+- uses: BitmapAsset/probbit@v0.11.0    # the action needs probbit 0.9.0 or later
   with:
     persona: agent/policy.yaml
     props: agent/rules.json
@@ -567,7 +577,7 @@ numbers), and uploads the JSON report as an artifact:
 | `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
 | `seeds` | `0-99` | the individuals |
 | `depth` | probbit's (8) | events per fuzzed script |
-| `version` | `latest` | the release `install.sh` installs (`v0.10.0`, ...) |
+| `version` | `latest` | the release `install.sh` installs (`v0.11.0`, ...) |
 | `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
 | `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
 | `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |
@@ -758,6 +768,19 @@ What it does **not** do, also measured:
 - **Nothing beyond the CPU's own compute, and no special hardware.** A Metal GPU path was measured and rejected (a
   decision is ~4k sites, too small to feed a GPU). Unmeasured: x86-64, Linux, Windows, CP-SAT, annealing hardware, real
   customer data, programs over 100k variables.
+
+**Viability, in simulation (0.11.0; BENCHMARKS.md §13).** Seven bars registered before the run, judged as registered on
+1,000 seeded episodes per arm; six pass, one fails:
+- survival **0.922 vs 0.000** for the same policy on a constant resting stance (95 % CI of the difference [0.905, 0.938];
+  bar: above 0, and ≥ 0.515);
+- pressure tracks the worst margin at median Spearman **0.8156** with no habits on deficits (bar ≥ 0.30 and above a shuffled
+  null, 0.0040);
+- the engine names the worst need on **389,375** events with **0** margin mismatches (bar: 0);
+- valence tracks the distance to the bound at **+0.8394** (0.10.1 development line: −0.149; bar ≥ +0.30), but with the tonic
+  term off it still tracks at **+0.1199** against the ablation clause's ≤ +0.10: **V2 fails as registered**; the cause of
+  the residual is not tested yet;
+- **0 of 247** persuasion campaigns exceed the certified bound; **1,240** replayed strands verify, 0 failed; the P0 corpus,
+  **653** recorded outputs, 0 differ.
 
 ### Results: 0.11 viability (simulation)
 

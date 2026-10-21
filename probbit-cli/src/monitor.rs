@@ -7,6 +7,8 @@
 //! normal moved over drift_cap / 2 within 50 events), the habits in force and the ones that bound, the learned deltas, the
 //! decisions awaiting an outcome with their eligibility (§2.8, with a credit block), the drives when the documents carry them
 //! (feature-detected), and the stance line.
+//! Under it, the panel (`panel.rs`, docs/persona.md §5.8): every field of the individual as a dial with fixed words, one pure
+//! map from this event's reading and the event before's.
 //! `--serve` draws the same in a browser: one page embedded in the binary, fed by server-sent events from a server on
 //! 127.0.0.1. It changes no file (the demo's week goes through a temporary one, removed at once) and sends nothing anywhere.
 use crate::json::{self, Json};
@@ -19,6 +21,7 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
+mod panel;
 
 /// Moods (warm amber), wanting (orange), a line that diverges or a prediction error below zero (red), the shades of the levels
 /// not taken
@@ -59,7 +62,9 @@ impl SenseRow {
 /// What the layout reads from the strand's header
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
     history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow>, needs: Vec<NeedRow>,
-    pace: Option<(f64, f64)>, gates: Vec<String> }
+    pace: Option<(f64, f64)>, gates: Vec<String>,
+    /// For the panel: the surprise gate's g_max, the credit block's max_open, the habits declared, a dispositions block
+    g_max: f64, max_open: Option<usize>, n_habits: usize, dispositions: bool }
 impl Meta {
     fn of(r: &Replay) -> Meta {
         let d = persona::describe(&r.live.p);
@@ -90,12 +95,27 @@ impl Meta {
                 NeedRow { say: t("say"), unit: t("unit"), cap: x.get("cap").and_then(Json::as_f64).unwrap_or(1.0), goal: t("bind"), id: id.clone() } }).collect()),
             // a pace block (RFC 0002 Design C): r0 and the cap; a surprise block (Design B): the learned traits whose gain is drawn
             pace: d.get("pace").and_then(|p| Some((p.get("r0")?.as_f64()?, p.get("cap")?.as_f64()?))),
-            gates: if d.get("surprise").is_some() { strs(d.get("learning").and_then(|l| l.get("traits"))) } else { vec![] } }
+            gates: if d.get("surprise").is_some() { strs(d.get("learning").and_then(|l| l.get("traits"))) } else { vec![] },
+            g_max: d.get("surprise").and_then(|x| x.get("g_max")).and_then(Json::as_f64).unwrap_or(3.0),
+            max_open: d.get("learning").and_then(|l| l.get("credit")).and_then(|c| c.get("max_open")).and_then(Json::as_f64).map(|x| x as usize),
+            n_habits: decl("habits").len(), dispositions: d.get("dispositions").is_some() }
     }
 }
 
-/// One replayed event: its number, its stance document, its inputs as the strand logs them, the learned deltas after it
-struct Frame { n: u64, doc: Json, given: Json, learned: Json }
+/// One replayed event: its number, its stance document, its inputs as the strand logs them, the learned deltas after it, the
+/// panel's readings and words at it
+struct Frame { n: u64, doc: Json, given: Json, learned: Json, read: Vec<panel::Reading>, words: Vec<panel::Word> }
+impl Frame {
+    /// A frame for event `n` of `rep`; `prev`: the frame before it (None: the first one this replay shows)
+    fn of(rep: &Replay, meta: &Meta, n: u64, doc: Json, given: Json, prev: Option<&Frame>) -> Frame {
+        let st = rep.live.st.to_json(&rep.live.p);
+        let learned = st.get("learned").cloned().unwrap_or(Json::Null);
+        let open = persona::open_decisions(&rep.live.p, &rep.live.st).map(|o| o.len());
+        let read = readings(meta, &doc, &learned, st.get("dispositions"), open);
+        let words = panel::words(&read, prev.map_or(&[][..], |f| &f.read[..]));
+        Frame { n, doc, given, learned, read, words }
+    }
+}
 /// A strand being watched: the replay, the layout, the latest frame, the moods' recent positions, the line that diverged (if any)
 struct Watch { rep: Replay, meta: Meta, last: Option<Frame>, spark: Vec<VecDeque<f64>>, bad: Option<(usize, String)> }
 impl Watch {
@@ -110,9 +130,8 @@ impl Watch {
         let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None };
         if let Some(doc) = w.rep.last_stance().cloned() {
             let given = json::parse(before).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
-            let learned = w.rep.live.st.to_json(&w.rep.live.p).get("learned").cloned().unwrap_or(Json::Null);
             for (m, s) in w.meta.moods.iter().zip(w.spark.iter_mut()) { s.push_back(position(&odds(&doc, "mood", m))); }
-            w.last = Some(Frame { n: w.rep.live.n, doc, given, learned }); }
+            w.last = Some(Frame::of(&w.rep, &w.meta, w.rep.live.n, doc, given, None)); }
         Ok(w)
     }
     /// Replay one event line; after a line that differs, nothing more is replayed
@@ -122,9 +141,8 @@ impl Watch {
             Ok(None) => {} // a control or checkpoint line: no stance to draw
             Ok(Some(doc)) => {
                 let given = json::parse(l).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
-                let learned = self.rep.live.st.to_json(&self.rep.live.p).get("learned").cloned().unwrap_or(Json::Null);
                 for (m, s) in self.meta.moods.iter().zip(self.spark.iter_mut()) { if s.len() == SPARK { s.pop_front(); } s.push_back(position(&odds(&doc, "mood", m))); }
-                self.last = Some(Frame { n: self.rep.live.n, doc, given, learned });
+                self.last = Some(Frame::of(&self.rep, &self.meta, self.rep.live.n, doc, given, self.last.as_ref()));
             }
             Err(e) => self.bad = Some(e) }
     }
@@ -139,6 +157,58 @@ fn position(ps: &[f64]) -> f64 {
     let (t, k) = (ps.iter().sum::<f64>(), ps.len());
     if k < 2 || t <= 0.0 { return 0.0; }
     ps.iter().enumerate().map(|(i, p)| p * i as f64).sum::<f64>() / t / (k - 1) as f64
+}
+
+/// The panel's readings at an event (docs/persona.md §5.8), in the panel's order: the traits (and `pursue`), the moods, the needs,
+/// the surprise gates, pace, the dispositions, the learned traits, credit, habits, the senses, room left in the bound. A block the
+/// persona does not declare reads as one `not declared` field.
+fn readings(m: &Meta, doc: &Json, learned: &Json, disp: Option<&Json>, open: Option<usize>) -> Vec<panel::Reading> {
+    use panel::{Field, Reading};
+    let r = |key: String, label: &str, field: Field| Reading { key, label: label.to_string(), field };
+    let mut out = vec![];
+    let level = |group: &str, v: &Var, mood: bool| {
+        let x = doc.get(group).and_then(|g| g.get(&v.id));
+        Field::Level { levels: v.levels.clone(), level: x.and_then(|x| x.get("level")).and_then(Json::as_str).map(String::from),
+            released: x.and_then(|x| x.get("released")) != Some(&Json::Bool(false)), odds: odds(doc, group, v), mood } };
+    for v in &m.traits { out.push(r(format!("stance:{}", v.id), &v.id, level("stance", v, false))); }
+    if let Some(p) = doc.get("pursue").filter(|x| x.as_obj().is_some()) {
+        let goals: Vec<String> = if m.goals.is_empty() { p.get("odds").and_then(Json::as_obj).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default() } else { m.goals.clone() };
+        let ps = goals.iter().map(|g| p.get("odds").and_then(|o| o.get(g)).and_then(Json::as_f64).unwrap_or(0.0)).collect();
+        out.push(r("stance:pursue".into(), "pursue", Field::Level { levels: goals, level: p.get("goal").and_then(Json::as_str).map(String::from), released: p.get("released") != Some(&Json::Bool(false)), odds: ps, mood: false }));
+    }
+    for v in &m.moods { out.push(r(format!("mood:{}", v.id), &v.id, level("mood", v, true))); }
+    if m.needs.is_empty() { out.push(r("need".into(), "needs", Field::Undeclared)); }
+    for x in &m.needs {
+        let e = doc.get("needs").and_then(|n| n.get(&x.id)); let g = |k: &str| e.and_then(|r| r.get(k)).and_then(Json::as_f64).unwrap_or(0.0);
+        let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
+        out.push(r(format!("need:{}", x.id), &format!("need {say}"), Field::Need { deficit: g("deficit"), cap: x.cap, term: g("term") }));
+    }
+    if m.gates.is_empty() { out.push(r("surprise".into(), "surprise gate", Field::Undeclared)); }
+    for t in &m.gates { let g = doc.get("surprise").and_then(|x| x.get(t)).and_then(Json::as_f64).unwrap_or(1.0);
+        out.push(r(format!("surprise:{t}"), &format!("surprise gate on {t}"), Field::Gate { g, g_max: m.g_max })); }
+    match m.pace {
+        None => out.push(r("pace".into(), "pace (average reward)", Field::Undeclared)),
+        Some((_, cap)) => { let p = doc.get("pace");
+            out.push(r("pace".into(), "pace (average reward)", Field::Pace { level: p.and_then(|x| x.get("level")).and_then(Json::as_str).unwrap_or("steady").to_string(),
+                rbar: p.and_then(|x| x.get("rbar")).and_then(Json::as_f64).unwrap_or(0.0), cap })); }
+    }
+    if !m.dispositions { out.push(r("disposition".into(), "dispositions", Field::Undeclared)); }
+    else { for (gene, x) in disp.and_then(Json::as_obj).unwrap_or(&[]) { let v = x.as_f64().unwrap_or(0.0);
+        out.push(r(format!("disposition:{gene}"), &format!("disposition {gene}"), Field::Gene { gene: gene.clone(), x: if gene == "patience" { v.max(1e-12).ln() } else { v } })); } }
+    if let Some((traits, cap)) = &m.learning {
+        for t in traits {
+            let levels = m.traits.iter().find(|v| &v.id == t).map(|v| v.levels.clone()).or_else(|| (t == "pursue").then(|| m.goals.clone())).unwrap_or_default();
+            let ds: Vec<f64> = learned.get(t).and_then(Json::as_arr).map(|a| a.iter().filter_map(Json::as_f64).collect()).unwrap_or_default();
+            out.push(r(format!("learned:{t}"), &format!("learned {t}"), Field::Learned { levels, deltas: ds, cap: *cap }));
+        }
+    }
+    match (m.max_open, open) { (Some(max), Some(n)) => out.push(r("credit".into(), "credit", Field::Credit { open: n, max })), _ => out.push(r("credit".into(), "credit", Field::Undeclared)) }
+    let hb = doc.get("habits"); let n = |k: &str| hb.and_then(|h| h.get(k)).and_then(Json::as_arr).map_or(0, <[Json]>::len);
+    out.push(r("habits".into(), "habits", Field::Habits { active: n("active"), bound: n("bound"), declared: m.n_habits }));
+    for x in &m.senses { let z = doc.get("senses").and_then(|s| s.get(&x.id)).and_then(|s| s.get("z")).and_then(Json::as_f64);
+        out.push(r(format!("sense:{}", x.id), &format!("sense {}", x.id), Field::Sense { z })); }
+    out.push(r("room".into(), "room left in the bound", Field::Room));
+    out
 }
 
 /// How a frame is drawn: the theme (None: no colour), plain ASCII, the columns a line may take
@@ -313,6 +383,18 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         if dx >= x.cap - 5e-7 { let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
             out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} {say}: the deficit sits at its cap ({})", s.g("⚠", "!"), persona::r6(x.cap))))); }
     }
+    // 3c'. viability (RFC 0008 E): per need with a bound its margin as a bar over [0, 1] (1 at the setpoint, 0 at the bound) and its
+    // run of events beyond the bound; the worst need highlighted; the status when lost
+    if let Some(vj) = doc.get("viability") { let worst = vj.get("worst").and_then(Json::as_str).unwrap_or("");
+        let mm = vj.get("margin_min").and_then(Json::as_f64).unwrap_or(0.0); let status = vj.get("status").and_then(Json::as_str).unwrap_or("viable");
+        // the label is wider than the 8-column gutter: it heads its own line
+        out.push(format!("{}  {}", s.bold(MAGENTA, "VIABILITY"), s.bold(if status == "lost" { RED } else { CYAN }, &format!("worst {worst} {dot} margin_min {mm:.2} {dot} {status}"))));
+        for x in &m.needs { let Some(mg) = doc.get("needs").and_then(|n| n.get(&x.id)).and_then(|e| e.get("margin")).and_then(Json::as_f64) else { continue };
+            let by = doc.get("needs").and_then(|n| n.get(&x.id)).and_then(|e| e.get("beyond")).and_then(Json::as_f64).unwrap_or(0.0);
+            let txt = format!("margin {mg:.2}  beyond {}{}", whole(by), if x.id == worst { "  worst" } else { "" });
+            out.push(format!("{}{:<nw$}  {}  {}", lab(""), x.id, nbar(s, mg, 1.0, if x.id == worst { RED } else { GREEN }),
+                if x.id == worst { s.bold(RED, &txt) } else { s.paint(CYAN, &txt) })); }
+        if vj.get("status").and_then(Json::as_str) == Some("lost") { out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} viability lost: a need stayed beyond its bound for its declared run of events", s.g("⚠", "!"))))); } }
     // 3d. pace (RFC 0002 Design C): the average as a dot over [0, cap] with an r0 tick, and the level; 3e. the surprise gate
     // (Design B): per learned trait its gain g (1 when the stance lists none: the gate is closed)
     if let Some((r0, cap)) = m.pace { let p = doc.get("pace"); let rb = p.and_then(|x| x.get("rbar")).and_then(Json::as_f64).unwrap_or(0.0);
@@ -356,7 +438,13 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     // 7. the line, and why
     if let Some(l) = doc.get("line").and_then(Json::as_str) { out.push(format!("{}{}", lab("LINE"), s.bold(CYAN, l))); }
     if let Some(y) = doc.get("why").and_then(Json::as_str).filter(|y| !y.is_empty()) { out.push(format!("{}{}", lab(""), s.paint(GREY, &format!("why: {}", display_why(y))))); }
-    // 8. the footer
+    // 8. the panel: every field's words (panel.rs), the number its dial shows beside them
+    let pw = f.words.iter().map(|w| w.text.chars().count()).max().unwrap_or(0);
+    for (k, w) in f.words.iter().enumerate() {
+        let num = if w.value.is_empty() { String::new() } else { format!("  {}", s.paint(GREY, &format!("({})", w.value))) };
+        out.push(format!("{}{}{}", lab(if k == 0 { "PANEL" } else { "" }), s.bold(if w.dial.is_some() { CYAN } else { GREY }, &format!("{:<pw$}", w.text)), num).trim_end().to_string());
+    }
+    // 9. the footer
     out.push(footer(path, &m.engine, s));
     finish(out)
 }
@@ -446,6 +534,7 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
     let spark = w.map_or(Json::Obj(vec![]), |w| Json::Obj(w.meta.moods.iter().zip(&w.spark).map(|(m, xs)| (m.id.clone(), Json::Arr(xs.iter().map(|x| Json::Num(persona::r6(*x))).collect()))).collect()));
     let of = |g: fn(&Frame) -> &Json| f.map_or(Json::Null, |f| g(f).clone());
     let mut kv = vec![("n", Json::Num(f.map_or(0, |f| f.n) as f64)), ("doc", of(|f| &f.doc)), ("given", of(|f| &f.given)), ("learned", of(|f| &f.learned)), ("spark", spark),
+        ("words", f.map_or(Json::Arr(vec![]), |f| panel::to_json(&f.words))),
         ("diverges", bad.map_or(Json::Null, |(l, why)| json::obj(vec![("line", Json::Num(*l as f64)), ("why", json::str(why))]))), ("note", note.map_or(Json::Null, json::str)),
         ("from_checkpoint", w.and_then(|w| w.rep.from).map_or(Json::Null, |n| json::num(n as f64))),
         ("status", w.map_or(Json::Null, |w| json::str(w.rep.live.status.name())))];
@@ -701,7 +790,9 @@ fn doc_of(w: &Watch) -> (u64, String) { w.last.as_ref().map_or((0, String::new()
 /// `--serve`: listen on 127.0.0.1:`port` (0: a free port), say the URL on stdout, open the browser if asked, serve every
 /// connection on its own thread, and run `feed` (it publishes the frames; it never returns)
 fn serve(port: u16, open: bool, feed: &mut dyn FnMut(&Hub)) -> ! {
-    let l = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap_or_else(|e| crate::fail(&format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}")));
+    let l = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap_or_else(|e| crate::fail(&if e.kind() == std::io::ErrorKind::AddrInUse {
+        format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}: another program holds this port; pick another with --port N, or leave --port out for a free one")
+    } else { format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}") }));
     let port = l.local_addr().map_or(port, |a| a.port());
     let url = format!("http://127.0.0.1:{port}/");
     out(&format!("{url}\n"));
@@ -800,7 +891,8 @@ fn busy(mut c: TcpStream) { let _ = c.set_write_timeout(Some(Duration::from_secs
 /// a new layout before the frame when the strand starts over as another, and a heartbeat comment after `beat` quiet (15 s)
 fn events(mut c: TcpStream, hub: &Hub, beat: Duration) {
     let _ = c.set_nodelay(true);
-    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{SAFE}\r\n");
+    // X-Accel-Buffering: a reverse proxy (nginx) would otherwise hold the stream in its buffer
+    let head = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n{SAFE}X-Accel-Buffering: no\r\n\r\n");
     if c.write_all(head.as_bytes()).and_then(|_| c.flush()).is_err() { return; }
     let (mut layout, mut seq) = (0u64, 0u64);
     loop {
@@ -1122,6 +1214,65 @@ mod tests {
         read_until(&mut s, &mut got, at, "event: meta\ndata: {\"path\":\"x\"}\n\nevent: frame\ndata: {\"n\":1}\n\n");
         let at = got.len(); read_until(&mut s, &mut got, at, ": heartbeat\n\n");
         assert!(!got[at..].contains("event:"), "nothing new, nothing but heartbeats: {got}");
+    }
+
+    /// The panel on strands named in PROBBIT_PANEL_STRANDS (paths joined as in PATH; unset: nothing to do), docs/persona.md §5.8:
+    /// a field's words change exactly when its (level, size, direction) buckets change; a twin with the same header and empty
+    /// events (no inputs, no clock, no feedback) changes no word after its second event; every `why` naming a trait is counted
+    /// against a word change on that trait (hits and misses, reported, not a bar); the time per event to read, word and
+    /// serialize the page's frame. One `PANEL-STRAND {json}` line per strand on stderr.
+    #[test]
+    fn panel_words_on_strands_named_in_the_environment() {
+        let Some(v) = std::env::var_os("PROBBIT_PANEL_STRANDS") else { return };
+        for p in std::env::split_paths(&v) {
+            let text = std::fs::read_to_string(&p).unwrap(); let lines = live::lines(&text);
+            let mut w = Watch::open(lines[0]).unwrap();
+            let (mut evs, mut slow, mut slow_all): (Vec<(Vec<panel::Word>, String)>, f64, f64) = (vec![], 0.0, 0.0);
+            for l in &lines[1..] {
+                let (n, t0) = (w.rep.live.n, std::time::Instant::now()); w.feed(l, &run); assert!(w.bad.is_none(), "{}: {:?}", p.display(), w.bad);
+                if w.rep.live.n == n { continue; }
+                let all = t0.elapsed().as_secs_f64() * 1e3;
+                // the panel's own cost: readings, words and the page frame's bytes for this event
+                let t1 = std::time::Instant::now(); let f = w.last.as_ref().unwrap();
+                let st = w.rep.live.st.to_json(&w.rep.live.p); let open = persona::open_decisions(&w.rep.live.p, &w.rep.live.st).map(|o| o.len());
+                let rd = readings(&w.meta, &f.doc, &f.learned, st.get("dispositions"), open); let prev = evs.len();
+                let _ = panel::words(&rd, &rd); let bytes = persona::canon(&frame_json(Some(&w), None, None)).len(); assert!(bytes > 0 && prev == evs.len());
+                let ms = t1.elapsed().as_secs_f64() * 1e3; slow = slow.max(ms); slow_all = slow_all.max(all + ms);
+                evs.push((f.words.clone(), f.doc.get("why").and_then(Json::as_str).unwrap_or("").to_string()));
+            }
+            let key = |x: &panel::Word| (x.level.clone(), x.size, x.dir.clone());
+            let (mut changes, mut mismatch, mut flaps, mut hits, mut misses, mut fields) = (0, 0, 0, 0, 0, std::collections::BTreeMap::<String, usize>::new());
+            let ids: Vec<String> = w.meta.traits.iter().chain(&w.meta.moods).map(|v| v.id.clone()).collect();
+            for i in 1..evs.len() {
+                for (k, now) in evs[i].0.iter().enumerate() {
+                    let before = &evs[i - 1].0[k]; assert_eq!(before.key, now.key);
+                    let (wc, kc) = (before.text != now.text, key(before) != key(now));
+                    if wc != kc { mismatch += 1; }
+                    if wc { changes += 1; *fields.entry(now.key.clone()).or_default() += 1; }
+                    if i >= 2 && wc && evs[i - 2].0[k].text == now.text { flaps += 1; }
+                }
+                let why = &evs[i].1; let named: Vec<&String> = ids.iter().filter(|id| why.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|t| t == id.as_str())).collect();
+                for id in named {
+                    let moved = evs[i].0.iter().zip(&evs[i - 1].0).any(|(a, b)| [format!("stance:{id}"), format!("mood:{id}"), format!("learned:{id}")].contains(&a.key) && a.text != b.text);
+                    if moved { hits += 1 } else { misses += 1 }
+                }
+            }
+            // the twin: the same individual, the same number of events, each event {}
+            let mut maker = Replay::open(lines[0]).unwrap(); let mut twin = Watch::open(lines[0]).unwrap(); let mut tw: Vec<Vec<String>> = vec![];
+            for _ in 0..evs.len() { let (_, line) = maker.live.event(&Json::Obj(vec![]), &run).unwrap(); twin.feed(&line, &run); assert!(twin.bad.is_none());
+                tw.push(twin.last.as_ref().unwrap().words.iter().map(|x| x.text.clone()).collect()); }
+            let diff = |a: &Vec<String>, b: &Vec<String>| a.iter().zip(b).filter(|(x, y)| x != y).count();
+            let twin_first = if tw.len() > 1 { diff(&tw[0], &tw[1]) } else { 0 };
+            let twin_after: usize = (2..tw.len()).map(|i| diff(&tw[i - 1], &tw[i])).sum();
+            eprintln!("PANEL-STRAND {}", persona::canon(&json::obj(vec![("strand", json::str(&p.display().to_string())), ("events", json::num(evs.len() as f64)),
+                ("fields", json::num(evs.first().map_or(0, |e| e.0.len()) as f64)), ("word_changes", json::num(changes as f64)), ("mismatch", json::num(mismatch as f64)),
+                ("flaps", json::num(flaps as f64)), ("why_hits", json::num(hits as f64)), ("why_misses", json::num(misses as f64)),
+                ("twin_changes_event2", json::num(twin_first as f64)), ("twin_changes_after", json::num(twin_after as f64)),
+                ("panel_ms_max", json::num((slow * 1000.0).round() / 1000.0)), ("event_ms_max_with_replay", json::num((slow_all * 1000.0).round() / 1000.0)),
+                ("changes_by_field", Json::Obj(fields.into_iter().map(|(k, n)| (k, json::num(n as f64))).collect()))])));
+            assert_eq!(mismatch, 0, "{}: words changed without a bucket change, or the reverse", p.display());
+            assert_eq!(twin_after, 0, "{}: the twin with empty events changed words", p.display());
+        }
     }
 
     /// The tutor `--demo` embeds is examples/persona/tutor.yaml

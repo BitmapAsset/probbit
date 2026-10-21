@@ -3,9 +3,70 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.10.1 - unreleased
+## 0.11.0 - 2026-10-21
+
+RFC 0008, viability (docs/rfcs/0008-viability.md), and RFC 0004, the persuadability bound (docs/rfcs/0004-bound.md), in the
+engine, with the 0.10.1 development line, which was not released on its own. Every new key is opt-in: a persona without them
+gives every document byte for byte as the 0.10.1 development build (the P0 corpus: 653 outputs, 0 differ). Measured:
+BENCHMARKS.md §13 (V2 fails as registered) and §12.
+
+Merged pull requests:
+- #44 fix: a new learner's surprise gate starts closed (0.10.1, RFC 0002 Design B)
+- #45 fix: needs n10 and n11 pass: an unclipped forecast and a deepening omission run (0.10.1, RFC 0002 A.3-A.4)
+- #46 RFC 0002 part 2: rest and load (opt-in blocks)
+- #47 monitor: panel words, every field of the individual as a dial with fixed words (0.10.1)
+- #48 portability: BOM strands, proxy-safe monitor stream, Safari 15 page, old-glibc installs
+- #49 RFC 0004 bound in the engine: certificate, audit, erase + dead-rule lint
+- #50 RFC 0008 viability: bounds, graded pressure, need valence, stance.block
+
+### Added
+- **Viability bounds** (docs/persona.md §2.12): `viable: {at_most, events}` per need. The stance reports per need its `margin`
+  (1 at the setpoint, 0 at the bound) and `beyond`, and `viability: {worst, margin_min, status}`; the state keeps `beyond` and
+  `viability` (`lost` once a need stays beyond its bound for its declared run). Rules read `need.<id>.margin` and
+  `needs.margin_min`. `why` names the worst need while its margin is under 0.25.
+- **Graded pressure and need valence**: `needs.pressure {mood, gain, shape: linear}` moves a mood by `gain x (1 -
+  margin_min)`; `needs.valence {mood, tonic, phasic}` by `-tonic x D(x)/D(cap) + phasic x` the event's drive reduction. They
+  lower to the reserved inputs `need_pressure`, `need_tonic`, `need_phasic`, which `prove` boxes.
+- **Flag senses grow needs**: `per_reading: {sense: <flag>, per_event: g}` (a tool failure can grow a need with no parallel
+  number sense).
+- **`stance.block`**: the text a host injects verbatim, every declared trait and mood once as `name level` plus the viability
+  line; in the stance with a bound, a coupling or `line.block: true`. `live verify --blocks FILE` renders it for any strand.
+- `live verify` summarises `viability: {margin_min_seen, lost_at}`; `monitor` draws a VIABILITY line with margin bars, the worst
+  need highlighted. `examples/persona/viable.yaml` is new. `docs/welfare-stance.md` (draft for owner review) fixes what need,
+  viability and damage mean as arithmetic and what is not claimed.
+- RFC 0004 `bound` (docs/rfcs/0004-bound.md, docs/persona.md §2.16): an optional block and `probbit persona bound`, the
+  certified ceiling epsilon per learned trait on how far any event sequence can move its odds at rest (exact over the
+  learned-weight box by vertex probes; history enumerated by feature value, A8, up to 4096 combinations; counted moods
+  searched; decayed channels as the residue r), with
+  `speed` and the proved `speed_floor`. The block stays out of the persona digest: states, strands and turns are unchanged.
+- `probbit persona bound PERSONA --audit STRAND`: the room each learned trait used over a recorded life, most and now.
+- `probbit live control STRAND erase`: a chained control line that returns the learned weights to 0.
+- `probbit persona check` runs the certificate when the block declares `max_epsilon`.
+- `probbit persona lint PERSONA --host MANIFEST [--strict]`: the dead-rule lint, each habit whose `when` needs an input or
+  sense the host never supplies is reported `dead on this host` (a warning; an error with `--strict`); manifests for two real
+  hosts under `examples/hosts/`.
+- bench/bound: fixtures and `run.py` (bars bo1, bo2, bo3, bo5 through the engine).
 
 ### Changed
+- N-R4 is relaxed: `per_reading` takes a number sense with `rate` or a flag sense with `per_event` (a flag sense with `rate` is
+  refused at `per_reading.rate`, no longer at `per_reading.sense`).
+
+### From the 0.10.1 development line (not released on its own): added
+- **Rest and load** (RFC 0002 part 2, docs/rfcs/0002-neuromodulators-and-body.md): two opt-in blocks. `rest` keeps a
+  pressure S that rises over active hours and falls over idle gaps; an idle gap at S ≥ threshold brings a rest line, its own
+  strand line, that scales every learned weight by `downscale` (prune below `prune`), keeping their order, and never shares an
+  event with feedback (`pressure.pending`). Each learned trait's surprise gate is left unchanged. `load` keeps a slow L
+  raised by aversive evidence (learning flags, declared senses, credit expiries) and a held mood, relaxing with its half-life,
+  capped; it enters the field as the engine-owned number input `load_level` (box [0, cap]), refused when sent. State
+  `pressure: {s, pending}` and `load: {l}`; refusals W-R1 and L-R1. `live verify` recomputes rest lines. bench/body P6
+  (r0-r5) and P7 (l1-l5) measured by the engine for the first time (numbers in the PR). A persona without the blocks gives
+  byte-identical documents.
+- **Monitor panel words** (docs/persona.md §5.8): `probbit monitor` prints a PANEL block and the `--serve` page an Instrument
+  panel: every field of the individual (traits, moods, needs, surprise gates, pace, dispositions, learned traits, credit,
+  habits, senses, room left in the bound) as a dial with fixed words for its level, size and direction since the event before.
+  One pure map, unit-tested for zero ambiguity over every bucket; page frames carry `words`. No stance document changes.
+
+### From the 0.10.1 development line: the 0.10.1 fixes
 - A new learner's surprise gate starts closed (docs/persona.md §2.13, RFC 0002 Design B): v = 0, r = r_ref, g = 1, so the
   opening step equals the fixed rate's (0.10.0 started at g = 2.5 and stepped 1.67× at the opening feedback, bench/body s3), and
   `why` says `learning fast: feedback changed` only after a gate step whose volatility passed v0. `r_ref` above `r_max` is
@@ -14,10 +75,23 @@ All notable changes to this project are documented here. The format follows
   k-th omission in a run without a win multiplies the bound goal's success rate by max(1 − k × rate, 0) (state `needs.misses`,
   only while a run is open). bench/body n10: context at cap 0.8536 → 0.0186 h a day at τ 2 (bar ≤ 0.5×); n11: 0 report pursuits
   on away days 2-5, 1.58 a day before and 1.215 on return days 2-3 (bars 0, ≥ 0.5, ≥ 0.5); neither bar was changed.
+- Portability: a strand with a leading UTF-8 byte-order mark (a Windows editor's save) replays and monitors like the bytes
+  without it, as CRLF line endings already did (`live verify` used to report a divergence at line 1). `monitor --serve` sends
+  `X-Accel-Buffering: no` on the event stream (a reverse proxy would hold it in its buffer) and, when the port is taken, says
+  so with what to do. The page no longer uses `Array.prototype.at` (Safari before 15.4 lacked it and the page stopped after
+  its first frame). A cut line at a terminal under `NO_COLOR` no longer ends in a bare reset escape. `install.sh` and the
+  npm package pick the static musl build on Linux x86_64 with glibc older than 2.34 (the gnu build does not run there), and
+  the npm package says plainly when a platform has no prebuilt binary instead of promising a fetch on first run, and names
+  `NODE_USE_ENV_PROXY=1` when a fetch fails with a proxy set (Node's fetch ignores `HTTPS_PROXY` without it). An argument
+  that is not valid UTF-8 (a legacy-encoded file name) is refused with exit 2 instead of a panic.
 
 ### Other
-- Development builds print `0.10.1-dev` (`probbit --version`, the strand header's `engine`, MCP `serverInfo`), so a
-  strand header tells them from 0.10.0.
+- The version is 0.11.0 (`probbit --version`, the strand header's `engine`, MCP `serverInfo`); development builds of the
+  0.10.1 line printed `0.10.1-dev`.
+  **Upgrade note** (from 0.10.0): a persona with a `surprise` block gives different documents, because a new learner's gate
+  now starts closed; a persona with a needs block and a forecast horizon or omission windows can pursue differently (the n10
+  and n11 fixes). A persona without those blocks and without the new keys gives the documents 0.10.0 gave; its strands differ
+  only in the header's `engine` and the hash chain that follows from it.
 
 ## 0.10.0 - 2026-10-18
 

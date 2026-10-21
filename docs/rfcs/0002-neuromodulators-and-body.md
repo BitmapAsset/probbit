@@ -423,6 +423,20 @@ a floor exempting reinforced levels gave back a third of the gain and protected 
 
 **Public:** "During idle time it scales its learned weights down in proportion, keeping their order."
 
+Decided by the implementation (0.10.1):
+- **Feedback** for the deferral is a learning flag on (`learning.from`), or with a drives block any goal signal in the event.
+  The pressure steps on every event (the rule above, h = the stamped hours); when an idle gap finds S ≥ θ and the event
+  carries feedback, `pressure.pending` becomes true and the line comes before the next event without feedback, whatever its
+  gap. A rest line clears `pending` and leaves S to the pressure step of its event.
+- **The line** is `{"prev", "rest": {downscale, prune, pressure, learned, gate}, "state"}`: ρ and ε, S before the line, the
+  learned weights after it, and the digest of the state after it. It is written only directly before its event's line, which
+  chains to it; `live verify` recomputes it from the state and the event and refuses a missing, extra or changed rest line
+  (exit 1). The turn applies the same downscale before step 1, so `persona turn` without a strand gives the same stance.
+- **The surprise gate at a rest line:** each learned trait's v, r̂, g and counts are left unchanged (the gate tracks
+  feedback and a rest line carries none); the line says so per learned trait (`gate: {<trait>: "unchanged: v, r, g and
+  counts kept"}`). The credit and the open decisions are left as they are too: a rest line scales the learned weights only.
+- The prune compares the rounded value: Δ ← round(ρΔ, 6), then 0 when |round(ρΔ, 6)| < ε.
+
 **`load` (simulation).** Wear accumulates when responses repeat, fail to adapt or fail to shut off (McEwen 1998; McEwen
 2006), and can leave a lasting set-point deviation (Koob & Le Moal 2001).
 
@@ -442,6 +456,18 @@ adaptation, prolonged response); the fourth, an inadequate response with compens
 interacting channels and is out of scope. State `load: {l}`.
 
 **Public:** "Repeated aversive events raise a slow load that relaxes over days."
+
+Decided by the implementation (0.10.1):
+- **Evidence a_t:** a learning flag on adds its weight × 1; `sense_<id>` (a declared sense) adds its weight × this event's
+  reading (a flag sense true = 1, false = 0, a number sense its value, no reading 0); `expired` adds its weight × the number
+  of open decisions that expire at this event (t − n − 1 ≥ 4 × the credit half-life, which the patience gene scales; 0
+  without a credit block).
+- **The hold** reads the mood accumulator at the mood's last level, as it stands before this event (the load step runs
+  before compile, where this event's mood evidence enters), so it lags the mood by one event on and off.
+- **Lowering:** `load_level` is a number input (box [0, L_cap]) with the block's `effects` (ordinal shifts per unit of L),
+  added after the declared inputs; reserved only with the block, refused when the host sends it (`inputs.load_level`), left
+  out of the stance's `inputs`; the stance adds `load: {l}` (L after this event). The load step runs right after the pace
+  step. `load.from` with `expired` and no credit block is accepted and reads 0.
 
 ## Invariants
 

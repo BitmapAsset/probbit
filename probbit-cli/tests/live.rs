@@ -321,8 +321,9 @@ fn probbit_check_holds_a_sensed_persona() {
 /// sensed-credit.events.jsonl --strand ... --checkpoint-every 4`: a senses block and a learning.credit block, 5 events, a
 /// checkpoint at line 6); `sensed-credit-0.9.0-dev.verify-0.8.2.txt`, what the released 0.8.2 binary printed on it (it cannot be
 /// changed); and one version up, derived from the 0.9.0 strand (not recordings: no engine with these exists yet), the header's
-/// engine set to "probbit 0.11.0-dev" and every later line re-chained: `next-load.strand` (the header's persona document gains
-/// RFC 0002 part 2's `load` block, which no engine has yet, its digest recomputed for it) and `next-rest.strand` (a rest line appended as line 8).
+/// engine set to "probbit 0.11.0-dev" and every later line re-chained: `next-block.strand` (the header's persona document gains
+/// a `sleep` block, which no engine has, its digest recomputed for it) and `next-line.strand` (a `nap` line appended as line 8).
+/// Until 0.10.1 they used RFC 0002 part 2's `load` block and rest line, which 0.10.1 implements (the same bytes, renamed).
 const STRANDS: &str = "probbit-cli/tests/fixtures/strands";
 fn fixture(name: &str) -> String { format!("{STRANDS}/{name}") }
 fn fixture_text(name: &str) -> String { read(&format!("{}/../{STRANDS}/{name}", env!("CARGO_MANIFEST_DIR"))) }
@@ -343,9 +344,9 @@ fn a_newer_engines_strand_is_unsupported_not_a_divergence() {
     let old = parse(rec.lines().find(|l| !l.starts_with('#')).unwrap());
     assert_eq!((s(&old, &["ok"]), s(&old, &["line"])), (&Json::Bool(false), &Json::Num(1.0)));
     assert!(s(&old, &["diverges"]).as_str().unwrap().starts_with("the persona document: senses: unknown field"), "{rec}");
-    // one version up: unsupported, at line 1 for the header's persona, at line 8 for the rest line
+    // one version up: unsupported, at line 1 for the header's persona, at line 8 for the nap line
     let actions = tmp("unsupported-actions.jsonl"); std::fs::write(&actions, "{\"turn\":0,\"action\":{\"action\":\"retry\"}}\n").unwrap();
-    for (name, line, field) in [("next-load.strand", 1, "load"), ("next-rest.strand", 8, "rest")] {
+    for (name, line, field) in [("next-block.strand", 1, "sleep"), ("next-line.strand", 8, "nap")] {
         let want = format!(r#"{{"engine":"{THIS}","line":{line},"ok":false,"strand_engine":"probbit 0.11.0-dev","unsupported":"{field}"}}"#);
         let say = format!("probbit: live verify: line {line}: unsupported by this engine: {field} (written by probbit 0.11.0-dev; this engine is {THIS}): not verified, and not a divergence");
         for extra in [vec![], vec!["--from-checkpoint"], vec!["--actions", actions.as_str()]] {
@@ -363,7 +364,7 @@ fn a_newer_engines_strand_is_unsupported_not_a_divergence() {
 /// as unsupported (never FAIL), fails the gate (exit 1) and names the field and the strand's engine in --json.
 #[test]
 fn a_tampered_strand_still_diverges_and_check_says_unsupported() {
-    let t = fixture_text("sensed-credit-0.9.0-dev.strand"); let load = fixture_text("next-load.strand"); let rest = fixture_text("next-rest.strand");
+    let t = fixture_text("sensed-credit-0.9.0-dev.strand"); let load = fixture_text("next-block.strand"); let rest = fixture_text("next-line.strand");
     let lines = |x: &str| x.lines().map(str::to_string).collect::<Vec<_>>();
     let mut cut = lines(&load); cut.remove(2);
     let mut moved = lines(&rest); let last = moved.len() - 1;
@@ -380,14 +381,14 @@ fn a_tampered_strand_still_diverges_and_check_says_unsupported() {
         clean(&[&f]);
     }
     // probbit check: the 0.9.0 strand replays, the newer one is unsupported (its line, its field, the engine that wrote it)
-    let persona = fixture("sensed-credit.json"); let (ok, nx) = (fixture("sensed-credit-0.9.0-dev.strand"), fixture("next-load.strand"));
+    let persona = fixture("sensed-credit.json"); let (ok, nx) = (fixture("sensed-credit-0.9.0-dev.strand"), fixture("next-block.strand"));
     let (c, out, e) = probbit(&["check", &persona, "--seeds", "0-1", "--strand", &ok, "--strand", &nx]); assert_eq!(c, 1, "{out}\n{e}");
     assert!(out.lines().any(|l| l.starts_with("strand  ") && l.contains(&ok) && l.ends_with("  ok 5 events")), "{out}");
-    assert!(out.lines().any(|l| l.starts_with("strand  ") && l.contains(&nx) && l.ends_with("  line 1: unsupported by this engine: load (written by probbit 0.11.0-dev)")), "{out}");
+    assert!(out.lines().any(|l| l.starts_with("strand  ") && l.contains(&nx) && l.ends_with("  line 1: unsupported by this engine: sleep (written by probbit 0.11.0-dev)")), "{out}");
     assert!(!out.contains("FAIL") && !out.contains("diverges"), "{out}");
     let (c, out, e) = probbit(&["check", &persona, "--seeds", "0-1", "--strand", &nx, "--json"]); assert_eq!(c, 1, "{e}");
     let d = parse(&out); let st = &s(&d, &["strands"]).as_arr().unwrap()[0];
-    assert_eq!(jw(st), format!(r#"{{"error":"line 1: unsupported by this engine: load","events":null,"final_state":null,"ok":false,"path":"{nx}","strand_engine":"probbit 0.11.0-dev","unsupported":"load"}}"#));
+    assert_eq!(jw(st), format!(r#"{{"error":"line 1: unsupported by this engine: sleep","events":null,"final_state":null,"ok":false,"path":"{nx}","strand_engine":"probbit 0.11.0-dev","unsupported":"sleep"}}"#));
     assert_eq!((s(&d, &["verdict", "strands_ok"]), s(&d, &["verdict", "exit"])), (&Json::Num(0.0), &Json::Num(1.0)));
 }
 
@@ -601,4 +602,41 @@ fn a_pacer_life_split_across_runs_equals_one_run() {
     }
     let (c, v, e) = probbit(&["live", "verify", &one]); assert_eq!(c, 0, "{e}"); assert_eq!(s(&parse(&v), &["ok"]), &Json::Bool(true));
     clean(&[&st1, &one, &all]);
+}
+
+/// RFC 0008 E: `live verify` recomputes the viability receipts from the logged readings and amounts: margin_min_seen is the
+/// smallest margin_min any replayed stance reports and lost_at the first event whose stance says lost; a tampered reading (a
+/// tool_fail flipped in a logged event, the line kept canonical) diverges at that line
+#[test]
+fn verify_recomputes_viability_and_a_tampered_reading_diverges() {
+    let (ev, sf) = (tmp("viable.jsonl"), tmp("viable.strand")); let _ = std::fs::remove_file(&sf);
+    let mut lines = String::new();
+    for i in 0..14 { lines.push_str(&format!(r#"{{"elapsed_hours":1,"senses":{{"tokens":{},"tool_fail":{}}},"src":"env:host"}}"#, [0.1, 0.25, 0.2][i % 3], i % 2 == 0)); lines.push('\n'); }
+    lines.push_str(r#"{"elapsed_hours":1,"needs":{"context":{"amount":0.6,"src":"env:compactor"}},"src":"env:host"}"#); lines.push('\n');
+    std::fs::write(&ev, &lines).unwrap();
+    let (c, out, e) = probbit(&["live", "examples/persona/viable.yaml", "--clock", "fixed", "--events", &ev, "--strand", &sf]); assert_eq!(c, 0, "{e}");
+    let docs: Vec<Json> = out.lines().map(parse).collect(); assert_eq!(docs.len(), 15);
+    let v = |d: &Json, k: &str| d.get("viability").and_then(|x| x.get(k)).cloned().unwrap();
+    let seen = docs.iter().map(|d| v(d, "margin_min").as_f64().unwrap()).fold(1.0f64, f64::min);
+    let lost_at = docs.iter().position(|d| v(d, "status").as_str() == Some("lost")).map(|i| (i + 1) as f64);
+    assert!(lost_at.is_some(), "the context stays beyond its bound for 4 events");
+    let (c, sum, e) = probbit(&["live", "verify", &sf]); assert_eq!(c, 0, "{e}"); let sum = parse(&sum);
+    let vs = sum.get("viability").expect("the summary carries viability");
+    assert_eq!(vs.get("margin_min_seen").and_then(Json::as_f64), Some(seen)); assert_eq!(vs.get("lost_at").and_then(Json::as_f64), lost_at);
+    // on every prefix of the strand the summary agrees with the stances so far
+    let text = read(&sf); let all: Vec<&str> = text.lines().collect();
+    for n in 1..=docs.len() { let pre = tmp(&format!("viable-pre-{n}.strand")); std::fs::write(&pre, all[..=n].iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let (c, s, e) = probbit(&["live", "verify", &pre]); assert_eq!(c, 0, "{e}"); let s = parse(&s);
+        let seen_n = docs[..n].iter().map(|d| v(d, "margin_min").as_f64().unwrap()).fold(1.0f64, f64::min);
+        let lost_n = docs[..n].iter().position(|d| v(d, "status").as_str() == Some("lost")).map(|i| (i + 1) as f64);
+        assert_eq!(s.get("viability").and_then(|x| x.get("margin_min_seen")).and_then(Json::as_f64), Some(seen_n), "prefix {n}");
+        assert_eq!(s.get("viability").and_then(|x| x.get("lost_at")).and_then(Json::as_f64), lost_n, "prefix {n}"); let _ = std::fs::remove_file(&pre); }
+    // a tampered reading: event 3's tool_fail flipped
+    let k = all.iter().position(|l| l.starts_with(r#"{"inputs":"#) && l.contains(r#""n":3,"#)).unwrap();
+    assert!(all[k].contains(r#""tool_fail":true"#), "{}", all[k]);
+    let bad: String = all.iter().enumerate().map(|(i, l)| format!("{}\n", if i == k { l.replace(r#""tool_fail":true"#, r#""tool_fail":false"#) } else { l.to_string() })).collect();
+    let tf = tmp("viable-tampered.strand"); std::fs::write(&tf, bad).unwrap();
+    let (c, s, _) = probbit(&["live", "verify", &tf]); assert_eq!(c, 1, "{s}"); let s = parse(&s);
+    assert_eq!(s.get("ok"), Some(&Json::Bool(false))); assert_eq!(s.get("line").and_then(Json::as_f64), Some((k + 1) as f64), "diverges at the tampered line");
+    for f in [&ev, &sf, &tf, &format!("{sf}.lock")] { let _ = std::fs::remove_file(f); }
 }

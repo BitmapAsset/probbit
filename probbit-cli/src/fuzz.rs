@@ -443,6 +443,12 @@ mod tests {
     /// levels or prev); conflicts by fallback or yield. With `learn`, a learning block on every trait (f0 rewards, f1 corrects; rate
     /// 1-3, total cap 0.05-2, step cap 50-100% of it). -> (persona, trait ids with their level counts, habits)
     fn persona_at(r: &mut Philox4x32, big: bool, learn: bool) -> (Persona, Vec<(String, usize)>, Vec<H>) {
+        let (doc, tl, habits) = persona_doc_at(r, big, learn);
+        let p = persona::build(&doc).unwrap_or_else(|e| panic!("{}: {} in {}", e.path, e.msg, persona::canon(&doc)));
+        (p, tl, habits)
+    }
+    /// `persona_at`'s document, unbuilt
+    fn persona_doc_at(r: &mut Philox4x32, big: bool, learn: bool) -> (Json, Vec<(String, usize)>, Vec<H>) {
         let w = |r: &mut Philox4x32| ((r.f64() * 4.0 - 2.0) * 100.0).round() / 100.0;
         let lv = |n: usize| (0..n).map(|i| format!("\"l{i}\"")).collect::<Vec<_>>().join(",");
         let (mut traits, mut tl) = (vec![], vec![]);
@@ -466,8 +472,7 @@ mod tests {
             traits.join(","), (30 + r.below(51)) as f64 / 100.0, couplings.join(","), inputs.join(","), hj.join(","), ["fallback", "yield"][r.below(2)]);
         if learn { let tc = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0][r.below(6)]; let names: Vec<String> = tl.iter().map(|(t, _)| format!("\"{t}\"")).collect(); doc.pop();
             doc.push_str(&format!(r#","learning":{{"from":["f0","f1"],"traits":[{}],"rate":{},"step_cap":{},"total_cap":{tc}}}}}"#, names.join(","), (100 + r.below(201)) as f64 / 100.0, ((50 + r.below(51)) as f64 / 100.0 * tc * 100.0).round() / 100.0)); }
-        let p = persona::build(&json::parse(&doc).unwrap()).unwrap_or_else(|e| panic!("{}: {} in {doc}", e.path, e.msg));
-        (p, tl, habits)
+        (json::parse(&doc).unwrap(), tl, habits)
     }
     /// Three random properties (a condition on f0, f1 or lv, or none; a restriction of one trait or the mood) and every habit's own
     /// rule as a property
@@ -565,6 +570,68 @@ mod tests {
             every_sequence(&p, &prs, &st0, &alpha, 4, &mut broken);
             assert_eq!(broken[0], breaks, "cap {cap}"); assert_eq!(persona::prove_seed(&p, &prs[0], 0, &run).is_ok(), !breaks, "cap {cap}");
         }
+    }
+
+    /// (vi) RFC 0008: the need inputs' boxes are what the bound needs. One trait, l0 ahead of l1 by 1 nat, a mood coupled to it
+    /// that need_pressure (box [0, 1]) moves with gain g. With g 0.2 prove proves "never l1" and no sequence breaks it; with g 8
+    /// one hour of growth makes it l1 and prove says unknown. The same with need_tonic (weight -tonic) on a mood whose low level
+    /// pushes l1, and need_phasic (box [-r_cap, r_cap]) with an amount that pays a large drive reduction.
+    #[test]
+    fn prove_covers_the_need_inputs() {
+        let alpha: Vec<Json> = [r#"{}"#, r#"{"elapsed_hours":1}"#, r#"{"elapsed_hours":2}"#, r#"{"needs":{"n0":0.5},"src":"env"}"#, r#"{"elapsed_hours":1,"needs":{"n0":1},"src":"env"}"#]
+            .iter().map(|s| json::parse(s).unwrap()).collect();
+        let doc = |coupling: &str| format!(r#"{{"probbit_persona":1,"identity":{{"name":"T","version":"1","seed":1}},"traits":[{{"id":"a","levels":["l0","l1"],"logw":[1,0]}}],
+            "moods":[{{"id":"m","levels":["lo","hi"],"inertia":0.3}}],"couplings":[{{"vars":["m","a"],"align":1.5}}],"drives":{{"goals":[{{"id":"work"}},{{"id":"fix","expect_by_hours":1}}]}},
+            "needs":{{"drive":{{"n":4,"m":3}},"r_cap":1,{coupling},"items":[{{"id":"n0","unit":"u","cap":1,"weight":1,"per_hour":0.5,"satisfy_from":["env"],"amount":0.5,"bind":"fix","viable":{{"at_most":0.8,"events":3}}}}]}}}}"#);
+        for (coupling, breaks) in [(r#""pressure":{"mood":"m","gain":0.2}"#, false), (r#""pressure":{"mood":"m","gain":8}"#, true),
+            (r#""valence":{"mood":"m","tonic":0.2,"phasic":0}"#, false), (r#""valence":{"mood":"m","tonic":8,"phasic":0}"#, true),
+            (r#""valence":{"mood":"m","tonic":0,"phasic":0.2}"#, false), (r#""valence":{"mood":"m","tonic":0,"phasic":8}"#, true)] {
+            // tonic pushes the mood down (weight -tonic): the property is then "never l0" with l1 ahead, so a large tonic breaks it
+            let down = coupling.contains("tonic\":0.2") || coupling.contains("tonic\":8");
+            let d = if down { doc(coupling).replace(r#""logw":[1,0]"#, r#""logw":[0,1]"#) } else { doc(coupling) };
+            let p = persona::build(&json::parse(&d).unwrap()).unwrap_or_else(|e| panic!("{}: {}", e.path, e.msg));
+            let rule = if down { r#"{"id":"never_l0","then":{"a":["l1"]}}"# } else { r#"{"id":"never_l1","then":{"a":["l0"]}}"# };
+            let prs = persona::props(&p, &json::parse(rule).unwrap(), "never", "prop1").unwrap();
+            let st0 = persona::init(&p, Some(0), true, &run); let mut broken = vec![false];
+            every_sequence(&p, &prs, &st0, &alpha, 3, &mut broken);
+            assert_eq!(broken[0], breaks, "{coupling}: a sequence breaks it"); assert_eq!(persona::prove_seed(&p, &prs[0], 0, &run).is_ok(), !breaks, "{coupling}: prove");
+        }
+    }
+
+    /// (vii) RFC 0008, brute force: 16 tiny need personas (one or two bounded needs, pressure and valence on the mood with random
+    /// weights) x 2 individuals x their properties, every sequence of up to 3 events over growth, amounts and flags; a property
+    /// prove calls held or proved never breaks
+    #[test]
+    fn prove_agrees_with_every_event_sequence_of_tiny_need_personas() {
+        let ev = |s: &str| json::parse(s).unwrap();
+        let alpha: Vec<Json> = [r#"{"f0":true}"#, r#"{"elapsed_hours":1,"lv":"neg"}"#, r#"{"elapsed_hours":2,"f1":true}"#, r#"{"needs":{"n0":0.5},"src":"env","lv":"pos"}"#,
+            r#"{"elapsed_hours":1,"needs":{"n1":0.8},"src":"env"}"#].iter().map(|s| ev(s)).collect();
+        let res = par(16, std::thread::available_parallelism().map_or(1, |n| n.get()), |k| {
+            let mut r = Philox4x32::new(80, k as u64); let (base, tl, habits) = persona_doc_at(&mut r, false, false);
+            let w = |r: &mut Philox4x32, hi: f64| (r.f64() * hi * 100.0).round() / 100.0;
+            let two = r.below(2) == 1;
+            let item = |i: usize, r: &mut Philox4x32| format!(r#"{{"id":"n{i}","unit":"u","cap":1,"weight":1,"per_hour":{},"satisfy_from":["env"],"amount":{},"bind":"g{i}","viable":{{"at_most":{},"events":{}}}}}"#,
+                w(r, 0.6), [0.5, 0.8][i], (30 + r.below(71)) as f64 / 100.0, 1 + r.below(4));
+            let items = if two { format!("{},{}", item(0, &mut r), item(1, &mut r)) } else { item(0, &mut r) };
+            let goals = if two { r#"{"id":"work"},{"id":"g0","expect_by_hours":1},{"id":"g1","expect_by_hours":2}"# } else { r#"{"id":"work"},{"id":"g0","expect_by_hours":1}"# };
+            let mut d = base.clone(); let Json::Obj(kv) = &mut d else { unreachable!() };
+            kv.push(("drives".into(), json::parse(&format!(r#"{{"goals":[{goals}]}}"#)).unwrap()));
+            kv.push(("needs".into(), json::parse(&format!(r#"{{"drive":{{"n":4,"m":3}},"r_cap":1,"pressure":{{"mood":"m","gain":{}}},"valence":{{"mood":"m","tonic":{},"phasic":{}}},"items":[{items}]}}"#,
+                (1 + r.below(400)) as f64 / 100.0, w(&mut r, 4.0), w(&mut r, 4.0))).unwrap()));
+            let p = persona::build(&d).unwrap_or_else(|e| panic!("{}: {} in {}", e.path, e.msg, persona::canon(&d)));
+            // alphabet events naming n1 only when the persona has it
+            let al: Vec<Json> = alpha.iter().filter(|e| two || !persona::canon(e).contains("n1")).cloned().collect();
+            let prs = props_of(&mut r, &p, &tl, &habits); let mut out = vec![];
+            for seed in [0u64, 7] {
+                let st0 = persona::init(&p, Some(seed), true, &run); let mut broken = vec![false; prs.len()];
+                every_sequence(&p, &prs, &st0, &al, 3, &mut broken);
+                for (i, pr) in prs.iter().enumerate() { let held = persona::by_construction(&p, pr, &run).is_some(); let proved = persona::prove_seed(&p, pr, seed, &run).is_ok();
+                    assert!(!(broken[i] && (held || proved)), "need persona {k} seed {seed}: {} {} is {} but a sequence breaks it", pr.id, persona::canon(&pr.rule), if held { "held" } else { "proved" });
+                    out.push((held || proved, broken[i])); } }
+            out });
+        let all: Vec<(bool, bool)> = res.into_iter().flatten().collect();
+        let (yes, broke) = (all.iter().filter(|x| x.0).count(), all.iter().filter(|x| x.1).count());
+        assert!(yes >= 5 && broke >= 5, "the check must see both sides: {yes} held or proved, {broke} broken of {}", all.len());
     }
 
     /// (iii) A habit's own rule is held by construction: every habit under on_conflict fallback, the top-ranked habit under yield

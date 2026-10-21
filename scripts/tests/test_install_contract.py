@@ -24,7 +24,7 @@ class InstallRouting(unittest.TestCase):
                 script.chmod(0o755)
             env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
                        FIXTURE_OS=os_name, FIXTURE_ARCH=arch, FIXTURE_LIBC=libc,
-                       PROBBIT_VERSION="v0.10.0", PROBBIT_INSTALL_DIR=str(root / "bin"))
+                       PROBBIT_VERSION="v0.11.0", PROBBIT_INSTALL_DIR=str(root / "bin"))
             for key in ["PROBBIT_TARGET", "PROBBIT_DOWNLOAD_BASE"]:
                 env.pop(key, None)
             env.update(extra)
@@ -40,12 +40,18 @@ class InstallRouting(unittest.TestCase):
             ("Darwin", "x86_64", "", "x86_64-apple-darwin"),
             ("Linux", "x86_64", "glibc 2.35", "x86_64-unknown-linux-gnu"),
             ("Linux", "x86_64", "musl libc", "x86_64-unknown-linux-musl"),
+            # the gnu build needs glibc >= 2.34; an older one gets the static musl build
+            ("Linux", "x86_64", "ldd (Ubuntu GLIBC 2.35-0ubuntu3) 2.35", "x86_64-unknown-linux-gnu"),
+            ("Linux", "x86_64", "ldd (GNU libc) 2.34", "x86_64-unknown-linux-gnu"),
+            ("Linux", "x86_64", "ldd (Ubuntu GLIBC 2.31-0ubuntu9.16) 2.31", "x86_64-unknown-linux-musl"),
+            ("Linux", "x86_64", "ldd (GNU libc) 2.28", "x86_64-unknown-linux-musl"),
+            ("Linux", "x86_64", "ldd (GNU libc) 2.17", "x86_64-unknown-linux-musl"),
             ("Linux", "aarch64", "glibc 2.35", "aarch64-unknown-linux-musl"),
         ]:
             with self.subTest(target=target):
                 output = self.run_fixture(os_name, arch, libc)
                 self.assertIn("FIXTURE_FETCH", output)
-                self.assertIn("probbit-v0.10.0-" + target + ".tar.gz", output)
+                self.assertIn("probbit-v0.11.0-" + target + ".tar.gz", output)
 
     def test_unsupported_architecture_never_fetches(self):
         output = self.run_fixture("Linux", "riscv64", "glibc")

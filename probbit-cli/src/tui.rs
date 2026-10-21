@@ -32,7 +32,9 @@ pub(crate) fn clip(s: &str, w: usize) -> String {
     for c in s.chars() { if esc { o.push(c); if c.is_ascii_alphabetic() { esc = false; } continue; }
         if c == '\x1b' { esc = true; o.push(c); continue; }
         if n == w { break; } o.push(c); n += 1; }
-    o.push_str(RESET); o
+    // a reset only after a cut that keeps an escape: a plain line (NO_COLOR, --plain) stays plain
+    if o.contains('\x1b') { o.push_str(RESET); }
+    o
 }
 fn pad(s: &str, w: usize) -> String { let s = clip(s, w); let n = width(&s); format!("{s}{}", " ".repeat(w - n)) }
 /// stderr, unbuffered; a reader that went away is ignored (as `err_line` in main.rs)
@@ -398,5 +400,7 @@ mod tests {
         let (lanes, w, per) = field_layout(300, 6, 80, 6); assert!(lanes * 3 <= 6 && lanes * w * per >= 300, "{lanes} {w} {per}");
         assert_eq!((group(1234567), group(12)), ("1,234,567".to_string(), "12".to_string())); assert_eq!(date(0), "1970-01-01"); assert_eq!(date(1_759_363_200), "2025-10-02");
         assert_eq!(width("\x1b[1m\x1b[38;5;51mab\x1b[0m c"), 4); assert_eq!(width(&clip("\x1b[31mabcdef\x1b[0m", 3)), 3);
+        // a cut plain line stays plain (NO_COLOR at a terminal); a cut coloured one is reset
+        assert_eq!(clip("abcdef", 3), "abc"); assert_eq!(clip("\x1b[31mabcdef", 3), "\x1b[31mabc\x1b[0m");
     }
 }

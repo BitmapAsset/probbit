@@ -1,0 +1,1 @@
+{"host": "chat-stance", "inputs": ["praise", "correction", "failure", "security", "owner_upset", "win", "wants_energy", "elapsed_hours"], "senses": [], "source": "a chat host's stance plugin: its classifier sets the flags praise, correction, failure, owner_upset, security, win, wants_energy, and its event line always carries elapsed_hours; no senses read yet"}

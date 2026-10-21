@@ -24,6 +24,9 @@ for (const [platform, arch, glibc, target] of [
   ['darwin', 'x64', null, 'x86_64-apple-darwin'],
   ['linux', 'x64', '2.35', 'x86_64-unknown-linux-gnu'],
   ['linux', 'x64', null, 'x86_64-unknown-linux-musl'],
+  ['linux', 'x64', '2.34', 'x86_64-unknown-linux-gnu'],
+  ['linux', 'x64', '2.31', 'x86_64-unknown-linux-musl'],
+  ['linux', 'x64', '2.28', 'x86_64-unknown-linux-musl'],
   ['linux', 'arm64', '2.35', 'aarch64-unknown-linux-musl'],
   ['win32', 'x64', null, 'x86_64-pc-windows-msvc'],
   ['win32', 'arm64', null, 'x86_64-pc-windows-msvc'],
@@ -40,6 +43,21 @@ test('unsupported architecture fails without fetching', async () => {
   const fixture = installer('linux', 'riscv64', null);
   await assert.rejects(fixture.install(() => {}), /no prebuilt/);
   assert.equal(fixture.urls.length, 0);
+});
+
+for (const [platform, arch] of [['linux', 'arm'], ['freebsd', 'x64'], ['linux', 'ppc64']]) {
+  test(`unsupported platform ${platform}/${arch}: a clear message, not "fetched on first run"`, async () => {
+    const fixture = installer(platform, arch, null);
+    await assert.rejects(fixture.install(() => {}), e => e instanceof fixture.UnsupportedError && /no prebuilt probbit for .*PROBBIT_BINARY/.test(e.message));
+    assert.equal(fixture.urls.length, 0);
+  });
+}
+
+test('a fetch that fails with a proxy set names NODE_USE_ENV_PROXY', async () => {
+  const fixture = installer('darwin', 'arm64', null, { HTTPS_PROXY: 'http://proxy.invalid:3128' });
+  await assert.rejects(fixture.install(() => {}), /network disabled; a proxy is set .*NODE_USE_ENV_PROXY=1/);
+  const plain = installer('darwin', 'arm64', null, { HTTPS_PROXY: 'http://proxy.invalid:3128', NODE_USE_ENV_PROXY: '1' });
+  await assert.rejects(plain.install(() => {}), e => e.message === 'fixture: network disabled');
 });
 
 for (const env of [{ PROBBIT_VERSION: '../bad' }, { PROBBIT_TARGET: '../../bad' }]) {
