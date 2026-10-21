@@ -302,7 +302,7 @@ pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "live", aliases: &[], group: "live", summary: "a resident individual: JSONL events in, one stance per event out",
         usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]",
             "live PERSONA --demo week [--seed N] [--strand FILE] [--plain]",
-            "live verify STRAND [--from-checkpoint] [--actions FILE]",
+            "live verify STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]",
             "live control STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]"],
         about: "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n--strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.",
         before: &[],
@@ -318,9 +318,10 @@ pub(crate) static COMMANDS: &[Command] = &[
             Flag { name: "--checkpoint-every", arg: "K", help: "with --strand: a checkpoint line (the whole state) after every K-th event (default 1000; 0: none); `verify --from-checkpoint` and `monitor` start at the last one" },
         ]],
         subs: &[
-            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE]", help: "replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
+            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]", help: "replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
                 flags: &[Flag { name: "--from-checkpoint", arg: "", help: "start at the last checkpoint instead of the header" },
-                    Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" }] },
+                    Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" },
+                    Flag { name: "--blocks", arg: "FILE", help: "write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {\"block\", \"n\"} per line; replays from the header" }] },
             Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]",
                 help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status",
                 flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required)" },
@@ -810,6 +811,15 @@ fn live_cmd(args: &[String]) {
                 Err((line, why)) => failed(line, &why) }
             return;
         }
+        // --blocks (RFC 0008 E): the block every replayed stance renders, one line per event, for persona without a block key too
+        if let Some(bf) = opt("--blocks") {
+            if args.iter().any(|a| a == "--from-checkpoint") { fail("live verify: --blocks replays from the header: drop --from-checkpoint") }
+            match live::verify_blocks(&text, eng) {
+                Ok((doc, blocks)) => { let body: String = blocks.iter().map(|(n, b)| format!("{}\n", persona::canon(&obj(vec![("n", num(*n as f64)), ("block", Json::Str(b.clone()))])))).collect();
+                    std::fs::write(&bf, body).unwrap_or_else(|e| fail(&format!("live verify: cannot write {bf}: {e}"))); emit(&persona::canon(&doc)) }
+                Err((line, why)) => failed(line, &why) }
+            return;
+        }
         let res = if args.iter().any(|a| a == "--from-checkpoint") { live::verify_from_checkpoint(&text, eng) } else { live::verify(&text, eng) };
         match res {
             Ok(doc) => emit(&persona::canon(&doc)),
@@ -1190,7 +1200,7 @@ mod table_tests {
         let (v, w) = sub_flags("persona", "fuzz").unwrap(); assert!(v.contains(&"--fixture-src") && w.contains(&"--json") && w.contains(&"--pretty"));
         let (v, w) = flags_of("monitor"); assert!(v.contains(&"--port") && w.contains(&"--demo"), "--demo takes an optional value: parsed as a switch");
         assert!(sub_flags("persona", "lnt").is_none());
-        assert_eq!(sub_flags("live", "verify").unwrap(), (vec!["--actions"], vec!["--from-checkpoint"]), "live's own flags are not verify's");
+        assert_eq!(sub_flags("live", "verify").unwrap(), (vec!["--actions", "--blocks"], vec!["--from-checkpoint"]), "live's own flags are not verify's");
         for c in COMMANDS { let (v, w) = flags_of(c.name); assert_eq!(v.len() + w.len(), c.flags().count(), "{}", c.name); }
     }
     #[test]

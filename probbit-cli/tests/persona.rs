@@ -931,3 +931,164 @@ fn stdout_matches_the_pacer_golden() {
     assert!(lines[15].contains(r#""level":"slow""#) && lines[8].contains(r#""initiative":1.770138"#), "{}", lines[15]);
     let _ = std::fs::remove_file(&st);
 }
+
+// ------------------------------------------------------------------------------------------- RFC 0008: viability (0.11)
+/// A small deterministic generator for the RFC 0008 tests (SplitMix64)
+struct Sm(u64);
+impl Sm { fn next(&mut self) -> u64 { self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15); let mut z = self.0; z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9); z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB); z ^ (z >> 31) }
+    fn below(&mut self, n: u64) -> u64 { self.next() % n } }
+/// `persona turn` on the state file: the stance document (the state file moves on)
+fn turn_on(p: &str, st: &str, ev: &str) -> Json { let (c, out, e) = probbit(&["persona", "turn", p, "--state", st, "--inputs", ev], ""); assert_eq!(c, 0, "{e} on {ev}"); parse(&out) }
+/// A need persona with `k` needs (k + 1 goals): (cap, per_hour, Some((at_most, events)) or None) per need
+/// One need of `need_doc`: (cap, per_hour, Some((at_most, events)) or None)
+type NeedItem = (f64, f64, Option<(f64, u64)>);
+fn need_doc(items: &[NeedItem]) -> String {
+    let goals: Vec<String> = std::iter::once(r#"{"id":"work"}"#.to_string()).chain((0..items.len()).map(|i| format!(r#"{{"id":"g{i}","expect_by_hours":1}}"#))).collect();
+    let its: Vec<String> = items.iter().enumerate().map(|(i, (cap, ph, v))| format!(r#"{{"id":"n{i}","unit":"u","cap":{cap},"weight":1,"per_hour":{ph},"satisfy_from":["env"],"amount":{},"bind":"g{i}"{}}}"#,
+        cap / 2.0, v.map_or(String::new(), |(b, e)| format!(r#","viable":{{"at_most":{b},"events":{e}}}"#)))).collect();
+    format!(r#"{{"probbit_persona":1,"identity":{{"name":"M","version":"1","seed":0}},"traits":[{{"id":"tone","levels":["plain","warm"]}}],"drives":{{"goals":[{}]}},"needs":{{"drive":{{"n":4,"m":3}},"r_cap":1,"items":[{}]}}}}"#, goals.join(","), its.join(","))
+}
+
+/// RFC 0008 (invariant a, golden): a persona without the 0.11 keys gives every document byte for byte as 0.10.1. The body
+/// example (needs, senses, valence) replays its pinned day unchanged and its documents carry no block, viability or margin.
+#[test]
+fn a_persona_without_the_viability_keys_is_byte_identical() {
+    let g = read(&ex("golden/body/day.jsonl"));
+    let (c, rep, e) = probbit(&["persona", "replay", &ex("body.yaml"), "--script", &ex("golden/body/day.json")], ""); assert_eq!(c, 0, "{e}"); assert_eq!(rep, g, "body replay");
+    for k in [r#""block""#, r#""viability""#, r#""margin""#, r#""beyond""#] { assert!(!rep.contains(k), "{k} in a 0.10.1 document"); }
+    for n in NAMES { let (c, out, e) = probbit(&["persona", "replay", &ex(&format!("{n}.yaml")), "--script", &ex("workday.json")], ""); assert_eq!(c, 0, "{e}");
+        assert!(!out.contains(r#""block""#) && !out.contains(r#""viability""#), "{n}"); }
+}
+
+/// RFC 0008 A (invariant b): margin and worst match a reference over random deficit vectors: per bounded need round(clip(1 −
+/// x / x_b, 0, 1), 6) from the deficit the stance reports, the worst the smallest margin with ties by declared order (equal
+/// growths and deficits clipped at the cap make ties), margin_min its margin; needs without a bound carry neither
+#[test]
+fn margin_and_worst_match_a_reference_over_random_deficits() {
+    let mut r = Sm(20261021); let (file, st) = (tmp("margin.json"), tmp("margin-state.json")); let mut checked = (0, 0);
+    for _ in 0..30 {
+        let k = 1 + r.below(4) as usize; let tie = r.below(3) == 0;
+        let items: Vec<NeedItem> = (0..k).map(|i| { let cap = [0.5, 1.0, 2.0][if tie { 1 } else { r.below(3) as usize }];
+            let ph = if tie && i > 0 { 0.37 } else { r.below(1300) as f64 / 1000.0 * cap }; let b = (1 + r.below(1000)) as f64 / 1000.0 * cap;
+            (cap, if tie { 0.37 } else { ph }, if r.below(5) == 0 && i > 0 { None } else { Some((if tie { 0.6 } else { (b * 1e6).round() / 1e6 }, 1 + r.below(5))) }) }).collect();
+        std::fs::write(&file, need_doc(&items)).unwrap();
+        let (c, s0, e) = probbit(&["persona", "init", &file], ""); assert_eq!(c, 0, "{e}: {}", need_doc(&items)); std::fs::write(&st, &s0).unwrap();
+        for _ in 0..3 { let d = turn_on(&file, &st, r#"{"elapsed_hours":1}"#);
+            let mut best: Option<(usize, f64)> = None;
+            for (i, (_, _, v)) in items.iter().enumerate() { let e = s(&d, &["needs", &format!("n{i}")]); let x = s(e, &["deficit"]).as_f64().unwrap();
+                match v { None => assert!(e.get("margin").is_none() && e.get("beyond").is_none(), "an unbounded need has no margin"),
+                    Some((b, _)) => { let m = ((1.0 - x / b).clamp(0.0, 1.0) * 1e6).round() / 1e6; assert_eq!(s(e, &["margin"]).as_f64().unwrap(), m, "n{i}: x {x} b {b}");
+                        if best.is_some_and(|w| w.1 == m) { checked.1 += 1; } else if best.map_or(true, |w| m < w.1) { best = Some((i, m)); } } } }
+            let (w, m) = best.unwrap(); assert_eq!(s(&d, &["viability", "worst"]).as_str(), Some(format!("n{w}").as_str()), "worst"); assert_eq!(s(&d, &["viability", "margin_min"]).as_f64(), Some(m));
+            checked.0 += 1; } }
+    assert!(checked.0 == 90 && checked.1 >= 5, "{checked:?}: events checked, ties seen");
+    for f in [&file, &st] { let _ = std::fs::remove_file(f); }
+}
+
+/// RFC 0008 (invariant c, V8-R1 style): every new row is refused at its path, exit 2, when the persona is read; an event that
+/// sends an engine-owned input is refused whole (N-E4)
+#[test]
+fn every_viability_row_is_refused_at_its_path() {
+    let base = read(&ex("viable.yaml")); let file = tmp("viable-bad.yaml");
+    let bad = |from: &str, to: &str| -> String { assert!(base.contains(from), "{from}"); std::fs::write(&file, base.replacen(from, to, 1)).unwrap();
+        let (c, out, _) = probbit(&["persona", "init", &file], ""); assert_eq!(c, 2, "{from} -> {to}"); let j = parse(&out);
+        format!("{}: {}", s(&j, &["error", "path"]).as_str().unwrap(), s(&j, &["error", "message"]).as_str().unwrap()) };
+    let v = "viable: {at_most: 0.85, events: 4}";
+    assert_eq!(bad(v, "viable: {at_most: 0, events: 4}"), "needs.items[0].viable.at_most: in (0, 1] (the need's cap)");
+    assert_eq!(bad(v, "viable: {at_most: 1.2, events: 4}"), "needs.items[0].viable.at_most: in (0, 1] (the need's cap)");
+    assert_eq!(bad(v, "viable: {at_most: -0.1, events: 4}"), "needs.items[0].viable.at_most: in (0, 1] (the need's cap)");
+    assert!(bad(v, "viable: {at_most: 0.85, events: 0}").starts_with("needs.items[0].viable.events: "));
+    assert!(bad(v, "viable: {at_most: 0.85, events: 10001}").starts_with("needs.items[0].viable.events: "));
+    assert!(bad(v, "viable: {at_most: 0.85, events: 1.5}").starts_with("needs.items[0].viable.events: "));
+    assert!(bad(v, "viable: {at_most: 0.85}").starts_with("needs.items[0].viable"));
+    assert!(bad(v, "viable: {at_most: 0.85, events: 4, after: 2}").starts_with("needs.items[0].viable"));
+    assert_eq!(bad("shape: linear", "shape: square"), "needs.pressure.shape: linear (c(u) = u, the one shape)");
+    assert_eq!(bad("gain: 2.0", "gain: 0"), "needs.pressure.gain: must be > 0");
+    assert!(bad("pressure: {mood: pressure", "pressure: {mood: calm").starts_with("needs.pressure.mood: a declared mood"));
+    assert!(bad("tonic: 0.8", "tonic: -0.1").starts_with("needs.valence.tonic: "));
+    assert!(bad("valence: {mood: valence, tonic", "valence: {mood: verbosity, tonic").starts_with("needs.valence.mood: a declared mood"));
+    assert_eq!(bad("per_event: 0.08", "rate: 0.08"), "needs.items[2].per_reading.rate: a flag sense grows a need by per_event per true reading (not rate)");
+    assert_eq!(bad("{sense: tokens, rate: 1}", "{sense: tokens, per_event: 1}"), "needs.items[0].per_reading.per_event: a number sense grows a need by rate per unit of its raw reading (not per_event)");
+    assert_eq!(bad("need.context.margin", "need.contact.deficit: {at_least: 0.5}, need.nothing.margin"), "habits[1].when.need.nothing.margin: unknown need \"nothing\"");
+    assert_eq!(bad("when: {quiet: true}", "when: {need_pressure: 0.5}"), "habits[0].when.need_pressure: reserved for the needs block (a rule reads need.<id>.deficit)");
+    assert_eq!(bad("    - id: integrity\n", "    - id: pressure\n"), "needs.items[2].id: need_pressure is reserved by needs.pressure");
+    // pressure needs a bound: every viable removed
+    let nob = base.replace("      viable: {at_most: 0.85, events: 4}\n", "").replace("      viable: {at_most: 0.75, events: 4}\n", "").replace("      viable: {at_most: 0.8, events: 4}\n", "")
+        .replace("need.context.margin: {at_most: 0.1}", "need.context.deficit: {at_least: 0.9}");
+    std::fs::write(&file, &nob).unwrap(); let (c, out, _) = probbit(&["persona", "init", &file], ""); assert_eq!(c, 2); assert!(out.contains("pressure reads the worst margin"), "{out}");
+    // N-E4: the engine owns need_pressure, need_tonic, need_phasic
+    let (c, s0, e) = probbit(&["persona", "init", &ex("viable.yaml")], ""); assert_eq!(c, 0, "{e}"); let st = tmp("viable-ne4.json"); std::fs::write(&st, &s0).unwrap();
+    for k in ["need_pressure", "need_tonic", "need_phasic"] { let (c, out, _) = probbit(&["persona", "turn", &ex("viable.yaml"), "--state", &st, "--inputs", &format!(r#"{{"{k}":0.5,"src":"env"}}"#)], "");
+        assert_eq!(c, 2, "{k}"); assert!(out.contains(&format!("inputs.{k}")), "{out}"); }
+    assert_eq!(read(&st), s0, "a refused event changes nothing");
+    for f in [&file, &st] { let _ = std::fs::remove_file(f); }
+}
+
+/// RFC 0008 (invariant d, P3 with bounds): a refused event changes nothing. 20 individuals x 60 random events mixing growth,
+/// readings, flag readings, amounts, sources and refused rows (an amount from a wrong source, above its cap, for no need; an
+/// engine-owned input; a reading out of range): the run equals the run without its refused events, strand byte for byte
+#[test]
+fn p3_holds_with_bounds() {
+    let mut r = Sm(8008); let mut refused = 0;
+    for seed in 0..20u64 {
+        let (mut all, mut good) = (String::new(), String::new());
+        for _ in 0..60 { let h = [0.0, 0.5, 1.0, 2.0][r.below(4) as usize]; let tok = r.below(50) as f64 / 100.0; let fail = r.below(3) == 0;
+            let ok = match r.below(5) { 0 => format!(r#"{{"elapsed_hours":{h},"needs":{{"context":{{"amount":0.6,"src":"env:compactor"}}}},"senses":{{"tokens":{tok}}},"src":"env:host"}}"#),
+                1 => format!(r#"{{"elapsed_hours":{h},"needs":{{"contact":{{"amount":0.8,"src":"human:owner"}}}},"src":"env:host"}}"#),
+                2 => format!(r#"{{"elapsed_hours":{h},"needs":{{"integrity":0.5}},"senses":{{"tool_fail":{fail}}},"src":"env:host"}}"#),
+                _ => format!(r#"{{"elapsed_hours":{h},"senses":{{"tokens":{tok},"tool_fail":{fail}}},"src":"env:host"}}"#) };
+            all.push_str(&ok); all.push('\n'); good.push_str(&ok); good.push('\n');
+            if r.below(3) == 0 { refused += 1; all.push_str([r#"{"elapsed_hours":1,"needs":{"contact":{"amount":0.8,"src":"env:host"}},"src":"env:host"}"#,
+                r#"{"elapsed_hours":1,"needs":{"context":1.5},"src":"env:host"}"#, r#"{"elapsed_hours":1,"needs":{"hunger":0.2},"src":"env:host"}"#,
+                r#"{"elapsed_hours":1,"need_pressure":0.9,"src":"env:host"}"#, r#"{"elapsed_hours":1,"senses":{"tokens":3},"src":"env:host"}"#,
+                r#"{"elapsed_hours":1,"needs":{"integrity":0.5},"senses":{"tool_fail":true},"src":"self"}"#][r.below(6) as usize]); all.push('\n'); } }
+        let run = |events: &str, tag: &str| -> (String, String) { let (ev, sf) = (tmp(&format!("p3b-{seed}-{tag}.jsonl")), tmp(&format!("p3b-{seed}-{tag}.strand")));
+            std::fs::write(&ev, events).unwrap(); let _ = std::fs::remove_file(&sf);
+            let (_, out, _) = probbit(&["live", &ex("viable.yaml"), "--seed", &seed.to_string(), "--clock", "fixed", "--events", &ev, "--strand", &sf], "");
+            let st = read(&sf); for f in [&ev, &sf] { let _ = std::fs::remove_file(f); }
+            (out.lines().filter(|l| !l.starts_with(r#"{"error""#)).map(|l| format!("{l}\n")).collect(), st) };
+        let (a, b) = (run(&all, "all"), run(&good, "good"));
+        assert_eq!(a.0, b.0, "seed {seed}: the stances"); assert_eq!(a.1, b.1, "seed {seed}: the strand");
+        assert!(a.0.contains(r#""viability""#), "seed {seed}"); }
+    assert!(refused >= 300, "{refused} refused events");
+}
+
+/// RFC 0008 D (invariant e): one tool_fail reading adds exactly per_event to the need it grows (no growth gene, no hours); a
+/// false reading adds nothing; the event without the sense adds nothing
+#[test]
+fn one_tool_fail_reading_adds_exactly_per_event() {
+    let (c, s0, e) = probbit(&["persona", "init", &ex("viable.yaml")], ""); assert_eq!(c, 0, "{e}"); let st = tmp("viable-flag.json"); std::fs::write(&st, &s0).unwrap();
+    let integ = |d: &Json| s(d, &["needs", "integrity", "deficit"]).as_f64().unwrap();
+    let mut x = 0.0;
+    for (ev, add) in [(r#"{"senses":{"tool_fail":true},"src":"env:host"}"#, 0.08), (r#"{"senses":{"tool_fail":false},"src":"env:host"}"#, 0.0), (r#"{"src":"env:host"}"#, 0.0),
+        (r#"{"senses":{"tool_fail":true},"src":"env:host"}"#, 0.08), (r#"{"senses":{"tool_fail":true,"tokens":0.1},"src":"env:host"}"#, 0.08)] {
+        let d = turn_on(&ex("viable.yaml"), &st, ev); let y = integ(&d); assert_eq!(y, ((x + add) * 1e6_f64).round() / 1e6, "{ev}"); x = y; }
+    let _ = std::fs::remove_file(&st);
+}
+
+/// RFC 0008 E (invariant g, H1 on the fixtures): the block names each declared trait and mood exactly once as `name level`,
+/// the levels the stance took, then the viability line when needs are declared; for every example persona (a persona without a
+/// block key through `live verify --blocks`) on every event, and `stance.block` equals the rendering where the persona has one
+#[test]
+fn the_block_names_every_trait_and_mood_once() {
+    let mut personas: Vec<String> = std::fs::read_dir(ex("")).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().into_string().unwrap()).filter(|n| n.ends_with(".yaml")).collect();
+    personas.sort(); assert!(personas.len() >= 8, "{personas:?}"); let mut events_checked = 0;
+    for name in &personas {
+        let (ev, sf, bf) = (tmp(&format!("blk-{name}.jsonl")), tmp(&format!("blk-{name}.strand")), tmp(&format!("blk-{name}.blocks")));
+        let events = if name.starts_with("viable") { r#"{"elapsed_hours":1,"senses":{"tokens":0.3,"tool_fail":true},"src":"env:host"}"# } else if name == "body.yaml" || name == "sensed.yaml" { r#"{"elapsed_hours":1,"src":"env:host"}"# } else { r#"{"elapsed_hours":1}"# };
+        std::fs::write(&ev, format!("{events}\n").repeat(6)).unwrap(); let _ = std::fs::remove_file(&sf);
+        let (c, out, e) = probbit(&["live", &ex(name), "--clock", "fixed", "--events", &ev, "--strand", &sf], ""); assert_eq!(c, 0, "{name}: {e}");
+        let docs: Vec<Json> = out.lines().map(parse).collect(); assert_eq!(docs.len(), 6, "{name}");
+        let (c, _, e) = probbit(&["live", "verify", &sf, "--blocks", &bf], ""); assert_eq!(c, 0, "{name}: {e}");
+        let blocks: Vec<Json> = read(&bf).lines().map(parse).collect(); assert_eq!(blocks.len(), 6, "{name}");
+        for (d, b) in docs.iter().zip(&blocks) { let text = s(b, &["block"]).as_str().unwrap();
+            let first = text.split('\n').next().unwrap(); let items: Vec<&str> = first.split("; ").collect();
+            let want: Vec<String> = ["stance", "mood"].iter().flat_map(|g| d.get(g).and_then(Json::as_obj).map_or(vec![], |o| o.iter().map(|(k, e)| format!("{k} {}", s(e, &["level"]).as_str().unwrap())).collect())).collect();
+            assert_eq!(items.len(), want.len(), "{name}: {text}");
+            for w in &want { assert_eq!(items.iter().filter(|x| **x == w.as_str()).count(), 1, "{name}: {w} once in {text}"); }
+            assert_eq!(text.contains("\nviability: "), d.get("needs").is_some(), "{name}: the viability line with needs: {text}");
+            if let Some(own) = d.get("block") { assert_eq!(own.as_str(), Some(text), "{name}: stance.block is the rendering"); }
+            events_checked += 1; }
+        for f in [&ev, &sf, &bf, &format!("{sf}.lock")] { let _ = std::fs::remove_file(f); } }
+    assert_eq!(events_checked, personas.len() * 6);
+}

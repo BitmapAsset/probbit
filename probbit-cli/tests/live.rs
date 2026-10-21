@@ -603,3 +603,40 @@ fn a_pacer_life_split_across_runs_equals_one_run() {
     let (c, v, e) = probbit(&["live", "verify", &one]); assert_eq!(c, 0, "{e}"); assert_eq!(s(&parse(&v), &["ok"]), &Json::Bool(true));
     clean(&[&st1, &one, &all]);
 }
+
+/// RFC 0008 E: `live verify` recomputes the viability receipts from the logged readings and amounts: margin_min_seen is the
+/// smallest margin_min any replayed stance reports and lost_at the first event whose stance says lost; a tampered reading (a
+/// tool_fail flipped in a logged event, the line kept canonical) diverges at that line
+#[test]
+fn verify_recomputes_viability_and_a_tampered_reading_diverges() {
+    let (ev, sf) = (tmp("viable.jsonl"), tmp("viable.strand")); let _ = std::fs::remove_file(&sf);
+    let mut lines = String::new();
+    for i in 0..14 { lines.push_str(&format!(r#"{{"elapsed_hours":1,"senses":{{"tokens":{},"tool_fail":{}}},"src":"env:host"}}"#, [0.1, 0.25, 0.2][i % 3], i % 2 == 0)); lines.push('\n'); }
+    lines.push_str(r#"{"elapsed_hours":1,"needs":{"context":{"amount":0.6,"src":"env:compactor"}},"src":"env:host"}"#); lines.push('\n');
+    std::fs::write(&ev, &lines).unwrap();
+    let (c, out, e) = probbit(&["live", "examples/persona/viable.yaml", "--clock", "fixed", "--events", &ev, "--strand", &sf]); assert_eq!(c, 0, "{e}");
+    let docs: Vec<Json> = out.lines().map(parse).collect(); assert_eq!(docs.len(), 15);
+    let v = |d: &Json, k: &str| d.get("viability").and_then(|x| x.get(k)).cloned().unwrap();
+    let seen = docs.iter().map(|d| v(d, "margin_min").as_f64().unwrap()).fold(1.0f64, f64::min);
+    let lost_at = docs.iter().position(|d| v(d, "status").as_str() == Some("lost")).map(|i| (i + 1) as f64);
+    assert!(lost_at.is_some(), "the context stays beyond its bound for 4 events");
+    let (c, sum, e) = probbit(&["live", "verify", &sf]); assert_eq!(c, 0, "{e}"); let sum = parse(&sum);
+    let vs = sum.get("viability").expect("the summary carries viability");
+    assert_eq!(vs.get("margin_min_seen").and_then(Json::as_f64), Some(seen)); assert_eq!(vs.get("lost_at").and_then(Json::as_f64), lost_at);
+    // on every prefix of the strand the summary agrees with the stances so far
+    let text = read(&sf); let all: Vec<&str> = text.lines().collect();
+    for n in 1..=docs.len() { let pre = tmp(&format!("viable-pre-{n}.strand")); std::fs::write(&pre, all[..=n].iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
+        let (c, s, e) = probbit(&["live", "verify", &pre]); assert_eq!(c, 0, "{e}"); let s = parse(&s);
+        let seen_n = docs[..n].iter().map(|d| v(d, "margin_min").as_f64().unwrap()).fold(1.0f64, f64::min);
+        let lost_n = docs[..n].iter().position(|d| v(d, "status").as_str() == Some("lost")).map(|i| (i + 1) as f64);
+        assert_eq!(s.get("viability").and_then(|x| x.get("margin_min_seen")).and_then(Json::as_f64), Some(seen_n), "prefix {n}");
+        assert_eq!(s.get("viability").and_then(|x| x.get("lost_at")).and_then(Json::as_f64), lost_n, "prefix {n}"); let _ = std::fs::remove_file(&pre); }
+    // a tampered reading: event 3's tool_fail flipped
+    let k = all.iter().position(|l| l.starts_with(r#"{"inputs":"#) && l.contains(r#""n":3,"#)).unwrap();
+    assert!(all[k].contains(r#""tool_fail":true"#), "{}", all[k]);
+    let bad: String = all.iter().enumerate().map(|(i, l)| format!("{}\n", if i == k { l.replace(r#""tool_fail":true"#, r#""tool_fail":false"#) } else { l.to_string() })).collect();
+    let tf = tmp("viable-tampered.strand"); std::fs::write(&tf, bad).unwrap();
+    let (c, s, _) = probbit(&["live", "verify", &tf]); assert_eq!(c, 1, "{s}"); let s = parse(&s);
+    assert_eq!(s.get("ok"), Some(&Json::Bool(false))); assert_eq!(s.get("line").and_then(Json::as_f64), Some((k + 1) as f64), "diverges at the tampered line");
+    for f in [&ev, &sf, &tf, &format!("{sf}.lock")] { let _ = std::fs::remove_file(f); }
+}

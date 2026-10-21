@@ -383,6 +383,18 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         if dx >= x.cap - 5e-7 { let say = if x.say.is_empty() { x.id.replace('_', " ") } else { x.say.clone() };
             out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} {say}: the deficit sits at its cap ({})", s.g("⚠", "!"), persona::r6(x.cap))))); }
     }
+    // 3c'. viability (RFC 0008 E): per need with a bound its margin as a bar over [0, 1] (1 at the setpoint, 0 at the bound) and its
+    // run of events beyond the bound; the worst need highlighted; the status when lost
+    if let Some(vj) = doc.get("viability") { let worst = vj.get("worst").and_then(Json::as_str).unwrap_or("");
+        let mm = vj.get("margin_min").and_then(Json::as_f64).unwrap_or(0.0); let status = vj.get("status").and_then(Json::as_str).unwrap_or("viable");
+        // the label is wider than the 8-column gutter: it heads its own line
+        out.push(format!("{}  {}", s.bold(MAGENTA, "VIABILITY"), s.bold(if status == "lost" { RED } else { CYAN }, &format!("worst {worst} {dot} margin_min {mm:.2} {dot} {status}"))));
+        for x in &m.needs { let Some(mg) = doc.get("needs").and_then(|n| n.get(&x.id)).and_then(|e| e.get("margin")).and_then(Json::as_f64) else { continue };
+            let by = doc.get("needs").and_then(|n| n.get(&x.id)).and_then(|e| e.get("beyond")).and_then(Json::as_f64).unwrap_or(0.0);
+            let txt = format!("margin {mg:.2}  beyond {}{}", whole(by), if x.id == worst { "  worst" } else { "" });
+            out.push(format!("{}{:<nw$}  {}  {}", lab(""), x.id, nbar(s, mg, 1.0, if x.id == worst { RED } else { GREEN }),
+                if x.id == worst { s.bold(RED, &txt) } else { s.paint(CYAN, &txt) })); }
+        if vj.get("status").and_then(Json::as_str) == Some("lost") { out.push(format!("{}{}", lab(""), s.bold(RED, &format!("{} viability lost: a need stayed beyond its bound for its declared run of events", s.g("⚠", "!"))))); } }
     // 3d. pace (RFC 0002 Design C): the average as a dot over [0, cap] with an r0 tick, and the level; 3e. the surprise gate
     // (Design B): per learned trait its gain g (1 when the stance lists none: the gate is closed)
     if let Some((r0, cap)) = m.pace { let p = doc.get("pace"); let rb = p.and_then(|x| x.get("rbar")).and_then(Json::as_f64).unwrap_or(0.0);

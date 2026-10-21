@@ -676,6 +676,69 @@ windows and payments). Amounts never come through the MCP tools (section 7). A s
 passes every check; amounts are logged and replayed, not shown true. A need is arithmetic over logged numbers, not an inner
 state.
 
+#### Viability bounds, graded pressure and need valence (optional, RFC 0008; 0.11)
+
+Three keys, each additive: a persona without them gives every document byte for byte as before (the stance, the state, the
+strand, `describe`). A bound says where a need stops being viable; the couplings carry the distance to that bound into two
+moods with one weight each, with no thresholds to pick. All of it is arithmetic over the logged readings and amounts.
+
+```yaml
+needs:
+  pressure: {mood: pressure, gain: 2.0, shape: linear}   # mood evidence += gain x (1 - margin_min); needs a bound
+  valence: {mood: valence, tonic: 0.8, phasic: 0.6}      # mood evidence += -tonic x D(x)/D(cap) + phasic x (D(x_before) - D(x_after))
+  items:
+    - id: integrity
+      per_reading: {sense: tool_fail, per_event: 0.08}   # a flag sense: growth per true reading (a number sense takes rate)
+      viable: {at_most: 0.8, events: 4}                  # the deficit bound x_b and the run of events beyond it that ends viability
+```
+
+**Bounds (RFC 0008 A).** After the needs step, per need with `viable`, every number rounded to 6 decimals:
+
+```
+margin = round(clip(1 - x / x_b, 0, 1), 6)          # 1 at the setpoint, 0 at the bound
+beyond = beyond + 1 (at most events) if x > x_b, else 0
+worst  = the need with the smallest margin (ties: declared order);  margin_min = its margin
+```
+
+When some need's `beyond` reaches its `events`, the state sets `viability: "lost"` once and keeps it; nothing else changes
+(the engine never stops a host). The state's `needs` gains `beyond: {id: n}` (per bounded need) and `viability: "viable" |
+"lost"`, only with a bound. Rules may read `need.<id>.margin` (a need with a bound) and `needs.margin_min` as number
+conditions (a number = at least, or `{at_least, at_most}`), as they read `need.<id>.deficit`.
+
+**Pressure (RFC 0008 B).** The named mood (any declared mood) takes `gain x (1 - margin_min)` as an ordinal shift each event,
+lowered as the reserved number input `need_pressure` (box [0, 1]). `shape` is `linear` (the one shape).
+
+**Need valence (RFC 0008 C).** The named mood takes `-tonic x D(x)/D(cap)` (lowered as `need_tonic`, box [0, 1]: how far the
+deficits are from their setpoints, D(cap) the drive with every need at its cap) and `phasic x (D(x before pass 1) - D(x after
+pass 2))` (lowered as `need_phasic`, box [-r_cap, r_cap]: this event's drive reduction, Keramati & Gutkin's homeostatic
+reward). It adds to `drives.valence` when both name the mood. A weight of 0 lowers no input.
+
+**Flag senses as growth (RFC 0008 D).** `per_reading` on a flag sense takes `per_event` (growth per true reading, times the
+growth gene); N-R4 reads "a number sense with `rate`, or a flag sense with `per_event`".
+
+**Stance and receipts (RFC 0008 E).** `needs.<id>` gains `margin` and `beyond` (a need with a bound); the stance gains
+`viability: {worst, margin_min, status}`; `why` gains `<need> margin <m>, nearest its bound` while the worst margin is under
+0.25. **`block`**: with a bound, a coupling or `line.block: true`, the stance carries the text a host injects verbatim: every
+declared trait, then every mood, once each as `name level` (declared order, `; ` between), then with a needs block one line
+`viability: worst <need>, margin <m>` (`viability: lost, worst ...` once lost; `viability: no bounds declared` without a
+bound). `line` is unchanged. `live verify` summarises `viability: {margin_min_seen, lost_at}` (the smallest margin_min after
+any event replayed, the event at which viability was lost or null), recomputed from the logged readings and amounts; `live
+verify --blocks FILE` writes each event's block (any persona, a block key or not). `monitor` draws a VIABILITY line (worst,
+margin_min, status) with one margin bar per bounded need, the worst highlighted. `prove` boxes `need_pressure`, `need_tonic`
+and `need_phasic` like any number input.
+
+**Refused when the persona is read** (exit 2, at the field's path): `viable.at_most` outside (0, cap] or with more than 6
+decimals, `viable.events` not a whole number in 1..10000, an unknown key (V8-R1); `needs.pressure` without a need with
+`viable`, a `gain` <= 0 or above 50, a `shape` other than `linear`, a `mood` not declared; `needs.valence` with `tonic` or
+`phasic` outside [0, 50] or a mood not declared; `per_event` on a number sense or `rate` on a flag sense (N-R4); a need whose
+input id `need_<id>` is `need_pressure`, `need_tonic` or `need_phasic` while the coupling that reserves it is declared;
+`need.<id>.margin` on a need without a bound; a rule on `need_pressure`, `need_tonic` or `need_phasic`. **An event is refused
+whole** when it sends `need_pressure`, `need_tonic` or `need_phasic` (N-E4: the engine computes them).
+
+What it guarantees, and what it does not. A margin is a declared bound applied to a logged deficit; "viability" is a status
+of that arithmetic, not a state of the host or of anything else. A source is the host's word, as for every reading. See
+docs/welfare-stance.md for what the words need, viability and damage mean here and what is not claimed.
+
 ### 2.13 Surprise (optional)
 
 After a run of surprising outcomes the learner takes larger steps, and smaller ones again once things settle (RFC 0002 Design
