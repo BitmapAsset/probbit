@@ -3837,8 +3837,10 @@ pub fn expect_weights(ex: &Expect, mem: &ExpectMem) -> Vec<(String, f64)> {
     let tot = c.iter().fold(empty, |a, x| a + x.1);
     let mut out = vec![("{}".to_string(), empty / tot)]; out.extend(c.into_iter().map(|(k, n)| (k, n / tot))); out
 }
-/// The non-twin exact marginals of a program, aligned to `ids` / `levels` when given -> None unless the exact tier solved it
-fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Vec<(String, Vec<(String, f64)>)>> {
+/// Per non-twin variable its exact marginal, levels sorted
+type Marg = Vec<(String, Vec<(String, f64)>)>;
+/// The non-twin exact marginals of a program -> None unless the exact tier solved it
+fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
     let doc = eng(prog, &Flags { op: "decide".into(), ..flags(p, st) });
     if doc.get("verdict").and_then(Json::as_str) != Some("exact") { return None; }
     Some(doc.get("marginals")?.as_obj()?.iter().filter(|(k, _)| !k.starts_with("free.")).map(|(k, v)| (k.clone(), v.as_obj().map_or(vec![], |o| {
@@ -3848,7 +3850,7 @@ fn with_elapsed(rep: &Json, e: &Json) -> Json {
     let mut kv: Vec<(String, Json)> = rep.as_obj().map_or(vec![], |o| o.to_vec()); kv.push(("elapsed_hours".into(), e.clone())); Json::Obj(kv)
 }
 /// Sum over variables of KL(a_i || b_i) and the per-variable terms (each clamped at 0) -> None when b_i is 0 where a_i is not
-fn kl_marg(a: &[(String, Vec<(String, f64)>)], b: &[(String, Vec<(String, f64)>)]) -> Option<(f64, Vec<f64>)> {
+fn kl_marg(a: &Marg, b: &Marg) -> Option<(f64, Vec<f64>)> {
     let mut tot = 0.0; let mut terms = vec![];
     for (id, la) in a { let lb = &b.iter().find(|(k, _)| k == id)?.1; let mut t = 0.0;
         for (l, x) in la { if *x > 0.0 { let y = lb.iter().find(|(m, _)| m == l).map_or(0.0, |v| v.1); if y <= 0.0 { return None; } t += x * (x.ln() - y.ln()); } }
@@ -3868,7 +3870,7 @@ pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engi
     let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
     let cold = !mem.warm && key == "{}";
     // the members' marginals, weighted; a member that does not compile or solve exactly folds into the empty member
-    let mut parts: Vec<(f64, Vec<(String, Vec<(String, f64)>)>)> = vec![]; let mut empty_w = 0.0;
+    let mut parts: Vec<(f64, Marg)> = vec![]; let mut empty_w = 0.0;
     for (k, w) in &ws {
         if *k == key { parts.push((*w, a.clone())); continue; }
         if k == "{}" { empty_w += w; continue; }
@@ -3876,7 +3878,7 @@ pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engi
         match solve(&with_elapsed(&rep, &e)) { Some(m) => parts.push((*w, m)), None => empty_w += w } }
     // the empty member: E_t, or A_t itself when the event is time-only (ws[0], pushed first)
     if key != "{}" { parts.push((empty_w, ed.clone())); } else { parts[0].0 += empty_w; }
-    let pi: Vec<(String, Vec<(String, f64)>)> = a.iter().map(|(id, la)| (id.clone(), la.iter().map(|(l, _)| (l.clone(), parts.iter().fold(0.0, |acc, (w, m)|
+    let pi: Marg = a.iter().map(|(id, la)| (id.clone(), la.iter().map(|(l, _)| (l.clone(), parts.iter().fold(0.0, |acc, (w, m)|
         acc + w * m.iter().find(|(k, _)| k == id).and_then(|(_, r)| r.iter().find(|(x, _)| x == l)).map_or(0.0, |v| v.1)))).collect())).collect();
     let (pred, tp) = kl_marg(&a, &pi)?; let (s_self, ts) = kl_marg(&a, &ed)?;
     let w_cur = ws.iter().find(|(k, _)| *k == key).map_or(ws[0].1, |x| x.1);
