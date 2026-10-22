@@ -403,6 +403,18 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     for (k, t) in m.gates.iter().enumerate() { let g = doc.get("surprise").and_then(|x| x.get(t)).and_then(Json::as_f64).unwrap_or(1.0);
         out.push(format!("{}{t:<idw$}  {}  {}", lab(if k == 0 { "GAIN" } else { "" }), nbar(s, g - 1.0, 2.0, AMBER),
             s.bold(if g > 1.0 { AMBER } else { GREEN }, &format!("g {g:.2}{}", if g > 1.0 { "  learning fast" } else { "" })))); }
+    // 3f. RFC 0009: the deviation from the engine's own expectation (KL in nats, effects {}) and its z against the learned
+    // normal; then the event's exact trajectory as the mean marginal entropy per beta step (derived, never logged)
+    if let Some(dv) = doc.get("deviation").filter(|d| !d.is_null()) { let g = |k: &str| dv.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+        let cold = dv.get("cold") == Some(&Json::Bool(true)); let reg = dv.get("registers") == Some(&Json::Bool(true));
+        let z = dv.get("z").and_then(Json::as_f64).map_or("z -".to_string(), |z| format!("z {z:+.2}"));
+        let txt = format!("pred {:.4} {dot} self {:.4} {dot} input {:.2} {dot} {}{}", g("pred"), g("self"), g("input"), if cold { "cold".to_string() } else { z }, if reg { "  registers deviation" } else { "" });
+        out.push(format!("{}  {}", s.bold(MAGENTA, "DEVIATION"), if reg { s.bold(AMBER, &txt) } else { s.paint(CYAN, &txt) })); }
+    if let Some(tj) = w.rep.live.traj.as_ref() { let st = tj.get("steps").and_then(Json::as_arr).map_or(vec![], |a| a.to_vec());
+        let hs: Vec<String> = st.iter().map(|x| format!("{:.2}", x.get("h").and_then(Json::as_f64).unwrap_or(0.0))).collect();
+        let b0 = st.first().and_then(|x| x.get("beta")).and_then(Json::as_f64).unwrap_or(1.0);
+        out.push(format!("{}  {}", s.bold(MAGENTA, "TRAJECTORY"), s.paint(CYAN, &format!("exact {dot} beta {b0:.2} -> 1 {dot} mean H {}", hs.join(" ")))));
+    }
     // 4. the habits: in force, the ones that bound highlighted, the violations counter (0 by construction)
     let hb = doc.get("habits");
     let list = |k: &str| strs(hb.and_then(|h| h.get(k)));
@@ -544,6 +556,8 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
         kv.push(("normals", Json::Arr(persona::normals(&w.rep.live.p, &w.rep.live.st).iter().enumerate().map(|(k, (id, mean, n, _))| json::obj(vec![("id", json::str(id)),
             ("mean", json::num(*mean)), ("n", json::num(*n as f64)), ("moved", json::num(moved.get(k).copied().unwrap_or(0.0)))])).collect())));
     }
+    // RFC 0009: the last event's exact trajectory, only with engine.trajectory
+    if let Some(t) = w.and_then(|w| w.rep.live.traj.clone()) { kv.push(("trajectory", t)); }
     // the open decisions now (§2.8), only with a credit block: each turn and the eligibility a payment at the next event would get
     if let Some(o) = w.and_then(|w| persona::open_decisions(&w.rep.live.p, &w.rep.live.st)) {
         kv.push(("open", Json::Arr(o.iter().map(|(t, e)| json::obj(vec![("turn", json::num(*t as f64)), ("e", json::num(*e))])).collect())));

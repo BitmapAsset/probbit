@@ -22,6 +22,14 @@ model that reads a stance all read the same thing.
   0008 adds two shifts: `gain x (1 - margin_min)` and `-tonic x D(x)/D(cap) + phasic x (drive reduction)`. The stance reports
   the level the arithmetic gave. A model that reads "pressure high" reads a number about logged deficits.
 
+- **Expectation**, **deviation** and **trajectory** (RFC 0009): the expectation is a mixture of the persona's own programs
+  over the input combinations its strand has logged, weighted by decayed counts. "Deviation" is the KL divergence, in nats,
+  of the turn's per-variable odds from that mixture's odds, computed exactly from logged events; "registers deviation" means
+  its z-score against a learned average of past deviations reached 1.5. "Surprise" in this sense is that KL number. The
+  trajectory is the same program at a higher temperature (p^beta, normalised), a picture of one answer, never a second
+  source of information. All three move nothing (effects {}), and every number is recomputed from the strand. No inner
+  experience is claimed; the stance on this page applies unchanged.
+
 ## What is claimed
 
 - Mechanism: the stance registers deviation from declared bounds (the margins and the worst need), the strand logs every
