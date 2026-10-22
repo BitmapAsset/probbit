@@ -291,6 +291,8 @@ pub(crate) static COMMANDS: &[Command] = &[
                 help: "RFC 0004, read-only: per learned trait epsilon (no event sequence moves its odds at rest by more, in total variation: exact over the learned-weight box), the ceiling, the attaining level set and seed, speed, speed_floor, the residue r and every uncounted channel; exit 1 on an uncounted channel or an epsilon above max_epsilon. --audit STRAND replays a recorded life and reports per trait the room used (resting TV of the learned weights / epsilon), the most at any event and now; exit 1 on an exceedance",
                 flags: &[F_P_SEEDS, F_P_JSON, Flag { name: "--audit", arg: "STRAND", help: "replay this strand and report the room each learned trait used" }] },
             Sub { name: "compile", args: "PERSONA --state STATE [--inputs JSON|FILE]", help: "the turn's probbit-ir program (its sha256 = engine.program)", flags: &[F_P_STATE, F_P_INPUTS] },
+            Sub { name: "trajectory", args: "PERSONA (--state STATE [--inputs JSON|FILE] | --program FILE)", help: "RFC 0009: the turn's program (or a probbit-ir program) at K inverse temperatures beta0 -> 1, each step solved by the exact tier (engine.trajectory; default k 8, beta0 0.4): per step the marginals and their entropy",
+                flags: &[F_P_STATE, F_P_INPUTS, Flag { name: "--program", arg: "FILE", help: "a probbit-ir program instead of the turn's" }] },
             Sub { name: "describe", args: "PERSONA", help: "traits, moods, inputs, habits, agenda, and the blocks it declares (learning, drives with windows and valence, senses, needs, surprise, pace with its closed form, the disposition genes)", flags: &[] },
         ],
         list_subs: false, shared: true,
@@ -1052,6 +1054,9 @@ fn persona_cmd(args: &[String]) {
         "diff" => { let q = opt("--other").map_or_else(|| p.clone(), |o| persona::load(&o).unwrap_or_else(|e| bad_input("persona: ", e)).0);
             let (sa, sb) = (seed_arg(args, "--seed").unwrap_or(p.seed), seed_arg(args, "--seed2").unwrap_or(q.seed));
             emit(&persona_text(&persona::diff(&p, sa, &q, sb, &turns(), eng).unwrap_or_else(|e| bad_input("persona: ", e)), pretty)); }
+        "trajectory" => { let (k, b0) = p.traj.as_ref().map_or((8, 0.4), |t| (t.k, t.beta0));
+            let prog = match opt("--program") { Some(f) => json_arg(&f, "program"), None => persona::program_json(&p, &state("--state"), &inputs()).unwrap_or_else(|e| bad_input("persona: ", e)) };
+            match persona::trajectory_program(&prog, k, b0, 2_000_000) { Some(t) => emit(&persona_text(&t, pretty)), None => bad_input("persona: ", persona::perr("trajectory", "a step is not solved by the exact tier (too large, or infeasible)")) } }
         "compile" => { let st = state("--state"); let text = persona::program(&p, &st, &inputs()).unwrap_or_else(|e| bad_input("persona: ", e));
             if pretty { emit(&json::write(&json::parse(&text).expect("compiled program JSON"), true)); } else { emit(&text); } }
         "check" => { let mut doc = persona::check(&p, eng).unwrap_or_else(|e| bad_input("persona: ", e)); let mut ok = true;

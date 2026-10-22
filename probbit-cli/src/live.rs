@@ -47,7 +47,9 @@ fn refusal(s: Status) -> InErr {
 pub const CHECKPOINT_EVERY: u64 = 1000;
 
 /// A live individual: the persona, the current state, the clock, the strand's chain and its status (control lines)
-pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: String, pub n: u64, pub status: Status, pub controls: u64, pub checkpoints: u64, pub rests: u64 }
+pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: String, pub n: u64, pub status: Status, pub controls: u64, pub checkpoints: u64, pub rests: u64,
+    /// RFC 0009: the expectation's memory (a fold of the logged events) and the last event's exact trajectory (derived, never logged)
+    pub expect: Option<persona::ExpectMem>, pub traj: Option<Json> }
 /// A document with its keys sorted at every level (`persona::text` of it is its canonical JSON)
 fn sorted(j: &Json) -> Json {
     match j { Json::Obj(v) => { let mut o: Vec<(String, Json)> = v.iter().map(|(k, x)| (k.clone(), sorted(x))).collect(); o.sort_by(|a, b| a.0.cmp(&b.0)); Json::Obj(o) }
@@ -67,7 +69,8 @@ impl Live {
             ("persona".into(), Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest))])),
             ("seed".into(), Json::Num(st.seed as f64)), ("state".into(), sorted(&st.to_json(&p))), ("document".into(), doc.clone())]));
         let prev = persona::digest_of(&header);
-        (Live { p, st, clock, last: 0.0, prev, n: 0, status: Status::Active, controls: 0, checkpoints: 0, rests: 0 }, header)
+        let expect = p.expect.as_ref().map(|_| persona::ExpectMem::new());
+        (Live { p, st, clock, last: 0.0, prev, n: 0, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None }, header)
     }
     /// One event: stamp its elapsed hours, run the turn, chain the strand line -> (the stance document, the strand line). A bad
     /// event is an error and changes nothing (no turn, no line); so is every event while the individual is paused or retired.
@@ -82,13 +85,22 @@ impl Live {
             Clock::Fixed => { let e = match given { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err(perr("event.elapsed_hours", "a number >= 0")) }; (q6(e), self.last) } };
         kv.push(("elapsed_hours".into(), Json::Num(elapsed)));
         let inputs = Json::Obj(kv);
-        let (stance, ns) = persona::turn(&self.p, &self.st, &inputs, false, eng, false)?;
+        // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without them)
+        let dev = self.expect.as_ref().and_then(|m| persona::deviation(&self.p, &self.st, &inputs, m, eng));
+        let traj = persona::trajectory(&self.p, &self.st, &inputs);
+        let (mut stance, ns) = persona::turn(&self.p, &self.st, &inputs, false, eng, false)?;
+        let sd = persona::stance_sha(&stance);
+        if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, persona::Deviation::to_json))); } }
         // RFC 0002 part 2: a rest line due before this event is its own line, chained before the event line (the turn applied it)
         let (rest, prev) = match persona::rest_line(&self.p, &self.st, &inputs) {
             Some((r, rs)) => { let l = rest_line(&self.prev, r, &rs.digest); let d = persona::digest_of(&l); (Some(l), d) }
             None => (None, self.prev.clone()) };
-        let line = persona::canon(&Json::Obj(vec![("n".into(), Json::Num((self.n + 1) as f64)), ("inputs".into(), inputs), ("stance".into(), Json::Str(persona::sha(&stance))),
-            ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), Json::Str(prev))]));
+        let mut lj = vec![("n".into(), Json::Num((self.n + 1) as f64)), ("inputs".into(), inputs.clone()), ("stance".into(), Json::Str(sd)),
+            ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), Json::Str(prev))];
+        if let Some(d) = &dev { lj.push(("deviation".into(), d.receipt())); }
+        let line = persona::canon(&Json::Obj(lj));
+        if let Some(m) = self.expect.as_mut() { persona::expect_step(&self.p, m, &inputs, dev.as_ref().and_then(persona::Deviation::logged_pred)); }
+        self.traj = traj;
         self.n += 1; self.last = now; self.prev = persona::digest_of(&line); self.st = ns;
         if let Some(r) = &rest { self.rests += 1; return Ok((stance, format!("{r}\n{line}"))); }
         Ok((stance, line))
@@ -137,7 +149,7 @@ const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state
 /// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "nap": ...}`
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
-    let known: &[&str] = match kind(j) { Kind::Event => &["inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
+    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
         Kind::Checkpoint => &["checkpoint", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
@@ -207,6 +219,8 @@ impl Replay {
     /// from the checkpoint line. The lines before it are taken as written: a full `verify` replays them and checks the checkpoint.
     pub fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Replay, (usize, String)> {
         let mut r = Replay::open(head)?;
+        // RFC 0009: the expectation's memory is a fold of every event line, so a strand with the block replays from its header
+        if r.live.p.expect.is_some() { return Err((at, "the persona's expectation block reads every event before this checkpoint: verify this strand from its header".into())); }
         let j = json::parse(cp).map_err(|e| (at, format!("not JSON: {}", e.msg)))?;
         let b = json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?;
         if persona::canon(&j) != cp { return Err((at, "not canonical JSON".into())); }
@@ -221,7 +235,7 @@ impl Replay {
         let n = j.get("checkpoint").and_then(Json::as_f64).filter(|x| *x >= 1.0 && x.fract() == 0.0).ok_or((at, "not a checkpoint line".to_string()))? as u64;
         if b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
         let stance = j.get("stance").cloned().unwrap_or(Json::Null);
-        if b.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
+        if b.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
         let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, read_err(e, "the checkpoint's state: ")))?;
         if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
         r.live.st = st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
@@ -275,7 +289,9 @@ impl Replay {
             (None, Some(_)) => return Err((i - 1, "a rest line where none is due".into())),
             (None, None) => both };
         for (k, (_, x, cap)) in before.iter().enumerate() { if *x >= cap - 5e-7 { self.at_cap[k] = persona::r6(self.at_cap[k] + h); } }
-        if j.get("stance").and_then(Json::as_str) != Some(persona::sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
+        if j.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
+        // RFC 0009: the logged deviation is recomputed (an edited receipt diverges here)
+        if json::parse(&line).ok().and_then(|x| x.get("deviation").cloned()) != j.get("deviation").cloned() { return Err((i, "the deviation differs".into())); }
         if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
         if line != l { return Err((i, "the line differs".into())); }
         self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true; self.norms.track(&self.live.p, &self.live.st);
@@ -526,7 +542,12 @@ pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, 
         match kind(&j) { Kind::Checkpoint => (j.get("checkpoint").and_then(Json::as_f64).unwrap_or(0.0) as u64, j.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string()),
             _ => (j.get("n").and_then(Json::as_f64).unwrap_or(0.0) as u64, j.get("state").and_then(Json::as_str).unwrap_or("").to_string()) } };
     if st.digest != want { return Err(perr("state", format!("not the strand's last state ({} != {})", &st.digest[..st.digest.len().min(19)], &want[..want.len().min(19)]))); }
-    let mut lv = Live { p: q, st, clock, last: 0.0, prev: persona::digest_of(last), n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0 };
+    // RFC 0009: the expectation's memory, folded from every event line's inputs and logged deviation
+    let expect = q.expect.as_ref().map(|_| { let mut m = persona::ExpectMem::new();
+        for l in lines.iter().skip(1) { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
+            let lp = d.filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64);
+            persona::expect_step(&q, &mut m, j.get("inputs").unwrap_or(&Json::Null), lp); } } } m });
+    let mut lv = Live { p: q, st, clock, last: 0.0, prev: persona::digest_of(last), n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None };
     for c in tail.iter().rev() { let what = c.get("control").and_then(Json::as_str).unwrap_or("");
         lv.status = lv.status.after(what).unwrap_or(Status::Retired); lv.st = lv.st.zero_credit(&lv.p); lv.controls += 1; }
     Ok(lv)
@@ -874,6 +895,59 @@ mod tests {
         let (mut text, mut stances) = (format!("{header}\n"), vec![]);
         for t in 0..n { let (s, line) = live.event(&ev(t), &run).unwrap(); text.push_str(&line); text.push('\n'); stances.push(s); }
         (text, stances)
+    }
+
+    /// RFC 0009 (effects {}): the expectation block leaves every stance and state digest of the life as without it; its strand
+    /// lines carry the deviation receipt, `verify` recomputes it (an edited digit diverges as "the deviation differs"), `resume`
+    /// folds the same memory, the bound -log w(c_t) holds term by term, and the cold start reads 0 until the first non-time input
+    #[test]
+    fn expectation_receipts_replay_and_bound() {
+        let off = json::parse(DOC).unwrap(); let mut on = off.clone();
+        if let Json::Obj(v) = &mut on { v.push(("expectation".into(), Json::Obj(vec![]))); v.push(("engine".into(), json::parse(r#"{"trajectory":{"k":5,"beta0":0.3}}"#).unwrap())); }
+        let (po, pn) = (persona::build(&off).unwrap(), persona::build(&on).unwrap()); assert_eq!(po.digest, pn.digest, "the blocks stay out of the digest");
+        let evs: Vec<Json> = (0..24).map(|t| if t < 3 { json::parse(r#"{"elapsed_hours":1}"#).unwrap() } else { ev(t) }).collect();
+        let run_arm = |p: &Persona, d: &Json| { let (mut live, header) = Live::start(p.clone(), d, persona::init(p, Some(2), true, &run), Clock::Fixed, "probbit test");
+            let mut text = format!("{header}\n"); let mut docs = vec![];
+            for e in &evs { let (s, l) = live.event(e, &run).unwrap(); text += &l; text.push('\n'); docs.push((s, live.traj.clone())); } (text, docs) };
+        let ((t0, d0), (t1, d1)) = (run_arm(&po, &off), run_arm(&pn, &on));
+        for (a, b) in t0.lines().skip(1).zip(t1.lines().skip(1)) { let (a, b) = (json::parse(a).unwrap(), json::parse(b).unwrap());
+            assert_eq!((a.get("stance"), a.get("state")), (b.get("stance"), b.get("state"))); assert!(a.get("deviation").is_none() && b.get("deviation").is_some()); }
+        for (k, ((s0, _), (s1, tj))) in d0.iter().zip(&d1).enumerate() {
+            assert_eq!(persona::stance_sha(s1), persona::sha(s0)); let dv = s1.get("deviation").unwrap(); let g = |x: &str| dv.get(x).and_then(Json::as_f64).unwrap();
+            assert_eq!(dv.get("cold"), Some(&Json::Bool(k < 3)), "event {k}"); if k < 3 { assert_eq!(g("pred"), 0.0); } else { assert!(g("pred") > 1e-6, "event {k}: {dv:?}"); }
+            assert_eq!(tj.as_ref().and_then(|t| t.get("steps")).and_then(Json::as_arr).map(|a| a.len()), Some(5)); }
+        assert_eq!(verify(&t1, &run).map(|d| d.get("events").cloned()), Ok(Some(Json::Num(24.0))));
+        // one edited digit of a logged deviation diverges at its line
+        let ls: Vec<&str> = t1.lines().collect(); let at = ls.iter().position(|l| l.contains(r#""pred":0."#) && !l.contains("cold")).unwrap();
+        let k = ls[at].find(r#""pred":0."#).unwrap() + 10; let mut bad = ls[at].to_string(); let c = bad.as_bytes()[k]; bad.replace_range(k..k + 1, if c == b'9' { "8" } else { "9" });
+        let mut tt: Vec<String> = ls.iter().map(|l| l.to_string()).collect(); tt[at] = bad; let tampered = tt.join("\n") + "\n";
+        assert_eq!(verify(&tampered, &run).err().map(|e| e.1), Some("the deviation differs".to_string()));
+        // resume folds the same memory: the next event's line is the one the continuous life writes
+        let cut: String = ls[..20].iter().map(|l| format!("{l}\n")).collect();
+        let st20 = { let mut r = Replay::open(ls[0]).unwrap(); for l in &ls[1..20] { r.step(l, &run).unwrap(); } r.live.st.clone() };
+        let mut lv = resume(&cut, &pn, st20, Clock::Fixed).unwrap(); let (_, l20) = lv.event(&evs[19], &run).unwrap(); assert_eq!(l20, ls[20]);
+        // the bound (P9), term by term: a member combo reads at most -ln w(c_t) per variable; a new one at most self_i - ln w_empty
+        let mut mem = persona::ExpectMem::new(); let mut st = persona::init(&pn, Some(2), true, &run);
+        for e in &evs { let d = persona::deviation(&pn, &st, e, &mem, &run).unwrap();
+            for (_, x, y) in &d.terms { assert!(*x <= if d.member { d.input } else { y + d.input } + 1e-9, "{d:?}"); }
+            persona::expect_step(&pn, &mut mem, e, d.logged_pred()); st = persona::turn(&pn, &st, e, false, &run, false).unwrap().1; }
+    }
+
+    /// RFC 0009: the trajectory at beta = 1 is the exact tier's answer (to 1e-9), and the joint entropy of p_beta is non-increasing
+    /// in beta (dH/dbeta = -beta Var(log w) <= 0), checked by enumerating the joint of a small program
+    #[test]
+    fn exact_trajectory_matches_and_sharpens() {
+        let p = persona::build(&json::parse(DOC).unwrap()).unwrap(); let st = persona::init(&p, Some(2), true, &run);
+        for t in 0..6 { let prog = persona::program_json(&p, &st, &ev(t)).unwrap();
+            let tj = persona::trajectory_program(&prog, 8, 0.4, 2_000_000).unwrap(); let steps = tj.get("steps").and_then(Json::as_arr).unwrap();
+            let d = run(&prog, &persona::Flags { op: "decide".into(), seed: 1, sweeps: 10, polish_sweeps: 0, exact_limit: 2_000_000, chains: 4 });
+            for (id, row) in steps[7].get("marginals").and_then(Json::as_obj).unwrap() { for (l, x) in row.as_obj().unwrap() {
+                let y = d.get("marginals").and_then(|m| m.get(id)).and_then(|r| r.get(l)).and_then(Json::as_f64).unwrap(); assert!((x.as_f64().unwrap() - y).abs() <= 1e-9); } }
+            let m = crate::run::from_json(&prog).unwrap().m; let mut last = f64::INFINITY;
+            for s in steps { let b = s.get("beta").and_then(Json::as_f64).unwrap();
+                let e = probbit_ir::exact(&m.scaled(b), 1 << 20, 2_000_000).unwrap(); assert_eq!(e.top.len() as u64, e.n_feasible);
+                let h = e.top.iter().fold(0.0, |a, (lw, _)| { let q = (lw - e.logz).exp(); if q > 0.0 { a - q * (lw - e.logz) } else { a } });
+                assert!(h <= last + 1e-9, "joint entropy rose at beta {b}"); last = h; } }
     }
 
     /// A life with drives (docs/persona.md §2.9): goal signals ride in the events, the strand logs them as given, `verify` replays it
