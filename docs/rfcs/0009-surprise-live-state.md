@@ -5,7 +5,7 @@ draft) · Changes: docs/persona.md §2.17 (format 1, additive), `probbit live`, 
 `probbit persona trajectory` · Depends on: RFC 0001 (senses), RFC 0003 (reafference and consolidation, draft, not yet in
 this repository), RFC 0004 (the bound)
 
-Mechanism and simulation only: every key below is arithmetic over logged events, a sampler's output or a typed judge's
+Mechanism and simulation only: every key below is arithmetic over logged events, an exact solve's output or a typed judge's
 score, recomputable from the strand. The numbers come from two lab waves on the 0.11 engine (`152d005`): N1 (the first
 draft) and N1-b (a constrained schedule search and a second growth rule). This text merges N1-b's proposed changes into
 N1's draft. The measured results are summarised in [docs/results/0.11](../results/0.11/README.md#lab-results-not-yet-in-the-engine).
@@ -14,9 +14,11 @@ N1's draft. The measured results are summarised in [docs/results/0.11](../result
 
 Four additions, each optional and off by default, so a persona without them produces the same bytes as today:
 
-1. `trajectory`: the stance computed coarse-to-fine. The engine's own program for the event is sampled along a beta
-   schedule (β0 → 1) with categorical p-bits; each step emits per-variable marginals, the last step matches the exact solve,
-   and the committed stance is still the exact `--op decide` answer. The steps are a display path, never a second answer.
+1. `trajectory`: the stance computed coarse-to-fine. The engine's own program for the event at a rising inverse
+   temperature (beta0 -> 1), each step solved exactly (`Model::scaled(beta)` + the exact tier; this PR, §1); the last step
+   is the exact solve, and the committed stance is still the `--op decide` answer. The steps are a display path, never a
+   second answer. With it, `expectation` (§1b, this PR): the exact deviation of each event from the engine's own
+   expectation.
 2. `senses[].novelty`: a number sense whose reading is the novelty of the incoming message (a typed judge's 0..1 score
    against the previous 8 messages), judged by the existing sense step against a learned normal (RFC 0001).
 3. The two-way channel: engine → model gets one coarse-state line (≤ 90 characters) before `stance.block`; model → engine
@@ -47,7 +49,12 @@ and can rise; the draft's b2 bar (one rise allowed) is restated on the exact pat
 deterministic function of the final program: a picture of the same answer at a higher temperature, never a second source of
 information, so it drives nothing.
 
-**Measured (N2-ss lab, 2026-10-22):** filled in below before review.
+**Measured (N2-ss lab, 2026-10-22).** Joint entropy non-increasing on 88/88 programs of two live strand copies (8 betas,
+grid enumeration). On N1's held-out programs (300 of 1,931, 3,076 (program, variable) pairs) the exact per-variable
+marginal entropy is non-increasing with one rise allowed on 99.61% (none: 99.41%), against the draft sampler's 93.1%: the
+draft's b2 failure was the sampler and its schedule; about 0.4-0.6% of pairs are genuinely non-monotone, so the published
+sharpening claim is the joint entropy (a theorem) plus this measured share. Fidelity: beta = 1 equals the exact tier to
+<= 1e-9 (tests), the grid to 3.0e-14, N1's exact marginals to 5.0e-10.
 
 ## 1b. `expectation`: the engine's own expectation and the exact deviation of each event
 
@@ -67,7 +74,24 @@ inputs also occur, and reaches zero only if one input is all that happens.
 reading is the engine's own: non-zero on every post-cold event that moves any input, graded, bounded, and recomputed by
 `live verify` from the strand. It does not replace the novelty sense of §2.
 
-**Measured (N2-ss lab, 2026-10-22):** filled in below before review.
+**Measured (N2-ss lab, 2026-10-22; pre-registered bars P1-P9, nulls 1-3; one run each).**
+
+| bar | result |
+|---|---|
+| replay digests, block on and off | 42/42 + 46/46 live; 64,000/64,000 synthetic lines |
+| engine vs the reference harness | 1.1e-13 (X1 grid reference); joint KL vs `pred` Spearman 0.993 / 0.996 live, 0.997 pooled synthetic sample |
+| `pred` > 1e-6 after the cold start | 100% live (38/38, 45/45); 99.16% synthetic (63,699 events) |
+| graded, p90/p10 per persona | 16.6 to 1,859 (>= 3); 1.8x to 21.9x the uniform-weight null |
+| habituation (P4) / dishabituation (P5) | **fail**: 76.5% and 35% of 200 scripts (bars 90%); the matched-index control (null 2) reads >= 2x on 36% only |
+| cost / line growth (P6) | **fail**: extra wall time per event p95 3.98 ms (bar 2 ms, loaded Mac); line growth max 62 live, 66 synthetic (bar 60) |
+| same bytes (P7), receipts (P8), bound (P9) | 100%; 100/100 edits caught; 100% term by term |
+
+So: a reading on every post-cold event, graded and bounded, recomputed by `verify`, with zero effect on the stance. The
+habituation claim does not hold as registered: a repeated salient input reads lower over its repeats on most scripts
+(median 2.03 -> 1.44 nats while `self` stays 2.03), but not on 90%, and a first-time input at the same index reads only
+1.2x the tenth repeat (median), so the decay is not shown to be specific to the repeated input. Cost and receipt length are
+over their bars and go to owner review. Gap: `null` on events whose first program is infeasible (habit conflict; 0.6% of
+the tutor's synthetic events).
 
 ## 2. `senses[].novelty`
 
@@ -160,20 +184,21 @@ the file is read.
 
 ## 5. Monitor row
 
-`probbit monitor` serves the strand with heartbeats. Add one row kind after each event's stance: `TRAJECTORY` (format above),
-throttled to the last event; the page draws the K steps as a blur-to-sharp bar per variable. The row is derived; it is never
-written to the strand.
+`probbit monitor` serves the strand with heartbeats. This PR adds two rows after each event's stance: `DEVIATION` (pred,
+self, input, z or cold) and `TRAJECTORY` (the mean marginal entropy per beta step, for the last event); the JSON frame
+carries `trajectory`. Both are derived; the trajectory is never written to the strand.
 
 ## 6. Receipts in `live verify`
 
-`live verify` recomputes per event: the trajectory rows' sha256 (with the persona's schedule), the novelty sense's z from
+`live verify` recomputes per event: the deviation receipt (this PR; the trajectory needs none: it is a pure function of the
+logged program and is never written), the novelty sense's z from
 logged readings, the reafferent normal, and which growth slots were open (from logged readings, the visit counter, the
 cooldown list and the rule's parameters); a mismatch fails verification as today's digests do.
 
 ## 7. Welfare page (docs/welfare-stance.md), one paragraph under "What the words mean here"
 
-- **Coarse-to-fine state, novelty, growth**: the "state forming" line is the marginal odds of a sampler at an intermediate
-  inverse temperature over the same program the engine solves exactly; it is a picture of a computation converging, not a
+- **Coarse-to-fine state, novelty, growth**: the "state forming" line is the exact marginal odds at an intermediate
+  inverse temperature over the same program the engine solves at beta = 1; it is a picture of a computation converging, not a
   report of an inner experience. "Novelty" is a judge's score of how much a message differs from the previous eight, and
   "registers novelty" means its z-score against a learned average exceeded a threshold. "Growth" is a declared, budgeted
   set of sense slots switched on by a counting rule; nothing grows beyond the file's declared slots, and every number can be
@@ -181,5 +206,5 @@ cooldown list and the rule's parameters); a mismatch fails verification as today
 
 ## 8. Not claimed
 
-No claim that the engine's state is anything but arithmetic over logged events. A "blurry" stance here means sampler
-marginals at an intermediate beta, nothing more.
+No claim that the engine's state is anything but arithmetic over logged events. A "blurry" stance here means exact
+marginals at an intermediate beta, nothing more; a "deviation" is a KL number between two such distributions.
