@@ -334,7 +334,10 @@ and `stats` write exactly one JSON document on stdout; `probbit ir` writes probb
 `probbit demo` whose stdout and stderr are both a terminal shows the live view instead). Exit code 0 = a plan was
 returned (verdict `exact`, `diagnostics_passed` or `partial`), 3 = `refused` (the whole queue should be escalated; the plan is still
 in the output as a best effort) or `declined` (an exact-only mode could not answer), 1 = `infeasible` (no plan satisfies the rules),
-2 = bad input. Agents: `probbit mcp` serves the same commands over the Model Context Protocol ([docs/agents.md](docs/agents.md)).
+2 = bad input. Agents: `probbit mcp` serves the same commands over the Model Context Protocol ([docs/agents.md](docs/agents.md));
+beside an agent loop, [docs/adapters.md](docs/adapters.md) binds a live individual to Claude Code hooks, the OpenAI Agents
+SDK, LangChain and the Vercel AI SDK (one event per model call, the stance block in the system prompt), and
+[docs/receipts.md](docs/receipts.md) renders the strand as one receipt per decision.
 
 `--budget-ms` bounds the sampling phase only. A call also parses, tries the exact tiers, runs the gate and polishes the plan,
 so its total is longer: the 300-task `--hard` demo took 206-216 ms in all at `--budget-ms 50` (sampling 53-54 ms, the

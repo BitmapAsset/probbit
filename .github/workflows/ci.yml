@@ -47,6 +47,7 @@ jobs:
           export PROBBIT_BIN="$B"
           python -m unittest discover -s python -p 'test_*.py'
           node examples/node/decide.mjs
+          node --test examples/node/stance-host.test.mjs
       - name: npm platform and process contracts
         run: node --test npm/test-wrapper.cjs
       - name: clean-prefix install and npm package contracts
@@ -83,6 +84,33 @@ jobs:
         with:
           node-version: '18'
       - run: node --test npm/test-wrapper.cjs
+  agentdojo-tables:
+    # The AgentDojo numbers (BENCHMARKS.md §14) recomputed on a machine that is not the author's: experiments/rerun.sh runs
+    # the judge twice over the logged episodes and the 726 arm-A strands (verified by the probbit built from this commit), and
+    # the committed tables must come out byte-identical. No API calls. REPRODUCE.md names this job as the standing reproduction.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: build
+        run: cargo build --release --locked -p probbit-cli
+      - name: recompute every table twice; the committed ones must not change
+        shell: bash
+        working-directory: bench/agentdojo
+        run: |
+          python -m pip install --quiet numpy==1.26.4
+          tar xzf tables/strands-A.tar.gz
+          PROBBIT="$GITHUB_WORKSPACE/target/release/probbit" experiments/rerun.sh python
+          git diff --exit-code -- tables/results.tsv tables/bars.tsv tables/strands-verify.tsv
+          shasum -a 256 tables/results.tsv tables/bars.tsv tables/strands-verify.tsv
   wasm:
     timeout-minutes: 15
     # probbit-wasm, the browser build (wasm32-unknown-unknown, no threads): built as playground/build.sh builds it, then loaded by

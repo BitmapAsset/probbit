@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+Hosts, receipts and reproduction; no engine change (every document byte for byte as 0.12.0).
+- `python/probbit_host.py`: the AgentDojo run's host logic as a module: `StanceHost` (one individual per conversation, one
+  `probbit live` event per model call, the `security` sense from tool results, the stance block for the system prompt) and
+  `receipts` (a strand replayed from its header, one record per decision, each checked against the chain;
+  `python3 python/probbit_host.py receipts STRAND`). `examples/node/stance-host.mjs` is the same host in Node.
+- Bindings: Claude Code hooks (`examples/hosts/claude-code/`), the OpenAI Agents SDK, LangChain / LangGraph and the Vercel AI
+  SDK (`examples/hosts/`); `docs/adapters.md` says which are tested here and which are written to the framework's contract
+  only. `docs/receipts.md`: what a strand proves and what it does not, with a worked episode from the AgentDojo run.
+- `REPRODUCE.md`, a reproduction-report issue template, and the CI job `agentdojo-tables`: the §14 tables recomputed on
+  GitHub's Ubuntu and macOS runners on every push and pull request, byte-identical to the committed ones.
+
 ## 0.12.0 - 2026-10-22
 
 RFC 0009 (docs/rfcs/0009-surprise-live-state.md), the engine side: two opt-in keys, both outside the digest, effects {}.

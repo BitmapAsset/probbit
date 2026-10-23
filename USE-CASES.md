@@ -70,6 +70,13 @@ Do not use it when:
   `probbit <command> --help` lists every flag with its default.
 - **Rust**: the `probbit-decide` crate (router front-end) and `probbit-ir` (general programs, JSON v1 in `docs/probbit-ir-json.md`).
 - **MCP server**: `probbit mcp` serves the ten documented tools over stdio; see [docs/agents.md](docs/agents.md).
+- **Beside an agent loop**: `python/probbit_host.py` and `examples/node/stance-host.mjs` (one individual per conversation, one
+  event per model call, the stance block in the system prompt, the strand as the receipt), bound to Claude Code hooks, the
+  OpenAI Agents SDK, LangChain and the Vercel AI SDK in [docs/adapters.md](docs/adapters.md); tested against the binary
+  here, the framework paths written to their contracts and marked where not run.
+- **Receipts for every decision**: `probbit live verify` replays a strand from its header; `python3 python/probbit_host.py
+  receipts STRAND` renders one record per decision (inputs as used, stance, habits, the chain). [docs/receipts.md](docs/receipts.md)
+  says what that proves (the engine's decision and its inputs) and what it does not (the model's obedience, the words).
 - **Host-enforced incident regression**: [examples/agent-harness](examples/agent-harness/README.md) records a local tool
   failure, reproduces history-dependent retries, gates dispatch and checks a repaired rule. A bounded example, not a
   production authorization system.

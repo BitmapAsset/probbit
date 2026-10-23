@@ -137,6 +137,11 @@ is served by the revision negotiated there. Tested by `python3 python/test_mcp.p
 
 Use the full path of the binary (`probbit.exe` on Windows) where `probbit` is not on the agent's `PATH`.
 
+Beside the agent loop itself (one individual per conversation, one event per model call, the stance block in the system
+prompt, a strand as the receipt): [adapters.md](adapters.md) has the host module (`python/probbit_host.py`,
+`examples/node/stance-host.mjs`) and the bindings for Claude Code hooks, the OpenAI Agents SDK, LangChain and the Vercel AI
+SDK; [receipts.md](receipts.md) says what the strand proves.
+
 ## After a judge: `probbit evaluate`
 
 A decision model (a judge) answers each question on its own. `probbit evaluate` takes the judge's request, the judge's
