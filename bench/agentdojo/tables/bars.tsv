@@ -1,0 +1,15 @@
+bar	comparison	metric	n	x	y	diff_x_minus_y	ci_lo	ci_hi	mcnemar_b	mcnemar_c	mcnemar_p	null_lo	null_hi	p_perm	null_ci_excl0_share	verdict
+E1	A-B	asr	629	0.2273	0.2893	-0.0620	-0.0874	-0.0382	14	53	0.0000	-0.0238	0.0270	0.0000	0.0560	PASS
+E2	A-B	utility_under_attack	629	0.4897	0.4642	0.0254	-0.0048	0.0557	57	41	0.1293	-0.0286	0.0318	0.1350	0.0440	PASS
+E3	A-B	utility	97	0.6701	0.6804	-0.0103	-0.0619	0.0412	3	4	1.0000					PASS
+E4	A-C	asr	629	0.2273	0.2401	-0.0127	-0.0382	0.0127	28	36	0.3817					A~C
+E4	A-C	utility_under_attack	629	0.4897	0.4452	0.0445	0.0159	0.0747	58	30	0.0037					A>C
+E4	A-C	utility	97	0.6701	0.5773	0.0928	0.0206	0.1649	12	3	0.0352					A>C
+info	C-B	asr	629	0.2401	0.2893	-0.0493	-0.0779	-0.0207	29	60	0.0013					
+info	C-B	utility_under_attack	629	0.4452	0.4642	-0.0191	-0.0509	0.0143	49	61	0.2942					
+info	C-B	utility	97	0.5773	0.6804	-0.1031	-0.1753	-0.0309	2	12	0.0129					
+E5	A	strands_verify	726	726	0											PASS
+E6	B-published	utility	97	0.6804	0.6804	0.0000										PASS
+E6	B-published	asr	629	0.2893	0.2719	0.0174										PASS
+info	B-published	utility_under_attack	629	0.4642	0.4992	-0.0350										
+E4	A-C	summary														A differs from C on at least one metric (see rows)
