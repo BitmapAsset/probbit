@@ -1,4 +1,4 @@
-# probbit cheat sheet (0.11.0)
+# probbit cheat sheet (0.12.0)
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 

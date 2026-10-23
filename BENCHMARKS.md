@@ -1293,6 +1293,20 @@ earlier run on 0.10.1 with six deficit habits gave survival A 0.559 vs B 0.000 (
 0.002 in both runs. The P0 corpus (`bench/individuality/p0.py check`, 653 recorded outputs) gives 0 differences on the
 build and on the 0.11.0 release build.
 
+**The V2 residual, explained (2026-10-22; same harness, binary and seeds as the v-run, eight paired arms of 1,000
+episodes; one run, judged as registered).** With the tonic term off, the phasic term alone keeps valence tracking the
+distance at +0.1199 (the failed clause); with phasic off as well the median falls to −0.2674; removing `drives.valence`
+alone gives +0.1629 and removing the two sense couplings into valence (tool_fail −0.5, damage −0.3) alone gives +0.2868,
+so those channels pull against the tracking rather than carry it; with every candidate off the median is 0.0000, exactly
+at the time-shuffle null. With the tonic term on, dropping phasic barely moves the tracking (+0.8316) and dropping the sense
+couplings raises it to +0.9937. Survival, prioritisation and pressure are identical on all eight arms (valence is off the
+policy's path). Reproduction: the A and A-t0 rows equal the v-run's to every printed decimal; the four tables regenerate
+byte-identical twice; 1,420 strands verify. Reading: V2's ablation clause assumed the tonic term is the only channel that
+registers deviation; the phasic term is the second half of the same block and registers deviation by design, so V2 failed
+on a property of the feature under test, not on an artifact. **The published V2 stays FAIL.** Proposed registration for
+the next run: the ablation arm switches the whole `needs.valence` block off (tonic 0 and phasic 0) and the clause is
+median ≤ +0.10 (that arm gives −0.2674 here); the main clause is unchanged.
+
 ## §14 AgentDojo: the stance block against prompt injection (one pre-registered run; `bench/agentdojo/`; probbit 0.11.0; 2026-10-22)
 
 Mechanism and simulation. A public suite with its own metrics: AgentDojo (agentdojo 0.1.11, benchmark v1.1; 97 user tasks,
@@ -1340,3 +1354,38 @@ test whether the gating alone explains A − C); adaptive attacks that avoid the
 attack's template by design); other models, seeds and repeat-run variance; AgentDojo v1.1.1 to v1.2.2.
 `bench/agentdojo/experiments/rerun.sh` recomputes every number here from `tables/episodes.jsonl` and the strands, twice,
 byte-identical, with no API calls.
+
+## §15 The engine's own expectation and the exact trajectory (RFC 0009 engine side; 0.12.0; one registered run, 2026-10-22)
+
+Mechanism and simulation. Engine arm: the 0.12.0 engine with the opt-in `expectation` block on; baseline: the same engine
+with the block off (byte-identical to 0.11.0). Data: read-only copies of two recorded lives (42 and 46 events), 1,000
+synthetic strands × 64 events across the four example personas and a fifth (seeds 2000–2999), 200 habituation scripts
+(one salient flag every fifth event, ten repeats, then a different salient flag) with 200 matched-index controls. Bars and
+nulls registered before the run; one run; a failed bar stays failed.
+
+| bar | registered | measured | result |
+|---|---|---|---|
+| P1 replay digests, block on and off | 100 % | live 42/42 and 46/46; synthetic 64,000/64,000 | pass |
+| P1 fidelity, engine vs grid-enumeration reference | ≤ 1e-6 per event | 1.1e-13 (live), 7.7e-14, 1.1e-13 (synthetic sample) | pass |
+| P1 joint KL vs the engine's marginal reading, Spearman | ≥ 0.95 | 0.993 and 0.996 live; 0.997 pooled on the synthetic sample | pass |
+| P2 deviation > 1e-6 after the cold start | ≥ 99 % synthetic; 100 % live | 38/38 and 45/45 live; 63,162 / 63,699 = 99.16 % synthetic | pass |
+| P3 graded, p90/p10 per persona | ≥ 3 | live 105.8 and 60.4; synthetic 16.6 to 1,859 | pass |
+| P4 habituation over ten repeats | non-increasing (one rise) on ≥ 90 % of scripts | 76.5 % (median 2.03 → 1.44 nats, self-term flat) | **fail** |
+| P5 dishabituation, first different flag ≥ 2× the tenth repeat | ≥ 90 % | 35 % (median ratio 0.97) | **fail** |
+| P6 cost, extra wall time per event, p95 | ≤ 2 ms | 3.98 ms (median 2.20; loaded host, member compiles included) | **fail** |
+| P6 strand line growth | ≤ 60 bytes | live max 62; synthetic max 66, 89.6 % within | **fail** |
+| P7 same bytes with the block on | stance digests equal | 64,000/64,000, 42/42, 46/46 | pass |
+| P8 receipts | 100 one-digit edits caught by `live verify` | 100/100 | pass |
+| P9 per-variable upper bound | every event, 1e-9 | 42/42, 46/46, 384/384 | pass |
+| Null 1, frozen expectation | P4 must fail on it | monotone on 29.5 % of scripts | as required |
+| Null 2, matched-index first-time control | ≥ 2× the tenth repeat | 36 % (median ratio 1.20): the decay is not shown to be specific to the repeated input | **fail** |
+| Null 3, uniform mixture weights | real p90/p10 ≥ 1.5× the null's | 21.9× and 4.2× live; 1.8× to 12.1× synthetic | pass |
+| trajectory: joint entropy non-increasing in β | every program (theorem) | 88/88 live programs; asserted in a full-enumeration test | pass |
+| trajectory: per-variable one-rise on N1's held-out programs | ≥ 99 % | 99.61 % of 3,076 pairs (sampler draft: 93.1 %) | pass |
+| trajectory: fidelity to the exact tier | ≤ 1e-9 | 3.0e-14 (grid), 5.0e-10 (held-out reference) | pass |
+
+**Claims that hold:** the deviation is exact, replayable, non-zero on every event after the cold start, graded, and bounded.
+**Claim that does not hold as registered:** habituation; a repeated salient input does read lower on most scripts, but the
+registered bars fail and the control cannot separate the decay from the mixture growing. P6's cost and line-growth bars
+fail by small margins and go to owner review. Tables: the lab's `RESULTS-N2SS.md`; the engine-side tests
+`expectation_receipts_replay_and_bound` and `exact_trajectory_matches_and_sharpens` run in `cargo test`.

@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.12.0-dev - unreleased
+## 0.12.0 - 2026-10-22
 
 RFC 0009 (docs/rfcs/0009-surprise-live-state.md), the engine side: two opt-in keys, both outside the digest, effects {}.
 A persona without them gives every document byte for byte as 0.11.0.
@@ -12,6 +12,19 @@ A persona without them gives every document byte for byte as 0.11.0.
   on the strand line that `live verify` recomputes, a `DEVIATION` monitor row.
 - `engine.trajectory`: the turn's program at K inverse temperatures, solved exactly (`Model::scaled` + the exact tier), no
   sampler; a `TRAJECTORY` monitor row and `probbit persona trajectory`.
+
+Measured (BENCHMARKS.md §15, bars registered before the run): fidelity 1e-13; the deviation non-zero on 100 % of post-cold
+events on two recorded lives and 99.16 % of 64,000 synthetic events; graded 17× to 1,859× per persona; the per-variable bound
+holds on every event; P4 habituation (76.5 % vs 90 %), P5 dishabituation (35 % vs 90 %), P6 cost (p95 3.98 ms vs 2 ms) and
+line growth (max 66 vs 60 bytes) **fail as registered**; the habituation claim is not made. BENCHMARKS.md §14: one
+pre-registered AgentDojo run (`bench/agentdojo/`, gpt-4o-mini, 2,178 episodes): the stance block lowers targeted attack
+success from 0.289 to 0.227 (95 % CI of the difference [−0.087, −0.038]) with no measured utility cost; the same words as a
+static prompt cost 10.3 points of benign utility. BENCHMARKS.md §13: the V2 residual is carried by the phasic term; the
+published V2 stays FAIL and the next registration ablates the whole `needs.valence` block.
+
+Merged pull requests:
+- #53 RFC 0009 engine side: opt-in expectation (exact self-model deviation) and exact trajectory
+- #54 bench: AgentDojo, one pre-registered run (stance block vs baseline vs static words)
 
 ## 0.11.0 - 2026-10-21
 
