@@ -84,6 +84,31 @@ jobs:
         with:
           node-version: '18'
       - run: node --test npm/test-wrapper.cjs
+  openclaw-plugin:
+    # plugins/openclaw (the probbit-stance OpenClaw plugin): tsc against the bundled SDK type slice, then its node:test suite
+    # (mocked host, the real probbit built from this commit). The real-host type check (npm run test:host) needs an installed
+    # OpenClaw and runs on the author's machine.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: build probbit
+        run: cargo build --release --locked -p probbit-cli
+      - name: build and test the plugin
+        shell: bash
+        working-directory: plugins/openclaw
+        run: |
+          npm ci
+          PROBBIT_BIN="$GITHUB_WORKSPACE/target/release/probbit" npm test
+          npm pack --dry-run
   agentdojo-tables:
     # The AgentDojo numbers (BENCHMARKS.md §14) recomputed on a machine that is not the author's: experiments/rerun.sh runs
     # the judge twice over the logged episodes and the 726 arm-A strands (verified by the probbit built from this commit), and

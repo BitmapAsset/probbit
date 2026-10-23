@@ -339,6 +339,15 @@ beside an agent loop, [docs/adapters.md](docs/adapters.md) binds a live individu
 SDK, LangChain and the Vercel AI SDK (one event per model call, the stance block in the system prompt), and
 [docs/receipts.md](docs/receipts.md) renders the strand as one receipt per decision.
 
+### OpenClaw: `openclaw plugins install npm:probbit-stance --accept-capabilities`
+
+[plugins/openclaw](plugins/openclaw/README.md) puts an individual beside an OpenClaw agent: in the sessions you list, every
+user message is one engine event, the stance block goes into the turn, the visible reply ends with a one-line footer
+(`Assistant stance #14 · valence even · pressure keyed · security means careful, no play · in: correction, security`),
+and each lane keeps a strand you can verify and watch:
+
+![probbit monitor on a strand the OpenClaw plugin wrote](plugins/openclaw/docs/monitor.png)
+
 `--budget-ms` bounds the sampling phase only. A call also parses, tries the exact tiers, runs the gate and polishes the plan,
 so its total is longer: the 300-task `--hard` demo took 206-216 ms in all at `--budget-ms 50` (sampling 53-54 ms, the
 default 50 ms polish, the rest parsing, the exact tiers and the gate; M4, load ~3, N = 3). Every `probbit run` answer lists

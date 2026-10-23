@@ -1,0 +1,67 @@
+{
+  "name": "probbit-stance",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin: a probbit individual's stance in every turn of the sessions you list (one event per user message, a replayable strand as the receipt), plus a shadow-mode destructive-action gate.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BitmapAsset/probbit.git",
+    "directory": "plugins/openclaw"
+  },
+  "homepage": "https://github.com/BitmapAsset/probbit/tree/main/plugins/openclaw#readme",
+  "bugs": "https://github.com/BitmapAsset/probbit/issues",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "probbit",
+    "p-bit",
+    "persona",
+    "stance",
+    "agent",
+    "audit"
+  ],
+  "type": "module",
+  "files": [
+    "dist/src",
+    "openclaw.plugin.json",
+    "personas/",
+    "install/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test dist/test/*.test.js",
+    "build:host": "tsc -p tsconfig.host.json",
+    "test:host": "tsc -p tsconfig.host.json && node --test dist-host/test/*.test.js",
+    "check:host": "node scripts/host-checks.mjs",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.9.7"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/src/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.9.7",
+      "minGatewayVersion": "2026.9.7"
+    },
+    "build": {
+      "openclawVersion": "2026.9.7",
+      "pluginSdkVersion": "2026.9.7"
+    }
+  }
+}

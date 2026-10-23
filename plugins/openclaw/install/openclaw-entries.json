@@ -1,0 +1,24 @@
+{
+  "plugins": {
+    "entries": {
+      "probbit-stance": {
+        "enabled": true,
+        "hooks": {
+          "allowConversationAccess": true
+        },
+        "config": {
+          "lanes": {
+            "agent:main:telegram:group:-1001234567890": "team-room",
+            "agent:main:telegram:direct:*": "dm"
+          },
+          "stateDir": "~/.openclaw/probbit-stance",
+          "binary": "probbit",
+          "timeoutMs": 500,
+          "gateMode": "shadow",
+          "footer": true,
+          "inject": "appendContext"
+        }
+      }
+    }
+  }
+}

@@ -15,6 +15,10 @@ Hosts, receipts and reproduction; no engine change (every document byte for byte
   only. `docs/receipts.md`: what a strand proves and what it does not, with a worked episode from the AgentDojo run.
 - `REPRODUCE.md`, a reproduction-report issue template, and the CI job `agentdojo-tables`: the §14 tables recomputed on
   GitHub's Ubuntu and macOS runners on every push and pull request, byte-identical to the committed ones.
+- `plugins/openclaw`: the OpenClaw plugin `probbit-stance` (npm `probbit-stance` 0.1.0): a probbit individual beside the
+  agent in the sessions you list, one event per user message, the stance block injected into the turn, the footer line in
+  the chat, a replayable strand per lane, a shadow gate for destructive tool calls; a bundled persona
+  (`personas/assistant.yaml`); 124 tests against a mocked host and the real binary; CI job `openclaw-plugin`.
 
 ## 0.12.0 - 2026-10-22
 
