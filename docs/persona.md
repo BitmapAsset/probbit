@@ -916,6 +916,52 @@ reaches the room used is the learned share of that limit.
 every learned weight to 0 (and closes the open credits, as every control line does); replay applies it, the next event's
 state digest records it, and the audit then reports a room used of 0.
 
+### 2.17 Expectation and trajectory (optional; RFC 0009)
+
+Two additive keys, both off by default and both outside the persona digest (as `bound` is): a persona without them gives
+every document byte for byte as 0.11.0, and adding either to a persona with a recorded life leaves every state and stance
+digest as it was. Both have effects {}: they move nothing.
+
+```yaml
+expectation:            # optional; {} = the defaults
+  half_life_events: 32  # the decayed combo counts' half-life, in events
+  max_combos: 16        # mixture members at most, the empty combo included; the rest fold into it
+engine:
+  trajectory:           # optional
+    k: 8                # steps, 2-16
+    beta0: 0.4          # first step's inverse temperature, (0, 1); linear to 1
+```
+
+**Expectation.** On `probbit live` (the strand is the memory), per event, from the state before it: A_t = the event's
+program (`persona compile` of its inputs); E_t = the program with `elapsed_hours` only; Pi_t = the mixture over the
+canonical input combos seen so far (false, 0 and null dropped; a declared number input bucketed into the thirds of its
+range; `elapsed_hours` dropped), each member compiled from its combo's latest inputs with this event's hours (the event's own
+combo with its own inputs, so A_t is a member whenever its combo is), weights = exponentially decayed counts plus one
+pseudo-count on the empty combo. Mixture marginals are linear in the members' exact marginals, so every number is exact
+from at most M + 1 exact solves. The stance gains
+
+```json
+"deviation": {"self": 2.18, "pred": 1.64, "input": 1.21, "cold": false, "z": 2.3, "registers": true}
+```
+
+`self` = sum over the non-twin variables of KL(A_i || E_i); `pred` = the same against Pi_i (nats); `input` = -ln of the
+mixture weight of the event's combo (its own member's, else the empty member's); `cold` = no non-time combo seen yet
+(`pred` is 0 then); `z` = (ln(1 + pred) - mean) / sqrt(var + 1e-4) against a learned normal (prior mean 0, var 0.04, the same
+half-life; read after the cold start, from the logged value); `registers` = z >= 1.5. The strand line carries the receipt
+`"deviation": {"input", "pred", "self"}` at 5 significant digits (with `"cold": true` while cold); `live verify` recomputes
+it ("the deviation differs" on an edit), `resume` folds the same memory from the logged lines, and the stance digest the
+line logs excludes `deviation`. Bound (by construction): per variable, `pred_i <= input` for a member combo and
+`pred_i <= self_i + input` otherwise. `persona turn` and `persona replay` carry no memory and add nothing. A strand with
+the block verifies from its header (`--from-checkpoint` refuses: the memory reads every event). The deviation is absent
+(`null`) when a program is not solved by the exact tier.
+
+**Trajectory.** p_beta, proportional to p^beta, of the event's program at the k betas, each solved by the exact tier on
+`Model::scaled(beta)`: no sampler, a pure function of the program. It is derived and never logged: `probbit monitor`
+shows a `TRAJECTORY` row (mean marginal entropy per step) and its JSON frame a `trajectory` key; `probbit persona
+trajectory PERSONA --state S [--inputs I]` (or `--program FILE` for any probbit-ir program) prints the steps. The joint
+entropy of p_beta is non-increasing in beta (dH/dbeta = -beta Var(log w)); a single variable's marginal entropy can rise
+(measured in RFC 0009).
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:

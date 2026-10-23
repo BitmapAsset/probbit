@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.12.0-dev - unreleased
+
+RFC 0009 (docs/rfcs/0009-surprise-live-state.md), the engine side: two opt-in keys, both outside the digest, effects {}.
+A persona without them gives every document byte for byte as 0.11.0.
+- `expectation`: per live event, the exact KL of the turn's per-variable marginals from the engine's own expectation (a
+  decayed mixture over the input combos the strand has seen), from M + 1 exact solves; `deviation` on the stance, a receipt
+  on the strand line that `live verify` recomputes, a `DEVIATION` monitor row.
+- `engine.trajectory`: the turn's program at K inverse temperatures, solved exactly (`Model::scaled` + the exact tier), no
+  sampler; a `TRAJECTORY` monitor row and `probbit persona trajectory`.
+
 ## 0.11.0 - 2026-10-21
 
 RFC 0008, viability (docs/rfcs/0008-viability.md), and RFC 0004, the persuadability bound (docs/rfcs/0004-bound.md), in the

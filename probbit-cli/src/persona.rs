@@ -177,7 +177,9 @@ type Table = Vec<(String, Vec<f64>)>;
 pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub digest: String, vars: Vec<Var>, steps: Vec<String>, slots: Vec<String>, say_order: bool,
     prefer: Eff, couplings: Vec<(String, String, Vec<Vec<f64>>)>, inputs: Vec<Input>, history: Vec<Hist>, habits: Vec<Habit>, eng: Eng, max_tokens: usize, order: Vec<String>, prefix: String,
     learning: Option<Learning>, drives: Option<Drives>, reward: Option<Vec<(String, Option<Vec<String>>)>>, senses: Option<Senses>, why_past: Option<bool>,
-    surprise: Option<Surprise>, pace: Option<Pace>, disp: Option<Disp>, rest_b: Option<Rest>, load: Option<Load>, block: bool }
+    surprise: Option<Surprise>, pace: Option<Pace>, disp: Option<Disp>, rest_b: Option<Rest>, load: Option<Load>, block: bool,
+    /// RFC 0009: the `expectation` block and `engine.trajectory` (both outside the digest; effects {})
+    pub expect: Option<Expect>, pub traj: Option<Traj> }
 impl Persona {
     /// `line.why_past` (§2.11): `why` names what the learned weights came from; default on with a senses block, off without
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
@@ -307,6 +309,20 @@ pub fn build(doc: &Json) -> R<Persona> {
     // persona with a recorded life leaves every state, strand and turn byte for byte the same (amendment A1)
     if let Some(b) = doc.get("bound") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "bound"); }
         let p = build(&d)?; bound::spec(b, &p)?; return Ok(p); }
+    // RFC 0009: `expectation` and `engine.trajectory` move nothing (effects {}): they are read against the persona built without
+    // them and stay out of the digest, so adding either to a persona with a recorded life leaves every state and stance digest as
+    // it was (an `engine` mapping left empty is dropped with them)
+    if doc.get("expectation").is_some() || doc.get("engine").and_then(|e| e.get("trajectory")).is_some() {
+        let (mut d, mut ex, mut tj) = (doc.clone(), None, None);
+        if let Json::Obj(v) = &mut d {
+            if let Some(i) = v.iter().position(|(k, _)| k == "expectation") { ex = Some(v.remove(i).1); }
+            if let Some(i) = v.iter().position(|(k, _)| k == "engine") {
+                if let Json::Obj(e) = &mut v[i].1 { if let Some(j) = e.iter().position(|(k, _)| k == "trajectory") { tj = Some(e.remove(j).1); } }
+                if v[i].1.as_obj().is_some_and(|e| e.is_empty()) { v.remove(i); } } }
+        let mut p = build(&d)?;
+        p.expect = match ex { None | Some(Json::Null) => None, Some(x) => Some(expect_spec(&x)?) };
+        p.traj = match tj { None | Some(Json::Null) => None, Some(x) => Some(traj_spec(&x)?) };
+        return Ok(p); }
     const TOP: [&str; 22] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "learning", "drives", "reward_from", "senses", "needs",
         "surprise", "pace", "dispositions", "rest", "load", "comment"];
     let kv = keys(doc, "", &TOP, &["probbit_persona", "identity", "traits"])?;
@@ -439,7 +455,7 @@ pub fn build(doc: &Json) -> R<Persona> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block };
+    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None };
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -2969,14 +2985,16 @@ pub fn replay(p: &Persona, seed: Option<u64>, turns: &[Json], no_inertia: bool, 
     Ok((out, st))
 }
 /// `compile`: the turn's program (insertion order; its sha256 is the stance's `engine.program`)
-pub fn program(p: &Persona, st: &State, raw: &Json) -> R<String> {
+pub fn program(p: &Persona, st: &State, raw: &Json) -> R<String> { Ok(text(&program_json(p, st, raw)?)) }
+/// `program` as a document (RFC 0009: the expectation's members and the trajectory compile through it)
+pub fn program_json(p: &Persona, st: &State, raw: &Json) -> R<Json> {
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     let (src, raw) = if p.senses.is_some() || p.credit().is_some() || p.has_needs() { take_src(p, raw, true)? } else { (None, raw) };
     let (pay, raw) = take_pay(p, raw)?;
     let (st, raw) = prep(p, st, &raw, src.as_ref(), true)?;
     let st = match &pay { Some(k) => credit_step(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
     let st = gate_step(p, st, &raw)?;
-    Ok(text(&compile(p, &st, &raw, &Opts::default())?.0))
+    Ok(compile(p, &st, &raw, &Opts::default())?.0)
 }
 
 /// Static check: for every conditional habit and every pair of them (with every unconditional one), and every previous level of
@@ -3758,6 +3776,166 @@ pub fn prove_seed(p: &Persona, pr: &Prop, seed: u64, eng: Engine) -> Result<(usi
             Ok(()) };
         match check() { Ok(()) => true, Err(e) => { res = Err(e); false } } });
     res.map(|_| (n, calls))
+}
+
+// --------------------------------------------------------------------------------- RFC 0009: the expectation and the trajectory
+/// RFC 0009 `expectation` (effects {}): the decayed combo counts' half-life in events and the most mixture members
+#[derive(Clone, Debug)]
+pub struct Expect { pub half_life: f64, pub max_combos: usize }
+/// RFC 0009 `engine.trajectory`: K steps of beta from beta0 to 1 (linear), each solved by the exact tier
+#[derive(Clone, Debug)]
+pub struct Traj { pub k: usize, pub beta0: f64 }
+fn expect_spec(x: &Json) -> R<Expect> {
+    let kv = keys(x, "expectation", &["half_life_events", "max_combos", "comment"], &[])?;
+    Ok(Expect { half_life: num_or(kv, "half_life_events", 32.0, "expectation", Some(1.0), Some(1e6), false)?,
+        max_combos: num_or(kv, "max_combos", 16.0, "expectation", Some(1.0), Some(64.0), true)? as usize })
+}
+fn traj_spec(x: &Json) -> R<Traj> {
+    let kv = keys(x, "engine.trajectory", &["k", "beta0", "comment"], &[])?;
+    let beta0 = num_or(kv, "beta0", 0.4, "engine.trajectory", Some(0.0), Some(1.0), false)?;
+    need(beta0 > 0.0 && beta0 < 1.0, "engine.trajectory.beta0", "must be > 0 and < 1")?;
+    Ok(Traj { k: num_or(kv, "k", 8.0, "engine.trajectory", Some(2.0), Some(16.0), true)? as usize, beta0 })
+}
+/// The expectation's memory: per canonical input combo seen, its decayed count and the inputs (without `elapsed_hours`) of the
+/// latest event that had it (that combo's member), whether a non-time combo has been seen, and the learned normal of
+/// ln(1 + pred). A fold over the logged events (their inputs and deviation receipts), so it lives with a strand's replay and
+/// never in the state: the state digest is the same with the block on or off.
+#[derive(Clone, Debug, Default)]
+pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64 }
+const DEV_PRIOR_VAR: f64 = 0.04;
+const DEV_VAR_FLOOR: f64 = 1e-4;
+/// z at or above this registers the deviation (the RFC 0001 sense threshold)
+pub const DEV_Z: f64 = 1.5;
+impl ExpectMem { pub fn new() -> ExpectMem { ExpectMem { var: DEV_PRIOR_VAR, ..Default::default() } } }
+/// One event's deviation from the engine's own expectation (nats): `s_self` = sum over the non-twin variables of KL(A_i || E_i),
+/// `pred` = the same against the mixture Pi_i, `input` = -ln of the mixture weight of the event's combo (its own member's,
+/// else the empty member's), `cold` until the first non-time combo; `member`: the combo has its own member; `z` against the
+/// learned normal (None while cold); per variable (id, pred_i, self_i)
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // member, members and terms are read by the bound tests
+pub struct Deviation { pub s_self: f64, pub pred: f64, pub input: f64, pub cold: bool, pub member: bool, pub z: Option<f64>, pub members: usize, pub terms: Vec<(String, f64, f64)> }
+/// 5 significant digits: the value a strand line logs (and the learned normal reads, so a resumed strand learns the same normal)
+pub fn sig5(x: f64) -> f64 { if x == 0.0 || !x.is_finite() { x } else { format!("{x:.4e}").parse().unwrap_or(x) } }
+/// The canonical combo of an event's inputs: `elapsed_hours`, false, 0 and null dropped; a declared number input bucketed into
+/// the thirds of its range; everything else as given; keys sorted (canonical JSON)
+pub fn combo_key(p: &Persona, raw: &[(String, Json)]) -> String {
+    let mut kv: Vec<(String, Json)> = raw.iter().filter(|(k, v)| k != "elapsed_hours" && !matches!(v, Json::Null | Json::Bool(false)) && !matches!(v, Json::Num(x) if *x == 0.0))
+        .map(|(k, v)| (k.clone(), match (p.input(k), v) {
+            (Some(i), Json::Num(x)) if i.kind == Kind::Number && i.max > i.min => Json::Str(format!("third{}", (((x - i.min) / (i.max - i.min)) * 3.0).floor().clamp(0.0, 2.0) as i64)),
+            _ => v.clone() })).collect();
+    kv.sort_by(|a, b| a.0.cmp(&b.0)); canon(&Json::Obj(kv))
+}
+/// The mixture's members and weights: the empty combo first (its decayed count + one pseudo-count + every combo folded into it),
+/// then the other combos by decayed count (ties: key order), at most `max_combos` members in all
+pub fn expect_weights(ex: &Expect, mem: &ExpectMem) -> Vec<(String, f64)> {
+    let mut c: Vec<(String, f64)> = mem.combos.iter().filter(|x| x.0 != "{}").map(|x| (x.0.clone(), x.1)).collect();
+    c.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+    let keep = ex.max_combos - 1;
+    let mut empty = 1.0 + mem.combos.iter().find(|x| x.0 == "{}").map_or(0.0, |x| x.1);
+    for x in c.iter().skip(keep) { empty += x.1; }
+    c.truncate(keep);
+    let tot = c.iter().fold(empty, |a, x| a + x.1);
+    let mut out = vec![("{}".to_string(), empty / tot)]; out.extend(c.into_iter().map(|(k, n)| (k, n / tot))); out
+}
+/// Per non-twin variable its exact marginal, levels sorted
+type Marg = Vec<(String, Vec<(String, f64)>)>;
+/// The non-twin exact marginals of a program -> None unless the exact tier solved it
+fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
+    let doc = eng(prog, &Flags { op: "decide".into(), ..flags(p, st) });
+    if doc.get("verdict").and_then(Json::as_str) != Some("exact") { return None; }
+    Some(doc.get("marginals")?.as_obj()?.iter().filter(|(k, _)| !k.starts_with("free.")).map(|(k, v)| (k.clone(), v.as_obj().map_or(vec![], |o| {
+        let mut r: Vec<(String, f64)> = o.iter().map(|(l, x)| (l.clone(), x.as_f64().unwrap_or(0.0))).collect(); r.sort_by(|a, b| a.0.cmp(&b.0)); r }))).collect())
+}
+fn with_elapsed(rep: &Json, e: &Json) -> Json {
+    let mut kv: Vec<(String, Json)> = rep.as_obj().map_or(vec![], |o| o.to_vec()); kv.push(("elapsed_hours".into(), e.clone())); Json::Obj(kv)
+}
+/// Sum over variables of KL(a_i || b_i) and the per-variable terms (each clamped at 0) -> None when b_i is 0 where a_i is not
+fn kl_marg(a: &Marg, b: &Marg) -> Option<(f64, Vec<f64>)> {
+    let mut tot = 0.0; let mut terms = vec![];
+    for (id, la) in a { let lb = &b.iter().find(|(k, _)| k == id)?.1; let mut t = 0.0;
+        for (l, x) in la { if *x > 0.0 { let y = lb.iter().find(|(m, _)| m == l).map_or(0.0, |v| v.1); if y <= 0.0 { return None; } t += x * (x.ln() - y.ln()); } }
+        let t = t.max(0.0); tot += t; terms.push(t); }
+    Some((tot, terms))
+}
+/// RFC 0009: the event's deviation, from the pre-event state `st` and the memory of the events before it. A_t is the event's
+/// program (`persona compile` of its inputs), E_t the program with `elapsed_hours` only, Pi_t the mixture of the members'
+/// programs (each combo's latest inputs with this event's hours; the event's own combo with its own inputs, so A_t is a member
+/// whenever its combo is). Mixture marginals are linear in the members' exact marginals, so every number is exact from the
+/// M + 1 solves. None without the block, or when a program is not solved exactly or a divergence is not finite.
+pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine) -> Option<Deviation> {
+    let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
+    let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
+    let solve = |ins: &Json| program_json(p, st, ins).ok().and_then(|prog| exact_marg(p, st, &prog, eng));
+    let a = solve(raw)?; let ed = solve(&with_elapsed(&Json::Obj(vec![]), &e))?;
+    let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
+    let cold = !mem.warm && key == "{}";
+    // the members' marginals, weighted; a member that does not compile or solve exactly folds into the empty member
+    let mut parts: Vec<(f64, Marg)> = vec![]; let mut empty_w = 0.0;
+    for (k, w) in &ws {
+        if *k == key { parts.push((*w, a.clone())); continue; }
+        if k == "{}" { empty_w += w; continue; }
+        let rep = mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![]));
+        match solve(&with_elapsed(&rep, &e)) { Some(m) => parts.push((*w, m)), None => empty_w += w } }
+    // the empty member: E_t, or A_t itself when the event is time-only (ws[0], pushed first)
+    if key != "{}" { parts.push((empty_w, ed.clone())); } else { parts[0].0 += empty_w; }
+    let pi: Marg = a.iter().map(|(id, la)| (id.clone(), la.iter().map(|(l, _)| (l.clone(), parts.iter().fold(0.0, |acc, (w, m)|
+        acc + w * m.iter().find(|(k, _)| k == id).and_then(|(_, r)| r.iter().find(|(x, _)| x == l)).map_or(0.0, |v| v.1)))).collect())).collect();
+    let (pred, tp) = kl_marg(&a, &pi)?; let (s_self, ts) = kl_marg(&a, &ed)?;
+    let w_cur = ws.iter().find(|(k, _)| *k == key).map_or(ws[0].1, |x| x.1);
+    let z = (!cold).then(|| ((1.0 + sig5(pred)).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
+    Some(Deviation { s_self, pred, input: -w_cur.ln(), cold, member, z, members: ws.len(), terms: a.iter().zip(tp.iter().zip(&ts)).map(|((id, _), (x, y))| (id.clone(), *x, *y)).collect() })
+}
+/// The memory after an event: every count decays by 2^(-1/half_life), the event's combo gains one and keeps its inputs as its
+/// member; the learned normal (after the cold start) reads ln(1 + the logged pred) with the same half-life
+pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Option<f64>) {
+    let Some(ex) = p.expect.as_ref() else { return }; let Some(kv) = raw.as_obj() else { return };
+    let d = 0.5f64.powf(1.0 / ex.half_life); let key = combo_key(p, kv);
+    let rep = Json::Obj(kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect());
+    for c in &mut mem.combos { c.1 *= d; }
+    match mem.combos.iter_mut().find(|c| c.0 == key) { Some(c) => { c.1 += 1.0; c.2 = rep; } None => mem.combos.push((key.clone(), 1.0, rep)) }
+    if key != "{}" { mem.warm = true; }
+    if let Some(x) = logged_pred { let (x, a) = ((1.0 + x).ln(), 1.0 - d); let dx = x - mem.mean;
+        mem.mean += a * dx; mem.var = (1.0 - a) * (mem.var + a * dx * dx); mem.n += 1; }
+}
+impl Deviation {
+    /// The stance's `deviation` (full precision)
+    pub fn to_json(&self) -> Json {
+        Json::Obj(vec![("self".into(), Json::Num(self.s_self)), ("pred".into(), Json::Num(self.pred)), ("input".into(), Json::Num(self.input)), ("cold".into(), Json::Bool(self.cold)),
+            ("z".into(), self.z.map_or(Json::Null, |z| Json::Num(r6(z)))), ("registers".into(), Json::Bool(self.z.is_some_and(|z| z >= DEV_Z)))])
+    }
+    /// The strand line's receipt: self, pred and input at 5 significant digits, `cold: true` while cold
+    pub fn receipt(&self) -> Json {
+        let mut v = vec![("input".into(), Json::Num(sig5(self.input))), ("pred".into(), Json::Num(sig5(self.pred))), ("self".into(), Json::Num(sig5(self.s_self)))];
+        if self.cold { v.insert(0, ("cold".into(), Json::Bool(true))); } Json::Obj(v)
+    }
+    /// The value the learned normal reads after this event (None while cold)
+    pub fn logged_pred(&self) -> Option<f64> { (!self.cold).then(|| sig5(self.pred)) }
+}
+/// RFC 0009: a program's trajectory, p_beta proportional to p^beta at K betas from beta0 to 1 (linear), each step solved by the
+/// exact tier on `Model::scaled(beta)`: per step its beta, the non-twin marginals (allowed levels in declared order) and their
+/// mean entropy (nats). No sampler, so it is a pure function of the program. None when a step is not solved exactly.
+pub fn trajectory_program(prog: &Json, k: usize, beta0: f64, limit: u64) -> Option<Json> {
+    let pr = crate::run::from_json(prog).ok()?; let kk = pr.m.k; let mut steps = vec![];
+    for i in 0..k {
+        let b = if i + 1 == k { 1.0 } else { beta0 + (1.0 - beta0) * i as f64 / (k - 1) as f64 };
+        let c = probbit_ir::exact_components_until(&pr.m.scaled(b), limit, probbit_ir::FRONTIER_MAX_STATES, None)?;
+        if c.infeasible { return None; }
+        let (mut marg, mut hs) = (vec![], vec![]);
+        for (vi, id) in pr.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")) {
+            let row: Vec<(String, f64)> = (0..kk).filter(|&q| pr.m.allowed[vi * kk + q]).map(|q| (pr.values[q].clone(), c.marg[vi * kk + q])).collect();
+            hs.push(row.iter().filter(|x| x.1 > 0.0).fold(0.0, |a, x| a - x.1 * x.1.ln()));
+            marg.push((id.clone(), Json::Obj(row.into_iter().map(|(l, x)| (l, Json::Num(x))).collect()))); }
+        let h = if hs.is_empty() { 0.0 } else { hs.iter().sum::<f64>() / hs.len() as f64 };
+        steps.push(Json::Obj(vec![("beta".into(), Json::Num(b)), ("h".into(), Json::Num(h)), ("entropy".into(), Json::Arr(hs.into_iter().map(Json::Num).collect())), ("marginals".into(), Json::Obj(marg))])); }
+    Some(Json::Obj(vec![("k".into(), Json::Num(k as f64)), ("beta0".into(), Json::Num(beta0)), ("steps".into(), Json::Arr(steps))]))
+}
+/// The event's trajectory with the persona's `engine.trajectory` (the program `persona compile` gives for the event)
+pub fn trajectory(p: &Persona, st: &State, raw: &Json) -> Option<Json> {
+    let t = p.traj.as_ref()?; trajectory_program(&program_json(p, st, raw).ok()?, t.k, t.beta0, p.eng.exact_limit)
+}
+/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009, effects {}: the block on or off, one digest)
+pub fn stance_sha(doc: &Json) -> String {
+    match doc { Json::Obj(v) if v.iter().any(|(k, _)| k == "deviation") => sha(&Json::Obj(v.iter().filter(|(k, _)| k != "deviation").cloned().collect())), _ => sha(doc) }
 }
 
 #[cfg(test)]

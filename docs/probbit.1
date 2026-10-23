@@ -254,6 +254,20 @@ the individual's stored state (`probbit persona init \-\-out` writes one)
 this turn's inputs: a JSON object, inline or a file (default {})
 .RE
 .TP
+\fBtrajectory\fR PERSONA (\-\-state STATE [\-\-inputs JSON|FILE] | \-\-program FILE)
+RFC 0009: the turn's program (or a probbit\-ir program) at K inverse temperatures beta0 \-> 1, each step solved by the exact tier (engine.trajectory; default k 8, beta0 0.4): per step the marginals and their entropy
+.RS 4
+.TP
+\fB\-\-state\fR \fISTATE\fR
+the individual's stored state (`probbit persona init \-\-out` writes one)
+.TP
+\fB\-\-inputs\fR \fIJSON|FILE\fR
+this turn's inputs: a JSON object, inline or a file (default {})
+.TP
+\fB\-\-program\fR \fIFILE\fR
+a probbit\-ir program instead of the turn's
+.RE
+.TP
 \fBdescribe\fR PERSONA
 traits, moods, inputs, habits, agenda, and the blocks it declares (learning, drives with windows and valence, senses, needs, surprise, pace with its closed form, the disposition genes)
 .RE
