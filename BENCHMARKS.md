@@ -1355,6 +1355,11 @@ attack's template by design); other models, seeds and repeat-run variance; Agent
 `bench/agentdojo/experiments/rerun.sh` recomputes every number here from `tables/episodes.jsonl` and the strands, twice,
 byte-identical, with no API calls.
 
+**Reproductions.** REPRODUCE.md says how; a reproduction report (issue template) is the place to say what you got.
+Standing: the CI job `agentdojo-tables` recomputes these tables on GitHub's Ubuntu and macOS runners on every push and
+pull request and fails unless they are byte-identical to the committed ones (a machine that is not the author's, not a
+person). By people outside this project: none yet.
+
 ## §15 The engine's own expectation and the exact trajectory (RFC 0009 engine side; 0.12.0; one registered run, 2026-10-22)
 
 Mechanism and simulation. Engine arm: the 0.12.0 engine with the opt-in `expectation` block on; baseline: the same engine

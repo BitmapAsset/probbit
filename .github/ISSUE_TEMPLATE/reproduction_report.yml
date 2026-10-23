@@ -1,0 +1,61 @@
+name: Reproduction report
+description: You reran a measurement from BENCHMARKS.md (REPRODUCE.md says how). Tell us what you got, match or not.
+title: "[repro] "
+labels: ["reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Both outcomes are wanted: a match is listed under "Reproductions" in BENCHMARKS.md with your name or
+        handle (say below if you prefer to stay anonymous); a disagreement is investigated here, in public.
+  - type: dropdown
+    id: what
+    attributes:
+      label: What you reproduced
+      options:
+        - Five minutes (persona prove + live verify of a recorded strand)
+        - AgentDojo tables recomputed (experiments/rerun.sh, no API calls)
+        - AgentDojo benchmark rerun (API calls, three arms)
+        - Viability bench (bench/viability)
+        - Individuality or body bench (bench/individuality, bench/body)
+        - Something else (say what below)
+    validations:
+      required: true
+  - type: dropdown
+    id: matched
+    attributes:
+      label: Did it match?
+      options:
+        - Yes, byte-identical (the sha256s match) or within the stated intervals
+        - Partly (say which numbers differ)
+        - No
+        - It did not run (say where it stopped)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: probbit version and commit
+      placeholder: "probbit 0.12.0 · 3036e4b"
+    validations:
+      required: true
+  - type: input
+    id: machine
+    attributes:
+      label: OS and CPU
+      placeholder: "Ubuntu 24.04, AMD Ryzen 7 5800X · or · macOS 15, Apple M2"
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: What it printed
+      description: The lines of rerun.sh (identical/DIFFERS and the sha256s), the verify answer, or the full-run numbers (ASR and utility per arm with the episode counts).
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Python and numpy versions, anything you changed, how long it took, how you would like to be credited.
