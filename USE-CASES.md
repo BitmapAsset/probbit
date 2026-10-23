@@ -70,6 +70,9 @@ Do not use it when:
   `probbit <command> --help` lists every flag with its default.
 - **Rust**: the `probbit-decide` crate (router front-end) and `probbit-ir` (general programs, JSON v1 in `docs/probbit-ir-json.md`).
 - **MCP server**: `probbit mcp` serves the ten documented tools over stdio; see [docs/agents.md](docs/agents.md).
+- **OpenClaw plugin**: [plugins/openclaw](plugins/openclaw/README.md), `openclaw plugins install npm:probbit-stance`: one
+  individual per listed session, one event per user message, the stance block in the turn, the footer in the chat, a
+  strand per lane, a shadow gate for destructive tool calls.
 - **Beside an agent loop**: `python/probbit_host.py` and `examples/node/stance-host.mjs` (one individual per conversation, one
   event per model call, the stance block in the system prompt, the strand as the receipt), bound to Claude Code hooks, the
   OpenAI Agents SDK, LangChain and the Vercel AI SDK in [docs/adapters.md](docs/adapters.md); tested against the binary

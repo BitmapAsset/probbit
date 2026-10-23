@@ -1,0 +1,138 @@
+{
+  "id": "probbit-stance",
+  "name": "probbit stance",
+  "description": "A probbit individual (persona + seed) beside the agent: one engine event per user message in the sessions you list, its stance block injected into the turn, a replayable strand as the receipt; destructive tool calls a careful stance would deny are shadow-logged.",
+  "categories": [
+    "other"
+  ],
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "lanes": {
+        "type": "object",
+        "description": "Session key (exact) or prefix ending in * → lane name. Only listed sessions get the hooks.",
+        "additionalProperties": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        }
+      },
+      "personaPath": {
+        "type": "string"
+      },
+      "stateDir": {
+        "type": "string"
+      },
+      "binary": {
+        "type": "string"
+      },
+      "seed": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 50,
+        "maximum": 10000
+      },
+      "gateMode": {
+        "type": "string",
+        "enum": [
+          "shadow",
+          "off"
+        ]
+      },
+      "footer": {
+        "type": "boolean"
+      },
+      "footerPrefix": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 24,
+        "description": "Opens the footer line (default: the persona's name). An emoji or a short handle works."
+      },
+      "inject": {
+        "type": "string",
+        "enum": [
+          "appendContext",
+          "appendSystemContext"
+        ]
+      },
+      "classifierTimeoutMs": {
+        "type": "integer",
+        "minimum": 50,
+        "maximum": 5000
+      },
+      "decisionThreshold": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "classifier": {
+        "type": "string",
+        "enum": [
+          "auto",
+          "jev",
+          "keyword"
+        ],
+        "description": "auto: host decision role when an agent decisionModel is configured, else keywords. jev: the Jev adapter (OpenRouter). keyword: keywords only."
+      },
+      "classifierShadow": {
+        "type": "boolean",
+        "description": "classifier jev only (default true): log Jev's answers, feed the engine the keyword flags."
+      },
+      "jevModel": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Pinned Jev model id (default typesafe/jev-1.13)."
+      },
+      "jevKeyFile": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Env-style file with OPENROUTER_API_KEY (default ~/.openclaw/probbit-stance/openrouter.env); read once at start."
+      },
+      "senderIds": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "destructive": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "tools"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "tools": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "regex": {
+              "type": "string"
+            },
+            "param": {
+              "type": "string"
+            },
+            "pathPrefix": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
