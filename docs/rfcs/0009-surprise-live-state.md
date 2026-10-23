@@ -1,6 +1,6 @@
 # RFC 0009: surprise-driven live state
 
-Status: **proposed, this PR** (engine side: `expectation` and the exact `engine.trajectory`, 0.12.0-dev; §2-§4 stay
+Status: **proposed; engine side shipped in 0.12.0** (engine side: `expectation` and the exact `engine.trajectory`, 0.12.0; §2-§4 stay
 draft) · Changes: docs/persona.md §2.17 (format 1, additive), `probbit live`, `probbit monitor`, `live verify`,
 `probbit persona trajectory` · Depends on: RFC 0001 (senses), RFC 0003 (reafference and consolidation, draft, not yet in
 this repository), RFC 0004 (the bound)
@@ -172,7 +172,7 @@ the file is read.
 - **The bound holds.** Through the engine, a growth-on arm (60 campaigns) stays at 0 of 180 (campaign, trait) cases over
   the `persona bound` epsilon (max ratio 0.944), with 81 slots opened over 53 campaigns; the 247-campaign suite stays at 0
   exceedances. Replay was byte-identical twice.
-- **Open gap (failed bar g1), untouched by the 0.12.0-dev engine change.** The bar asks that a varied stream end with more cells than a repetitive one on ≥ 45 of 50
+- **Open gap (failed bar g1), untouched by the 0.12.0 engine change.** The bar asks that a varied stream end with more cells than a repetitive one on ≥ 45 of 50
   seeds, and that the repetitive stream plateau on ≥ 45 of 50. The first rule: 22/50 and 6/50. Rule v2a: **40/50** (fail)
   and 49/50. Hits per visit fixed the repetitive stream's late openings. The varied stream now plateaus too (3-11 cells
   against about 40 latent contexts) for two measured reasons: rare contexts never collect 4 visits in 50 events, and cells

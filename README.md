@@ -29,30 +29,38 @@ One binary of about 2 MB, zero third-party dependencies, nothing phones home. Al
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
 <p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
 
-## What's new in 0.11.0
+## What's new in 0.12.0
 
-- **A persuadability bound, computed by the engine** (RFC 0004, opt-in `bound` block): `probbit persona bound` prints, per
-  learned trait, the certified ceiling epsilon on how far any event sequence can move its odds at rest, with the attaining
-  vertex; `--audit STRAND` reports the room a recorded life used; `live control STRAND erase` returns the learned weights to 0
-  as a chained line. On the 247 recorded persuasion campaigns, 0 exceed the published epsilon (max ratio 1.0). Also new: the
-  dead-rule lint, `persona lint --host MANIFEST`.
-- **Viability** (RFC 0008, opt-in): a bound per need with a `margin` and a worst-need `viability` line in the stance;
-  **graded pressure** from the worst margin to a mood; **need valence** with a tonic term (distance from the setpoints) and
-  a phasic term (this event's drive reduction); flag senses that grow a need; **`stance.block`**, the text a host injects
-  verbatim (every trait and mood once, plus the viability line); a VIABILITY row in `monitor`.
-- **Rest and load** (RFC 0002 part 2, opt-in blocks), **panel words** in `monitor` (every field as a dial with fixed,
-  bucketed words), portability fixes (strands with a byte-order mark, a proxy-safe event stream, the page on Safari 15,
-  static builds on old glibc), and the fixes for the two 0.10.0 findings: a new learner's surprise gate starts closed, and
-  n10 and n11 now pass (BENCHMARKS.md §12). These were the 0.10.1 development line; 0.10.1 was not released on its own.
-- Every new key is opt-in: the P0 corpus recorded with 0.8.2 gives 653 outputs, 0 differ.
-  [docs/welfare-stance.md](docs/welfare-stance.md) fixes what need, viability and damage mean here as arithmetic, and what
-  is not claimed.
-- **Measured** (BENCHMARKS.md §13, bars registered before the run, 1,000 simulated episodes per arm): survival 0.922 vs 0.000
-  for the same policy on a constant stance; pressure tracks the worst margin at 0.8156 with no habits; valence tracks the
-  distance to the bound at +0.8394 (was −0.149), but the tonic-off ablation still gives +0.1199 against its ≤ 0.10 clause,
-  so **V2 fails as registered**. [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.11.0) · [RFC 0008](docs/rfcs/0008-viability.md) · [RFC 0004](docs/rfcs/0004-bound.md) · [CHANGELOG](CHANGELOG.md)
+- **The engine's own expectation, and the exact surprise of every event** (RFC 0009, engine side; opt-in `expectation`
+  block). Per live event the engine compiles, beside the turn's program, its own expectation of that turn (a decayed
+  mixture over the input combinations the life has seen) and reports the exact divergence between them: `deviation`
+  on the stance, a receipt on the strand line that `live verify` recomputes, a `DEVIATION` row in `monitor`. Measured
+  (BENCHMARKS.md §15, bars registered before the run): fidelity to the reference enumerator 1e-13; the deviation is
+  non-zero on 100 % of post-cold-start events on the two recorded lives and 99.2 % of 64,000 synthetic ones; graded 17×
+  to 1,859× between the 90th and 10th percentile per persona; a per-event upper bound holds on every event checked.
+  **Not shown**: habituation. On 200 scripted repeats the reading fell on 76.5 % of scripts and dishabituated on 35 %,
+  against bars of 90 %, and a matched-index control could not separate the decay from the mixture simply growing; the
+  claim is not made. Also failed as registered: the cost bar (p95 3.98 ms extra per event against 2 ms, on a loaded
+  machine) and the 60-byte receipt (62 to 66 bytes). Effects {}: the deviation moves nothing in this release.
+- **The trajectory, exactly.** `engine.trajectory` solves the turn's program at K inverse temperatures through the exact
+  tier (no sampler): the "forming, then settled" picture, deterministic. Joint entropy non-increasing on every program
+  checked; per-variable one-rise on 99.61 % of 300 held-out programs (the draft's sampler: 93.1 %). `probbit persona
+  trajectory`, a `TRAJECTORY` monitor row.
+- **Measured against prompt injection** (BENCHMARKS.md §14, `bench/agentdojo/`): one pre-registered AgentDojo run,
+  gpt-4o-mini, 97 user tasks and 629 attack cases, three paired arms. The stance block lowered targeted attack success
+  from **0.289 to 0.227** (−6.2 points, 95 % CI [−8.7, −3.8], McNemar p = 1.8e-6) with no measured utility cost. The
+  same words as a static prompt lower it almost as much but cost **10.3 points** of benign utility; the sense-gated
+  block did not. The engine's measured contribution on this suite is *when* the words reach the model, plus a replayable
+  strand for every stance, not the words. The baseline arm matches the suite's published row (utility 0.6804 = 0.6804).
+  Not tested: an if-statement doing the same gating without the engine; adaptive attacks that avoid the sense's markers.
+- **V2's residual explained** (BENCHMARKS.md §13): the tonic-off valence tracking of +0.1199 that failed 0.11.0's V2 is
+  carried by the phasic term of the same need-valence block (phasic off as well: −0.267; everything off: 0.0000). The
+  published V2 stays FAIL; the proposed 0.12 registration ablates the whole `needs.valence` block.
+- Every new key is opt-in: a persona without them gives every document byte for byte as 0.11.0 (64,000 synthetic lines,
+  both recorded lives; the P0 corpus, 653 recorded outputs, 0 differ).
+  [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.12.0) · [RFC 0009](docs/rfcs/0009-surprise-live-state.md) · [BENCHMARKS §14](BENCHMARKS.md) · [CHANGELOG](CHANGELOG.md)
 
-0.10.0 added the body: needs, valence, surprise, pace and dispositions ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.10.0)).
+0.11.0 added the certified persuadability bound and viability in the engine ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.11.0)); 0.10.0 added the body: needs, valence, surprise, pace and dispositions ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.10.0)).
 
 ## probbit in two minutes
 
@@ -130,7 +138,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.11.0.
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.12.0.
 
 | how | command |
 |---|---|
@@ -561,7 +569,7 @@ numbers), and uploads the JSON report as an artifact:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: BitmapAsset/probbit@v0.11.0    # the action needs probbit 0.9.0 or later
+- uses: BitmapAsset/probbit@v0.12.0    # the action needs probbit 0.9.0 or later
   with:
     persona: agent/policy.yaml
     props: agent/rules.json
@@ -577,7 +585,7 @@ numbers), and uploads the JSON report as an artifact:
 | `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
 | `seeds` | `0-99` | the individuals |
 | `depth` | probbit's (8) | events per fuzzed script |
-| `version` | `latest` | the release `install.sh` installs (`v0.11.0`, ...) |
+| `version` | `latest` | the release `install.sh` installs (`v0.12.0`, ...) |
 | `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
 | `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
 | `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |
@@ -777,8 +785,8 @@ What it does **not** do, also measured:
   null, 0.0040);
 - the engine names the worst need on **389,375** events with **0** margin mismatches (bar: 0);
 - valence tracks the distance to the bound at **+0.8394** (0.10.1 development line: −0.149; bar ≥ +0.30), but with the tonic
-  term off it still tracks at **+0.1199** against the ablation clause's ≤ +0.10: **V2 fails as registered**; the cause of
-  the residual is not tested yet;
+  term off it still tracks at **+0.1199** against the ablation clause's ≤ +0.10: **V2 fails as registered**; the residual
+  is carried by the phasic term of the same block (measured 2026-10-22, BENCHMARKS.md §13);
 - **0 of 247** persuasion campaigns exceed the certified bound; **1,240** replayed strands verify, 0 failed; the P0 corpus,
   **653** recorded outputs, 0 differ.
 
