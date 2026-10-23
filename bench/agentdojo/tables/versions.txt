@@ -1,0 +1,8 @@
+agentdojo 0.1.11 (venv011, deps resolved --exclude-newer 2024-07-20; smoke 1 ran on 0.1.35 v1, see LOOP §3/§5)
+agentdojo_benchmark_version v1.1
+openai_python 1.36.0
+python Python 3.12.12
+probbit probbit 0.11.0
+probbit_sha256 eabd1db6037ee4b6a8adc0ffc5c08380b0f388002f3f3115b9707702e2fffecf
+persona_digest sha256:514e4d23d6359b55a1741650112a065c1ff3d90d737e14cd4aa8c85e2feac7c5
+model openrouter:openai/gpt-4o-mini (2024-07-18 snapshot), provider OpenAI, temperature 0, seed 20261022
