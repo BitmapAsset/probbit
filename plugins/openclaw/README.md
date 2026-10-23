@@ -48,10 +48,12 @@ Requirements: OpenClaw 2026.9.7 or later, the `probbit` binary on the gateway's 
 1. Back up your config: `cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.pre-probbit-stance`.
 2. Install the plugin:
    ```sh
-   openclaw plugins install npm:probbit-stance
+   openclaw plugins install npm:probbit-stance --accept-capabilities
    ```
-   (or from a clone: `cd plugins/openclaw && npm ci && npm run build && openclaw plugins install --link "$PWD" --force`).
-   With no `lanes` configured the plugin registers no hooks and logs one warning: it is inert until step 3.
+   The flag is the host's consent step for a plugin that registers hooks (without it the install stops and asks for it).
+   From a clone instead: `cd plugins/openclaw && npm ci && npm run build && openclaw plugins install --link "$PWD" --force --accept-capabilities`.
+   The install writes `plugins.entries.probbit-stance.enabled: true` and nothing else; with no `lanes` configured the
+   plugin registers no hooks and logs one warning, so it is inert until step 3.
 3. Tell it which sessions get a stance. Merge into `plugins.entries` of `~/.openclaw/openclaw.json`
    (the full example is `install/openclaw-entries.json`; `hooks` sits next to `config`, not inside it):
    ```json

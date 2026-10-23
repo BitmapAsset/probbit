@@ -339,7 +339,7 @@ beside an agent loop, [docs/adapters.md](docs/adapters.md) binds a live individu
 SDK, LangChain and the Vercel AI SDK (one event per model call, the stance block in the system prompt), and
 [docs/receipts.md](docs/receipts.md) renders the strand as one receipt per decision.
 
-### OpenClaw: `openclaw plugins install npm:probbit-stance`
+### OpenClaw: `openclaw plugins install npm:probbit-stance --accept-capabilities`
 
 [plugins/openclaw](plugins/openclaw/README.md) puts an individual beside an OpenClaw agent: in the sessions you list, every
 user message is one engine event, the stance block goes into the turn, the visible reply ends with a one-line footer
