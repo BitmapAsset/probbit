@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.12.1 - 2026-10-24
+
 Hosts, receipts and reproduction, and the 0.11 dogfood fixes; every document byte for byte as 0.12.0 except `live verify`'s
 summary, which gains one key.
 - `python/probbit_host.py`: the AgentDojo run's host logic as a module: `StanceHost` (one individual per conversation, one
@@ -27,6 +29,19 @@ summary, which gains one key.
 - `install.sh` with `PROBBIT_INSTALL_DIR=<prefix>/bin` and no `PROBBIT_MAN_DIR` installs the manual page to
   `<prefix>/share/man/man1/` instead of `~/.local/share/man/man1/`; with any other `PROBBIT_INSTALL_DIR` it keeps the HOME
   default and says the page went outside it. `install.ps1` installs no manual page and is unchanged.
+
+Measured (BENCHMARKS.md §14, readings registered before the run): the if-statement control E3, one run (`bench/agentdojo/e3/`,
+726 episodes): a fourth arm that inserts the same words when the same regex fires, no engine, matched the stance block on
+targeted attack success (A − D −0.0143, 95 % CI [−0.0366, +0.0079], McNemar p = 0.28) and on both utilities, the registered
+reading "the gating alone explains the gain"; the engine's measured contribution beyond the if-statement is not
+distinguishable from 0 on this suite, and what remains specific to it is the replayable strand per stance.
+
+Merged pull requests:
+- #56 Hosts, receipts and reproduction: probbit_host, adapters, REPRODUCE.md, agentdojo-tables CI
+- #57 OpenClaw plugin probbit-stance: public plugin, bundled persona, docs with monitor capture, CI job
+- #58 plugins/openclaw README: note the non-ClawHub source confirmation
+- #59 AgentDojo E3: the if-statement control arm (one registered run)
+- #60 0.11 dogfood fixes: live verify names the verifier; the man page stays under the install prefix
 
 ## 0.12.0 - 2026-10-22
 
