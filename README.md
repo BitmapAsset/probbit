@@ -163,8 +163,8 @@ there are no external crates.
 
 At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes and the installer tests: [PORTABILITY.md](PORTABILITY.md).
 
-`install.sh` also installs the manual page (`man probbit`) to `~/.local/share/man/man1/` (`PROBBIT_MAN_DIR` to choose; a
-failure there installs the binary all the same); every archive carries it as `docs/probbit.1`, and `probbit man` prints it.
+`install.sh` also installs the manual page (`man probbit`) to `~/.local/share/man/man1/`, or to `<prefix>/share/man/man1/` when
+`PROBBIT_INSTALL_DIR` is `<prefix>/bin` (`PROBBIT_MAN_DIR` to choose; a failure there installs the binary all the same); every archive carries it as `docs/probbit.1`, and `probbit man` prints it.
 Shell completions come from the binary itself:
 
 | shell | command |

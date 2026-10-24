@@ -241,7 +241,8 @@ def receipts(strand, *, binary=None, timeout_s=60):
             {"n", "inputs" (as used), "line", "stance": {trait: level}, "mood": {mood: level}, "habits": {"active", "bound"},
              "noticed", "why", "status", "state": the replayed state digest, "logged_state": the strand's, "matches": bool,
              "prev": the sha256 of the line before}, ...],
-         "verify": the `probbit live verify` answer, "all_match": bool, "skipped": lines that are not events}
+         "verify": the `probbit live verify` answer (from 0.12.1 with "verified_by", the engine that replayed the strand),
+         "all_match": bool, "skipped": lines that are not events}
 
     The receipt says what the engine decided and from which inputs. What the host put in front of the model is the block
     (`probbit live verify --blocks FILE` writes the engine's own block per event; a host's block is `build_block` of the
@@ -302,8 +303,11 @@ def render_receipts(r, fmt="text"):
         return json.dumps(r, ensure_ascii=False, indent=1)
     p = r.get("persona") or {}
     v = r.get("verify") or {}
+    engine = r.get("engine")
+    if v.get("verified_by"):  # 0.12.1 on: the writer (the header's engine) and the verifier, so an upgrade shows
+        engine = "written by %s, verified by %s" % (engine, v["verified_by"])
     head = "%s  %s %s  seed %s  %s  verify: %s" % (
-        r["strand"], p.get("name"), p.get("version"), r.get("seed"), r.get("engine"),
+        r["strand"], p.get("name"), p.get("version"), r.get("seed"), engine,
         "ok, %s events replay" % v.get("events") if v.get("ok") else json.dumps(v, ensure_ascii=False))
     lines = [head]
     for e in r["events"]:

@@ -5,7 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-Hosts, receipts and reproduction; no engine change (every document byte for byte as 0.12.0).
+Hosts, receipts and reproduction, and the 0.11 dogfood fixes; every document byte for byte as 0.12.0 except `live verify`'s
+summary, which gains one key.
 - `python/probbit_host.py`: the AgentDojo run's host logic as a module: `StanceHost` (one individual per conversation, one
   `probbit live` event per model call, the `security` sense from tool results, the stance block for the system prompt) and
   `receipts` (a strand replayed from its header, one record per decision, each checked against the chain;
@@ -19,6 +20,13 @@ Hosts, receipts and reproduction; no engine change (every document byte for byte
   agent in the sessions you list, one event per user message, the stance block injected into the turn, the footer line in
   the chat, a replayable strand per lane, a shadow gate for destructive tool calls; a bundled persona
   (`personas/assistant.yaml`); 124 tests against a mocked host and the real binary; CI job `openclaw-plugin`.
+- `live verify` (and MCP's `probbit_live_verify`) adds `verified_by`, the engine that replayed the strand, beside `engine`, the
+  header's (the engine that wrote it): after an upgrade, verify no longer reads as if the old engine were still installed.
+  `probbit_host.py receipts` prints both. Upgrade note: the success document gains one key; every other key and the exit
+  codes are unchanged. Test: a strand written by the released 0.11.0 (`probbit-cli/tests/fixtures/strands/`).
+- `install.sh` with `PROBBIT_INSTALL_DIR=<prefix>/bin` and no `PROBBIT_MAN_DIR` installs the manual page to
+  `<prefix>/share/man/man1/` instead of `~/.local/share/man/man1/`; with any other `PROBBIT_INSTALL_DIR` it keeps the HOME
+  default and says the page went outside it. `install.ps1` installs no manual page and is unchanged.
 
 ## 0.12.0 - 2026-10-22
 

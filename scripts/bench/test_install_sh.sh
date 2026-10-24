@@ -60,6 +60,18 @@ after=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb"
 echo "== 6. invalid release path is rejected before download"
 if PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION='../bad' PROBBIT_INSTALL_DIR="$WORK/bin" "$SH" install.sh; then echo "FAIL: invalid version accepted"; exit 1; fi
 
+echo "== 6a. PROBBIT_INSTALL_DIR=<prefix>/bin keeps the manual page in <prefix>/share/man/man1, not under HOME"
+HOME="$WORK/home6a" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/pfx/bin" "$SH" install.sh > "$WORK/out6a"
+cmp "$WORK/pfx/share/man/man1/probbit.1" docs/probbit.1 && [ ! -e "$WORK/home6a/.local/share/man/man1/probbit.1" ] \
+    && grep -q "installed  $WORK/pfx/share/man/man1/probbit.1" "$WORK/out6a" || { echo "FAIL: the manual page left the prefix"; cat "$WORK/out6a"; exit 1; }
+echo "ok: $WORK/pfx/share/man/man1/probbit.1"
+echo "== 6a'. a PROBBIT_INSTALL_DIR that is not <prefix>/bin: the manual page goes under HOME, and the installer says so"
+HOME="$WORK/home6c" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/tools6c" "$SH" install.sh > "$WORK/out6c"
+cmp "$WORK/home6c/.local/share/man/man1/probbit.1" docs/probbit.1 \
+    && grep -q "installed  $WORK/home6c/.local/share/man/man1/probbit.1 (man probbit; outside PROBBIT_INSTALL_DIR" "$WORK/out6c" \
+    || { echo "FAIL: the manual page left PROBBIT_INSTALL_DIR without saying so"; cat "$WORK/out6c"; exit 1; }
+echo "ok: $WORK/home6c/.local/share/man/man1/probbit.1, said"
+
 echo "== 6b. an unwritable man directory is not fatal"
 PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/bin6" PROBBIT_MAN_DIR="/dev/null/man1" "$SH" install.sh > "$WORK/out6b"
 [ -x "$WORK/bin6/probbit" ] && grep -q "skipped    the manual page" "$WORK/out6b" || { echo "FAIL: a man directory failure broke the install"; cat "$WORK/out6b"; exit 1; }

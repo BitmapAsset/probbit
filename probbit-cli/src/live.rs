@@ -308,11 +308,13 @@ impl Replay {
     pub fn end(&self) -> Result<(), (usize, String)> {
         if self.rest.is_some() { return Err((self.line, "a rest line must be followed by its event line".into())); } Ok(())
     }
-    /// `verify`'s summary of the lines replayed so far
+    /// `verify`'s summary of the lines replayed so far: `engine` is the strand header's (the engine that wrote it), `verified_by`
+    /// the engine that replayed it
     pub fn summary(&self) -> Json {
         let (s, live) = (|x: &str| Json::Str(x.to_string()), &self.live);
         let mut v = vec![("ok".into(), Json::Bool(true)), ("events".into(), Json::Num(live.n as f64)), ("persona".into(), s(&live.p.name)), ("seed".into(), Json::Num(live.st.seed as f64)),
-            ("engine".into(), self.header.get("engine").cloned().unwrap_or(Json::Null)), ("final_state".into(), s(&live.st.digest)), ("last_line".into(), s(live.head()))];
+            ("engine".into(), self.header.get("engine").cloned().unwrap_or(Json::Null)), ("verified_by".into(), Json::Str(engine())), ("final_state".into(), s(&live.st.digest)),
+            ("last_line".into(), s(live.head()))];
         // a strand with control or checkpoint lines says so (a strand without them gives the summary of before)
         if live.controls > 0 { v.push(("controls".into(), Json::Num(live.controls as f64))); v.push(("status".into(), s(live.status.name()))); }
         if live.checkpoints > 0 { v.push(("checkpoints".into(), Json::Num(live.checkpoints as f64))); }

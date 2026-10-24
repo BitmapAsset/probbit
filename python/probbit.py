@@ -410,7 +410,7 @@ def live_event(persona, state=None, event=None, *, seed=None, strand=None, timeo
 
 def live_verify(strand, *, timeout_s=None, binary=None):
     """`probbit live verify` (docs/persona.md §5.7): replay a strand file from its header alone -> {"ok": True, "events", "persona",
-    "seed", "engine", "final_state", "last_line"} when every line replays byte for byte, else {"ok": False, "line": n, "diverges":
+    "seed", "engine", "verified_by", "final_state", "last_line"} when every line replays byte for byte, else {"ok": False, "line": n, "diverges":
     what} at the earliest line that differs, or {"ok": False, "line": n, "unsupported": field, "engine": this engine,
     "strand_engine": the header's engine} at the earliest line with a field or line kind this engine does not know (a newer
     engine's strand: not verified, and not a divergence; verify it with the engine that wrote it). Answers, not errors."""
