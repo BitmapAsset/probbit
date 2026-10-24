@@ -61,6 +61,13 @@ One binary of about 2 MB, zero third-party dependencies, nothing phones home. Al
 - Every new key is opt-in: a persona without them gives every document byte for byte as 0.11.0 (64,000 synthetic lines,
   both recorded lives; the P0 corpus, 653 recorded outputs, 0 differ).
   [Release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.12.0) · [RFC 0009](docs/rfcs/0009-surprise-live-state.md) · [BENCHMARKS §14](BENCHMARKS.md) · [CHANGELOG](CHANGELOG.md)
+- **0.12.1, the patch around the engine** ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.12.1)):
+  the AgentDojo run's host as a module with bindings for Claude Code hooks, the OpenAI Agents SDK, LangChain and the
+  Vercel AI SDK ([docs/adapters.md](docs/adapters.md)); one receipt per decision from any strand
+  ([docs/receipts.md](docs/receipts.md)); **[REPRODUCE.md](REPRODUCE.md)**, three tiers (five minutes, thirty seconds of
+  compute, or the full $3 rerun) with the sha256s to compare, and a CI job that recomputes the §14 tables on every push;
+  the OpenClaw plugin [`probbit-stance`](plugins/openclaw/README.md) on npm; the E3 control above; `live verify` names
+  the engine that replayed the strand (`verified_by`).
 
 0.11.0 added the certified persuadability bound and viability in the engine ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.11.0)); 0.10.0 added the body: needs, valence, surprise, pace and dispositions ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.10.0)).
 
