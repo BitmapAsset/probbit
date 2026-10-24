@@ -51,6 +51,7 @@ Requirements: OpenClaw 2026.9.7 or later, the `probbit` binary on the gateway's 
    openclaw plugins install npm:probbit-stance --accept-capabilities
    ```
    The flag is the host's consent step for a plugin that registers hooks (without it the install stops and asks for it).
+   The host also asks you to confirm a source outside ClawHub (npm): answer yes, or add `--force` in a script.
    From a clone instead: `cd plugins/openclaw && npm ci && npm run build && openclaw plugins install --link "$PWD" --force --accept-capabilities`.
    The install writes `plugins.entries.probbit-stance.enabled: true` and nothing else; with no `lanes` configured the
    plugin registers no hooks and logs one warning, so it is inert until step 3.
