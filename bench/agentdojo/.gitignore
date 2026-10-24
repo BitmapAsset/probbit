@@ -7,3 +7,5 @@ tables/transport-retries.jsonl
 tables/episode-failures.log
 tables/injections-*.json
 tables/prompt-sample-*.txt
+venv/
+run/

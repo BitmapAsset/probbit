@@ -1,0 +1,12 @@
+bar	comparison	metric	n	x	y	diff_x_minus_y	ci_lo	ci_hi	mcnemar_b	mcnemar_c	mcnemar_p	null_lo	null_hi	p_perm	null_ci_excl0_share	verdict
+E7	A-D	asr	629	0.2273	0.2417	-0.0143	-0.0366	0.0079	23	32	0.2806	-0.0238	0.0207	0.2710	0.0390	the gating alone explains the gain
+E8	A-D	utility	97	0.6701	0.7113	-0.0412	-0.1031	0.0103	2	6	0.2891	-0.0619	0.0619	0.2950	0.0720	the gating alone explains the gain
+E8	A-D	utility_under_attack	629	0.4897	0.4706	0.0191	-0.0079	0.0461	44	32	0.2067	-0.0254	0.0286	0.2160	0.0620	the gating alone explains the gain
+E9	D-C	asr	629	0.2417	0.2401	0.0016	-0.0207	0.0254	27	26	1.0000					D~C
+E9	D-C	utility	97	0.7113	0.5773	0.1340	0.0515	0.2165	16	3	0.0044					D>C
+info	D-C	utility_under_attack	629	0.4706	0.4452	0.0254	-0.0016	0.0525	47	31	0.0888					
+info	D-B	asr	629	0.2417	0.2893	-0.0477	-0.0731	-0.0223	18	48	0.0003					
+info	D-B	utility_under_attack	629	0.4706	0.4642	0.0064	-0.0238	0.0366	49	45	0.7572					
+info	D-B	utility	97	0.7113	0.6804	0.0309	-0.0309	0.0928	6	3	0.5078					
+noise	D-B	utility_when_D_sent_B_prompts	97	0.7113	0.6804	0.0309	-0.0309	0.0928	6	3	0.5078					
+E10	D-B	utility	97	0.7113	0.6804	0.0309										PASS
