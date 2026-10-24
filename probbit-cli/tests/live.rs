@@ -338,6 +338,8 @@ fn a_newer_engines_strand_is_unsupported_not_a_divergence() {
     let (c, out, e) = probbit(&["live", "verify", &fixture("sensed-credit-0.9.0-dev.strand")]); assert_eq!(c, 0, "{e}");
     let v = parse(&out); assert_eq!((s(&v, &["ok"]), s(&v, &["events"]), s(&v, &["engine"])), (&Json::Bool(true), &Json::Num(5.0), &Json::Str("probbit 0.9.0-dev".into())));
     assert!(v.get("normals").is_some() && v.get("open").is_some(), "the senses and the credit replayed: {out}");
+    // 0.12.1 (dogfood F1): beside the header's engine, the engine that replayed the strand, so an upgrade shows
+    assert_eq!(s(&v, &["verified_by"]), &Json::Str(THIS.into()), "{out}");
     // the released 0.8.2 binary's recorded answer: the tamper verdict on a correct strand
     let rec = fixture_text("sensed-credit-0.9.0-dev.verify-0.8.2.txt");
     assert!(rec.starts_with("# probbit 0.8.2, the released binary") && rec.lines().any(|l| l == "# exit 1"), "{rec}");
@@ -639,4 +641,15 @@ fn verify_recomputes_viability_and_a_tampered_reading_diverges() {
     let (c, s, _) = probbit(&["live", "verify", &tf]); assert_eq!(c, 1, "{s}"); let s = parse(&s);
     assert_eq!(s.get("ok"), Some(&Json::Bool(false))); assert_eq!(s.get("line").and_then(Json::as_f64), Some((k + 1) as f64), "diverges at the tampered line");
     for f in [&ev, &sf, &tf, &format!("{sf}.lock")] { let _ = std::fs::remove_file(f); }
+}
+
+/// 0.11 dogfood F1: a strand written by the released 0.11.0 (one AgentDojo episode of BENCHMARKS.md §14, a member of
+/// `bench/agentdojo/tables/strands-A.tar.gz`) verifies here, and the summary names both engines: `engine` the header's, the
+/// one that wrote it, and `verified_by` this one, the one that replayed it
+#[test]
+fn verify_names_the_writer_and_the_verifier() {
+    let (c, out, e) = probbit(&["live", "verify", &fixture("agentdojo-0.11.0.strand")]); assert_eq!(c, 0, "{e}");
+    let v = parse(&out);
+    assert_eq!((s(&v, &["ok"]), s(&v, &["events"])), (&Json::Bool(true), &Json::Num(1.0)), "{out}");
+    assert_eq!((s(&v, &["engine"]), s(&v, &["verified_by"])), (&Json::Str("probbit 0.11.0".into()), &Json::Str(THIS.into())), "{out}");
 }

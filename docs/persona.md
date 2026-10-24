@@ -1380,12 +1380,13 @@ continued over several runs is the strand of one run, byte for byte.
 **Verify.** `probbit live verify STRAND` reads nothing but the strand. It rebuilds the persona from the header's document (its
 digest must match), checks the initial state as any state is checked (section 5.1), rebuilds the header, replays every event on
 the fixed clock with its logged hours and compares, line by line, `prev`, `n`, the stance digest, the state digest and the bytes.
-It prints `{"ok":true,"events","persona","seed","engine","final_state","last_line"}` and exits 0, or prints
+It prints `{"ok":true,"events","persona","seed","engine","verified_by","final_state","last_line"}` and exits 0, or prints
 `{"ok":false,"line":n,"diverges":"..."}` for the earliest line that differs and exits 1: a changed input diverges at its own line
 (its stance or state no longer replays), a removed or reordered line at the next line's `prev`, a changed header at line 1. A copy
 with `\r\n` line endings (Windows text mode, an editor) verifies and can be continued: the hashes cover each line's text without
 its line ending, and a canonical JSON line never ends in `\r`. Verify replays with the binary that runs it; the header's `engine`
-names the version that wrote the strand (a development build writes its `-dev` version, so its strands are told from a release's).
+names the version that wrote the strand (a development build writes its `-dev` version, so its strands are told from a release's),
+and `verified_by` (since 0.12.1) the version that replayed it, so a strand begun before an upgrade verifies under the new engine.
 Measured (BENCHMARKS.md §8, Apple M4): a 10,000-event strand of the tutor is 3,055,367 bytes and verifies in 3.3 s, about 3,000
 events per second.
 

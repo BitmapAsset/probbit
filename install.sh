@@ -10,8 +10,9 @@
 #   PROBBIT_DOWNLOAD_BASE  the archive is fetched from $PROBBIT_DOWNLOAD_BASE/<tag>/probbit-<tag>-<target>.tar.gz
 #                       (default: https://github.com/BitmapAsset/probbit/releases/download); needs PROBBIT_VERSION
 #   PROBBIT_TARGET         Rust target triple to fetch instead of the detected one
-#   PROBBIT_MAN_DIR        where the manual page probbit.1 goes, when the archive has one (default: ~/.local/share/man/man1;
-#                       a failure there is reported and installs nothing less)
+#   PROBBIT_MAN_DIR        where the manual page probbit.1 goes, when the archive has one (default: <prefix>/share/man/man1
+#                       when PROBBIT_INSTALL_DIR is <prefix>/bin, else ~/.local/share/man/man1, and the installer says so
+#                       when that is outside PROBBIT_INSTALL_DIR; a failure there is reported and installs nothing less)
 # Needs curl or wget, tar, and one of sha256sum, shasum or openssl.
 set -eu
 
@@ -141,12 +142,21 @@ main() {
     cp "$tmp/$name/probbit" "$dir/.probbit.$$" && chmod 755 "$dir/.probbit.$$" && mv -f "$dir/.probbit.$$" "$dir/probbit" \
         || die "could not install into $dir"
     say "  installed  $dir/probbit ($ran)"
-    # the manual page (archives from 0.8.2 carry docs/probbit.1): never fatal, never outside PROBBIT_MAN_DIR or HOME
+    # the manual page (archives from 0.8.2 carry docs/probbit.1): never fatal, never outside PROBBIT_MAN_DIR, the install
+    # prefix or HOME; a PROBBIT_INSTALL_DIR of <prefix>/bin keeps it in <prefix>/share/man/man1
     if [ -f "$tmp/$name/docs/probbit.1" ]; then
         mandir="${PROBBIT_MAN_DIR:-}"
-        if [ -z "$mandir" ] && [ -n "${HOME:-}" ]; then mandir="$HOME/.local/share/man/man1"; fi
+        if [ -z "$mandir" ] && [ -n "${PROBBIT_INSTALL_DIR:-}" ]; then
+            case "$dir" in ?*/bin | ?*/bin/) mandir="${dir%/}"; mandir="${mandir%/bin}/share/man/man1" ;; esac
+        fi
+        where=""
+        if [ -z "$mandir" ] && [ -n "${HOME:-}" ]; then
+            mandir="$HOME/.local/share/man/man1"
+            # a PROBBIT_INSTALL_DIR that is not <prefix>/bin has no man directory of its own: say that the page left it
+            if [ -n "${PROBBIT_INSTALL_DIR:-}" ]; then where="; outside PROBBIT_INSTALL_DIR, PROBBIT_MAN_DIR to choose"; fi
+        fi
         if [ -n "$mandir" ] && mkdir -p "$mandir" 2> /dev/null && cp "$tmp/$name/docs/probbit.1" "$mandir/probbit.1" 2> /dev/null; then
-            say "  installed  $mandir/probbit.1 (man probbit)"
+            say "  installed  $mandir/probbit.1 (man probbit$where)"
         else
             say "  skipped    the manual page (set PROBBIT_MAN_DIR to a directory you can write; or: probbit man)"
         fi
