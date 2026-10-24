@@ -50,9 +50,11 @@ One binary of about 2 MB, zero third-party dependencies, nothing phones home. Al
   gpt-4o-mini, 97 user tasks and 629 attack cases, three paired arms. The stance block lowered targeted attack success
   from **0.289 to 0.227** (−6.2 points, 95 % CI [−8.7, −3.8], McNemar p = 1.8e-6) with no measured utility cost. The
   same words as a static prompt lower it almost as much but cost **10.3 points** of benign utility; the sense-gated
-  block did not. The engine's measured contribution on this suite is *when* the words reach the model, plus a replayable
-  strand for every stance, not the words. The baseline arm matches the suite's published row (utility 0.6804 = 0.6804).
-  Not tested: an if-statement doing the same gating without the engine; adaptive attacks that avoid the sense's markers.
+  block did not. A registered control run (E3) replaced the engine with a plain if-statement that inserts the same words
+  when the same regex fires: it matched the block on attack success (0.242 vs 0.227, difference CI [−3.7, +0.8] points)
+  and on both utilities. The gain on this suite is the gating, *when* the words reach the model; what the engine adds
+  beyond an if-statement here is a replayable strand for every stance. The baseline arm matches the suite's published
+  row (utility 0.6804 = 0.6804). Not tested: adaptive attacks that avoid the sense's markers.
 - **V2's residual explained** (BENCHMARKS.md §13): the tonic-off valence tracking of +0.1199 that failed 0.11.0's V2 is
   carried by the phasic term of the same need-valence block (phasic off as well: −0.267; everything off: 0.0000). The
   published V2 stays FAIL; the proposed 0.12 registration ablates the whole `needs.valence` block.
@@ -161,8 +163,8 @@ there are no external crates.
 
 At a terminal, `install.sh` ends with probbit's own hero screen. Platform notes and the installer tests: [PORTABILITY.md](PORTABILITY.md).
 
-`install.sh` also installs the manual page (`man probbit`) to `~/.local/share/man/man1/` (`PROBBIT_MAN_DIR` to choose; a
-failure there installs the binary all the same); every archive carries it as `docs/probbit.1`, and `probbit man` prints it.
+`install.sh` also installs the manual page (`man probbit`) to `~/.local/share/man/man1/`, or to `<prefix>/share/man/man1/` when
+`PROBBIT_INSTALL_DIR` is `<prefix>/bin` (`PROBBIT_MAN_DIR` to choose; a failure there installs the binary all the same); every archive carries it as `docs/probbit.1`, and `probbit man` prints it.
 Shell completions come from the binary itself:
 
 | shell | command |

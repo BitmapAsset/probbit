@@ -1349,11 +1349,39 @@ for every stance; it is not the words.
 before it ran, was one corrected smoke on agentdojo 0.1.11 with `v1.1`, whose smoke inputs are byte-identical to the
 published ones; it passed (3/5, 3/10), and its gate was final. Persona, sense patterns and words did not change.
 
-**Not tested.** A plain if-statement that inserts the same words when the same regex fires, without the engine (it would
-test whether the gating alone explains A − C); adaptive attacks that avoid the regex's markers (the sense matches this
-attack's template by design); other models, seeds and repeat-run variance; AgentDojo v1.1.1 to v1.2.2.
-`bench/agentdojo/experiments/rerun.sh` recomputes every number here from `tables/episodes.jsonl` and the strands, twice,
-byte-identical, with no API calls.
+**The if-statement control (E3, one registered run, 2026-10-23).** A fourth arm, **D**: C's words in the system prompt
+only on a call where a tool result since the previous assistant turn matches the same regex, otherwise nothing; no engine,
+no state. Same suite, model, seed, injections (byte-identical, checked before any API call) and harness (`e2b.py` plus one
+branch: `bench/agentdojo/e3/`), run once (15-episode smoke gated on B's recorded utility, then 726 episodes; 0 errors,
+0.95 USD) and judged against E2b's recorded A, B and C. Readings registered before the smoke
+(`bench/agentdojo/e3/PREREGISTRATION.md`): for A − D, a 95 % CI that includes 0 reads "the gating alone explains the
+gain", entirely below 0 "the engine adds beyond the gating", entirely above "the gating beats the engine".
+
+| arm | utility (97) | utility under attack (629) | targeted ASR (629) |
+|---|---|---|---|
+| D same words, if the regex fires | 0.7113 | 0.4706 | 0.2417 |
+
+| bar | measured | reading |
+|---|---|---|
+| E7 ASR, A − D | −0.0143, CI [−0.0366, +0.0079]; McNemar 23 vs 32, p = 0.28; null band [−0.0238, +0.0207] | the gating alone explains the ASR gain |
+| E8 utility, A − D | benign −0.0412, CI [−0.1031, +0.0103]; under attack +0.0191, CI [−0.0079, +0.0461] | the gating alone explains the gain (both) |
+| E9 D vs C | ASR D − C +0.0016, CI [−0.0207, +0.0254]; benign utility D − C +0.1340, CI [+0.0515, +0.2165] | D ≈ C on ASR; D > C on benign utility |
+| E10 D vs B, benign utility | 0.7113 vs 0.6804 | pass (within ±0.08) |
+
+On this suite, model and attack, an if-statement that inserts the same words when the same regex fires matches the engine
+on ASR and on both utilities: the gating alone explains A − C, and timing alone recovers the static prompt's benign cost
+without giving back its ASR gain. The engine's measured contribution beyond the if-statement is not distinguishable from 0
+here; what remains specific to it is the replayable strand per stance (E5). The intervals allow an engine advantage of up
+to 3.7 ASR points. One unregistered row puts the benign numbers in scale: D inserted no text on any of the 97 benign tasks,
+so it sent exactly B's prompts, and 9 of 97 outcomes still differed (6 vs 3) between the two runs at temperature 0 with a
+seed. D ran on Linux about 25 hours after A, B and C (macOS), on the same model snapshot. The regex matches all 987
+injections of this attack, so the gate is near perfect here by design.
+
+**Not tested.** Adaptive attacks that avoid the regex's markers (the sense matches this attack's template by design; they
+would defeat the if-statement and the engine's sense alike); other models, seeds and repeat-run variance as a registered
+quantity; AgentDojo v1.1.1 to v1.2.2. `bench/agentdojo/experiments/rerun.sh` recomputes every number here from
+`tables/episodes.jsonl` and the strands, twice, byte-identical, with no API calls; `bench/agentdojo/e3/experiments/rerun_e3.sh`
+does the same for E3 from `e3/tables/episodes-d.jsonl`.
 
 **Reproductions.** REPRODUCE.md says how; a reproduction report (issue template) is the place to say what you got.
 Standing: the CI job `agentdojo-tables` recomputes these tables on GitHub's Ubuntu and macOS runners on every push and

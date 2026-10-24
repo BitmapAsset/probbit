@@ -78,3 +78,55 @@ Newer suite versions (v1.1.1 to v1.2.2) fix task checkers and add injection task
 
 Not in the repository: the full message traces (rerun to regenerate) and the injection texts (agentdojo computes them;
 the harness logs their sha256: full run `9776214c1009e6a6afd37894189b6fdf777548b3f36ba427c185b927557521df`).
+
+## E3: the if-statement control (one registered run, 2026-10-23)
+
+A fourth arm, run once after E2b and judged against E2b's recorded arms A, B and C:
+
+- **D**: arm C's words (`host/static_c.txt`) in the system prompt only on a model call where a tool result since the
+  previous assistant turn matches the same frozen regex (`host/sense.py`); otherwise the suite's default prompt. No engine,
+  no persona, no state, no strand. It tests whether the gating alone explains A − C.
+
+Everything else is E2b's: the harness `e3/experiments/e3.py` is `experiments/e2b.py` with one branch added to
+`_system_text`, the arm letter, two per-episode counts (`gate_checks`, `gated_calls`), its own output files, the budget
+guard of this run, and a check that the injections it computes are byte-identical to E2b's before any API call. Bars,
+readings and the record: [e3/PREREGISTRATION.md](e3/PREREGISTRATION.md); results: [BENCHMARKS.md §14](../../BENCHMARKS.md).
+
+### Recompute the E3 tables (no API calls, a few seconds)
+
+```bash
+cd bench/agentdojo/e3
+python3 -m venv venv && venv/bin/pip install numpy==1.26.4
+experiments/rerun_e3.sh venv/bin/python
+```
+
+`rerun_e3.sh` runs `experiments/judge_e3.py` twice over `tables/episodes-d.jsonl` and E2b's `../tables/episodes.jsonl`
+and prints `identical` with the sha256 of each output (`results-e3.tsv`, `bars-e3.tsv`); `git status --short tables` stays
+empty. The judge imports E2b's statistics (`boot_ci`, `mcnemar_exact`, `perm_null`) from `../experiments/judge.py`.
+
+### Rerun arm D (API calls, about 1 USD, about 12 min)
+
+```bash
+cd bench/agentdojo/e3
+mkdir -p run/experiments run/inputs run/tables && cp experiments/e3.py run/experiments/ && cp -r ../host run/
+cd run
+python3 -m venv venv && venv/bin/pip install -r ../../tables/pip-freeze.txt
+export OPENROUTER_API_KEY=...              # read from the environment only; never written to a file
+export E2B_TRACES=$PWD/out/traces
+# e3.py stops unless its injections equal inputs/injections-<mode>.json. The run used E2b's files; without them, let e3.py
+# write its own (it stops before any API call), check the sha256 against the published ones, then use them:
+for m in smoke full; do venv/bin/python experiments/e3.py $m 2>/dev/null; shasum -a 256 tables/injections-d-$m.json; cp tables/injections-d-$m.json inputs/injections-$m.json; done
+#   smoke 6ac06409f3314d2e48ec6ba2b8e674a26b2ef254142453719e6b82cc37d0ec7e   full 9776214c1009e6a6afd37894189b6fdf777548b3f36ba427c185b927557521df
+venv/bin/python -u experiments/e3.py smoke   # 15 episodes: E2b's smoke subset, arm D
+venv/bin/python -u experiments/e3.py full    # 726 episodes: arm D x (97 + 629)
+```
+
+The run writes `run/tables/episodes-d.jsonl`; copy it over `tables/episodes-d.jsonl` and rerun the judge to compare.
+
+| file | what |
+|---|---|
+| `e3/experiments/e3.py` | the harness as run (sha256 in `e3/tables/versions-e3.txt`) |
+| `e3/experiments/judge_e3.py`, `e3/experiments/rerun_e3.sh` | the E3 tables and the double rerun |
+| `e3/tables/episodes-d.jsonl`, `e3/tables/episodes-d-smoke.jsonl` | the 726 episodes of the full run; the 15 of the smoke |
+| `e3/tables/bars-e3.tsv`, `e3/tables/results-e3.tsv` | the judge's output |
+| `e3/tables/spend.tsv`, `e3/tables/versions-e3.txt`, `e3/tables/pip-freeze-e3.txt`, `e3/tables/pip-freeze-diff.txt` | spend, versions, the environment and its diff against E2b's |

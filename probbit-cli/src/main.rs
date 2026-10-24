@@ -437,7 +437,7 @@ pub(crate) static COMMANDS: &[Command] = &[
         run: completions_cmd },
     Command { name: "man", aliases: &[], group: "other", summary: "the manual page (roff), generated from this table: probbit man | man -l -",
         usage: &["man"],
-        about: "Print the manual page in roff (man(7) macros): NAME, SYNOPSIS, DESCRIPTION, COMMANDS (every command, subcommand and flag of this help), EXIT STATUS, ENVIRONMENT, EXAMPLES, SEE ALSO. The release archives carry it as docs/probbit.1 and install.sh installs it to ~/.local/share/man/man1/.",
+        about: "Print the manual page in roff (man(7) macros): NAME, SYNOPSIS, DESCRIPTION, COMMANDS (every command, subcommand and flag of this help), EXIT STATUS, ENVIRONMENT, EXAMPLES, SEE ALSO. The release archives carry it as docs/probbit.1 and install.sh installs it to ~/.local/share/man/man1/, or to <prefix>/share/man/man1/ when PROBBIT_INSTALL_DIR is <prefix>/bin.",
         before: &[], flags: &[], subs: &[], list_subs: false, shared: false, after: &[],
         examples: &["probbit man | man -l -", "probbit man > ~/.local/share/man/man1/probbit.1"],
         run: man_cmd },
