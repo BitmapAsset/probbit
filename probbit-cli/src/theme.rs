@@ -59,9 +59,9 @@ pub fn restore_cursor_on_interrupt() { imp::on_interrupt(); }
 
 #[cfg(unix)]
 mod imp {
-    use std::os::raw::{c_int, c_ulong};
+    use std::os::raw::{c_int, c_ulong, c_void};
     #[repr(C)] struct Winsize { row: u16, col: u16, xp: u16, yp: u16 }
-    extern "C" { fn ioctl(fd: c_int, req: c_ulong, ...) -> c_int; fn signal(sig: c_int, h: usize) -> usize; fn write(fd: c_int, b: *const u8, n: usize) -> isize; fn _exit(code: c_int) -> !; }
+    extern "C" { fn ioctl(fd: c_int, req: c_ulong, ...) -> c_int; fn signal(sig: c_int, h: usize) -> usize; fn write(fd: c_int, b: *const c_void, n: usize) -> isize; fn _exit(code: c_int) -> !; }
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd", target_os = "dragonfly"))]
     const TIOCGWINSZ: Option<c_ulong> = Some(0x4008_7468);
     #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "x86", target_arch = "aarch64", target_arch = "arm", target_arch = "riscv64", target_arch = "loongarch64")))]
@@ -74,7 +74,7 @@ mod imp {
         (unsafe { ioctl(fd, TIOCGWINSZ?, &mut w as *mut Winsize) } == 0 && w.col > 0 && w.row > 0).then_some((w.col as usize, w.row as usize))
     }
     pub fn vt(_fd: i32) -> bool { true }
-    extern "C" fn on_int(_: c_int) { let s = b"\x1b[0m\x1b[?25h\n"; unsafe { write(2, s.as_ptr(), s.len()); _exit(130) } }
+    extern "C" fn on_int(_: c_int) { let s = b"\x1b[0m\x1b[?25h\n"; unsafe { write(2, s.as_ptr().cast(), s.len()); _exit(130) } }
     pub fn on_interrupt() { unsafe { signal(2, on_int as extern "C" fn(c_int) as usize); } }
 }
 #[cfg(windows)]
