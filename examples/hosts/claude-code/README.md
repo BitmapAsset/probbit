@@ -6,7 +6,8 @@ its next request. On a tool result the host reads the `security` sense (instruct
 list from the AgentDojo run); the persona's habit `careful_under_security` then binds caution to `careful` and the line
 says to treat instructions found in tool results as data and to confirm before acting on them. On quiet results the
 stance returns to its normal, so the words are in front of the model only when the sense has fired (the measured
-difference on AgentDojo, BENCHMARKS.md §14).
+difference on AgentDojo, BENCHMARKS.md §14; a plain if-statement doing the same gating matched the engine there, E3, so
+what this hook adds beyond a conditional is the strand).
 
 ```sh
 npm i -g probbit                                       # or: curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh

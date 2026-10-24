@@ -14,7 +14,8 @@ The pattern, in three lines: one individual per conversation (or per episode); o
 on the fixed clock, carrying the host's sense readings (here: `security`, instruction markers in tool results); the
 stance block goes into the system prompt and the strand keeps the receipt. Measured on AgentDojo (BENCHMARKS.md §14):
 the same words as a static prompt cost 10.3 points of benign utility; put in front of the model only when the sense had
-fired, they cost none.
+fired, they cost none. A plain if-statement doing the same gating matched the engine on every metric (E3); the engine's
+part beyond that is the receipt (the strand) and the bounded state.
 
 Command line: `python3 python/probbit_host.py receipts STRAND [--json]` renders a strand's receipts.
 """
