@@ -1,0 +1,9 @@
+agentdojo 0.1.11 (pip install -r of E2b's tables/pip-freeze.txt; pip-freeze-diff.txt: 9 name spellings + greenlet==3.5.6)
+agentdojo_benchmark_version v1.1
+openai_python 1.36.0
+python Python 3.12.3 (E2b: 3.12.12)
+host Ubuntu 24.04 x86_64, 16 vCPU (E2b ran on macOS arm64)
+model openrouter:openai/gpt-4o-mini (2024-07-18 snapshot), provider OpenAI, temperature 0, seed 20261022
+arm D: host/sense.py sha256 cf94703a83bcdedad7d23deed9bfdd6374559d35df3ecad9cf90f1f62eb88e55, host/static_c.txt sha256 2fc36e8ae3eb19dbb25c8be25062302052fce45b498a363948c147d9c9df5339 (both = E2b's)
+harness experiments/e3.py sha256 344b5f166054179897af205e03baa6dae32fa17e0a7a65f48fdc05c97091fb94
+injections smoke sha256 6ac06409f3314d2e48ec6ba2b8e674a26b2ef254142453719e6b82cc37d0ec7e, full sha256 9776214c1009e6a6afd37894189b6fdf777548b3f36ba427c185b927557521df (both = E2b's)
