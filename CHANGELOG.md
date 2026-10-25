@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `CITATION.cff` at the repository root (GitHub's "Cite this repository" box and Zenodo read it).
 - Documentation, from a dress rehearsal of the published v0.12.1 artifacts (every install and reproduction command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): the glyph material in `plugins/openclaw/README.md`, docs/persona.md
   §2.18 and the cheat sheet is marked unreleased (probbit 0.12.1 refuses a persona with `display`, and the npm plugin 0.1.0
