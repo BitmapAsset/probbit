@@ -100,6 +100,8 @@ async function cdp(url) {
       else request.resolve(message.result);
     } else if (message.method === 'Runtime.exceptionThrown') {
       failures.push(message.params);
+    } else if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
+      failures.push({console: message.params.args?.map(a => a.value ?? a.description)});
     }
   };
   ws.onclose = () => {
@@ -239,6 +241,11 @@ try {
   assert.equal((await state()).channelValue,doc3.drives.want.learn.toFixed(2));
   assert.ok(await value(`document.getElementById('channel-facts').textContent.includes('0 to 3')`));
   assert.equal(await value(`getComputedStyle(document.querySelector('.spark')).transitionDuration`),'0s');
+  // The face header without a glyph: no glyph slot, no "undefined", one meter for the persona's one mood.
+  const bareFace=await value(`({glyph:document.getElementById('glyph').hidden,text:document.getElementById('face').textContent,meters:[...document.querySelectorAll('#meters .meter')].map(m=>m.dataset.mood),toggle:document.getElementById('why-toggle').textContent,settle:document.getElementById('settle').hidden})`);
+  assert.equal(bareFace.glyph,true,'No glyph slot without a glyph');assert.ok(!/undefined|null|NaN/.test(bareFace.text),bareFace.text);
+  assert.deepEqual(bareFace.meters,['valence']);assert.equal(bareFace.toggle,'Why this stance');assert.equal(bareFace.settle,true,'No trajectory, no settle strip');
+  report.face={noGlyph:true};
   await shot('activity-desktop-light',1280,820);
   assert.ok((await state()).height<=820,'Useful desktop should fit one viewport');
   await value(`document.getElementById('theme').value='dark'; document.getElementById('theme').dispatchEvent(new Event('change'))`);
@@ -255,6 +262,40 @@ try {
   report.demo.restarted=await state();
   assert.ok(['event 0','event 1'].includes(report.demo.restarted.event));
   if(report.demo.restarted.event==='event 0')assert.equal(report.demo.restarted.workspaceHidden,true);
+
+  // The face: the engine's glyph, its rule in words, the two meters the display block names, the why-panel, the settle strip.
+  const facePersona=path.join(out,'face-fixture.yaml'),faceStrand=path.join(out,'face.strand');
+  writeFileSync(facePersona,readFileSync(path.join(repo,'plugins/openclaw/personas/assistant.yaml'),'utf8').replace(/\r\n/g,'\n')
+    .replace('engine:\n  on_conflict: yield\n','expectation: {}\n\nengine:\n  on_conflict: yield\n  trajectory: {k: 6, beta0: 0.4}\n'));
+  const faceEvents=['{"praise":true,"elapsed_hours":1}','{"correction":true,"elapsed_hours":0.5}','{"security":true,"time_pressure":0.8}','{"launch":true,"praise":true,"elapsed_hours":2}','{"failure":true,"owner_upset":true}'];
+  const faceOut=command(['live',facePersona,'--seed','2','--clock','fixed','--strand',faceStrand],faceEvents.join('\n')+'\n').trim().split('\n').map(JSON.parse);
+  const faceLines=readFileSync(faceStrand,'utf8').match(/.*\n/g);writeFileSync(faceStrand,faceLines.slice(0,5).join(''));
+  const faceServer=await server([faceStrand],'face');await viewport(1280,820);await navigate(faceServer.url);await event(4);
+  const faceState=()=>value(`({glyph:document.getElementById('glyph').textContent,glyphHidden:document.getElementById('glyph').hidden,label:document.getElementById('glyph').getAttribute('aria-label'),
+    meters:[...document.querySelectorAll('#meters .meter')].map(m=>[m.dataset.mood,m.querySelector('.l').textContent,m.querySelectorAll('.segs i').length]),
+    panelHidden:document.getElementById('why-panel').hidden,expanded:document.getElementById('why-toggle').getAttribute('aria-expanded'),panel:document.getElementById('why-panel').textContent,
+    settleHidden:document.getElementById('settle').hidden,beta:document.getElementById('settle-beta').textContent,rows:document.querySelectorAll('#settle-grid .settle-row').length,face:document.getElementById('face').textContent})`);
+  let fs=await faceState();
+  assert.equal(fs.glyph,faceOut[3].glyph);assert.equal(fs.glyphHidden,false);assert.ok(fs.label.includes(faceOut[3].glyph_why),'The glyph is labelled with its rule: '+fs.label);
+  assert.deepEqual(fs.meters.map(m=>m[0]),['valence','pressure']);assert.deepEqual(fs.meters.map(m=>m[1]),[faceOut[3].mood.valence.level,faceOut[3].mood.pressure.level]);assert.ok(fs.meters.every(m=>m[2]===3));
+  assert.ok(!/undefined|null|NaN/.test(fs.face),fs.face);
+  assert.equal(fs.settleHidden,false);assert.equal(fs.beta,'settled · β 1.00','Reduced motion: the settled step at once');assert.equal(fs.rows,8);
+  assert.equal(await value(`getComputedStyle(document.getElementById('glyph')).transitionDuration`),'0s');
+  assert.equal(fs.panelHidden,true,'The why-panel is closed by default');assert.equal(fs.expanded,'false');
+  await click('#why-toggle');fs=await faceState();
+  assert.equal(fs.panelHidden,false);assert.equal(fs.expanded,'true');assert.ok(fs.panel.includes(faceOut[3].glyph_why),fs.panel);assert.ok(fs.panel.includes(faceOut[3].line));
+  assert.ok(fs.panel.includes('launch')&&fs.panel.includes('praise'),'The inputs the event carried: '+fs.panel);
+  assert.ok(fs.panel.includes('registers '+(faceOut[3].deviation.registers?'yes':'no')),'The surprise reading: '+fs.panel);
+  await shot('face-why-open',1280,820);
+  await navigate(faceServer.url+'?again');await event(4);assert.equal((await faceState()).panelHidden,false,'The panel remembers it was open');
+  appendFileSync(faceStrand,faceLines[5]);await event(5);fs=await faceState();
+  assert.equal(fs.glyph,faceOut[4].glyph);assert.ok(fs.label.includes(faceOut[4].glyph_why));assert.ok(fs.panel.includes(faceOut[4].glyph_why));
+  await click('#why-toggle');assert.equal((await faceState()).panelHidden,true);
+  await navigate(faceServer.url+'?closed');await event(5);assert.equal((await faceState()).panelHidden,true,'Closed is remembered too');
+  await click('[data-event="2"]');fs=await faceState();
+  assert.equal(fs.glyph,faceOut[1].glyph,'A stored document shows its own glyph');assert.equal(fs.settleHidden,true,'The trajectory belongs to the latest received event only');
+  await click('#follow');await event(5);
+  report.face={...report.face,glyph:true,meters:true,whyPanel:true,settle:true,remembered:true};
 
   // Author a different persona: no assumptions about the tutor, a preset character, or fixed mood/trait names.
   const persona=path.join(out,'instrument-fixture.json');

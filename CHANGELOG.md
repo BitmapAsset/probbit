@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `probbit monitor` page: a face header (docs/persona.md §5.8). The top bar shows the stance's glyph large, labelled with
+  `glyph_why`, the persona's name, version, seed, event number and receiver age, and two mood meters (the moods
+  `display.glyphs` names, else the first two) with every level's odds as proportional segments and the existing sparkline. A
+  changed mood level highlights its meter for 0.6 s (still under `prefers-reduced-motion`). **Why this glyph** opens a panel
+  (closed by default, remembered in `localStorage`) with `glyph_why`, the inputs the event carried, the habits in force (bound
+  and glyph-giving marked), the surprise reading and the stance line. With `engine.trajectory` a settle strip steps through
+  the event's exact trajectory (trait odds, hottest inverse temperature to beta = 1, at most 600 ms). Frames gain `settle`
+  (the trajectory by level name) and `meta.face`; the terminal gains a GLYPH row with `glyph_why` under the header. A strand
+  without a glyph draws the header without the glyph slot. Browser check: face assertions and console errors fail the run.
+
 - Documentation, from a dress rehearsal of the published v0.12.1 artifacts (every install and reproduction command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): the glyph material in `plugins/openclaw/README.md`, docs/persona.md
   §2.18 and the cheat sheet is marked unreleased (probbit 0.12.1 refuses a persona with `display`, and the npm plugin 0.1.0
