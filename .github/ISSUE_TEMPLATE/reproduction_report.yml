@@ -50,7 +50,7 @@ body:
     id: output
     attributes:
       label: What it printed
-      description: The lines of rerun.sh (identical/DIFFERS and the sha256s), the verify answer, or the full-run numbers (ASR and utility per arm with the episode counts).
+      description: The lines of rerun.sh (MATCH/DIFFERS and the sha256s), the verify answer, or the full-run numbers (ASR and utility per arm with the episode counts).
       render: text
     validations:
       required: true

@@ -38,13 +38,16 @@ PROBBIT=$(command -v probbit) experiments/rerun.sh venv011/bin/python
 
 Use a Python that has a numpy 1.26.4 wheel: 3.9 to 3.12 (CI uses 3.12; `python3.12 -m venv venv011` if your `python3` is
 newer). On 3.13 or later pip compiles numpy from source; a source-built numpy moved the bootstrap columns of three rows of
-`bars.tsv` in the fourth decimal on one machine (every verdict the same), so its sha256 no longer matched. GNU tar (Linux)
-prints `Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'` for the archive, which was
-packed on macOS; the warning is harmless and the strands extract.
+`bars.tsv` in the fourth decimal on one machine (every verdict the same), so its sha256 no longer matched. `rerun.sh`
+refuses a Python outside 3.9 to 3.12 with a one-line message; `PYTHON=<python> experiments/rerun.sh` runs another
+interpreter anyway, with a warning. The archive is packed without macOS extended attributes, so GNU tar extracts it
+without warnings; its 726 strands are byte for byte the ones of the run.
 
-`rerun.sh` runs the judge twice and prints `identical` with a sha256 for each output (`stdout.txt` is the bars table as
-printed, so its sha256 is the one of `bars.tsv`). `identical` compares the two passes with each other; the comparison with
-the committed files is the table below, or `git status --short tables`. The committed files:
+`rerun.sh` runs the judge twice and prints `two passes identical` with a sha256 for each output (`stdout.txt` is the bars
+table as printed, so its sha256 is the one of `bars.tsv`); that line compares the two passes with each other. It then
+compares each table with the committed file (git `HEAD`; outside a git checkout, the file as it was on disk before the
+run) and prints `MATCH <file> <sha256>` or `DIFFERS <file> <sha256> (committed <sha256>)`, and exits non-zero if any table
+differs. The committed files:
 
 | file | sha256 |
 |---|---|
@@ -62,6 +65,8 @@ The E3 control (the if-statement arm of BENCHMARKS.md §14) recomputes the same 
 ```sh
 cd e3 && experiments/rerun_e3.sh ../venv011/bin/python      # from bench/agentdojo
 ```
+
+`rerun_e3.sh` prints the same `MATCH` or `DIFFERS` line per table and has the same Python guard.
 
 | file | sha256 |
 |---|---|
@@ -87,7 +92,9 @@ python3 -m venv venv && venv/bin/pip install numpy==2.0.2
 PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
 ```
 
-numpy 2.0.2 has wheels for Python 3.9 to 3.12; on a newer `python3` use `python3.12 -m venv venv`.
+numpy 2.0.2 has wheels for Python 3.9 to 3.12; on a newer `python3` use `python3.12 -m venv venv`. Each `rerun.sh` refuses
+another Python unless `PYTHON=<python>` is set (then it warns), and prints `MATCH` or `DIFFERS` per table against the
+kit's `tables/original.sha256`.
 
 Measured on a 16-vCPU Ubuntu VM with probbit 0.12.1: the v-run 28 minutes, I3-sim 52 minutes, the residual run 35
 minutes (two passes each, plus the strand verification). The sha256s are in each kit's README;

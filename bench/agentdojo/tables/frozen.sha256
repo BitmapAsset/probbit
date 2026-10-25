@@ -3,7 +3,8 @@ cf94703a83bcdedad7d23deed9bfdd6374559d35df3ecad9cf90f1f62eb88e55  host/sense.py
 2fc36e8ae3eb19dbb25c8be25062302052fce45b498a363948c147d9c9df5339  host/static_c.txt
 8c4a3211775fc4d6bdd57b958657239951e57cabe95d243da09f32260775c83b  experiments/e2b.py (this copy: the run's file with the traces path and the probbit path as env vars, one docstring reworded)
 713011c8620dab519ed13a66bc4a8e173754bc0a2a8dfcd5ea6fccfb87d14a24  experiments/judge.py
-fbdd1fc177a2de566d45b90645bdf44e5b8e2020c7e8b31d8a90a38e7a390721  experiments/rerun.sh
+80bf6088aaa515df92cf8a737006f68b5855039353278919b5b63d22ab31a7e2  experiments/rerun.sh (this copy: the frozen file plus the comparison with the committed tables and the Python guard)
 eabd1db6037ee4b6a8adc0ffc5c08380b0f388002f3f3115b9707702e2fffecf  probbit 0.11.0 (macOS arm64 release binary the run used)
 c0b830bddac9c6e344c2f2feffd20c1a54aeceadbd42f465d901d34b3d020378  experiments/e2b.py as run in smoke 1 (on agentdojo 0.1.35)
 2ab596d5382b45b48c8caa18a6123b4818424e6b9822d53953d2272d5010ca9a  experiments/e2b.py as run in smoke 2 and the full run
+fbdd1fc177a2de566d45b90645bdf44e5b8e2020c7e8b31d8a90a38e7a390721  experiments/rerun.sh as frozen before the run and as run

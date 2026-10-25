@@ -112,7 +112,8 @@ jobs:
   agentdojo-tables:
     # The AgentDojo numbers (BENCHMARKS.md §14) recomputed on a machine that is not the author's: experiments/rerun.sh runs
     # the judge twice over the logged episodes and the 726 arm-A strands (verified by the probbit built from this commit), and
-    # the committed tables must come out byte-identical. No API calls. REPRODUCE.md names this job as the standing reproduction.
+    # the committed tables must come out byte-identical (each script prints MATCH or DIFFERS per table and exits non-zero on
+    # DIFFERS; E3's rerun as well). No API calls. REPRODUCE.md names this job as the standing reproduction.
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -134,7 +135,8 @@ jobs:
           python -m pip install --quiet numpy==1.26.4
           tar xzf tables/strands-A.tar.gz
           PROBBIT="$GITHUB_WORKSPACE/target/release/probbit" experiments/rerun.sh python
-          git diff --exit-code -- tables/results.tsv tables/bars.tsv tables/strands-verify.tsv
+          (cd e3 && experiments/rerun_e3.sh python)
+          git diff --exit-code -- tables/results.tsv tables/bars.tsv tables/strands-verify.tsv e3/tables/results-e3.tsv e3/tables/bars-e3.tsv
           shasum -a 256 tables/results.tsv tables/bars.tsv tables/strands-verify.tsv
   wasm:
     timeout-minutes: 15
