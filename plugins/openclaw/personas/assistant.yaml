@@ -171,3 +171,15 @@ learning:
 
 engine:
   on_conflict: yield
+
+# The glyph (docs/persona.md §2.18): one emoji per stance, computed by the engine from the stance document and logged on the
+# strand, so `probbit live verify` recomputes it. Outside the persona digest: it moves nothing.
+display:
+  glyphs:
+    moods: {valence: [down, even, up], pressure: [calm, steady, keyed]}
+    table:
+      down: ["😔", "😕", "😣"]
+      even: ["😌", "🙂", "😬"]
+      up: ["😊", "😄", "🤩"]
+    surprise: {glyph: "👀", z_at_least: 2.0}
+    habits: {security_careful: "🔒"}

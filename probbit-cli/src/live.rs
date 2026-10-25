@@ -91,6 +91,8 @@ impl Live {
         let (mut stance, ns) = persona::turn(&self.p, &self.st, &inputs, false, eng, false)?;
         let sd = persona::stance_sha(&stance);
         if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, persona::Deviation::to_json))); } }
+        // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
+        persona::set_glyph(&self.p, &mut stance);
         // RFC 0002 part 2: a rest line due before this event is its own line, chained before the event line (the turn applied it)
         let (rest, prev) = match persona::rest_line(&self.p, &self.st, &inputs) {
             Some((r, rs)) => { let l = rest_line(&self.prev, r, &rs.digest); let d = persona::digest_of(&l); (Some(l), d) }
@@ -98,6 +100,7 @@ impl Live {
         let mut lj = vec![("n".into(), Json::Num((self.n + 1) as f64)), ("inputs".into(), inputs.clone()), ("stance".into(), Json::Str(sd)),
             ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), Json::Str(prev))];
         if let Some(d) = &dev { lj.push(("deviation".into(), d.receipt())); }
+        if let Some(g) = stance.get("glyph") { lj.push(("glyph".into(), g.clone())); }
         let line = persona::canon(&Json::Obj(lj));
         if let Some(m) = self.expect.as_mut() { persona::expect_step(&self.p, m, &inputs, dev.as_ref().and_then(persona::Deviation::logged_pred)); }
         self.traj = traj;
@@ -149,7 +152,7 @@ const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state
 /// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "nap": ...}`
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
-    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
+    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
         Kind::Checkpoint => &["checkpoint", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
@@ -228,7 +231,8 @@ impl Replay {
         if !j.as_obj().is_some_and(|kv| kv.len() == 4 && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()))) {
             return Err((at, "checkpoint fields must be checkpoint, prev, stance and state".into()));
         }
-        if !b.as_obj().is_some_and(|kv| kv.len() == 5 && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state"].contains(&k.as_str()))) {
+        // §2.18: an event line of a persona with glyphs also carries `glyph`
+        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + usize::from(kv.iter().any(|(k, _)| k == "glyph")) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph"].contains(&k.as_str()))) {
             return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
         }
         if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
@@ -292,6 +296,8 @@ impl Replay {
         if j.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
         // RFC 0009: the logged deviation is recomputed (an edited receipt diverges here)
         if json::parse(&line).ok().and_then(|x| x.get("deviation").cloned()) != j.get("deviation").cloned() { return Err((i, "the deviation differs".into())); }
+        // §2.18: the logged glyph is recomputed from the replayed stance (an edited glyph diverges here)
+        if stance.get("glyph") != j.get("glyph") { return Err((i, "the glyph differs".into())); }
         if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
         if line != l { return Err((i, "the line differs".into())); }
         self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true; self.norms.track(&self.live.p, &self.live.st);
@@ -933,6 +939,150 @@ mod tests {
         for e in &evs { let d = persona::deviation(&pn, &st, e, &mem, &run).unwrap();
             for (_, x, y) in &d.terms { assert!(*x <= if d.member { d.input } else { y + d.input } + 1e-9, "{d:?}"); }
             persona::expect_step(&pn, &mut mem, e, d.logged_pred()); st = persona::turn(&pn, &st, e, false, &run, false).unwrap().1; }
+    }
+
+    /// §2.18: a persona with two moods and a habit that binds on a loss
+    const GDOC: &str = r#"{"probbit_persona":1,"identity":{"name":"G","version":"1","seed":5},
+        "traits":[{"id":"humour","levels":["none","light","playful"],"logw":[0,1.0,0.8]},{"id":"caution","levels":["bold","measured","careful"],"logw":[0.3,0.4,0]}],
+        "moods":[{"id":"valence","levels":["down","even","up"],"inertia":0.5,"half_life_hours":6},{"id":"pressure","levels":["calm","steady","keyed"],"inertia":0.5,"half_life_hours":3}],
+        "couplings":[{"vars":["pressure","caution"],"align":0.8}],
+        "inputs":[{"id":"praise","kind":"flag","effects":{"valence":1.5}},{"id":"loss","kind":"flag","effects":{"valence":-1.5,"pressure":1.2}},{"id":"rush","kind":"flag","effects":{"pressure":1.5}}],
+        "habits":[{"id":"no_jokes_on_loss","when":{"loss":true},"then":{"humour":["none"]}}]}"#;
+    const GLYPHS: &str = r#"{"glyphs":{"moods":{"valence":["down","even","up"],"pressure":["calm","steady","keyed"]},
+        "table":{"down":["😔","😕","😣"],"even":["😌","🙂","😬"],"up":["😊","😄","🤩"]},"surprise":{"glyph":"👀","z_at_least":2.0},"habits":{"no_jokes_on_loss":"🛟"}}}"#;
+    fn with_display(doc: &Json, extra: &[(&str, &str)]) -> Json {
+        let mut d = doc.clone(); if let Json::Obj(v) = &mut d { for (k, x) in extra { v.push((k.to_string(), json::parse(x).unwrap())); } } d
+    }
+    fn gev(t: usize) -> Json {
+        let (praise, loss, rush) = (t % 3 == 1, t % 7 == 5, t % 4 == 2);
+        json::parse(&format!(r#"{{"praise":{praise},"loss":{loss},"rush":{rush},"elapsed_hours":{}}}"#, if t % 9 == 8 { "7.5" } else { "0.2" })).unwrap()
+    }
+    fn glife(p: &Persona, d: &Json, evs: &[Json]) -> (String, Vec<Json>) {
+        let (mut live, header) = Live::start(p.clone(), d, persona::init(p, Some(1), true, &run), Clock::Fixed, "probbit test");
+        let (mut text, mut docs) = (format!("{header}\n"), vec![]);
+        for e in evs { let (s, l) = live.event(e, &run).unwrap(); text += &l; text.push('\n'); docs.push(s); }
+        (text, docs)
+    }
+
+    /// §2.18 (effects {}): `display.glyphs` stays out of the digest and moves nothing: every stance and state digest of the life
+    /// is the one without it and each document is the one without it plus `glyph` and `glyph_why`. The glyph follows the rule
+    /// order, the strand line logs it, `verify` recomputes it (an edited glyph diverges as "the glyph differs"), a checkpoint
+    /// strand verifies from the checkpoint and `resume` continues the same bytes
+    #[test]
+    fn glyphs_are_receipts_and_move_nothing() {
+        let off = json::parse(GDOC).unwrap(); let on = with_display(&off, &[("display", GLYPHS)]);
+        let (po, pn) = (persona::build(&off).unwrap(), persona::build(&on).unwrap()); assert_eq!(po.digest, pn.digest, "display stays out of the digest");
+        let evs: Vec<Json> = (0..40).map(gev).collect();
+        let ((t0, d0), (t1, d1)) = (glife(&po, &off, &evs), glife(&pn, &on, &evs));
+        for (a, b) in t0.lines().skip(1).zip(t1.lines().skip(1)) { let (a, b) = (json::parse(a).unwrap(), json::parse(b).unwrap());
+            assert_eq!((a.get("stance"), a.get("state")), (b.get("stance"), b.get("state"))); assert!(a.get("glyph").is_none() && b.get("glyph").is_some()); }
+        let (mut habit, mut cells) = (0, std::collections::BTreeSet::new());
+        for (s0, s1) in d0.iter().zip(&d1) {
+            assert!(s0.get("glyph").is_none());
+            let Json::Obj(v) = s1 else { panic!() }; let bare = Json::Obj(v.iter().filter(|(k, _)| k != "glyph" && k != "glyph_why").cloned().collect());
+            assert_eq!(persona::canon(&bare), persona::canon(s0), "the document is the one without the block, plus the glyph");
+            let (g, why) = (s1.get("glyph").and_then(Json::as_str).unwrap(), s1.get("glyph_why").and_then(Json::as_str).unwrap());
+            let bound = s1.get("habits").and_then(|h| h.get("bound")).and_then(Json::as_arr).unwrap();
+            if bound.iter().any(|b| b.as_str() == Some("no_jokes_on_loss")) { assert_eq!((g, why), ("🛟", "habit no_jokes_on_loss")); habit += 1; continue; }
+            let lv = |m: &str| s1.get("mood").and_then(|x| x.get(m)).and_then(|e| e.get("level")).and_then(Json::as_str).unwrap().to_string();
+            let (va, pr) = (lv("valence"), lv("pressure"));
+            let row = ["down", "even", "up"].iter().position(|x| *x == va).unwrap(); let col = ["calm", "steady", "keyed"].iter().position(|x| *x == pr).unwrap();
+            let want = [["😔", "😕", "😣"], ["😌", "🙂", "😬"], ["😊", "😄", "🤩"]][row][col];
+            assert_eq!((g, why), (want, format!("mood valence={va} pressure={pr}").as_str())); cells.insert(want); }
+        assert!(habit > 0 && cells.len() >= 3, "the life must exercise the habit rule and several cells: {habit} {cells:?}");
+        assert_eq!(verify(&t1, &run).map(|d| d.get("events").cloned()), Ok(Some(Json::Num(40.0))));
+        // an edited glyph, the chain re-made after it, diverges at its line
+        let ls: Vec<String> = t1.lines().map(str::to_string).collect();
+        let mut j = json::parse(&ls[7]).unwrap(); let was = j.get("glyph").and_then(Json::as_str).unwrap().to_string();
+        put(&mut j, &["glyph"], Json::Str(if was == "🤩" { "😊" } else { "🤩" }.into())); let mut tt = ls.clone(); tt[7] = persona::canon(&j);
+        assert_eq!(verify(&rechain(tt, 8), &run).unwrap_err(), (8, "the glyph differs".to_string()));
+        // a removed glyph diverges too (the line's other fields are as the replay gives them)
+        let mut j = json::parse(&ls[3]).unwrap(); if let Json::Obj(v) = &mut j { v.retain(|(k, _)| k != "glyph"); } let mut tt = ls.clone(); tt[3] = persona::canon(&j);
+        assert_eq!(verify(&rechain(tt, 4), &run).unwrap_err(), (4, "the glyph differs".to_string()));
+        // checkpoints: the strand with one verifies in full and from the checkpoint
+        let (mut live, header) = Live::start(pn.clone(), &on, persona::init(&pn, Some(1), true, &run), Clock::Fixed, "probbit test"); let mut text = format!("{header}\n");
+        for (k, e) in evs.iter().enumerate() { let (s, l) = live.event(e, &run).unwrap(); text += &l; text.push('\n'); if k == 19 { text += &live.checkpoint(&s); text.push('\n'); } }
+        assert!(verify(&text, &run).is_ok()); assert_eq!(verify_from_checkpoint(&text, &run).map(|d| d.get("from_checkpoint").cloned()), Ok(Some(Json::Num(20.0))));
+        // resume continues the same bytes
+        let cut: String = ls[..21].iter().map(|l| format!("{l}\n")).collect();
+        let st20 = { let mut r = Replay::open(&ls[0]).unwrap(); for l in &ls[1..21] { r.step(l, &run).unwrap(); } r.live.st.clone() };
+        let mut lv = resume(&cut, &pn, st20, Clock::Fixed).unwrap(); let (_, l21) = lv.event(&evs[20], &run).unwrap(); assert_eq!(l21, ls[21]);
+    }
+
+    /// §2.18, the cost of the glyph: the strands named in PROBBIT_GLYPH_COST (`:`-separated) are replayed from their headers'
+    /// documents without and with the `display` block in PROBBIT_GLYPH_DISPLAY (a JSON file), the two arms interleaved per event
+    /// (order alternating), 5 passes; prints p50 and p95 of `Live::event` per arm in ms. Release build:
+    /// `cargo test --release -p probbit-cli --bin probbit glyph_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn glyph_cost() {
+        let (Ok(paths), Ok(dp)) = (std::env::var("PROBBIT_GLYPH_COST"), std::env::var("PROBBIT_GLYPH_DISPLAY")) else { return };
+        let display = json::parse(&std::fs::read_to_string(dp).unwrap()).unwrap();
+        let (mut off_ms, mut on_ms) = (vec![], vec![]);
+        for path in paths.split(':') {
+            let text = std::fs::read_to_string(path).unwrap(); let ls = lines(&text);
+            let h = json::parse(ls[0]).unwrap(); let doc = h.get("document").unwrap().clone();
+            let mut on = doc.clone(); if let Json::Obj(v) = &mut on { v.push(("display".into(), display.clone())); }
+            let evs: Vec<Json> = ls[1..].iter().filter_map(|l| json::parse(l).ok()).filter(|j| matches!(kind(j), Kind::Event)).map(|j| j.get("inputs").unwrap().clone()).collect();
+            let start = |d: &Json| { let p = persona::build(d).unwrap(); let st = State::read(&p, h.get("state").unwrap()).unwrap(); Live::start(p, d, st, Clock::Fixed, "probbit test").0 };
+            for _pass in 0..5 {
+                let (mut a, mut b) = (start(&doc), start(&on));
+                for (k, e) in evs.iter().enumerate() {
+                    let one = |lv: &mut Live, out: &mut Vec<f64>| { let t = std::time::Instant::now(); lv.event(e, &run).unwrap(); out.push(t.elapsed().as_secs_f64() * 1e3); };
+                    if k % 2 == 0 { one(&mut a, &mut off_ms); one(&mut b, &mut on_ms); } else { one(&mut b, &mut on_ms); one(&mut a, &mut off_ms); } } } }
+        let q = |xs: &mut Vec<f64>, f: f64| { xs.sort_by(|a, b| a.partial_cmp(b).unwrap()); xs[((xs.len() as f64 * f).ceil() as usize).clamp(1, xs.len()) - 1] };
+        let (n, p50_off, p95_off, p50_on, p95_on) = (off_ms.len(), q(&mut off_ms, 0.5), q(&mut off_ms, 0.95), q(&mut on_ms, 0.5), q(&mut on_ms, 0.95));
+        println!("GLYPH_COST {{\"events_per_arm\":{n},\"off\":{{\"p50_ms\":{p50_off:.4},\"p95_ms\":{p95_off:.4}}},\"on\":{{\"p50_ms\":{p50_on:.4},\"p95_ms\":{p95_on:.4}}},\"p95_diff_ms\":{:.4}}}", p95_on - p95_off);
+    }
+
+    /// §2.18: with an expectation block the surprise modifier follows the deviation it reads (registers and z >= z_at_least),
+    /// after the base glyph, and `glyph_why` names the z; a floor no event reaches gives the bare base glyph
+    #[test]
+    fn the_surprise_modifier_reads_the_deviation() {
+        let off = json::parse(GDOC).unwrap();
+        let on = with_display(&off, &[("display", GLYPHS), ("expectation", "{}")]);
+        let pn = persona::build(&on).unwrap();
+        let evs: Vec<Json> = (0..60).map(|t| if t % 17 == 16 { json::parse(r#"{"loss":true,"rush":true,"praise":true,"elapsed_hours":0.1}"#).unwrap() } else { json::parse(r#"{"elapsed_hours":0.1}"#).unwrap() }).collect();
+        let (text, docs) = glife(&pn, &on, &evs);
+        let mut fired = 0;
+        for d in &docs { let (g, why) = (d.get("glyph").and_then(Json::as_str).unwrap(), d.get("glyph_why").and_then(Json::as_str).unwrap());
+            let dv = d.get("deviation").unwrap(); let z = dv.get("z").and_then(Json::as_f64);
+            let on_ = dv.get("registers") == Some(&Json::Bool(true)) && z.is_some_and(|z| z >= 2.0);
+            assert_eq!(g.ends_with('👀'), on_, "{why}"); assert_eq!(why.contains(" +surprise z="), on_);
+            if on_ { fired += 1; assert_eq!(g.chars().count(), 2); } else { assert_eq!(g.chars().count(), 1); } }
+        assert!(fired > 0, "the rare event must register");
+        assert!(verify(&text, &run).is_ok());
+        let high = with_display(&off, &[("display", &GLYPHS.replace(r#""z_at_least":2.0"#, r#""z_at_least":1000"#)), ("expectation", "{}")]);
+        let (_, hd) = glife(&persona::build(&high).unwrap(), &high, &evs);
+        assert!(hd.iter().all(|d| d.get("glyph").and_then(Json::as_str).unwrap().chars().count() == 1));
+    }
+
+    /// §2.18: `display.glyphs` is read strictly (the lint rules): two moods of the persona with their levels each once, one row
+    /// per level, one glyph per column, every glyph one code point that shows on its own, known habits, no repeated key
+    #[test]
+    fn display_glyphs_are_read_strictly() {
+        let off = json::parse(GDOC).unwrap();
+        let err = |g: &str| persona::build(&with_display(&off, &[("display", g)])).err().map(|e| (e.path, e.msg));
+        let ok = |g: &str| persona::build(&with_display(&off, &[("display", g)])).map(|p| p.glyphs.is_some()).map_err(|e| e.msg);
+        assert_eq!(ok(GLYPHS), Ok(true)); assert_eq!(ok("{}"), Ok(false)); assert_eq!(ok(r#"{"glyphs":null}"#), Ok(false));
+        let swap = |a: &str, b: &str| GLYPHS.replacen(a, b, 1);
+        assert_eq!(err(&swap(r#""pressure":["calm","steady","keyed"]"#, r#""humour":["none","light","playful"]"#)).map(|e| e.0), Some("display.glyphs.moods.humour".into()));
+        assert_eq!(err(&swap(r#""pressure":["calm","steady","keyed"]"#, r#""pressure":["calm","steady"]"#)).map(|e| e.0), Some("display.glyphs.moods.pressure".into()));
+        assert_eq!(err(&swap(r#""pressure":["calm","steady","keyed"]"#, r#""pressure":["calm","calm","keyed"]"#)).map(|e| e.0), Some("display.glyphs.moods.pressure".into()));
+        assert_eq!(err(&swap(r#","pressure":["calm","steady","keyed"]"#, "")).map(|e| e.0), Some("display.glyphs.moods".into()));
+        assert_eq!(err(&swap(r#""up":["😊","😄","🤩"]"#, r#""up":["😊","😄"]"#)).map(|e| e.0), Some("display.glyphs.table.up".into()));
+        assert_eq!(err(&swap(r#","up":["😊","😄","🤩"]"#, "")).map(|e| e.0), Some("display.glyphs.table.up".into()));
+        assert_eq!(err(&swap(r#""up":"#, r#""upp":"#)).map(|e| e.0), Some("display.glyphs.table.upp".into()));
+        // ZWJ sequences, variation selectors, skin tones, flags, keycaps, two glyphs, empty, a space: refused at the cell
+        for bad in ["👩\u{200d}💻", "☺\u{fe0f}", "👍\u{1f3fd}", "\u{1f1fa}", "1\u{20e3}", "🙂🙂", "", " ", "\u{1f3fd}"] {
+            let g = swap("😬", bad); assert_eq!(err(&g).map(|e| e.0), Some("display.glyphs.table.even[2]".into()), "{bad:?}"); }
+        assert_eq!(err(&swap(r#""glyph":"👀""#, r#""glyph":"👀👀""#)).map(|e| e.0), Some("display.glyphs.surprise.glyph".into()));
+        assert_eq!(err(&swap(r#""z_at_least":2.0"#, r#""z_at_least":-1"#)).map(|e| e.0), Some("display.glyphs.surprise.z_at_least".into()));
+        assert_eq!(err(&swap(r#""no_jokes_on_loss":"🛟""#, r#""no_such":"🛟""#)).map(|e| e.0), Some("display.glyphs.habits.no_such".into()));
+        assert_eq!(err(&swap(r#""no_jokes_on_loss":"🛟""#, r#""no_jokes_on_loss":"🛟","no_jokes_on_loss":"🔒""#)).map(|e| e.0), Some("display.glyphs.habits.no_jokes_on_loss".into()));
+        assert_eq!(err(&swap(r#""surprise":"#, r#""shock":"#)).map(|e| e.0), Some("display.glyphs.shock".into()));
+        assert_eq!(err(r#"{"glyph":{}}"#).map(|e| e.0), Some("display.glyph".into()));
+        assert_eq!(err(r#"{"glyphs":{"table":{}}}"#).map(|e| e.0), Some("display.glyphs.moods".into()));
     }
 
     /// RFC 0009: the trajectory at beta = 1 is the exact tier's answer (to 1e-9), and the joint entropy of p_beta is non-increasing

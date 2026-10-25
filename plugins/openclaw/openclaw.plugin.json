@@ -54,6 +54,10 @@
         "maxLength": 24,
         "description": "Opens the footer line (default: the persona's name). An emoji or a short handle works."
       },
+      "glyphInReply": {
+        "type": "boolean",
+        "description": "Default true: when the persona has display.glyphs, the block tells the model to use the engine's glyph as the reply's one mood emoji. The footer shows the glyph either way."
+      },
       "inject": {
         "type": "string",
         "enum": [

@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- Display glyphs (docs/persona.md §2.18): an optional `display.glyphs` block (outside the persona digest, effects {}) maps
+  the stance to one emoji by a fixed rule order: the first listed habit in `habits.bound`, else the cell of a two-mood table
+  (valence x pressure by default), then a surprise modifier when `deviation.registers` and `z >= z_at_least`. The stance
+  document gains `glyph` and `glyph_why`; `probbit live` strand lines carry `glyph` and `live verify` recomputes it ("the
+  glyph differs" on an edit). Every glyph is one code point (`persona lint` refuses ZWJ, variation-selector, skin-tone,
+  flag, keycap and tag sequences). A persona without the block gives every document byte for byte as before (P0: 653
+  outputs, 0 differ). `probbit monitor` shows the glyph next to the persona's name (terminal and page).
+- `plugins/openclaw`: the footer opens with the glyph when the stance carries one (`<prefix><glyph> stance #N · …`, a space
+  after a prefix ending in a letter or digit); the block gains `Mood glyph: 🙂 (valence even 0.71, pressure steady 0.80). Use
+  at most one mood emoji in this reply and make it this one.`, behind the new config key `glyphInReply` (default true);
+  the bundled persona carries the default map.
+
 - `bench/lab/0.11/`: the lab runs behind Result 2 as reproduction kits: the v-run (`v011-viability/`), I3-sim
   (`i3sim-needs-viability/`) and the V2 residual follow-up (`v2res-valence-residual/`). Each carries its harness, frozen
   configuration, tables, replay record and the bars as registered (`PREREGISTRATION.md`); `experiments/rerun.sh`
