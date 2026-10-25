@@ -3,6 +3,7 @@
 # original run; then verify every strand (A 1,000 + 60 per other arm) with `probbit live verify`. No network, no
 # model calls. Binary: $PROBBIT (the run used the 0.11 PR #50 head). Usage: PROBBIT=<probbit> experiments/rerun.sh [PYTHON]
 set -euo pipefail
+export LC_ALL=C  # byte-order globs, so tables/strand_counts.txt lists the arms in the order of the original run
 cd "$(dirname "$0")/.."
 PY="${1:-python3}"
 B="${PROBBIT:?set PROBBIT to a probbit binary}"

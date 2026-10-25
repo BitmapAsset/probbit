@@ -67,8 +67,8 @@ python3 -m venv venv && venv/bin/pip install numpy==2.0.2
 PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
 ```
 
-Measured on a 16-vCPU Ubuntu VM with probbit 0.12.1: the v-run 28 minutes, I3-sim 52 minutes, the residual run about
-40 minutes (two passes each, plus the strand verification). The sha256s are in each kit's README;
+Measured on a 16-vCPU Ubuntu VM with probbit 0.12.1: the v-run 28 minutes, I3-sim 52 minutes, the residual run 35
+minutes (two passes each, plus the strand verification). The sha256s are in each kit's README;
 `bench/lab/0.11/README.md` lists what is not in the kits and why.
 
 The other measurements have the same shape: `bench/individuality/`, `bench/body/`, `bench/viability/` each carry a `run.py`
