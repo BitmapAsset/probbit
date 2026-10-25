@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- Documentation, from a dress rehearsal of the published v0.12.1 artifacts (every install and reproduction command run as
+  written on Ubuntu 24.04 x86_64 and macOS arm64): the glyph material in `plugins/openclaw/README.md`, docs/persona.md
+  §2.18 and the cheat sheet is marked unreleased (probbit 0.12.1 refuses a persona with `display`, and the npm plugin 0.1.0
+  has no glyph); REPRODUCE.md names the Python range with numpy wheels (3.9 to 3.12), the harmless GNU tar warning, what
+  `identical` compares, the E3 rerun with its sha256s, and that a report needs a GitHub account; the README's binary size
+  (3 to 4 MB) and its OpenClaw subsection moved below the `--budget-ms` and `--summary` paragraphs it had split from their
+  section; docs/agents.md points at the README section that exists.
+
 - Display glyphs (docs/persona.md §2.18): an optional `display.glyphs` block (outside the persona digest, effects {}) maps
   the stance to one emoji by a fixed rule order: the first listed habit in `habits.bound`, else the cell of a two-mood table
   (valence x pressure by default), then a surprise modifier when `deviation.registers` and `z >= z_at_least`. The stance

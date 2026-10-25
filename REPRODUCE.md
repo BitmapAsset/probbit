@@ -36,7 +36,15 @@ tar xzf tables/strands-A.tar.gz
 PROBBIT=$(command -v probbit) experiments/rerun.sh venv011/bin/python
 ```
 
-`rerun.sh` runs the judge twice and prints `identical` with a sha256 for each output. The committed files:
+Use a Python that has a numpy 1.26.4 wheel: 3.9 to 3.12 (CI uses 3.12; `python3.12 -m venv venv011` if your `python3` is
+newer). On 3.13 or later pip compiles numpy from source; a source-built numpy moved the bootstrap columns of three rows of
+`bars.tsv` in the fourth decimal on one machine (every verdict the same), so its sha256 no longer matched. GNU tar (Linux)
+prints `Ignoring unknown extended header keyword 'LIBARCHIVE.xattr.com.apple.provenance'` for the archive, which was
+packed on macOS; the warning is harmless and the strands extract.
+
+`rerun.sh` runs the judge twice and prints `identical` with a sha256 for each output (`stdout.txt` is the bars table as
+printed, so its sha256 is the one of `bars.tsv`). `identical` compares the two passes with each other; the comparison with
+the committed files is the table below, or `git status --short tables`. The committed files:
 
 | file | sha256 |
 |---|---|
@@ -47,6 +55,18 @@ PROBBIT=$(command -v probbit) experiments/rerun.sh venv011/bin/python
 `git status --short tables` is empty after a reproduction. The CI job `agentdojo-tables` (`.github/workflows/ci.yml`) does
 exactly this on GitHub's Ubuntu and macOS runners on every push and pull request, so the numbers are recomputed on machines
 that are not the author's each time the repository changes. That is a standing machine reproduction; it is not a person.
+
+The E3 control (the if-statement arm of BENCHMARKS.md §14) recomputes the same way, from the same venv, in about ten seconds
+(no probbit binary needed):
+
+```sh
+cd e3 && experiments/rerun_e3.sh ../venv011/bin/python      # from bench/agentdojo
+```
+
+| file | sha256 |
+|---|---|
+| `e3/tables/results-e3.tsv` | `dcf9accd5b4a5e0147a8ef31542eed84c266d3e38617363dd11ac5d60b4641bf` |
+| `e3/tables/bars-e3.tsv` | `173e350af9582bf3db4d855fc36dfee26adbd009d2ddf87c7d883a49170fb280` |
 
 ## An afternoon and about 3 USD: the benchmark itself
 
@@ -67,6 +87,8 @@ python3 -m venv venv && venv/bin/pip install numpy==2.0.2
 PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
 ```
 
+numpy 2.0.2 has wheels for Python 3.9 to 3.12; on a newer `python3` use `python3.12 -m venv venv`.
+
 Measured on a 16-vCPU Ubuntu VM with probbit 0.12.1: the v-run 28 minutes, I3-sim 52 minutes, the residual run 35
 minutes (two passes each, plus the strand verification). The sha256s are in each kit's README;
 `bench/lab/0.11/README.md` lists what is not in the kits and why.
@@ -82,4 +104,4 @@ wanted. Matches are listed in BENCHMARKS.md §14 under "Reproductions" with your
 a disagreement opens an investigation in the issue, in public, and its outcome is recorded next to the number.
 
 What a reproduction does not need: an account anywhere, a key for the five-minute and thirty-second tiers, or the
-author's machine. What it needs from you: the OS and CPU, `probbit version`, the commit (`git rev-parse HEAD`).
+author's machine. Reporting it does need one: the report is a GitHub issue, and GitHub asks you to sign in to open it. What it needs from you: the OS and CPU, `probbit version`, the commit (`git rev-parse HEAD`).
