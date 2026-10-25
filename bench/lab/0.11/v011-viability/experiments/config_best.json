@@ -1,0 +1,71 @@
+{
+ "bridge": {
+  "dt_hours": 0.25,
+  "send_time_pressure": true
+ },
+ "persona": {
+  "fail_gain": 0.6,
+  "habit_high": {
+   "budget": 0.6375,
+   "integrity": 0.5625,
+   "recovery": 0.6
+  },
+  "habit_mid": {
+   "budget": 0.325,
+   "integrity": 0.325,
+   "recovery": 0.45
+  },
+  "need_want": 2,
+  "pressure_inertia": 0.6,
+  "spend_gain": 0.3,
+  "strain_gain": 0.3,
+  "tp_gain": 0.8
+ },
+ "policy": {
+  "gate_level": 1,
+  "risky_when_bold": true,
+  "use_pursue": true
+ },
+ "reactive": {
+  "risky_above": 0.6,
+  "threshold": 0.45
+ },
+ "world": {
+  "damage": [
+   0.05,
+   0.12
+  ],
+  "drought_len": [
+   40,
+   100
+  ],
+  "drought_p": 0.015,
+  "grant_p_request": 0.35,
+  "grant_p_spont": 0.01,
+  "grant_request_amt": [
+   0.35,
+   0.55
+  ],
+  "grant_spont_amt": [
+   0.2,
+   0.5
+  ],
+  "hi": {
+   "budget": 1.0,
+   "integrity": 1.0,
+   "recovery": 1.0
+  },
+  "k_below": 4,
+  "lo": {
+   "budget": 0.12,
+   "integrity": 0.22,
+   "recovery": 0.23
+  },
+  "repair": 0.08,
+  "rest_restore": 0.04,
+  "shock_damage": 0.3,
+  "shock_p": 0.008,
+  "steps": 400,
+  "task_len": 10
+ }
+}

@@ -1,0 +1,8 @@
+v2res/A-P0 60
+v2res/A-S0 60
+v2res/A-t0 60
+v2res/A 1000
+v2res/T0-D0 60
+v2res/T0-P0 60
+v2res/T0-S0 60
+v2res/T0-all 60

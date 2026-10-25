@@ -1,0 +1,4 @@
+bar	pass	evidence
+n1	PASS	median Spearman(pressure, -dist) in A = 0.5439 (bar >= 0.3); valence median Spearman(valence, dist) = -0.2441
+n2	PASS	survival A 0.8480 vs B 0.0000, diff 0.8480 95% CI [0.8250, 0.8700]; value A 68.223 vs 0.8 x C 48.210 (C 60.262)
+n3	PASS	prio accuracy A 1.0000 (bar >= 0.7) vs B 0.0000, diff 1.0000 95% CI [0.9999, 1.0000]
