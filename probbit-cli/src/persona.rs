@@ -3950,15 +3950,17 @@ pub fn stance_sha(doc: &Json) -> String {
 
 /// §2.18 `display.glyphs`: one glyph per stance, computed from the stance document. `moods`: the two mood ids (rows, then
 /// columns) with their levels in the table's order; `table[row][column]`; `surprise`: the modifier and its z floor; `habits`:
-/// habit id -> glyph, in the persona's order (the first one bound wins)
+/// habit id -> glyph, in the persona's order (the first one in force wins)
 #[derive(Clone)]
 pub struct Glyphs { moods: Vec<(String, Vec<String>)>, table: Vec<Vec<String>>, surprise: Option<(String, f64)>, habits: Vec<(String, String)> }
-/// One Unicode code point that shows on its own: not a control or a space, and none of the code points that only join, vary or
-/// tag another one (ZWJ, variation selectors, the keycap mark, skin-tone modifiers, regional indicators, tags, combining marks),
+/// One Unicode code point that shows on its own, optionally followed by U+FE0F (the emoji presentation selector, so 🛠️ and ❤️
+/// pass): the base not a control or a space, and none of the code points that only join, vary or tag another one (ZWJ, variation
+/// selectors, the keycap mark, skin-tone modifiers, regional indicators, tags, combining marks), and nothing after the selector,
 /// so a host, a terminal and a device panel draw the same glyph and a base glyph and its modifier never fuse into a third
 fn one_glyph(s: &str) -> bool {
     let mut c = s.chars();
-    let (Some(x), None) = (c.next(), c.next()) else { return false };
+    let Some(x) = c.next() else { return false };
+    match (c.next(), c.next()) { (None, _) => {}, (Some('\u{FE0F}'), None) => {}, _ => return false }
     let u = x as u32;
     !x.is_control() && !x.is_whitespace() && u != 0x200D && u != 0x20E3 && !(0xFE00..=0xFE0F).contains(&u) && !(0x1F3FB..=0x1F3FF).contains(&u)
         && !(0x1F1E6..=0x1F1FF).contains(&u) && !(0xE0000..=0xE007F).contains(&u) && !(0x0300..=0x036F).contains(&u) && !(0x20D0..=0x20FF).contains(&u)
@@ -3969,7 +3971,7 @@ fn once(kv: &[(String, Json)], path: &str) -> R<()> {
 }
 fn glyph_str(x: Option<&Json>, path: &str) -> R<String> {
     x.and_then(Json::as_str).filter(|s| one_glyph(s)).map(str::to_string)
-        .ok_or_else(|| perr(path, "one Unicode code point (no ZWJ, variation-selector, skin-tone, flag, keycap or tag sequence)"))
+        .ok_or_else(|| perr(path, "one Unicode code point, optionally followed by U+FE0F (no ZWJ, skin-tone, flag, keycap, tag or other combining sequence)"))
 }
 /// `display` -> its glyphs block, read against the persona built without it (§2.18)
 fn display_spec(dj: &Json, p: &Persona) -> R<Option<Glyphs>> {
@@ -4003,13 +4005,14 @@ fn display_spec(dj: &Json, p: &Persona) -> R<Option<Glyphs>> {
             need(p.habits.iter().any(|x| x.id == *h), &at(hp, h), "not a habit of this persona")?; habits.push((h.clone(), glyph_str(Some(g), &at(hp, h))?)); } }
     Ok(Some(Glyphs { moods, table, surprise, habits }))
 }
-/// §2.18: a stance document's glyph and why, by the rule order: (1) the first habit of `display.glyphs.habits` in `habits.bound`;
+/// §2.18: a stance document's glyph and why, by the rule order: (1) the first habit of `display.glyphs.habits` in `habits.active`
+/// (the habit applies this turn; `bound`, where the free stance would have broken it and the engine held it, is not the test);
 /// (2) else the table's cell at the two moods' levels; then (3) the surprise modifier appended when `deviation.registers` and
 /// `deviation.z >= z_at_least`. None without the block (or without the moods' levels).
 pub fn glyph(p: &Persona, doc: &Json) -> Option<(String, String)> {
     let g = p.glyphs.as_ref()?;
-    let bound = doc.get("habits").and_then(|h| h.get("bound")).and_then(Json::as_arr).unwrap_or(&[]);
-    let (mut gl, mut why) = match g.habits.iter().find(|(h, _)| bound.iter().any(|b| b.as_str() == Some(h))) {
+    let active = doc.get("habits").and_then(|h| h.get("active")).and_then(Json::as_arr).unwrap_or(&[]);
+    let (mut gl, mut why) = match g.habits.iter().find(|(h, _)| active.iter().any(|b| b.as_str() == Some(h))) {
         Some((h, x)) => (x.clone(), format!("habit {h}")),
         None => { let lv = |k: usize| doc.get("mood").and_then(|m| m.get(&g.moods[k].0)).and_then(|e| e.get("level")).and_then(Json::as_str);
             let (a, b) = (lv(0)?, lv(1)?);

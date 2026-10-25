@@ -107,15 +107,34 @@ export function footerLine(n: number, doc: StanceDoc, facts: FooterFacts = {}, n
 }
 
 /**
+ * The glyph split into its base and the surprise modifier (persona.md §2.18). Each part is one code point, optionally followed
+ * by U+FE0F, so the base is the first code point (and its selector) and the modifier is the rest; the modifier is present only
+ * when `glyph_why` reports ` +surprise z=<z>`.
+ */
+export function glyphParts(doc: StanceDoc): { base: string; modifier?: string; z?: number } | undefined {
+  if (!doc.glyph) return undefined;
+  const cps = [...doc.glyph];
+  const n = cps[1] === "\uFE0F" ? 2 : 1;
+  const m = / \+surprise z=(-?[\d.]+)/u.exec(doc.glyph_why ?? "");
+  if (!m || cps.length <= n) return { base: doc.glyph };
+  return { base: cps.slice(0, n).join(""), modifier: cps.slice(n).join(""), z: Number(m[1]) };
+}
+
+/**
  * `Mood glyph: <glyph> (valence <l> <p>, pressure <l> <p>). …`: the engine's glyph and the odds of the mood levels taken, so
- * the reply's mood emoji is the engine's reading, not the model's guess. Undefined when the document has no glyph.
+ * the reply's mood emoji is the engine's reading, not the model's guess. With the surprise modifier the line names the base
+ * glyph as the one mood emoji and reports the modifier apart (`…; surprise registered this turn (z 2.3), shown as 👀 in the
+ * footer. … make it 🙂.`); the footer keeps both. Undefined when the document has no glyph.
  */
 export function glyphLine(doc: StanceDoc): string | undefined {
-  if (!doc.glyph) return undefined;
+  const g = glyphParts(doc);
+  if (!g) return undefined;
   const odds = ["valence", "pressure"]
     .filter((m) => doc.mood?.[m]?.level !== undefined)
     .map((m) => `${m} ${level(doc, m)}${typeof doc.mood?.[m]?.p === "number" ? ` ${(doc.mood[m].p as number).toFixed(2)}` : ""}`);
-  return `Mood glyph: ${doc.glyph}${odds.length ? ` (${odds.join(", ")})` : ""}. Use at most one mood emoji in this reply and make it this one.`;
+  const head = `Mood glyph: ${g.base}${odds.length ? ` (${odds.join(", ")})` : ""}`;
+  if (g.modifier === undefined) return `${head}. Use at most one mood emoji in this reply and make it this one.`;
+  return `${head}; surprise registered this turn (z ${(g.z as number).toFixed(1)}), shown as ${g.modifier} in the footer. Use at most one mood emoji in this reply and make it ${g.base}.`;
 }
 
 /** The block the model sees for this turn. `glyphInReply` (default true) adds the glyph line when the document has a glyph. */
