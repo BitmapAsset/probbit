@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- Reproduction scripts: `bench/agentdojo/experiments/rerun.sh` and `e3/experiments/rerun_e3.sh` now compare every
+  regenerated table with the committed file (git `HEAD`, or the file on disk before the run outside git) and print
+  `MATCH <file> <sha256>` or `DIFFERS <file> <sha256> (committed <sha256>)`, exiting non-zero on any `DIFFERS`; the old
+  `identical` line, which compared the two passes with each other, now reads `two passes identical`. The three lab kits'
+  `rerun.sh` (`bench/lab/0.11/`) print the same per-table lines against their `tables/original.sha256`. All five refuse a
+  Python outside 3.9 to 3.12 (the numpy wheel range) unless `PYTHON=<python>` is set, which warns instead. The CI job
+  `agentdojo-tables` also runs the E3 rerun. Table contents unchanged. `tables/frozen.sha256` records both hashes of
+  `rerun.sh` (as run, and this copy).
+- `bench/agentdojo/tables/strands-A.tar.gz` repacked without macOS extended attributes (no AppleDouble `._` members, no
+  owner names, numeric owner 0, the original newest mtime): GNU tar extracts it without warnings; the 726 strand files
+  inside are byte-identical to the previous archive's.
+
 - Documentation, from a dress rehearsal of the published v0.12.1 artifacts (every install and reproduction command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): the glyph material in `plugins/openclaw/README.md`, docs/persona.md
   §2.18 and the cheat sheet is marked unreleased (probbit 0.12.1 refuses a persona with `display`, and the npm plugin 0.1.0

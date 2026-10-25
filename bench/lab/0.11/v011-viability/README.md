@@ -21,8 +21,8 @@ PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
 ```
 
 `rerun.sh` runs the harness twice from `experiments/config_baseline.json` (all five arms, 5,000 episodes each time), compares
-the sha256 of the five tables with `tables/original.sha256` (the run's own tables) and with each other, prints
-`tables: byte-identical (original, rerun 1, rerun 2)`, then verifies every strand it wrote with `probbit live verify`
+the sha256 of the five tables with `tables/original.sha256` (the run's own tables) and with each other, prints one
+`MATCH` line per table and `tables: byte-identical (original, rerun 1, rerun 2)`, then verifies every strand it wrote with `probbit live verify`
 (A 1,000 + 60 for each other arm = 1,240) and prints `strands: 1240 verified, 0 failed`. It exits 1 on any difference.
 Strands and the generated persona documents go to `out/` (not committed). `git status --short tables` is empty after a
 reproduction.
@@ -52,11 +52,15 @@ Python: the run used CPython 3.9.6 with numpy 2.0.2; the reproduction above used
 | `experiments/ablation.py`, `loop.py`, `loop_check.py`, `config_best*.json` | carried over unchanged from the I3-sim harness the v-run was copied from; not used by the v-run |
 | `tables/arms_vrun.tsv`, `tracking_vrun.tsv`, `episodes_vrun.tsv`, `vbars_vrun.tsv`, `nulls_vrun.tsv` | the run's tables (`vbars_vrun.tsv` judges V1-V4) |
 | `tables/original.sha256`, `rerun-1.sha256`, `rerun-2.sha256`, `rerun-twice.out`, `strand_*.txt` | the run's own replay record (V7) |
-| `tables/frozen-harness.sha256` | the harness as frozen before the run; `bridge.py`, `run_arms.py` and `rerun.sh` differ from it only by the path lines listed below |
+| `tables/frozen-harness.sha256` | the harness as frozen before the run; `bridge.py`, `run_arms.py` and `rerun.sh` differ from it only by the path lines listed below (and `rerun.sh` by the check added after the run) |
 | `v6/compare247.json`, `v6/compare247.out` | V6 as recorded: 247 persuasion campaigns, each achieved resting change compared with the epsilon the engine published (0 over, max ratio 1.0) |
 
 Path lines changed for publication (nothing else): `bridge.py` reads the binary from `PROBBIT`; `run_arms.py` writes
 strands and personas under `out/`; `rerun.sh` takes the interpreter as its argument and the binary from `PROBBIT`.
+
+Added after the run (no effect on the tables): `rerun.sh` prints `MATCH <file> <sha256>` or `DIFFERS <file> <sha256>
+(committed <sha256>)` per table against `tables/original.sha256` and refuses a Python outside 3.9 to 3.12 (numpy 2.0.2
+wheels) unless `PYTHON=<python>` is set, in which case it warns.
 
 ## Not in this kit
 
