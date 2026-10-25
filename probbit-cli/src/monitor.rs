@@ -63,6 +63,8 @@ impl SenseRow {
 struct Meta { name: String, version: String, seed: u64, individual: String, engine: String, traits: Vec<Var>, moods: Vec<Var>, inputs: Vec<Input>,
     history: Vec<(String, f64)>, learning: Option<(Vec<String>, f64)>, caps: (f64, f64, f64), goals: Vec<String>, senses: Vec<SenseRow>, needs: Vec<NeedRow>,
     pace: Option<(f64, f64)>, gates: Vec<String>,
+    /// The face's mood meters: the two moods `display.glyphs` names (rows, then columns; §2.18), else the persona's first two
+    face: Vec<String>,
     /// For the panel: the surprise gate's g_max, the credit block's max_open, the habits declared, a dispositions block
     g_max: f64, max_open: Option<usize>, n_habits: usize, dispositions: bool }
 impl Meta {
@@ -98,6 +100,7 @@ impl Meta {
             gates: if d.get("surprise").is_some() { strs(d.get("learning").and_then(|l| l.get("traits"))) } else { vec![] },
             g_max: d.get("surprise").and_then(|x| x.get("g_max")).and_then(Json::as_f64).unwrap_or(3.0),
             max_open: d.get("learning").and_then(|l| l.get("credit")).and_then(|c| c.get("max_open")).and_then(Json::as_f64).map(|x| x as usize),
+            face: face(&r.doc, &obj("moods").into_iter().map(|(id, _)| id).collect::<Vec<_>>()),
             n_habits: decl("habits").len(), dispositions: d.get("dispositions").is_some() }
     }
 }
@@ -146,6 +149,28 @@ impl Watch {
             }
             Err(e) => self.bad = Some(e) }
     }
+}
+/// The face's moods (§2.18): the ids `display.glyphs.moods` names, in its order, else the first two of `moods`
+fn face(doc: &Json, moods: &[String]) -> Vec<String> {
+    let named: Vec<String> = doc.get("display").and_then(|d| d.get("glyphs")).and_then(|g| g.get("moods")).and_then(Json::as_obj)
+        .map_or(vec![], |o| o.iter().map(|(k, _)| k.clone()).filter(|k| moods.contains(k)).collect());
+    if named.is_empty() { moods.iter().take(2).cloned().collect() } else { named }
+}
+/// RFC 0009 for the page's settle animation: the event's exact trajectory per trait and mood, its values named by the levels
+/// (a positional program names level i `l<i>`), in the persona's order: the betas, the mean marginal entropy per step and per
+/// variable its odds per step, each as the engine computed it (rounded to 6 places); None without `engine.trajectory`
+fn settle(m: &Meta, tj: &Json) -> Option<Json> {
+    let steps = tj.get("steps").and_then(Json::as_arr).filter(|a| !a.is_empty())?;
+    let num = |x: Option<&Json>| json::num(persona::r6(x.and_then(Json::as_f64).unwrap_or(0.0)));
+    let kinds = m.traits.iter().map(|v| ("trait", v)).chain(m.moods.iter().map(|v| ("mood", v)));
+    let vars: Vec<Json> = kinds.filter_map(|(kind, v)| {
+        let at = |st: &Json| st.get("marginals").and_then(|x| x.get(&v.id)).cloned();
+        let first = at(&steps[0])?;
+        let names: Vec<String> = v.levels.iter().enumerate().map(|(i, l)| if first.get(l).is_some() { l.clone() } else { format!("l{i}") }).collect();
+        let odds = steps.iter().map(|st| { let mg = at(st); Json::Arr(names.iter().map(|k| num(mg.as_ref().and_then(|g| g.get(k)))).collect()) }).collect();
+        Some(json::obj(vec![("id", json::str(&v.id)), ("kind", json::str(kind)), ("levels", Json::Arr(v.levels.iter().map(|l| json::str(l)).collect())), ("odds", Json::Arr(odds))]))
+    }).collect();
+    Some(json::obj(vec![("betas", Json::Arr(steps.iter().map(|st| num(st.get("beta"))).collect())), ("h", Json::Arr(steps.iter().map(|st| num(st.get("h"))).collect())), ("vars", Json::Arr(vars))]))
 }
 /// A variable's odds in its levels' order (0 for a level the document does not list)
 fn odds(doc: &Json, group: &str, v: &Var) -> Vec<f64> {
@@ -299,6 +324,12 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     let mut head = format!("{} {}{glyph} {dot} seed {} {dot} individual {} {dot} event {}", s.bold(CYAN, "probbit monitor"), s.bold(CYAN, &format!("{} {}", m.name, m.version)), m.seed, short(&m.individual), f.map_or(0, |f| f.n));
     if let Some(h) = f.and_then(|f| f.given.get("elapsed_hours")).and_then(Json::as_f64) { head += &format!(" {dot} {} since the event before", hours(h)); }
     out.push(format!("{head} {dot} {badge}"));
+    // §2.18: why the engine gave this glyph, under the header (the glyph itself only when the terminal takes UTF-8)
+    if let Some(y) = f.and_then(|f| f.doc.get("glyph_why")).and_then(Json::as_str).filter(|y| !y.is_empty()) {
+        let g = f.and_then(|f| f.doc.get("glyph")).and_then(Json::as_str).filter(|_| !s.ascii).map_or(String::new(), |g| format!("{g} "));
+        let y: String = if s.ascii { y.chars().filter(char::is_ascii).collect() } else { y.to_string() };
+        out.push(format!("{}{g}{}", lab("GLYPH"), s.paint(GREY, &y)));
+    }
     out.push(s.paint(GREY, s.g("LEGEND  width = odds; colour/[level] = chosen; shades = other levels",
         "LEGEND  width = odds; #/[level] = chosen; =/- = other levels")));
     out.push(s.paint(GREY, s.g("        Mood trail ▁▂▃▄▅▆▇█ = mean level low → high (last 50 events)",
@@ -524,7 +555,8 @@ fn meta_json(w: Option<&Watch>, path: &str) -> Json {
             ("inputs", Json::Arr(m.inputs.iter().map(|x| o(vec![("id", s(&x.id)), ("kind", s(&x.kind)), ("max", Json::Num(x.max))])).collect())),
             ("history", Json::Arr(m.history.iter().map(|(id, cap)| o(vec![("id", s(id)), ("cap", Json::Num(*cap))])).collect())),
             ("learning", m.learning.as_ref().map_or(Json::Null, |(t, cap)| o(vec![("traits", strs(t)), ("total_cap", Json::Num(*cap))]))),
-            ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1)), ("prediction_error", Json::Num(m.caps.2))])), ("goals", strs(&m.goals))]);
+            ("caps", o(vec![("wanting", Json::Num(m.caps.0)), ("afterglow", Json::Num(m.caps.1)), ("prediction_error", Json::Num(m.caps.2))])), ("goals", strs(&m.goals)),
+            ("face", strs(&m.face))]);
         // the senses (§2.11), only when the persona declares them: their range on the normal's scale and the alert's cap
         if !m.senses.is_empty() {
             kv.push(("senses", Json::Arr(m.senses.iter().map(|x| o(vec![("id", s(&x.id)), ("say", s(&x.say)), ("unit", s(&x.unit)), ("kind", s(if x.flag { "flag" } else { "number" })),
@@ -559,7 +591,11 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
             ("mean", json::num(*mean)), ("n", json::num(*n as f64)), ("moved", json::num(moved.get(k).copied().unwrap_or(0.0)))])).collect())));
     }
     // RFC 0009: the last event's exact trajectory, only with engine.trajectory
-    if let Some(t) = w.and_then(|w| w.rep.live.traj.clone()) { kv.push(("trajectory", t)); }
+    if let Some(t) = w.and_then(|w| w.rep.live.traj.clone()) {
+        // the same numbers by level name, for the page's settle animation
+        if let Some(st) = w.and_then(|w| settle(&w.meta, &t)) { kv.push(("settle", st)); }
+        kv.push(("trajectory", t));
+    }
     // the open decisions now (§2.8), only with a credit block: each turn and the eligibility a payment at the next event would get
     if let Some(o) = w.and_then(|w| persona::open_decisions(&w.rep.live.p, &w.rep.live.st)) {
         kv.push(("open", Json::Arr(o.iter().map(|(t, e)| json::obj(vec![("turn", json::num(*t as f64)), ("e", json::num(*e))])).collect())));
@@ -1089,12 +1125,66 @@ mod tests {
         let g = w.last.as_ref().unwrap().doc.get("glyph").and_then(Json::as_str).unwrap().to_string();
         let uni = frame(Some(&w), None, "x", None, &Style { th: None, ascii: false, cols: usize::MAX });
         assert!(uni[0].starts_with(&format!("probbit monitor Assistant 1.0.0 {g} · seed ")), "{}", uni[0]);
+        let why = w.last.as_ref().unwrap().doc.get("glyph_why").and_then(Json::as_str).unwrap().to_string();
+        assert_eq!(uni[1], format!("GLYPH   {g} {why}"), "the glyph's why under the header");
         let plain = frame(Some(&w), None, "x", None, &Style { th: None, ascii: true, cols: usize::MAX });
         assert!(plain[0].starts_with("probbit monitor Assistant 1.0.0 | seed "), "{}", plain[0]);
+        assert_eq!(plain[1], format!("GLYPH   {why}"), "plain ASCII: the why without the glyph");
         assert_eq!(frame_json(Some(&w), None, None).get("doc").and_then(|d| d.get("glyph")).and_then(Json::as_str), Some(g.as_str()));
         let Json::Obj(mut kv) = w.last.as_ref().unwrap().doc.clone() else { panic!() }; kv.retain(|(k, _)| k != "glyph" && k != "glyph_why");
         w.last.as_mut().unwrap().doc = Json::Obj(kv);
-        assert!(frame(Some(&w), None, "x", None, &Style { th: None, ascii: false, cols: usize::MAX })[0].starts_with("probbit monitor Assistant 1.0.0 · seed "));
+        let bare = frame(Some(&w), None, "x", None, &Style { th: None, ascii: false, cols: usize::MAX });
+        assert!(bare[0].starts_with("probbit monitor Assistant 1.0.0 · seed ") && bare[1].starts_with("LEGEND"), "{}", bare[..2].join("\n"));
+    }
+
+    /// The face (the page's header): its mood meters are the two moods `display.glyphs` names, else the persona's first two
+    /// (one for a persona with one mood, none without moods); `meta.face` carries them
+    #[test]
+    fn the_face_names_its_mood_meters() {
+        let face_of = |path: &str| { let text = strand(path, 1); let w = Watch::open(live::lines(&text)[0]).unwrap();
+            let ids = strs(meta_json(Some(&w), "x").get("face")); assert_eq!(ids, w.meta.face); ids };
+        let dir = env!("CARGO_MANIFEST_DIR");
+        assert_eq!(face_of(&format!("{dir}/../plugins/openclaw/personas/assistant.yaml")), ["valence", "pressure"]);
+        assert_eq!(face_of(&format!("{dir}/../examples/persona/tutor.yaml")), ["valence", "arousal"], "no display block: the first two moods");
+        let doc = json::parse(r#"{"display":{"glyphs":{"moods":{"b":["x"],"a":["y"]}}}}"#).unwrap();
+        assert_eq!(face(&doc, &["a".into(), "b".into(), "c".into()]), ["b", "a"], "the display's order");
+        assert_eq!(face(&Json::Null, &["a".into()]), ["a"]);
+        assert!(face(&Json::Null, &[]).is_empty());
+    }
+
+    /// RFC 0009 for the page: `settle` is the frame's `trajectory` by level name, per trait and mood in the persona's order, the
+    /// betas rising to 1; a strand without `engine.trajectory` has neither key
+    #[test]
+    fn settle_is_the_trajectory_by_level() {
+        let yaml = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../plugins/openclaw/personas/assistant.yaml")).unwrap()
+            .replace("\r\n", "\n").replace("engine:\n  on_conflict: yield\n", "expectation: {}\n\nengine:\n  on_conflict: yield\n  trajectory: {k: 5, beta0: 0.3}\n");
+        let f = std::env::temp_dir().join(format!("probbit-monitor-settle-{}.yaml", std::process::id())); std::fs::write(&f, yaml).unwrap();
+        let text = strand(f.to_str().unwrap(), 3); let _ = std::fs::remove_file(&f);
+        let lines = live::lines(&text); let mut w = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { w.feed(l, &run); }
+        let fr = frame_json(Some(&w), None, None);
+        let (st, tj) = (fr.get("settle").unwrap(), fr.get("trajectory").unwrap());
+        let betas: Vec<f64> = st.get("betas").and_then(Json::as_arr).unwrap().iter().filter_map(Json::as_f64).collect();
+        assert_eq!((betas.len(), betas[0], betas[4]), (5, 0.3, 1.0));
+        assert!(betas.windows(2).all(|b| b[0] < b[1]) && st.get("h").and_then(Json::as_arr).map(<[Json]>::len) == Some(5));
+        let vars = st.get("vars").and_then(Json::as_arr).unwrap();
+        let ids: Vec<&str> = vars.iter().filter_map(|v| v.get("id").and_then(Json::as_str)).collect();
+        let want: Vec<&str> = w.meta.traits.iter().chain(&w.meta.moods).map(|v| v.id.as_str()).collect();
+        assert_eq!(ids, want);
+        let steps = tj.get("steps").and_then(Json::as_arr).unwrap();
+        for v in vars {
+            let id = v.get("id").and_then(Json::as_str).unwrap();
+            let odds = v.get("odds").and_then(Json::as_arr).unwrap(); assert_eq!(odds.len(), 5);
+            for (k, row) in odds.iter().enumerate() { let row = row.as_arr().unwrap();
+                assert!((row.iter().filter_map(Json::as_f64).sum::<f64>() - 1.0).abs() < 1e-5, "{id} step {k}");
+                for (i, x) in row.iter().enumerate() {
+                    let exact = steps[k].get("marginals").and_then(|m| m.get(id)).and_then(|m| m.get(&format!("l{i}"))).and_then(Json::as_f64).unwrap();
+                    assert_eq!(x.as_f64(), Some(persona::r6(exact)), "{id} step {k} level {i}"); } }
+        }
+        let caution = vars.iter().find(|v| v.get("id").and_then(Json::as_str) == Some("caution")).unwrap();
+        assert_eq!(strs(caution.get("levels")), ["bold", "measured", "careful"]);
+        let plain = strand(concat!(env!("CARGO_MANIFEST_DIR"), "/../examples/persona/tutor.yaml"), 2);
+        let lines = live::lines(&plain); let mut w = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { w.feed(l, &run); }
+        let fr = frame_json(Some(&w), None, None); assert!(fr.get("settle").is_none() && fr.get("trajectory").is_none());
     }
 
     #[test]
