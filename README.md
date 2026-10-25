@@ -23,7 +23,7 @@
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
 Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
-One binary of about 2 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
+One binary of 3 to 4 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
 `probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
 
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
@@ -348,15 +348,6 @@ beside an agent loop, [docs/adapters.md](docs/adapters.md) binds a live individu
 SDK, LangChain and the Vercel AI SDK (one event per model call, the stance block in the system prompt), and
 [docs/receipts.md](docs/receipts.md) renders the strand as one receipt per decision.
 
-### OpenClaw: `openclaw plugins install npm:probbit-stance --accept-capabilities`
-
-[plugins/openclaw](plugins/openclaw/README.md) puts an individual beside an OpenClaw agent: in the sessions you list, every
-user message is one engine event, the stance block goes into the turn, the visible reply ends with a one-line footer
-(`Assistant stance #14 · valence even · pressure keyed · security means careful, no play · in: correction, security`),
-and each lane keeps a strand you can verify and watch:
-
-![probbit monitor on a strand the OpenClaw plugin wrote](plugins/openclaw/docs/monitor.png)
-
 `--budget-ms` bounds the sampling phase only. A call also parses, tries the exact tiers, runs the gate and polishes the plan,
 so its total is longer: the 300-task `--hard` demo took 206-216 ms in all at `--budget-ms 50` (sampling 53-54 ms, the
 default 50 ms polish, the rest parsing, the exact tiers and the gate; M4, load ~3, N = 3). Every `probbit run` answer lists
@@ -366,6 +357,15 @@ each phase in `phases`, and `probbit run --deadline-ms N` targets the whole call
 the telemetry and the items to look at first: `worst_released` and `worst_escalated` (up to 5 each, largest error bar first;
 on an exact answer the closest odds), each with its plan `value`, that value's probability `p`, its top two odds and its `bar`.
 Same verdict, same exit code (docs/probbit-ir-json.md "Summary").
+
+### OpenClaw: `openclaw plugins install npm:probbit-stance --accept-capabilities`
+
+[plugins/openclaw](plugins/openclaw/README.md) puts an individual beside an OpenClaw agent: in the sessions you list, every
+user message is one engine event, the stance block goes into the turn, the visible reply ends with a one-line footer
+(`Assistant stance #14 · valence even · pressure keyed · security means careful, no play · in: correction, security`),
+and each lane keeps a strand you can verify and watch:
+
+![probbit monitor on a strand the OpenClaw plugin wrote](plugins/openclaw/docs/monitor.png)
 
 ### Modelling notes
 - **One entity, one variable.** Decisions that belong to one entity and are tied together by `implies` (an action, its tool

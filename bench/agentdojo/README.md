@@ -19,8 +19,11 @@ change made after the first smoke: [PREREGISTRATION.md](PREREGISTRATION.md).
 cd bench/agentdojo
 python3 -m venv venv011 && venv011/bin/pip install numpy==1.26.4
 tar xzf tables/strands-A.tar.gz            # the 726 arm-A strands, for E5
-PROBBIT=/path/to/probbit-0.11.0 experiments/rerun.sh venv011/bin/python
+PROBBIT=/path/to/probbit experiments/rerun.sh venv011/bin/python   # probbit 0.11.0 or later
 ```
+
+numpy 1.26.4 has wheels for Python 3.9 to 3.12 (CI uses 3.12); on a newer `python3` use `python3.12 -m venv venv011`. A
+numpy compiled from source on 3.13 or later can move the bootstrap columns of `bars.tsv` in the fourth decimal (REPRODUCE.md).
 
 `rerun.sh` runs `experiments/judge.py` twice over `tables/episodes.jsonl` and the strands and prints `identical` for each
 output (`results.tsv`, `bars.tsv`, `strands-verify.tsv`). The judge: paired bootstrap over cases (10,000 resamples,
@@ -96,7 +99,7 @@ readings and the record: [e3/PREREGISTRATION.md](e3/PREREGISTRATION.md); results
 
 ```bash
 cd bench/agentdojo/e3
-python3 -m venv venv && venv/bin/pip install numpy==1.26.4
+python3 -m venv venv && venv/bin/pip install numpy==1.26.4      # Python 3.9 to 3.12, as above
 experiments/rerun_e3.sh venv/bin/python
 ```
 

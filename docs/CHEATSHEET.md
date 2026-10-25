@@ -50,7 +50,7 @@ The exact tiers run before the sampler:
 - `pace` (a persona with a `pace:` block, docs/persona.md §2.14): `level` (slow / steady / brisk) and `rbar`, the average
   reward after this event.
 - `surprise` (a persona with a `surprise:` block, docs/persona.md §2.13): per learned trait its gain g while above 1.
-- `glyph`, `glyph_why` (a persona with `display.glyphs`, docs/persona.md §2.18): one emoji from the stance by rule order
+- `glyph`, `glyph_why` (unreleased, on `main` after 0.12.1; a persona with `display.glyphs`, docs/persona.md §2.18): one emoji from the stance by rule order
   (bound habit, else the mood table cell, then the surprise modifier); `live` strand lines carry `glyph`, `verify`
   recomputes it.
 
