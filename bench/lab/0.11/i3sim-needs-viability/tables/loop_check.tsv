@@ -1,0 +1,7 @@
+config	seeds	A_survival	A_value	0.8xC_value	A_tracking_median	A_prio_acc
+baseline	tune_0-99	0.58	64.397	49.576	0.8293	1.0000
+baseline	heldout_100-199	0.50	63.742	50.850	0.8317	0.9999
+best	tune_0-99	0.96	86.020	68.391	0.4424	1.0000
+best	heldout_100-199	0.98	86.696	61.911	0.4374	1.0000
+best_coupling	tune_0-99	0.87	68.122	49.576	0.5428	1.0000
+best_coupling	heldout_100-199	0.86	70.316	50.850	0.4998	1.0000

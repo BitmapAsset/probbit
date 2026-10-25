@@ -55,6 +55,21 @@ arms, 2,178 episodes, about 35 minutes. Your run will not be byte-identical (the
 bars are stated as intervals for that reason. The bars to compare against, their registration before the run, and what
 was not tested are in BENCHMARKS.md §14 and `bench/agentdojo/PREREGISTRATION.md`.
 
+## Minutes to an hour of compute: the lab tables behind Result 2 (no API calls)
+
+BENCHMARKS.md §13 (viability and graded need pressure) and the V2 residual follow-up regenerate from three kits in
+`bench/lab/0.11/`: the v-run, I3-sim and the residual run. Each `experiments/rerun.sh` runs the seeded simulation twice
+with your probbit and checks every table byte for byte against the run's own sha256 manifest:
+
+```sh
+cd bench/lab/0.11/v011-viability          # or i3sim-needs-viability, v2res-valence-residual
+python3 -m venv venv && venv/bin/pip install numpy==2.0.2
+PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
+```
+
+Measured on a 16-vCPU Ubuntu VM with probbit 0.12.1: TIMES_LINE. The sha256s are in each kit's README;
+`bench/lab/0.11/README.md` lists what is not in the kits and why.
+
 The other measurements have the same shape: `bench/individuality/`, `bench/body/`, `bench/viability/` each carry a `run.py`
 with `--only` to pick a bar, and BENCHMARKS.md names the command next to every number.
 

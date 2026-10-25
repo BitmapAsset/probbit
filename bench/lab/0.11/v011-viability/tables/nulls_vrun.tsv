@@ -1,0 +1,11 @@
+arm	measure	observed_median	null_median_of_medians	null_975
+A	sp_pressure	0.8156	-0.0001	0.0040
+A	sp_valence	0.8394	0.0001	0.0033
+B	sp_pressure	0.9093	-0.0005	0.0084
+B	sp_valence	0.8056	-0.0005	0.0102
+C	sp_pressure	0.7554	-0.0002	0.0040
+C	sp_valence	0.7060	0.0002	0.0047
+D	sp_pressure	0.9085	-0.0002	0.0072
+D	sp_valence	0.8221	0.0003	0.0069
+A-t0	sp_pressure	0.8156	-0.0001	0.0040
+A-t0	sp_valence	0.1199	-0.0000	0.0033

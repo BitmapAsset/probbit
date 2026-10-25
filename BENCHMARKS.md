@@ -1273,7 +1273,8 @@ same policy on a constant resting stance; C is a threshold heuristic on the worl
 (`needs.pressure {gain 2.0, shape linear}`, `needs.valence {tonic 0.8, phasic 0.6}`, `viable.events 4`), and no habit on a
 need's deficit. The bars, the nulls and the rerun rule were written down before the run and judged as registered: one run, a
 failed bar stays failed. Null (i) permutes each episode's series 100 times and takes the 97.5th percentile of the medians.
-The harness is a lab harness, not yet part of this repository; the figures and monitor captures follow in `docs/results/0.11/`.
+The harness, its tables and the registered bars are the reproduction kit `bench/lab/0.11/v011-viability/` (the residual
+follow-up below: `bench/lab/0.11/v2res-valence-residual/`); the figures and monitor captures are in `docs/results/0.11/`.
 
 | bar | measured | bar value | result |
 |---|---|---|---|

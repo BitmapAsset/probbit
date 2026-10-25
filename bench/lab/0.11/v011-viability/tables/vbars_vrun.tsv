@@ -1,0 +1,5 @@
+bar	result	evidence
+V1	PASS	median Spearman(pressure, -distance) A 0.8156 (bar >= 0.30) vs null(i) 97.5th pct 0.0040; I3 reference 0.832 (habits)
+V2	FAIL	median Spearman(valence, distance) A 0.8394 (bar >= +0.30) vs null(i) 97.5th pct 0.0033; A-t0 median 0.1199 (bar <= +0.10); reference -0.149
+V3	PASS	A events 389375, margin/worst mismatches 0 (max |strand - world margin| 0.000000000); prio accuracy A 1.0000 (bar >= 0.9799; reference 0.9999); policy A reads no band width
+V4	PASS	survival A 0.9220 vs B 0.0000, diff 0.9220 95% CI [0.9050, 0.9380] (10,000 resamples, seed 20261021); A survival bar >= 0.515 (reference 0.559)

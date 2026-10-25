@@ -1,0 +1,4 @@
+bar	result	evidence
+R1	PASS	A and A-t0 rows vs v-run arms/tracking: 0 differences; persona A persona-07fd3405cc40bd05.json, A-t0 persona-b71a32d4f6ca14e8.json (v-run 07fd3405…, b71a32d4…)
+R2	PASS	arms whose survival/prio_acc/pressure median differ from A (0.9220/1.0000/0.8156): none
+R3	PASS	medians: A-t0 +0.1199; T0-P0 -0.2674; T0-D0 +0.1629; T0-S0 +0.2868; T0-all +0.0000 (null(i) 97.5th 0.0000, at-null True); carrier: phasic (single knob)

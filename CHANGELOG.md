@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `bench/lab/0.11/`: the lab runs behind Result 2 as reproduction kits: the v-run (`v011-viability/`), I3-sim
+  (`i3sim-needs-viability/`) and the V2 residual follow-up (`v2res-valence-residual/`). Each carries its harness, frozen
+  configuration, tables, replay record and the bars as registered (`PREREGISTRATION.md`); `experiments/rerun.sh`
+  regenerates every table twice and checks it byte for byte (no API calls). All three regenerate byte-identical with
+  0.12.1. `docs/results/0.11/README.md` (Replication) and `REPRODUCE.md` point at them; N1 and N1-b stay pending.
+
 ## 0.12.1 - 2026-10-24
 
 Hosts, receipts and reproduction, and the 0.11 dogfood fixes; every document byte for byte as 0.12.0 except `live verify`'s

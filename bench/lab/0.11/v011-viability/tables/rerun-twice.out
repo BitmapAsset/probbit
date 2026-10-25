@@ -1,0 +1,10 @@
+== rerun.sh invocation 1 07:47:23Z
+tables: byte-identical (original, rerun 1, rerun 2):        5 files
+strands: 1240 verified, 0 failed
+EXIT 0
+A 1000 B 60 C 60 D 60 A-t0 60 
+== rerun.sh invocation 2 07:51:31Z
+tables: byte-identical (original, rerun 1, rerun 2):        5 files
+strands: 1240 verified, 0 failed
+EXIT 0
+A 1000 B 60 C 60 D 60 A-t0 60 
