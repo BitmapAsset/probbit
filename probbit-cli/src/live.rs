@@ -1028,7 +1028,7 @@ mod tests {
             for _pass in 0..5 {
                 let (mut a, mut b) = (start(&doc), start(&on));
                 for (k, e) in evs.iter().enumerate() {
-                    let mut one = |lv: &mut Live, out: &mut Vec<f64>| { let t = std::time::Instant::now(); lv.event(e, &run).unwrap(); out.push(t.elapsed().as_secs_f64() * 1e3); };
+                    let one = |lv: &mut Live, out: &mut Vec<f64>| { let t = std::time::Instant::now(); lv.event(e, &run).unwrap(); out.push(t.elapsed().as_secs_f64() * 1e3); };
                     if k % 2 == 0 { one(&mut a, &mut off_ms); one(&mut b, &mut on_ms); } else { one(&mut b, &mut on_ms); one(&mut a, &mut off_ms); } } } }
         let q = |xs: &mut Vec<f64>, f: f64| { xs.sort_by(|a, b| a.partial_cmp(b).unwrap()); xs[((xs.len() as f64 * f).ceil() as usize).clamp(1, xs.len()) - 1] };
         let (n, p50_off, p95_off, p50_on, p95_on) = (off_ms.len(), q(&mut off_ms, 0.5), q(&mut off_ms, 0.95), q(&mut on_ms, 0.5), q(&mut on_ms, 0.95));
