@@ -51,7 +51,64 @@ the agent's decision model answers four Boolean questions when one is configured
 the Jev adapter does (`classifier: jev`, OpenRouter, shadow by default: logged beside the keyword result and not fed to the
 engine until you turn `classifierShadow` off); otherwise a conservative keyword list (a correction outranks a "thanks").
 The method lands in the log line of every event. Flags the persona does not declare are dropped with one warning each;
-`time_pressure` is fed when the classifier scores it.
+`time_pressure` is fed when the classifier scores it (the urgency question, asked by the Jev adapter in live mode). With
+`sensesMode` set, the plugin also measures readings of its own (next section).
+
+## Senses: tempo, tool failures and time pressure (`sensesMode`)
+
+Unreleased (on `main`, not in 0.1.0). A persona can declare senses (docs/persona.md §2.11): readings the host measures,
+which the engine judges against a learned normal. The plugin measures three things per event and, depending on
+`sensesMode`, sends them or only logs them:
+
+| `sensesMode` | what happens |
+|---|---|
+| `off` (default) | nothing is measured; the event line, the strand and the hooks are exactly as before |
+| `shadow` | the readings are measured and written to `strands/<lane>.senses.jsonl`, one JSON line per event; nothing reaches the engine, so the strand stays byte-identical to `off` (the example entry in `install/` uses this) |
+| `feed` | the readings the persona declares are sent with the event: `tempo` and `tool_fail` as sense readings with source `env:probbit-stance`, `time_pressure` as the input when `timePressureSource` is `heuristic`; the strand records them as used |
+
+A sense is fed only when the persona declares it with the right kind and `env` in its `src`: `tempo` as a `number`,
+`tool_fail` as a `flag`. Otherwise it is logged and not sent, with one warning per sense in `feed` mode. A persona without
+a `senses:` block (the bundled one) gets the same event lines in `feed` as in `off`, except for a heuristic
+`time_pressure`. The engine refuses a reading outside a sense's `range` rather than clipping it, so the plugin sends a
+tempo above the range's top as the top; the senses line keeps the measured count.
+
+**`tempo`: events in the last 60 minutes, this one included.** It is computed from the strand alone, so a replay
+recomputes it: with u_k = round(1e6 × `elapsed_hours`) of event k (whole micro-hours; the strand stamps `elapsed_hours`
+to 1e-6 h, so the sums are exact), tempo at event n = #{m ≤ n : u_(m+1) + … + u_n ≤ 1 000 000}. A message exactly 60
+minutes after the previous one still counts it; one micro-hour later does not. The plugin reads the strand's last
+512 KiB (about 1000 events) for this.
+
+**`tool_fail`: a tool call failed since the previous event.** The `after_tool_call` hook (registered only with
+`sensesMode` shadow or feed; observe-only, it never changes a result) counts tool calls in the lane and the ones that
+report an `error`. The reading at event n is true when a call made since event n−1 failed. The turn that answers a
+message runs after that message's event, so a failure while answering message n−1 shows up at event n. Only calls from
+runs that produced an event are counted (a cron or heartbeat run in the same session is not); a call without a run id
+is. A tool that returns a failure inside its result instead of an `error` (a shell command with a non-zero exit, say)
+is not counted. The counts live in the plugin's memory, so a gateway restart between a failure and the next message
+loses them.
+
+**`time_pressure` (`timePressureSource`).** `question` (default): only the urgency question's answer, as before.
+`heuristic`: the question's answer when it gives one, otherwise a fixed mapping from the message text (fed only in
+`feed` mode). `off`: never. The heuristic is a mechanism over surface features, not a judgement of the person writing:
+
+| feature | adds |
+|---|---|
+| a strong deadline term: asap, urgent(ly), immediately, right now / right away, hurry, deadline, eod, by tonight / today / tomorrow / noon / midnight / a clock time, in N minutes / hours, before the launch / demo / call / meeting / deploy / release | 0.4 |
+| otherwise a soft one: quick(ly), soon, fast, today, tonight, now | 0.2 |
+| the first word (after an optional "please") is one of: add, build, cancel, check, delete, deploy, do, finish, fix, kill, make, merge, move, push, remove, restart, revert, rollback, roll, rotate, run, send, ship, start, stop, update, write | 0.2 |
+| a "!" or a fully capitalised word of 3+ letters | 0.1 |
+| at most 8 words, when another feature fired | 0.1 |
+
+The sum is clipped to [0, 1] and rounded to 2 decimals; the highest possible value is 0.8, a plain message reads 0, and
+values below 0.05 are not fed (as with the question). Examples: "fix the build" 0.3, "please ship it today" 0.5,
+"restart the gateway right now!" 0.8, "can you take a look at the logs when you get a chance?" 0.
+
+**The senses line** (`strands/<lane>.senses.jsonl`, shadow and feed): `n` (the strand's event number), `ts`, `mode`,
+`tempo` and `tempo_src` (`strand`), `time_pressure` and `time_pressure_src` (`question`, `heuristic` or `none`: the value
+the configured source picks, fed or not), `time_pressure_heuristic` and `time_pressure_features` (always, for comparison),
+`tool_fail`, `tool_fail_src` (`after_tool_call`), `tool_calls`, `tool_errors`, `declared` (the readings this persona
+would take) and `fed` (what this event sent beyond the flags and the question's `time_pressure`; always empty in
+shadow). A run that fails writes no line, and its tool counts carry over to the next event.
 
 The engine does the rest: the persona's priors and couplings, the moods decaying over the hours between messages, the
 habits that bind the stance (hard rules: `security` always makes caution `careful`), and the bounded learning from praise
@@ -138,6 +195,8 @@ rules before you ship it), and set `personaPath`. Keep the input ids the plugin 
 | `jevModel` | `typesafe/jev-1.13` | pinned Jev model id |
 | `jevKeyFile` | `~/.openclaw/probbit-stance/openrouter.env` | env-style file with `OPENROUTER_API_KEY`; read once at start, never logged |
 | `senderIds` | `[]` | when set, only these sender ids produce events (other group members are skipped) |
+| `sensesMode` | `off` | unreleased: `shadow` measures tempo, tool_fail and the heuristic time_pressure and logs them to `strands/<lane>.senses.jsonl`; `feed` also sends the ones the persona declares ([Senses](#senses-tempo-tool-failures-and-time-pressure-sensesmode)) |
+| `timePressureSource` | `question` | unreleased: `question` (the urgency question only), `heuristic` (the question, else the text heuristic; fed with `sensesMode` feed), `off` |
 | `destructive` | built-in list | `{id, tools, regex, param?}` or `{id, tools, pathPrefix}`; replaces the defaults |
 
 Default destructive list (shadow gate): `rm -rf`, `git push --force`, `curl | sh`, `openclaw config set/unset`, shell or
@@ -153,13 +212,15 @@ file-tool writes to `~/.openclaw/openclaw.json`. The gate never blocks; it write
 - `log/<lane>.jsonl`: `iso \t event \t stance-document \t meta`, where meta holds the event number, the idempotency key,
   the classification method and flags, the text source, the milliseconds, and (with jev) the classifier's answers.
 - `last/<lane>.ts`: the epoch of the previous event, for the hours the engine decays moods over.
+- `strands/<lane>.senses.jsonl` (`sensesMode` shadow or feed): one line per event with the readings the plugin measured,
+  the source of each and what it fed.
 
 ## Safety properties
 
 - Only the listed sessions are touched. Heartbeats, cron runs and inter-session messages never produce events.
 - One event per admitted user message (the native message id when the host gives one; a retry reuses the event).
 - Any failure (no binary, bad persona, timeout) means no injection and one warning; the hooks never throw into the host,
-  and the tool hook never blocks.
+  and the tool hooks never block (`after_tool_call` only counts).
 - The strand is append-only and never rewritten. The plugin serialises its own events per lane; do not write the same
   strand from another process.
 

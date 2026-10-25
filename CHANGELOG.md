@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- OpenClaw plugin (`plugins/openclaw`): it now measures the readings a persona's senses declare, shadow first.
+  `sensesMode` (`off` by default, so existing installs are unchanged; the example entry shows `shadow`): `shadow` writes
+  one JSON line per event to `strands/<lane>.senses.jsonl` (`tempo`, `time_pressure`, `tool_fail`, the source of each,
+  what was fed) and leaves the strand byte-identical to `off`; `feed` sends them. `tempo` is the number of events in the
+  last 60 minutes, this one included, computed from the strand's own `elapsed_hours` in whole micro-hours, so a replay
+  recomputes it exactly; it is sent only when the persona declares a `tempo` number sense with `src` env, and at most at
+  the sense's range top. `tool_fail` comes from the `after_tool_call` hook (observe-only, registered only with
+  `sensesMode` set): true at event n when a tool call made while answering since event n−1 reported an error; sent only
+  when the persona declares a `tool_fail` flag sense. `timePressureSource` (`question` by default, today's behaviour;
+  `heuristic`; `off`): with `heuristic`, a message the urgency question does not score gets `time_pressure` from a fixed
+  mapping of deadline words, an imperative first word, emphasis and length to [0, 0.8], written out in the plugin
+  README, and fed only with `sensesMode` feed. 146 tests (mocked host and the real binary; `npm run test:host` against
+  the installed 2026.9.7 types), the config schema regenerated in `openclaw.plugin.json`, `check:host` green.
+
 - Documentation, from a dress rehearsal of the published v0.12.1 artifacts (every install and reproduction command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): the glyph material in `plugins/openclaw/README.md`, docs/persona.md
   §2.18 and the cheat sheet is marked unreleased (probbit 0.12.1 refuses a persona with `display`, and the npm plugin 0.1.0

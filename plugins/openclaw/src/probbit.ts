@@ -134,12 +134,32 @@ export function lastStrandEventNumber(strandPath: string): number | undefined {
   return undefined;
 }
 
-/** Canonical-enough event line: sorted keys, true flags only, number inputs (time_pressure) when given, elapsed_hours always present. */
-export function buildEventLine(flags: string[], hours: number, numbers: Record<string, number> = {}): string {
+/** A sense reading with its own source (docs/persona.md §2.11: `{v, src}`). */
+export type Reading = { v: number | boolean; src: string };
+
+/**
+ * Canonical-enough event line: sorted keys, true flags only, number inputs (time_pressure) when given, elapsed_hours always
+ * present, and `senses` (sorted, each `{src, v}`) only when there is a reading to send.
+ */
+export function buildEventLine(
+  flags: string[],
+  hours: number,
+  numbers: Record<string, number> = {},
+  senses: Record<string, Reading> = {},
+): string {
   const ev: Record<string, unknown> = {};
   for (const f of flags) ev[f] = true;
   for (const [k, v] of Object.entries(numbers)) if (Number.isFinite(v)) ev[k] = v;
   ev.elapsed_hours = hours;
+  const ids = Object.keys(senses).sort();
+  if (ids.length > 0) {
+    const out: Record<string, { src: string; v: number | boolean }> = {};
+    for (const id of ids) {
+      const r = senses[id] as Reading;
+      out[id] = { src: r.src, v: r.v };
+    }
+    ev.senses = out;
+  }
   const sorted: Record<string, unknown> = {};
   for (const k of Object.keys(ev).sort()) sorted[k] = ev[k];
   return JSON.stringify(sorted);
@@ -258,8 +278,12 @@ export type LogMeta = {
   decisionNote?: string;
   /** Classified flags the persona does not declare (dropped before the event). */
   dropped?: string[];
-  /** time_pressure fed to the engine this event (live classifier only). */
+  /** time_pressure fed to the engine this event (the question's answer, or the heuristic with sensesMode feed). */
   timePressure?: number;
+  /** Where the fed time_pressure came from, when it was not the question (heuristic). */
+  timePressureSrc?: "heuristic";
+  /** Sense readings fed this event (sensesMode feed, declared senses only). */
+  senses?: Record<string, number | boolean>;
   /** The named classifier's run (Jev): answers, latency, cost; in shadow mode none of it was fed. */
   classifier?: Record<string, unknown>;
   /** Footer facts, kept so a restart-time dedupe renders the same footer. */

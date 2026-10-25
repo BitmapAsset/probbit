@@ -317,3 +317,31 @@ test("hook, classifier keyword: no classifier call even with a key", async () =>
   assert.equal(calls.length, 0);
   assert.equal(lastLog(dir).meta.method, "keyword");
 });
+
+test("hook, jev live + timePressureSource: off drops the question's value; heuristic keeps it (the question wins) and logs both", async () => {
+  const run = async (extra: Record<string, unknown>) => {
+    const dir = tempStateDir();
+    const { fetch } = mockFetch({ probs: {}, score: 3 });
+    const host = createHost({
+      lanes: { [GROUP_KEY]: LANE },
+      stateDir: dir,
+      binary: PROBBIT,
+      classifier: "jev",
+      classifierShadow: false,
+      jevKeyFile: keyFile(`OPENROUTER_API_KEY=${FAKE_KEY}\n`),
+      ...extra,
+    });
+    registerStance(host.api, { fetch });
+    await host.promptBuild(cliEvent("fix the build"), groupCtx("r1"));
+    return { dir, ...lastLog(dir) };
+  };
+  const off = await run({ timePressureSource: "off" });
+  assert.equal(off.event.time_pressure, undefined);
+  assert.equal(off.meta.timePressure, undefined);
+  const heur = await run({ timePressureSource: "heuristic", sensesMode: "feed" });
+  assert.equal(heur.event.time_pressure, 0.75, "the question answered, so its value is fed, not the heuristic's 0.3");
+  assert.equal(heur.meta.timePressureSrc, undefined);
+  const line = JSON.parse(readFileSync(join(heur.dir, "strands", `${LANE}.senses.jsonl`), "utf8").trim()) as Record<string, unknown>;
+  assert.deepEqual([line.time_pressure, line.time_pressure_src, line.time_pressure_heuristic], [0.75, "question", 0.3]);
+  assert.deepEqual(line.fed, []);
+});
