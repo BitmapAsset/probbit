@@ -11,6 +11,10 @@ export type GateMode = "shadow" | "off";
 export type InjectTarget = "appendContext" | "appendSystemContext";
 /** auto: the host decision role when an agent decisionModel is configured, else keywords. jev: the Jev adapter. keyword: keywords only. */
 export type ClassifierMode = "auto" | "jev" | "keyword";
+/** off: no readings (default). shadow: compute them and log them to strands/<lane>.senses.jsonl, feed nothing. feed: send them. */
+export type SensesMode = "off" | "shadow" | "feed";
+/** question: the urgency question's answer only (default). heuristic: that answer, else the text heuristic. off: never. */
+export type TimePressureSource = "question" | "heuristic" | "off";
 
 /** One entry of the destructive-action list the shadow gate checks. */
 export type DestructiveRule = {
@@ -51,6 +55,10 @@ export type StanceConfig = {
   destructive: DestructiveRule[];
   /** When non-empty, only turns whose ctx.senderId is listed produce events (group members other than the operator are skipped). */
   senderIds: string[];
+  /** The readings this plugin measures (tempo, tool_fail, the heuristic time_pressure): off, shadow (logged only) or feed. */
+  sensesMode: SensesMode;
+  /** Where time_pressure comes from; a heuristic value reaches the engine only with sensesMode feed. */
+  timePressureSource: TimePressureSource;
 };
 
 export const SHELL_TOOLS = ["exec", "bash", "shell"];
@@ -176,6 +184,14 @@ export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
   if (Array.isArray(src.senderIds) && src.senderIds.every((v) => typeof v === "string" && v.length > 0)) senderIds = src.senderIds as string[];
   else if (src.senderIds !== undefined) warnings.push("senderIds: expected an array of non-empty strings");
 
+  let sensesMode: SensesMode = "off";
+  if (src.sensesMode === "off" || src.sensesMode === "shadow" || src.sensesMode === "feed") sensesMode = src.sensesMode;
+  else if (src.sensesMode !== undefined) warnings.push("sensesMode: expected off, shadow or feed");
+  let timePressureSource: TimePressureSource = "question";
+  if (src.timePressureSource === "question" || src.timePressureSource === "heuristic" || src.timePressureSource === "off") {
+    timePressureSource = src.timePressureSource;
+  } else if (src.timePressureSource !== undefined) warnings.push("timePressureSource: expected question, heuristic or off");
+
   return {
     config: {
       lanes,
@@ -197,6 +213,8 @@ export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
       jevKeyFile: expandHome(str("jevKeyFile", "~/.openclaw/probbit-stance/openrouter.env"), home),
       destructive,
       senderIds,
+      sensesMode,
+      timePressureSource,
     },
     warnings,
   };
@@ -272,6 +290,18 @@ export const CONFIG_JSON_SCHEMA = {
       description: "Env-style file with OPENROUTER_API_KEY (default ~/.openclaw/probbit-stance/openrouter.env); read once at start.",
     },
     senderIds: { type: "array", items: { type: "string", minLength: 1 } },
+    sensesMode: {
+      type: "string",
+      enum: ["off", "shadow", "feed"],
+      description:
+        "Default off. shadow: measure tempo, tool_fail and the heuristic time_pressure each event and log them to strands/<lane>.senses.jsonl, feed nothing. feed: send the readings the persona declares.",
+    },
+    timePressureSource: {
+      type: "string",
+      enum: ["question", "heuristic", "off"],
+      description:
+        "Default question: time_pressure only from the urgency question (live jev). heuristic: that answer, else the documented text heuristic (fed only with sensesMode feed). off: never.",
+    },
     destructive: {
       type: "array",
       items: {

@@ -105,6 +105,24 @@
           "minLength": 1
         }
       },
+      "sensesMode": {
+        "type": "string",
+        "enum": [
+          "off",
+          "shadow",
+          "feed"
+        ],
+        "description": "Default off. shadow: measure tempo, tool_fail and the heuristic time_pressure each event and log them to strands/<lane>.senses.jsonl, feed nothing. feed: send the readings the persona declares."
+      },
+      "timePressureSource": {
+        "type": "string",
+        "enum": [
+          "question",
+          "heuristic",
+          "off"
+        ],
+        "description": "Default question: time_pressure only from the urgency question (live jev). heuristic: that answer, else the documented text heuristic (fed only with sensesMode feed). off: never."
+      },
       "destructive": {
         "type": "array",
         "items": {

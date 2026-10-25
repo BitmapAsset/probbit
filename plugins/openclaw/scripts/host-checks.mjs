@@ -18,7 +18,7 @@ const loaded = manifestMod.r(deploy);
 const schema = JSON.parse(readFileSync(join(ROOT, "openclaw.plugin.json"), "utf8")).configSchema;
 const cfg = JSON.parse(readFileSync(join(ROOT, "install", "openclaw-entries.json"), "utf8")).plugins.entries["probbit-stance"].config;
 const good = validator.r({ schema, value: cfg, cacheKey: "probbit-stance:good" });
-const bad = validator.r({ schema, value: { ...cfg, gateMode: "enforce", lanes: { x: "../x" } }, cacheKey: "probbit-stance:bad" });
+const bad = validator.r({ schema, value: { ...cfg, gateMode: "enforce", sensesMode: "live", lanes: { x: "../x" } }, cacheKey: "probbit-stance:bad" });
 const entry = await import(join(deploy, "dist", "src", "index.js"));
 console.log(JSON.stringify({
   openclaw: version,

@@ -3,7 +3,7 @@
  * `openclaw` package installed (its npm package is about 390 MB). Shapes copied from OpenClaw 2026.9.7
  * (`dist/plugin-sdk/plugin-entry.d.ts` and the hook types it re-exports: PluginHookBeforePromptBuildEvent,
  * PluginHookBeforePromptBuildResult, PluginHookAgentContext, PluginHookBeforeToolCallEvent, PluginHookToolContext,
- * PluginHookBeforeToolCallResult). Only the fields this plugin reads or returns are declared; every one of them is
+ * PluginHookBeforeToolCallResult, PluginHookAfterToolCallEvent). Only the fields this plugin reads or returns are declared; every one of them is
  * optional in the host where it is optional here.
  *
  * `npm run build:host` compiles against the real SDK instead (`node_modules/openclaw` -> an installed OpenClaw), which is
@@ -66,6 +66,16 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
     toolCallId?: string;
     derivedPaths?: readonly string[];
   };
+  /** Observe-only: fired once per completed tool call, with the error message when the call failed. */
+  export type PluginHookAfterToolCallEvent = {
+    toolName: string;
+    params: Record<string, unknown>;
+    runId?: string;
+    toolCallId?: string;
+    result?: unknown;
+    error?: string;
+    durationMs?: number;
+  };
   export type PluginHookBeforeToolCallResult = {
     params?: Record<string, unknown>;
     block?: boolean;
@@ -75,14 +85,17 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
   export type PluginHookEvents = {
     before_prompt_build: PluginHookBeforePromptBuildEvent;
     before_tool_call: PluginHookBeforeToolCallEvent;
+    after_tool_call: PluginHookAfterToolCallEvent;
   };
   export type PluginHookContexts = {
     before_prompt_build: PluginHookAgentContext;
     before_tool_call: PluginHookToolContext;
+    after_tool_call: PluginHookToolContext;
   };
   export type PluginHookResults = {
     before_prompt_build: PluginHookBeforePromptBuildResult | undefined | void;
     before_tool_call: PluginHookBeforeToolCallResult | undefined | void;
+    after_tool_call: undefined | void;
   };
   export type PluginHookName = keyof PluginHookEvents;
   export type PluginHookHandler<K extends PluginHookName> = (
