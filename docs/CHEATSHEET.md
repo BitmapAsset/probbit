@@ -51,7 +51,7 @@ The exact tiers run before the sampler:
   reward after this event.
 - `surprise` (a persona with a `surprise:` block, docs/persona.md §2.13): per learned trait its gain g while above 1.
 - `glyph`, `glyph_why` (unreleased, on `main` after 0.12.1; a persona with `display.glyphs`, docs/persona.md §2.18): one emoji from the stance by rule order
-  (bound habit, else the mood table cell, then the surprise modifier); `live` strand lines carry `glyph`, `verify`
+  (a habit in force, else the mood table cell, then the surprise modifier); `live` strand lines carry `glyph`, `verify`
   recomputes it.
 
 ## Senses (0.9.0, docs/persona.md §2.11)

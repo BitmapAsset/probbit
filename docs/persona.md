@@ -981,13 +981,15 @@ display:
       even: ["😌", "🙂", "😬"]
       up:   ["😊", "😄", "🤩"]
     surprise: {glyph: "👀", z_at_least: 2.0}  # optional modifier (default z_at_least 2.0)
-    habits: {security_careful: "🔒"}          # optional: habit id -> glyph, first listed wins
+    habits: {security_careful: "🔒"}          # optional: habit id -> glyph, first listed in force wins
 ```
 
 **The rule order** (first base match wins; at most one base glyph and one modifier):
 
-1. the first habit listed under `habits` that is in the stance's `habits.bound` (the habit changed the stance; a habit in
-   force that the habit-free twin already obeys does not count);
+1. the first habit listed under `habits` that is in the stance's `habits.active`. Active means the habit applies this turn;
+   bound means the habit-free stance would have broken it and the engine held it, so a habit whose inputs already take the
+   stance where it points is active and not bound, and its glyph still shows. An unconditional habit (no `when`) is active
+   on every turn, so listing one here shows its glyph on every turn;
 2. otherwise the table's cell at the two moods' levels: `table[<level of the first mood>][<index of the second mood's level
    in its list>]`;
 3. then the modifier: `surprise.glyph` appended when the stance carries `deviation` (an `expectation` block, section 2.17,
@@ -1006,12 +1008,18 @@ engine: display` (not verified, not a divergence).
 
 **Read strictly** (`persona check`, `persona lint` and every command that loads the persona refuse it at its path): `moods`
 names two moods of the persona, each with its levels listed once; `table` has one row per level of the first mood, each a
-list with one glyph per level of the second; every glyph is one Unicode code point that shows on its own: not a control or
-a space, no zero-width joiner, variation selector, keycap mark, skin-tone modifier, regional indicator, tag or combining
-mark (so a terminal, a chat client and a device panel draw one glyph, and a base glyph and its modifier never fuse into a
-third); `habits` names habits of the persona; no key is repeated; `z_at_least` is a number >= 0.
+list with one glyph per level of the second; every glyph is one Unicode code point that shows on its own, optionally
+followed by U+FE0F (the emoji presentation selector, so `🛠️` and `❤️` pass) and by nothing else: the code point is not a
+control or a space, and no zero-width joiner, other variation selector, keycap mark, skin-tone modifier, regional indicator,
+tag or combining mark appears (so `👨‍💻` and `1️⃣` are refused; a terminal, a chat client and a device panel draw one glyph,
+and a base glyph and its modifier never fuse into a third); `habits` names habits of the persona; no key is repeated;
+`z_at_least` is a number >= 0. `persona lint` reports e.g. `display.glyphs.table.even[2]: one Unicode code point,
+optionally followed by U+FE0F (no ZWJ, skin-tone, flag, keycap, tag or other combining sequence)`. A host that counts a
+line's length in code points counts the selector as one more (`🛠️` is two, `🛠️👀` three). With the modifier the glyph is
+the base followed by the modifier, each one code point plus an optional selector, so a host splits them at the first code
+point (and its selector).
 
-What it is: a lookup from the stance's mood levels, bound habits and deviation to a symbol, so a person reading the chat
+What it is: a lookup from the stance's mood levels, active habits and deviation to a symbol, so a person reading the chat
 or the monitor sees the engine's state at a glance. What it is not: a measurement of anything beyond those fields.
 
 ## 3. Compilation: persona + state + inputs → one probbit IR program

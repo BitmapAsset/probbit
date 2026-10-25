@@ -33,11 +33,14 @@ the state move; the strand proves it did.
 
 **The glyph (unreleased).** Not in `probbit-stance` 0.1.0 on npm nor in probbit 0.12.1: it is on `main` and needs a
 probbit built from `main`. With a persona that has `display.glyphs` (the bundled one on `main` does; [docs/persona.md](../../docs/persona.md)
-§2.18), the engine computes one emoji from the stance: a bound habit's glyph first, else the valence x pressure table, then
-👀 when the expectation block reports a surprise. The footer opens with it (`Assistant 🙂 stance #14 · …`, or `◆🙂 stance
+§2.18), the engine computes one emoji from the stance: the glyph of a habit in force first, else the valence x pressure
+table, then 👀 when the expectation block reports a surprise. The footer opens with it (`Assistant 🙂 stance #14 · …`, or `◆🙂 stance
 #14 · …` with a symbol prefix), and the block gives the model one more line, `Mood glyph: 🙂 (valence even 0.71, pressure
 steady 0.80). Use at most one mood emoji in this reply and make it this one.`, so the reply's mood emoji is the engine's
-reading rather than the model's guess. `glyphInReply: false` drops that line and keeps the glyph in the footer. The strand
+reading rather than the model's guess. With the surprise modifier the line names the base glyph and reports the modifier
+apart (`Mood glyph: 🙂 (…); surprise registered this turn (z 2.3), shown as 👀 in the footer. Use at most one mood emoji in
+this reply and make it 🙂.`), and the footer keeps `🙂👀`. `glyphInReply: false` drops that line and keeps the glyph in the
+footer. The strand
 logs the glyph on every event line and `probbit live verify` recomputes it.
 
 ## How it decides what to feed the engine

@@ -982,8 +982,8 @@ mod tests {
             let Json::Obj(v) = s1 else { panic!() }; let bare = Json::Obj(v.iter().filter(|(k, _)| k != "glyph" && k != "glyph_why").cloned().collect());
             assert_eq!(persona::canon(&bare), persona::canon(s0), "the document is the one without the block, plus the glyph");
             let (g, why) = (s1.get("glyph").and_then(Json::as_str).unwrap(), s1.get("glyph_why").and_then(Json::as_str).unwrap());
-            let bound = s1.get("habits").and_then(|h| h.get("bound")).and_then(Json::as_arr).unwrap();
-            if bound.iter().any(|b| b.as_str() == Some("no_jokes_on_loss")) { assert_eq!((g, why), ("🛟", "habit no_jokes_on_loss")); habit += 1; continue; }
+            let active = s1.get("habits").and_then(|h| h.get("active")).and_then(Json::as_arr).unwrap();
+            if active.iter().any(|b| b.as_str() == Some("no_jokes_on_loss")) { assert_eq!((g, why), ("🛟", "habit no_jokes_on_loss")); habit += 1; continue; }
             let lv = |m: &str| s1.get("mood").and_then(|x| x.get(m)).and_then(|e| e.get("level")).and_then(Json::as_str).unwrap().to_string();
             let (va, pr) = (lv("valence"), lv("pressure"));
             let row = ["down", "even", "up"].iter().position(|x| *x == va).unwrap(); let col = ["calm", "steady", "keyed"].iter().position(|x| *x == pr).unwrap();
@@ -1007,6 +1007,26 @@ mod tests {
         let cut: String = ls[..21].iter().map(|l| format!("{l}\n")).collect();
         let st20 = { let mut r = Replay::open(&ls[0]).unwrap(); for l in &ls[1..21] { r.step(l, &run).unwrap(); } r.live.st.clone() };
         let mut lv = resume(&cut, &pn, st20, Clock::Fixed).unwrap(); let (_, l21) = lv.event(&evs[20], &run).unwrap(); assert_eq!(l21, ls[21]);
+    }
+
+    /// §2.18: the habit rule reads the habit in force (`habits.active`), not `habits.bound`: with an input that already takes the
+    /// stance where the habit points, the habit applies but does not bind, and its glyph still shows on every event it applies;
+    /// on the others the table's cell
+    #[test]
+    fn the_habit_glyph_reads_the_habit_in_force() {
+        let off = json::parse(&GDOC.replace(r#""effects":{"valence":-1.5,"pressure":1.2}"#, r#""effects":{"valence":-1.5,"pressure":1.2,"humour":-8}"#)).unwrap();
+        let on = with_display(&off, &[("display", GLYPHS)]); let pn = persona::build(&on).unwrap();
+        let evs: Vec<Json> = (0..40).map(gev).collect();
+        let (text, docs) = glife(&pn, &on, &evs);
+        let (mut applies, mut not_bound) = (0, 0);
+        for (d, e) in docs.iter().zip(&evs) {
+            let has = |k: &str| d.get("habits").and_then(|h| h.get(k)).and_then(Json::as_arr).unwrap().iter().any(|b| b.as_str() == Some("no_jokes_on_loss"));
+            let (g, why) = (d.get("glyph").and_then(Json::as_str).unwrap(), d.get("glyph_why").and_then(Json::as_str).unwrap());
+            assert_eq!(has("active"), e.get("loss") == Some(&Json::Bool(true)));
+            if has("active") { applies += 1; if !has("bound") { not_bound += 1; } assert_eq!((g, why), ("🛟", "habit no_jokes_on_loss")); }
+            else { assert!(why.starts_with("mood ") && g != "🛟", "{why}"); } }
+        assert!(applies > 0 && not_bound == applies, "the habit must apply without binding: {applies} {not_bound}");
+        assert!(verify(&text, &run).is_ok());
     }
 
     /// §2.18, the cost of the glyph: the strands named in PROBBIT_GLYPH_COST (`:`-separated) are replayed from their headers'
@@ -1058,7 +1078,8 @@ mod tests {
     }
 
     /// §2.18: `display.glyphs` is read strictly (the lint rules): two moods of the persona with their levels each once, one row
-    /// per level, one glyph per column, every glyph one code point that shows on its own, known habits, no repeated key
+    /// per level, one glyph per column, every glyph one code point that shows on its own (optionally followed by U+FE0F), known
+    /// habits, no repeated key
     #[test]
     fn display_glyphs_are_read_strictly() {
         let off = json::parse(GDOC).unwrap();
@@ -1073,9 +1094,13 @@ mod tests {
         assert_eq!(err(&swap(r#""up":["😊","😄","🤩"]"#, r#""up":["😊","😄"]"#)).map(|e| e.0), Some("display.glyphs.table.up".into()));
         assert_eq!(err(&swap(r#","up":["😊","😄","🤩"]"#, "")).map(|e| e.0), Some("display.glyphs.table.up".into()));
         assert_eq!(err(&swap(r#""up":"#, r#""upp":"#)).map(|e| e.0), Some("display.glyphs.table.upp".into()));
-        // ZWJ sequences, variation selectors, skin tones, flags, keycaps, two glyphs, empty, a space: refused at the cell
-        for bad in ["👩\u{200d}💻", "☺\u{fe0f}", "👍\u{1f3fd}", "\u{1f1fa}", "1\u{20e3}", "🙂🙂", "", " ", "\u{1f3fd}"] {
-            let g = swap("😬", bad); assert_eq!(err(&g).map(|e| e.0), Some("display.glyphs.table.even[2]".into()), "{bad:?}"); }
+        // one code point followed by the emoji presentation selector U+FE0F is one glyph (🛠️, ❤️, ☺️)
+        for good in ["🛠\u{fe0f}", "❤\u{fe0f}", "☺\u{fe0f}", "☺"] { assert_eq!(ok(&swap("😬", good)), Ok(true), "{good:?}"); }
+        assert_eq!(ok(&swap(r#""glyph":"👀""#, "\"glyph\":\"👁\u{fe0f}\"")), Ok(true));
+        // ZWJ sequences, the text selector, a lone or doubled selector, skin tones, flags, keycaps (1️⃣ and the bare mark), two
+        // glyphs, a code point after the selector, empty, a space: refused at the cell
+        for bad in ["👨\u{200d}💻", "👩\u{200d}💻", "☺\u{fe0e}", "\u{fe0f}", "🙂\u{fe0f}\u{fe0f}", "🙂\u{fe0f}🙂", "👍\u{1f3fd}", "\u{1f1fa}", "1\u{fe0f}\u{20e3}", "1\u{20e3}", "🙂🙂", "", " ", "\u{1f3fd}"] {
+            let g = swap("😬", bad); assert_eq!(err(&g), Some(("display.glyphs.table.even[2]".into(), "one Unicode code point, optionally followed by U+FE0F (no ZWJ, skin-tone, flag, keycap, tag or other combining sequence)".into())), "{bad:?}"); }
         assert_eq!(err(&swap(r#""glyph":"👀""#, r#""glyph":"👀👀""#)).map(|e| e.0), Some("display.glyphs.surprise.glyph".into()));
         assert_eq!(err(&swap(r#""z_at_least":2.0"#, r#""z_at_least":-1"#)).map(|e| e.0), Some("display.glyphs.surprise.z_at_least".into()));
         assert_eq!(err(&swap(r#""no_jokes_on_loss":"🛟""#, r#""no_such":"🛟""#)).map(|e| e.0), Some("display.glyphs.habits.no_such".into()));
