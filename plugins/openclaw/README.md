@@ -22,12 +22,17 @@ Mood glyph: 🔒 (valence even 0.64, pressure keyed 0.58). Use at most one mood 
 Write from this stance. End the visible reply with one line: "Assistant 🔒 stance #14 · valence even · pressure keyed · security means careful, no play · in: +2 · moved: pressure, +1".
 ```
 
+That block is what the plugin on `main` writes (unreleased, see "The glyph" below). `probbit-stance` 0.1.0, the version
+on npm, writes it without the `Mood glyph:` line and ends with `"Assistant stance #14 · valence even · pressure keyed ·
+security means careful, no play · in: correction, security · moved: pressure, caution"`.
+
 The footer is optional (`footer: false` removes it). With it on, the agent's visible reply ends with a line that says
 which event this was, the two moods, a few words of the stance, the inputs the plugin fed the engine (`in:`) and the moods
 and traits whose level changed since the previous event (`moved:`), 120 characters at most. People in the chat can see
 the state move; the strand proves it did.
 
-**The glyph.** With a persona that has `display.glyphs` (the bundled one does; [docs/persona.md](../../docs/persona.md)
+**The glyph (unreleased).** Not in `probbit-stance` 0.1.0 on npm nor in probbit 0.12.1: it is on `main` and needs a
+probbit built from `main`. With a persona that has `display.glyphs` (the bundled one on `main` does; [docs/persona.md](../../docs/persona.md)
 §2.18), the engine computes one emoji from the stance: the glyph of a habit in force first, else the valence x pressure
 table, then 👀 when the expectation block reports a surprise. The footer opens with it (`Assistant 🙂 stance #14 · …`, or `◆🙂 stance
 #14 · …` with a symbol prefix), and the block gives the model one more line, `Mood glyph: 🙂 (valence even 0.71, pressure
@@ -65,6 +70,8 @@ Requirements: OpenClaw 2026.9.7 or later, the `probbit` binary on the gateway's 
    The flag is the host's consent step for a plugin that registers hooks (without it the install stops and asks for it).
    The host also asks you to confirm a source outside ClawHub (npm): answer yes, or add `--force` in a script.
    From a clone instead: `cd plugins/openclaw && npm ci && npm run build && openclaw plugins install --link "$PWD" --force --accept-capabilities`.
+   A clone of `main` is ahead of the npm package: its bundled persona has `display.glyphs`, which probbit 0.12.1 refuses
+   (`display: unknown field`), so pair it with a probbit built from the same clone, or check out the tag `v0.12.1` first.
    The install writes `plugins.entries.probbit-stance.enabled: true` and nothing else; with no `lanes` configured the
    plugin registers no hooks and logs one warning, so it is inert until step 3.
 3. Tell it which sessions get a stance. Merge into `plugins.entries` of `~/.openclaw/openclaw.json`
@@ -98,7 +105,7 @@ the strand), or `--follow` in a terminal.
 
 ## Your own persona
 
-Copy `personas/assistant.yaml`, rename the identity, change the priors, the `say` words and the habits
+Copy `personas/assistant.yaml` (on `main` it carries a `display` block; delete it for probbit 0.12.1), rename the identity, change the priors, the `say` words and the habits
 ([docs/persona.md](../../docs/persona.md) is the reference; `probbit persona prove` and `probbit check` test a persona's
 rules before you ship it), and set `personaPath`. Keep the input ids the plugin sets (`praise`, `correction`, `failure`,
 `owner_upset`, `security`) if you want those readings; drop any you do not want and the plugin skips them with a warning.
@@ -116,13 +123,13 @@ rules before you ship it), and set `personaPath`. Keep the input ids the plugin 
 | `lanes` | `{}` | exact session key, or prefix ending in `*`, → lane name (`[a-z0-9][a-z0-9._-]*`). Only these sessions are hooked. |
 | `personaPath` | bundled `personas/assistant.yaml` | persona for `probbit live` / `persona init` |
 | `stateDir` | `~/.openclaw/probbit-stance` | `state/`, `strands/`, `last/`, `log/`, one file per lane |
-| `binary` | `probbit` | the probbit binary (0.11.0+); a path or a name on PATH |
+| `binary` | `probbit` | the probbit binary (0.11.0+; a persona with `display.glyphs` needs a build from `main`); a path or a name on PATH |
 | `seed` | `42` | seed for `persona init` when a lane has neither state nor strand |
 | `timeoutMs` | `500` | the hook's wait for probbit; a late run still finishes and logs `"late": true` |
 | `gateMode` | `shadow` | `shadow` logs would-deny lines for destructive tool calls under a careful stance; `off` registers no tool hook |
 | `footer` | `true` | ask for the footer line |
 | `footerPrefix` | the persona's name | opens the footer line (an emoji or a short handle works; 24 characters at most) |
-| `glyphInReply` | `true` | with a persona that has `display.glyphs`: the block's `Mood glyph:` line (the footer shows the glyph either way) |
+| `glyphInReply` | `true` | unreleased (on `main`, not in 0.1.0); with a persona that has `display.glyphs`: the block's `Mood glyph:` line (the footer shows the glyph either way) |
 | `inject` | `appendContext` | `appendSystemContext` puts the block in the system prompt instead (changes the cached prefix every turn) |
 | `classifier` | `auto` | `auto`: the agent's decision model when configured, else keywords; `jev`: the Jev adapter; `keyword` |
 | `classifierShadow` | `true` | with `jev`: log Jev's answers, feed the engine the keyword flags |

@@ -119,7 +119,7 @@ individual behind a `strand_path` as it grows: `probbit monitor STRAND --serve -
 terminal ([persona.md](persona.md) §5.8).
 
 `flags` are the command's flags without the dashes: `{"budget_ms": 200, "seed": 3, "summary": true}`; `summary: true`
-returns the compact answer (README, "First five minutes"). `infeasible` and `refused` / `declined` are answers; bad input
+returns the compact answer (README, "Use it from anything"). `infeasible` and `refused` / `declined` are answers; bad input
 and flag errors come back as tool errors (`isError`) with the `{"error"}` object or the flag message.
 
 Protocol: checked against the MCP specification revision 2026-07-28 (the current one on 2026-10-01). Requests that
