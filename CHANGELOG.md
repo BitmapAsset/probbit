@@ -5,7 +5,6 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-- `CITATION.cff` at the repository root (GitHub's "Cite this repository" box and Zenodo read it).
 - Reproduction scripts: `bench/agentdojo/experiments/rerun.sh` and `e3/experiments/rerun_e3.sh` now compare every
   regenerated table with the committed file (git `HEAD`, or the file on disk before the run outside git) and print
   `MATCH <file> <sha256>` or `DIFFERS <file> <sha256> (committed <sha256>)`, exiting non-zero on any `DIFFERS`; the old
