@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky.
 - OpenClaw plugin (`plugins/openclaw`): it now measures the readings a persona's senses declare, shadow first.
   `sensesMode` (`off` by default, so existing installs are unchanged; the example entry shows `shadow`): `shadow` writes
   one JSON line per event to `strands/<lane>.senses.jsonl` (`tempo`, `time_pressure`, `tool_fail`, the source of each,
