@@ -23,10 +23,13 @@ PROBBIT=/path/to/probbit experiments/rerun.sh venv011/bin/python   # probbit 0.1
 ```
 
 numpy 1.26.4 has wheels for Python 3.9 to 3.12 (CI uses 3.12); on a newer `python3` use `python3.12 -m venv venv011`. A
-numpy compiled from source on 3.13 or later can move the bootstrap columns of `bars.tsv` in the fourth decimal (REPRODUCE.md).
+numpy compiled from source on 3.13 or later can move the bootstrap columns of `bars.tsv` in the fourth decimal (REPRODUCE.md),
+so `rerun.sh` refuses a Python outside 3.9 to 3.12; `PYTHON=<python>` runs another interpreter with a warning instead.
 
-`rerun.sh` runs `experiments/judge.py` twice over `tables/episodes.jsonl` and the strands and prints `identical` for each
-output (`results.tsv`, `bars.tsv`, `strands-verify.tsv`). The judge: paired bootstrap over cases (10,000 resamples,
+`rerun.sh` runs `experiments/judge.py` twice over `tables/episodes.jsonl` and the strands and prints `two passes
+identical` for each output, then one line per table (`results.tsv`, `bars.tsv`, `strands-verify.tsv`) against the
+committed file at git `HEAD`: `MATCH <file> <sha256>`, or `DIFFERS <file> <sha256> (committed <sha256>)` and a non-zero
+exit. The judge: paired bootstrap over cases (10,000 resamples,
 `numpy.random.default_rng(20261022)`), exact McNemar, 1,000 within-pair label permutations as the null.
 
 ## Rerun the benchmark (API calls, about 3 USD, about 35 min)
@@ -104,8 +107,9 @@ experiments/rerun_e3.sh venv/bin/python
 ```
 
 `rerun_e3.sh` runs `experiments/judge_e3.py` twice over `tables/episodes-d.jsonl` and E2b's `../tables/episodes.jsonl`
-and prints `identical` with the sha256 of each output (`results-e3.tsv`, `bars-e3.tsv`); `git status --short tables` stays
-empty. The judge imports E2b's statistics (`boot_ci`, `mcnemar_exact`, `perm_null`) from `../experiments/judge.py`.
+and prints `two passes identical` with the sha256 of each output, then `MATCH` or `DIFFERS` for `results-e3.tsv` and
+`bars-e3.tsv` against git `HEAD` (non-zero exit on `DIFFERS`), with the same Python guard; `git status --short tables`
+stays empty. The judge imports E2b's statistics (`boot_ci`, `mcnemar_exact`, `perm_null`) from `../experiments/judge.py`.
 
 ### Rerun arm D (API calls, about 1 USD, about 12 min)
 
