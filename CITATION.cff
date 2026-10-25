@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use probbit in research or a product, please cite it as below."
+title: "probbit: an exact, auditable stance layer beside language-model agents"
+type: software
+version: 0.12.1
+date-released: 2026-10-24
+license: Apache-2.0
+repository-code: "https://github.com/BitmapAsset/probbit"
+url: "https://github.com/BitmapAsset/probbit"
+abstract: "A p-bit processor for agents: every rule kept by construction, exact odds for every part, a refusal when it cannot vouch; plus a persona layer that settles an agent's stance each turn as one exact program and logs it in a replayable strand."
+keywords:
+  - p-bits
+  - probabilistic computing
+  - decision engine
+  - language-model agents
+  - prompt injection
+  - AgentDojo
+  - persona
+  - Rust
+authors:
+  - family-names: "Choudhary"
+    given-names: "Garvit"
