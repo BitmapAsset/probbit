@@ -292,9 +292,15 @@ try {
   assert.equal(fs.glyph,faceOut[4].glyph);assert.ok(fs.label.includes(faceOut[4].glyph_why));assert.ok(fs.panel.includes(faceOut[4].glyph_why));
   await click('#why-toggle');assert.equal((await faceState()).panelHidden,true);
   await navigate(faceServer.url+'?closed');await event(5);assert.equal((await faceState()).panelHidden,true,'Closed is remembered too');
-  await click('[data-event="2"]');fs=await faceState();
-  assert.equal(fs.glyph,faceOut[1].glyph,'A stored document shows its own glyph');assert.equal(fs.settleHidden,true,'The trajectory belongs to the latest received event only');
+  // The history button is disabled until /doc/2 has loaded, and a click on it then selects nothing (document 2's glyph
+  // equals document 5's, so only the view mode tells): wait for it, then poll the strip, which hides on a stored document.
+  await until(()=>value(`document.querySelector('[data-event="2"]')?.disabled===false`),'stored document 2 loaded');
+  await click('[data-event="2"]');assert.equal((await state()).view,'INSPECTING #2');
+  fs=await until(async()=>{const s=await faceState();return s.settleHidden===true&&s;},'the trajectory belongs to the latest received event only',1500);
+  assert.equal(fs.glyph,faceOut[1].glyph,'A stored document shows its own glyph');
   await click('#follow');await event(5);
+  fs=await until(async()=>{const s=await faceState();return s.settleHidden===false&&s;},'following the latest event shows its trajectory again',1500);
+  assert.equal(fs.beta,'settled · β 1.00');assert.equal(fs.rows,8);
   report.face={...report.face,glyph:true,meters:true,whyPanel:true,settle:true,remembered:true};
 
   // Author a different persona: no assumptions about the tutor, a preset character, or fixed mood/trait names.

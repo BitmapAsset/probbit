@@ -66,7 +66,7 @@ const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 function svg(tag, attrs, parent) { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); parent.appendChild(e); return e; }
 function fact(parent, label, value) { mk('dt', '', parent, label); mk('dd', '', parent, value); }
 function badge(kind, text) { const b = $('badge'); b.className = 'badge ' + kind; b.textContent = text; b.title = text; }
-function reset() { epoch++; loading?.abort(); loading = null; cache.clear(); absent.clear(); live = null; viewed = null; held = false; historyError = ''; receivedAt = null; settledN = null; }
+function reset() { epoch++; loading?.abort(); loading = null; cache.clear(); absent.clear(); live = null; viewed = null; held = false; historyError = ''; receivedAt = null; settledN = null; clearTimeout(settleTimer); settleTimer = 0; }
 function bounds() { return [Math.max(1, (live?.n || 1) - SPARK + 1, live?.from_checkpoint || 1), live?.n || 0]; }
 function build(m) {
   const key = JSON.stringify(m); if (key === metaKey) return;
@@ -258,8 +258,7 @@ function face(f) {
     if(level&&lastLevels[id]&&lastLevels[id]!==level){box.classList.remove('cue');void box.offsetWidth;box.classList.add('cue');setTimeout(()=>box.classList.remove('cue'),600);}
     if(level)lastLevels[id]=level;
   }
-  why(f);
-  const st=f===live&&!held?obj(f.settle):null;$('settle').hidden=!st;if(st&&f.n===settledN&&!settleTimer)settle(st,(st.betas||[]).length-1);
+  why(f);settleView();
 }
 function why(f) {
   const d=obj(f.doc),facts=$('why-facts'),ins=$('why-inputs'),hab=$('why-habits');facts.replaceChildren();ins.replaceChildren();hab.replaceChildren();if(!d)return;
@@ -276,6 +275,12 @@ function why(f) {
   for(const h of active)mk('span','chip'+(bound.includes(h)?' on':'')+(h===gave?' glyph-habit':''),hab,h+(bound.includes(h)?' · bound':'')+(h===gave?' · gave the glyph':''));
   if(!active.length)mk('span','chip',hab,'None in force');
 }
+// The settle strip shows only the latest received event while the view follows it (one place decides; every render comes
+// here): a stored document or a held view hides it and cancels the pending steps; following again shows that event's steps
+function settleView() {
+  const st=!held&&viewed===live&&live?.doc?obj(live.settle):null;$('settle').hidden=!st;
+  if(!st){clearTimeout(settleTimer);settleTimer=0;}else if(live.n!==settledN){settledN=live.n;animateSettle(st);}else if(!settleTimer)settle(st,(st.betas||[]).length-1);
+}
 // RFC 0009: the trait odds of this event's exact trajectory at step k (hottest first; the last step, beta = 1, is the settled
 // stance); the segment at full strength is the level the stance document reports
 function settle(st,k) {
@@ -289,7 +294,7 @@ function animateSettle(st) {
   clearTimeout(settleTimer);settleTimer=0;const n=(st.betas||[]).length;if(!n)return;
   if(still()){settle(st,n-1);return;}
   // timers, not animation frames: a hidden tab still reaches the settled step
-  const each=Math.min(600,n*75)/n,step=k=>{settle(st,k);settleTimer=k<n-1?setTimeout(()=>step(k+1),each):0;};step(0);
+  const each=Math.min(600,n*75)/n,step=k=>{if(held||viewed!==live||live?.settle!==st){settleTimer=0;return;}settle(st,k);settleTimer=k<n-1?setTimeout(()=>step(k+1),each):0;};step(0);
 }
 // docs/persona.md §2.18: the engine's glyph from the stance document (display.glyphs), with a short transition when it changes
 function glyph(d) {
@@ -341,7 +346,6 @@ function receive(f) {
   if(f.doc&&(!live||f.n!==live.n))receivedAt=Date.now();live=f;if(f.doc)cache.set(f.n,f);
   const [first]=bounds();for(const n of cache.keys())if(n<first)cache.delete(n);for(const n of absent)if(n<first)absent.delete(n);
   if(!held||!viewed)draw(f);
-  if(!held&&obj(f.settle)&&f.doc&&f.n!==settledN){settledN=f.n;animateSettle(f.settle);}
   streamState();timeline();syncHistory();
 }
 for(const b of document.querySelectorAll('[data-filter]'))b.onclick=()=>{filter=b.dataset.filter;for(const item of document.querySelectorAll('[data-filter]'))item.setAttribute('aria-pressed',String(item===b));renderChannels();};

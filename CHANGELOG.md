@@ -5,6 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky.
 - Reproduction scripts: `bench/agentdojo/experiments/rerun.sh` and `e3/experiments/rerun_e3.sh` now compare every
   regenerated table with the committed file (git `HEAD`, or the file on disk before the run outside git) and print
   `MATCH <file> <sha256>` or `DIFFERS <file> <sha256> (committed <sha256>)`, exiting non-zero on any `DIFFERS`; the old
