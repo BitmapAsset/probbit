@@ -195,6 +195,7 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
         ...(entry.moved ? { moved: entry.moved } : {}),
       },
       cfg.footerPrefix ? { prefix: cfg.footerPrefix } : {},
+      cfg.glyphInReply,
     );
     return cfg.inject === "appendSystemContext" ? { appendSystemContext: block } : { appendContext: block };
   };

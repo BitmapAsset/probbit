@@ -36,6 +36,8 @@ export type StanceConfig = {
   footer: boolean;
   /** Opens the footer line (default: the persona's name as the stance document reports it). */
   footerPrefix?: string;
+  /** The block's glyph line (default true): tells the model to use the engine's glyph as the reply's one mood emoji. */
+  glyphInReply: boolean;
   inject: InjectTarget;
   classifierTimeoutMs: number;
   decisionThreshold: number;
@@ -133,6 +135,9 @@ export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
   let footer = true;
   if (typeof src.footer === "boolean") footer = src.footer;
   else if (src.footer !== undefined) warnings.push("footer: expected a boolean");
+  let glyphInReply = true;
+  if (typeof src.glyphInReply === "boolean") glyphInReply = src.glyphInReply;
+  else if (src.glyphInReply !== undefined) warnings.push("glyphInReply: expected a boolean");
 
   let destructive = DEFAULT_DESTRUCTIVE;
   if (Array.isArray(src.destructive)) {
@@ -182,6 +187,7 @@ export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
       gateMode,
       footer,
       ...(footerPrefix !== undefined ? { footerPrefix } : {}),
+      glyphInReply,
       inject,
       classifierTimeoutMs: num("classifierTimeoutMs", classifier === "jev" ? 800 : 300, 50, 5_000),
       decisionThreshold: num("decisionThreshold", 0.6, 0, 1),
@@ -241,6 +247,10 @@ export const CONFIG_JSON_SCHEMA = {
       minLength: 1,
       maxLength: 24,
       description: "Opens the footer line (default: the persona's name). An emoji or a short handle works.",
+    },
+    glyphInReply: {
+      type: "boolean",
+      description: "Default true: when the persona has display.glyphs, the block tells the model to use the engine's glyph as the reply's one mood emoji. The footer shows the glyph either way.",
     },
     inject: { type: "string", enum: ["appendContext", "appendSystemContext"] },
     classifierTimeoutMs: { type: "integer", minimum: 50, maximum: 5000 },

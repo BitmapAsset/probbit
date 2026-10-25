@@ -8,13 +8,17 @@ export type StanceDoc = {
   status?: string;
   turn?: number;
   stance?: Record<string, { level?: string; odds?: Record<string, number> }>;
-  mood?: Record<string, { level?: string }>;
+  mood?: Record<string, { level?: string; p?: number }>;
   habits?: { active?: string[]; bound?: string[]; violations?: number };
   /** The persona the stance was made under (name, version, digest), as `probbit live` prints it. */
   persona?: { name?: string; version?: string; digest?: string };
   why?: unknown;
   engine?: { verdict?: string };
   error?: unknown;
+  /** The engine's glyph for this stance (persona.md §2.18, `display.glyphs`): computed from the document, logged on the strand. */
+  glyph?: string;
+  /** Which rule gave the glyph: `habit <id>` or `mood <a>=<l> <b>=<l>`, then ` +surprise z=<z>` with the modifier. */
+  glyph_why?: string;
 };
 
 /**

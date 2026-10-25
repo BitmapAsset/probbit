@@ -76,15 +76,22 @@ function listPart(prefix: string, names: string[], keep: number): string {
   return ` · ${prefix}: ${[...names.slice(0, keep), ...(more > 0 ? [`+${more}`] : [])].join(", ")}`;
 }
 
+/** The glyph as it follows the footer's prefix: right after a symbol prefix (`◆🙂`), after a space when the prefix ends in a letter or digit. */
+function glyphAfter(prefix: string, glyph: string | undefined): string {
+  if (!glyph) return "";
+  return /[\p{L}\p{N}]$/u.test(prefix) ? ` ${glyph}` : glyph;
+}
+
 /**
- * `<prefix> stance #N · valence <l> · pressure <l> · <line words>`, then ` · in: <inputs>` when the event carried inputs
+ * `<prefix> stance #N · valence <l> · pressure <l> · <line words>` (`<prefix><glyph> stance #N · …` when the stance document
+ * carries the engine's glyph; a space between the two after a prefix that ends in a letter or digit), then ` · in: <inputs>` when the event carried inputs
  * and ` · moved: <names>` when levels changed. At most FOOTER_MAX characters. When both lists do not fit, names give way
  * to "+k" so that both parts stay visible: `moved` shortens first, then `in` (what fired outranks what moved). If even
  * "+k" cannot fit, `moved` drops, then `in`.
  */
 export function footerLine(n: number, doc: StanceDoc, facts: FooterFacts = {}, names: BlockNames = {}): string {
   const prefix = (names.prefix ?? "").trim() || blockName(doc, names.name);
-  const full = `${prefix} stance #${n} · valence ${level(doc, "valence")} · pressure ${level(doc, "pressure")} · ${footerWords(doc.line ?? "")}`;
+  const full = `${prefix}${glyphAfter(prefix, doc.glyph)} stance #${n} · valence ${level(doc, "valence")} · pressure ${level(doc, "pressure")} · ${footerWords(doc.line ?? "")}`;
   const head = width(full) <= FOOTER_MAX ? full : [...full].slice(0, FOOTER_MAX).join("").trimEnd();
   const inputs = facts.inputs ?? [];
   const moved = facts.moved ?? [];
@@ -99,8 +106,20 @@ export function footerLine(n: number, doc: StanceDoc, facts: FooterFacts = {}, n
   return head;
 }
 
-/** The block the model sees for this turn. */
-export function buildBlock(n: number, doc: StanceDoc, footer: boolean, facts: FooterFacts = {}, names: BlockNames = {}): string {
+/**
+ * `Mood glyph: <glyph> (valence <l> <p>, pressure <l> <p>). …`: the engine's glyph and the odds of the mood levels taken, so
+ * the reply's mood emoji is the engine's reading, not the model's guess. Undefined when the document has no glyph.
+ */
+export function glyphLine(doc: StanceDoc): string | undefined {
+  if (!doc.glyph) return undefined;
+  const odds = ["valence", "pressure"]
+    .filter((m) => doc.mood?.[m]?.level !== undefined)
+    .map((m) => `${m} ${level(doc, m)}${typeof doc.mood?.[m]?.p === "number" ? ` ${(doc.mood[m].p as number).toFixed(2)}` : ""}`);
+  return `Mood glyph: ${doc.glyph}${odds.length ? ` (${odds.join(", ")})` : ""}. Use at most one mood emoji in this reply and make it this one.`;
+}
+
+/** The block the model sees for this turn. `glyphInReply` (default true) adds the glyph line when the document has a glyph. */
+export function buildBlock(n: number, doc: StanceDoc, footer: boolean, facts: FooterFacts = {}, names: BlockNames = {}, glyphInReply = true): string {
   const line = (doc.line ?? "").trim();
   const status = doc.status && doc.status !== "ok" ? `, status ${doc.status}` : "";
   const moods = ["valence", "pressure", ...Object.keys(doc.mood ?? {}).filter((m) => m !== "valence" && m !== "pressure").sort()]
@@ -112,6 +131,8 @@ export function buildBlock(n: number, doc: StanceDoc, footer: boolean, facts: Fo
     line,
     `mood: ${moods.length ? moods.join(", ") : "none"}. habits bound: ${bound}.`,
   ];
+  const glyph = glyphInReply ? glyphLine(doc) : undefined;
+  if (glyph) lines.push(glyph);
   if (footer) {
     const foot = footerLine(n, doc, facts, names);
     lines.push(`Write from this stance. End the visible reply with one line: "${foot}".`);

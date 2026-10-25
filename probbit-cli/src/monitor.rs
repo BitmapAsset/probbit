@@ -294,7 +294,9 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
     };
     let m = &w.meta;
     let f = w.last.as_ref();
-    let mut head = format!("{} {} {dot} seed {} {dot} individual {} {dot} event {}", s.bold(CYAN, "probbit monitor"), s.bold(CYAN, &format!("{} {}", m.name, m.version)), m.seed, short(&m.individual), f.map_or(0, |f| f.n));
+    // §2.18: the engine's glyph next to the persona's name (not in plain ASCII)
+    let glyph = f.and_then(|f| f.doc.get("glyph")).and_then(Json::as_str).filter(|_| !s.ascii).map_or(String::new(), |g| format!(" {g}"));
+    let mut head = format!("{} {}{glyph} {dot} seed {} {dot} individual {} {dot} event {}", s.bold(CYAN, "probbit monitor"), s.bold(CYAN, &format!("{} {}", m.name, m.version)), m.seed, short(&m.individual), f.map_or(0, |f| f.n));
     if let Some(h) = f.and_then(|f| f.given.get("elapsed_hours")).and_then(Json::as_f64) { head += &format!(" {dot} {} since the event before", hours(h)); }
     out.push(format!("{head} {dot} {badge}"));
     out.push(s.paint(GREY, s.g("LEGEND  width = odds; colour/[level] = chosen; shades = other levels",
@@ -1078,6 +1080,23 @@ mod tests {
     }
 
     /// A 0.8.0 document with `pursue` and `drives` (hand-written) draws the drives rows; a document without them draws none
+    /// §2.18: the header shows the document's glyph next to the persona's name (not in plain ASCII); the page's frame carries it
+    /// in `doc`; a document without one draws the header as before
+    #[test]
+    fn the_header_shows_the_glyph() {
+        let text = strand(&format!("{}/../plugins/openclaw/personas/assistant.yaml", env!("CARGO_MANIFEST_DIR")), 3);
+        let lines = live::lines(&text); let mut w = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { w.feed(l, &run); }
+        let g = w.last.as_ref().unwrap().doc.get("glyph").and_then(Json::as_str).unwrap().to_string();
+        let uni = frame(Some(&w), None, "x", None, &Style { th: None, ascii: false, cols: usize::MAX });
+        assert!(uni[0].starts_with(&format!("probbit monitor Assistant 1.0.0 {g} · seed ")), "{}", uni[0]);
+        let plain = frame(Some(&w), None, "x", None, &Style { th: None, ascii: true, cols: usize::MAX });
+        assert!(plain[0].starts_with("probbit monitor Assistant 1.0.0 | seed "), "{}", plain[0]);
+        assert_eq!(frame_json(Some(&w), None, None).get("doc").and_then(|d| d.get("glyph")).and_then(Json::as_str), Some(g.as_str()));
+        let Json::Obj(mut kv) = w.last.as_ref().unwrap().doc.clone() else { panic!() }; kv.retain(|(k, _)| k != "glyph" && k != "glyph_why");
+        w.last.as_mut().unwrap().doc = Json::Obj(kv);
+        assert!(frame(Some(&w), None, "x", None, &Style { th: None, ascii: false, cols: usize::MAX })[0].starts_with("probbit monitor Assistant 1.0.0 · seed "));
+    }
+
     #[test]
     fn drives_are_drawn_when_the_document_carries_them() {
         let text = strand(&format!("{}/../examples/persona/tutor.yaml", env!("CARGO_MANIFEST_DIR")), 3);

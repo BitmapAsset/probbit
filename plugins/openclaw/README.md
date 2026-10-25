@@ -18,13 +18,22 @@ line the model was given.*
 ## Assistant stance (probbit, event 14)
 Stance: security means careful, no play; take the correction straight; say it plainly; short and complete; no emoji.
 mood: valence even, pressure keyed. habits bound: security_careful, correction_direct.
-Write from this stance. End the visible reply with one line: "Assistant stance #14 · valence even · pressure keyed · security means careful, no play · in: correction, security · moved: pressure, caution".
+Mood glyph: 🔒 (valence even 0.64, pressure keyed 0.58). Use at most one mood emoji in this reply and make it this one.
+Write from this stance. End the visible reply with one line: "Assistant 🔒 stance #14 · valence even · pressure keyed · security means careful, no play · in: +2 · moved: pressure, +1".
 ```
 
 The footer is optional (`footer: false` removes it). With it on, the agent's visible reply ends with a line that says
 which event this was, the two moods, a few words of the stance, the inputs the plugin fed the engine (`in:`) and the moods
 and traits whose level changed since the previous event (`moved:`), 120 characters at most. People in the chat can see
 the state move; the strand proves it did.
+
+**The glyph.** With a persona that has `display.glyphs` (the bundled one does; [docs/persona.md](../../docs/persona.md)
+§2.18), the engine computes one emoji from the stance: a bound habit's glyph first, else the valence x pressure table, then
+👀 when the expectation block reports a surprise. The footer opens with it (`Assistant 🙂 stance #14 · …`, or `◆🙂 stance
+#14 · …` with a symbol prefix), and the block gives the model one more line, `Mood glyph: 🙂 (valence even 0.71, pressure
+steady 0.80). Use at most one mood emoji in this reply and make it this one.`, so the reply's mood emoji is the engine's
+reading rather than the model's guess. `glyphInReply: false` drops that line and keeps the glyph in the footer. The strand
+logs the glyph on every event line and `probbit live verify` recomputes it.
 
 ## How it decides what to feed the engine
 
@@ -110,6 +119,7 @@ rules before you ship it), and set `personaPath`. Keep the input ids the plugin 
 | `gateMode` | `shadow` | `shadow` logs would-deny lines for destructive tool calls under a careful stance; `off` registers no tool hook |
 | `footer` | `true` | ask for the footer line |
 | `footerPrefix` | the persona's name | opens the footer line (an emoji or a short handle works; 24 characters at most) |
+| `glyphInReply` | `true` | with a persona that has `display.glyphs`: the block's `Mood glyph:` line (the footer shows the glyph either way) |
 | `inject` | `appendContext` | `appendSystemContext` puts the block in the system prompt instead (changes the cached prefix every turn) |
 | `classifier` | `auto` | `auto`: the agent's decision model when configured, else keywords; `jev`: the Jev adapter; `keyword` |
 | `classifierShadow` | `true` | with `jev`: log Jev's answers, feed the engine the keyword flags |

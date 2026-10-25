@@ -254,7 +254,7 @@ test("hook, jev shadow (default): keyword flags reach probbit; Jev answers, late
   registerStance(host.api, { fetch });
   const { result } = await host.promptBuild(cliEvent("thanks, now fix it right now"), groupCtx("r1"));
   const block = (result as { appendContext?: string }).appendContext ?? "";
-  assert.match(block, /Assistant stance #1 · valence \w+ · pressure \w+ · .+ · in: praise"/u);
+  assert.match(block, /Assistant \p{Extended_Pictographic} stance #1 · valence \w+ · pressure \w+ · .+ · in: praise"/u);
   const { event, meta } = lastLog(dir);
   assert.deepEqual(Object.keys(event).sort(), ["elapsed_hours", "praise"]);
   assert.equal(meta.method, "keyword");

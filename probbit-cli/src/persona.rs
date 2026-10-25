@@ -179,7 +179,9 @@ pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub d
     learning: Option<Learning>, drives: Option<Drives>, reward: Option<Vec<(String, Option<Vec<String>>)>>, senses: Option<Senses>, why_past: Option<bool>,
     surprise: Option<Surprise>, pace: Option<Pace>, disp: Option<Disp>, rest_b: Option<Rest>, load: Option<Load>, block: bool,
     /// RFC 0009: the `expectation` block and `engine.trajectory` (both outside the digest; effects {})
-    pub expect: Option<Expect>, pub traj: Option<Traj> }
+    pub expect: Option<Expect>, pub traj: Option<Traj>,
+    /// §2.18: the `display.glyphs` block (outside the digest; effects {})
+    pub glyphs: Option<Glyphs> }
 impl Persona {
     /// `line.why_past` (§2.11): `why` names what the learned weights came from; default on with a senses block, off without
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
@@ -305,6 +307,10 @@ pub fn parse_doc(t: &str, is_json: bool) -> Result<Json, String> {
 
 /// The strict validator: document -> persona (every field type-checked, unknown fields refused at their path).
 pub fn build(doc: &Json) -> R<Persona> {
+    // §2.18: `display` moves nothing (effects {}): it is read against the persona built without it and stays out of the digest,
+    // so adding it to a persona with a recorded life leaves every state and stance digest as it was
+    if let Some(dj) = doc.get("display") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "display"); }
+        let mut p = build(&d)?; p.glyphs = display_spec(dj, &p)?; return Ok(p); }
     // RFC 0004: a `bound` block is read against the persona built without it, and it stays out of the digest, so adding it to a
     // persona with a recorded life leaves every state, strand and turn byte for byte the same (amendment A1)
     if let Some(b) = doc.get("bound") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "bound"); }
@@ -455,7 +461,7 @@ pub fn build(doc: &Json) -> R<Persona> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None };
+    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None };
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -2865,6 +2871,8 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
     if let (Some(s), Json::Obj(v)) = (src, &mut j) { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.push(("src".into(), s)); } }
     if let (Some(k), Some(d)) = (&pay, settled) { ns = settle(p, &mut j, ns, k, d); }
     if p.has_block() { let b = block(p, &j); if let Json::Obj(v) = &mut j { v.push(("block".into(), Json::Str(b))); } }
+    // §2.18: the glyph last, from the finished document (`probbit live` sets it again once `deviation` is in)
+    set_glyph(p, &mut j);
     Ok((j, ns))
 }
 
@@ -3933,9 +3941,90 @@ pub fn trajectory_program(prog: &Json, k: usize, beta0: f64, limit: u64) -> Opti
 pub fn trajectory(p: &Persona, st: &State, raw: &Json) -> Option<Json> {
     let t = p.traj.as_ref()?; trajectory_program(&program_json(p, st, raw).ok()?, t.k, t.beta0, p.eng.exact_limit)
 }
-/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009, effects {}: the block on or off, one digest)
+/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009) and without `glyph` and `glyph_why` (§2.18);
+/// both have effects {}: the blocks on or off, one digest
 pub fn stance_sha(doc: &Json) -> String {
-    match doc { Json::Obj(v) if v.iter().any(|(k, _)| k == "deviation") => sha(&Json::Obj(v.iter().filter(|(k, _)| k != "deviation").cloned().collect())), _ => sha(doc) }
+    const OUT: [&str; 3] = ["deviation", "glyph", "glyph_why"];
+    match doc { Json::Obj(v) if v.iter().any(|(k, _)| OUT.contains(&k.as_str())) => sha(&Json::Obj(v.iter().filter(|(k, _)| !OUT.contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
+}
+
+/// §2.18 `display.glyphs`: one glyph per stance, computed from the stance document. `moods`: the two mood ids (rows, then
+/// columns) with their levels in the table's order; `table[row][column]`; `surprise`: the modifier and its z floor; `habits`:
+/// habit id -> glyph, in the persona's order (the first one bound wins)
+#[derive(Clone)]
+pub struct Glyphs { moods: Vec<(String, Vec<String>)>, table: Vec<Vec<String>>, surprise: Option<(String, f64)>, habits: Vec<(String, String)> }
+/// One Unicode code point that shows on its own: not a control or a space, and none of the code points that only join, vary or
+/// tag another one (ZWJ, variation selectors, the keycap mark, skin-tone modifiers, regional indicators, tags, combining marks),
+/// so a host, a terminal and a device panel draw the same glyph and a base glyph and its modifier never fuse into a third
+fn one_glyph(s: &str) -> bool {
+    let mut c = s.chars();
+    let (Some(x), None) = (c.next(), c.next()) else { return false };
+    let u = x as u32;
+    !x.is_control() && !x.is_whitespace() && u != 0x200D && u != 0x20E3 && !(0xFE00..=0xFE0F).contains(&u) && !(0x1F3FB..=0x1F3FF).contains(&u)
+        && !(0x1F1E6..=0x1F1FF).contains(&u) && !(0xE0000..=0xE007F).contains(&u) && !(0x0300..=0x036F).contains(&u) && !(0x20D0..=0x20FF).contains(&u)
+}
+/// A mapping's keys, each once (JSON allows a repeated key; the YAML subset does not)
+fn once(kv: &[(String, Json)], path: &str) -> R<()> {
+    match kv.iter().enumerate().find(|(n, (k, _))| kv[..*n].iter().any(|(k2, _)| k2 == k)) { Some((_, (k, _))) => Err(perr(&at(path, k), "duplicate field")), None => Ok(()) }
+}
+fn glyph_str(x: Option<&Json>, path: &str) -> R<String> {
+    x.and_then(Json::as_str).filter(|s| one_glyph(s)).map(str::to_string)
+        .ok_or_else(|| perr(path, "one Unicode code point (no ZWJ, variation-selector, skin-tone, flag, keycap or tag sequence)"))
+}
+/// `display` -> its glyphs block, read against the persona built without it (§2.18)
+fn display_spec(dj: &Json, p: &Persona) -> R<Option<Glyphs>> {
+    if dj.is_null() { return Ok(None); }
+    let dkv = keys(dj, "display", &["glyphs", "comment"], &[])?;
+    let Some(gj) = get(dkv, "glyphs").filter(|g| !g.is_null()) else { return Ok(None) };
+    let gkv = keys(gj, "display.glyphs", &["moods", "table", "surprise", "habits", "comment"], &["moods", "table"])?;
+    let mp = "display.glyphs.moods";
+    let mkv = get(gkv, "moods").and_then(Json::as_obj).filter(|m| m.len() == 2).ok_or_else(|| perr(mp, "a mapping of two mood ids -> their levels in table order"))?;
+    once(mkv, mp)?; let mut moods = vec![];
+    for (id, lv) in mkv { let path = at(mp, id);
+        let v = p.var(id).filter(|v| v.mood).ok_or_else(|| perr(&path, format!("not a mood of this persona ({})", p.vars.iter().filter(|v| v.mood).map(|v| v.id.as_str()).collect::<Vec<_>>().join(", "))))?;
+        let ls = strs(lv).filter(|l| l.len() == v.levels.len() && v.levels.iter().all(|x| l.contains(x))).ok_or_else(|| perr(&path, format!("the mood's levels, each once ({})", v.levels.join(", "))))?;
+        moods.push((id.clone(), ls)); }
+    let tp = "display.glyphs.table";
+    let tkv = get(gkv, "table").and_then(Json::as_obj).ok_or_else(|| perr(tp, format!("a mapping level of {} -> a list of glyphs, one per level of {}", moods[0].0, moods[1].0)))?;
+    once(tkv, tp)?;
+    for (r, _) in tkv { need(moods[0].1.contains(r), &at(tp, r), &format!("not a level of {}", moods[0].0))?; }
+    let mut table = vec![];
+    for r in &moods[0].1 { let rp = at(tp, r);
+        let row = get(tkv, r).ok_or_else(|| perr(&rp, "required (one row per level)"))?.as_arr().filter(|a| a.len() == moods[1].1.len())
+            .ok_or_else(|| perr(&rp, format!("a list of {} glyphs ({} order)", moods[1].1.len(), moods[1].0)))?;
+        table.push(row.iter().enumerate().map(|(i, c)| glyph_str(Some(c), &ix(&rp, i))).collect::<R<Vec<_>>>()?); }
+    let surprise = match get(gkv, "surprise").filter(|s| !s.is_null()) { None => None, Some(sj) => { let sp = "display.glyphs.surprise";
+        let skv = keys(sj, sp, &["glyph", "z_at_least", "comment"], &["glyph"])?;
+        Some((glyph_str(get(skv, "glyph"), &at(sp, "glyph"))?, num_or(skv, "z_at_least", 2.0, sp, Some(0.0), Some(1e6), false)?)) } };
+    let mut habits = vec![];
+    if let Some(hj) = get(gkv, "habits").filter(|h| !h.is_null()) { let hp = "display.glyphs.habits";
+        let hkv = hj.as_obj().ok_or_else(|| perr(hp, "a mapping of habit id -> glyph"))?; once(hkv, hp)?;
+        for (h, g) in hkv {
+            need(p.habits.iter().any(|x| x.id == *h), &at(hp, h), "not a habit of this persona")?; habits.push((h.clone(), glyph_str(Some(g), &at(hp, h))?)); } }
+    Ok(Some(Glyphs { moods, table, surprise, habits }))
+}
+/// §2.18: a stance document's glyph and why, by the rule order: (1) the first habit of `display.glyphs.habits` in `habits.bound`;
+/// (2) else the table's cell at the two moods' levels; then (3) the surprise modifier appended when `deviation.registers` and
+/// `deviation.z >= z_at_least`. None without the block (or without the moods' levels).
+pub fn glyph(p: &Persona, doc: &Json) -> Option<(String, String)> {
+    let g = p.glyphs.as_ref()?;
+    let bound = doc.get("habits").and_then(|h| h.get("bound")).and_then(Json::as_arr).unwrap_or(&[]);
+    let (mut gl, mut why) = match g.habits.iter().find(|(h, _)| bound.iter().any(|b| b.as_str() == Some(h))) {
+        Some((h, x)) => (x.clone(), format!("habit {h}")),
+        None => { let lv = |k: usize| doc.get("mood").and_then(|m| m.get(&g.moods[k].0)).and_then(|e| e.get("level")).and_then(Json::as_str);
+            let (a, b) = (lv(0)?, lv(1)?);
+            let (i, j) = (g.moods[0].1.iter().position(|l| l == a)?, g.moods[1].1.iter().position(|l| l == b)?);
+            (g.table[i][j].clone(), format!("mood {}={a} {}={b}", g.moods[0].0, g.moods[1].0)) } };
+    if let (Some((s, zmin)), Some(d)) = (&g.surprise, doc.get("deviation")) {
+        if let (Some(Json::Bool(true)), Some(z)) = (d.get("registers"), d.get("z").and_then(Json::as_f64)) {
+            if z >= *zmin { gl.push_str(s); why.push_str(&format!(" +surprise z={}", pyn(round_to(z, 2)))); } } }
+    Some((gl, why))
+}
+/// Puts (or replaces, in place) `glyph` and `glyph_why` in a stance document (§2.18); nothing without the block
+pub fn set_glyph(p: &Persona, doc: &mut Json) {
+    let Some((g, w)) = glyph(p, doc) else { return };
+    let Json::Obj(v) = doc else { return };
+    for (k, x) in [("glyph", g), ("glyph_why", w)] { match v.iter_mut().find(|(key, _)| key == k) { Some(slot) => slot.1 = Json::Str(x), None => v.push((k.into(), Json::Str(x))) } }
 }
 
 #[cfg(test)]

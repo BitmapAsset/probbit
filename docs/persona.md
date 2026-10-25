@@ -962,6 +962,55 @@ trajectory PERSONA --state S [--inputs I]` (or `--program FILE` for any probbit-
 entropy of p_beta is non-increasing in beta (dH/dbeta = -beta Var(log w)); a single variable's marginal entropy can rise
 (measured in RFC 0009).
 
+### 2.18 Display glyphs (optional)
+
+One emoji per stance, computed by the engine from the stance document, never chosen by the model. Off by default and outside
+the persona digest (as `bound` and `expectation` are): a persona without `display` gives every document byte for byte as
+before, and adding the block to a persona with a recorded life leaves every state and stance digest as it was. It has
+effects {}: it moves nothing.
+
+```yaml
+display:
+  glyphs:
+    moods: {valence: [down, even, up], pressure: [calm, steady, keyed]}   # two mood ids: rows, then columns, in table order
+    table:                                  # one row per level of the first mood, one glyph per level of the second
+      down: ["😔", "😕", "😣"]
+      even: ["😌", "🙂", "😬"]
+      up:   ["😊", "😄", "🤩"]
+    surprise: {glyph: "👀", z_at_least: 2.0}  # optional modifier (default z_at_least 2.0)
+    habits: {security_careful: "🔒"}          # optional: habit id -> glyph, first listed wins
+```
+
+**The rule order** (first base match wins; at most one base glyph and one modifier):
+
+1. the first habit listed under `habits` that is in the stance's `habits.bound` (the habit changed the stance; a habit in
+   force that the habit-free twin already obeys does not count);
+2. otherwise the table's cell at the two moods' levels: `table[<level of the first mood>][<index of the second mood's level
+   in its list>]`;
+3. then the modifier: `surprise.glyph` appended when the stance carries `deviation` (an `expectation` block, section 2.17,
+   on `probbit live`) with `registers: true` and `z >= z_at_least`. `persona turn` and `persona replay` carry no deviation,
+   so they never add it.
+
+The stance document gains `"glyph": "🙂"` and `"glyph_why"`: `"mood valence=even pressure=steady"`, `"habit
+security_careful"`, or either followed by ` +surprise z=2.31` (z to 2 decimals). Both come last, after `block`; the
+digest a strand line logs as `stance` excludes them, as it excludes `deviation`.
+
+**The receipt.** On `probbit live` each event line carries `"glyph"`, and `live verify` recomputes it from the replayed
+document: an edited, added or removed glyph diverges at its line as "the glyph differs". The same rules give the same
+glyph in the stance document, the strand line, a host's footer and the monitor's header, so a mismatch between them is a
+host bug, not a different state. A strand written with the block is read by an engine without it as `unsupported by this
+engine: display` (not verified, not a divergence).
+
+**Read strictly** (`persona check`, `persona lint` and every command that loads the persona refuse it at its path): `moods`
+names two moods of the persona, each with its levels listed once; `table` has one row per level of the first mood, each a
+list with one glyph per level of the second; every glyph is one Unicode code point that shows on its own: not a control or
+a space, no zero-width joiner, variation selector, keycap mark, skin-tone modifier, regional indicator, tag or combining
+mark (so a terminal, a chat client and a device panel draw one glyph, and a base glyph and its modifier never fuse into a
+third); `habits` names habits of the persona; no key is repeated; `z_at_least` is a number >= 0.
+
+What it is: a lookup from the stance's mood levels, bound habits and deviation to a symbol, so a person reading the chat
+or the monitor sees the engine's state at a glance. What it is not: a measurement of anything beyond those fields.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -1092,6 +1141,7 @@ child process). `probbit persona compile` prints it; `probbit run` with those fl
   `inputs` leaves out `pace_up` and `pace_down`.
 - With a surprise block (section 2.13): `"surprise": {"<trait>": g}` for the learned traits whose gain is above 1 (`{}` when none
   is).
+- With `display.glyphs` (section 2.18): `"glyph"` and `"glyph_why"`, last.
 - Timing is never part of the stance: `--timing` adds a separate, non-canonical `timing` object (compile, engine and decode ms,
   engine calls, the 1-minute load average).
 
@@ -1372,7 +1422,8 @@ with the initial state as canonical JSON (one individual has one header, whether
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
 "state":"sha256:..."}`, that is the inputs as the turn used them (the stamped hours included), the sha256 of the line before (the
-header, for event 1), the sha256 of the stance's canonical JSON and the new state's digest. Lines end in `\n`. A strand is never
+header, for event 1), the sha256 of the stance's canonical JSON and the new state's digest (with `display.glyphs`, section 2.18,
+the line also carries `"glyph"`, which `verify` recomputes). Lines end in `\n`. A strand is never
 rewritten, just appended to: `--strand` on an existing strand continues it from `--state`, which must be the state after its last
 line (that line carries its digest) of a persona with the header's digest, and the run uses the header's document. A life
 continued over several runs is the strand of one run, byte for byte.

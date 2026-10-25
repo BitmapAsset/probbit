@@ -70,7 +70,7 @@ test("injection: the block arrives as appendContext (default) and names event 1"
   const { result } = await host.promptBuild(cliEvent("perfect, thanks"), groupCtx("r1"));
   const block = appendContextOf(result);
   assert.ok(block, "expected appendContext");
-  assert.match(block, /^## Assistant stance \(probbit, event 1\)\nStance: .+\nmood: valence \w+, pressure \w+\. habits bound: .+\.\nWrite from this stance\. End the visible reply with one line: "Assistant stance #1 · valence \w+ · .+"\.$/u);
+  assert.match(block, /^## Assistant stance \(probbit, event 1\)\nStance: .+\nmood: valence \w+, pressure \w+\. habits bound: .+\.\nMood glyph: \p{Extended_Pictographic} \(valence \w+ \d\.\d\d, pressure \w+ \d\.\d\d\)\. Use at most one mood emoji in this reply and make it this one\.\nWrite from this stance\. End the visible reply with one line: "Assistant \p{Extended_Pictographic} stance #1 · valence \w+ · .+"\.$/u);
   assert.equal((result as { appendSystemContext?: string }).appendSystemContext, undefined);
 });
 
