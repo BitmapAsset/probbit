@@ -16,7 +16,8 @@
           "timeoutMs": 500,
           "gateMode": "shadow",
           "footer": true,
-          "inject": "appendContext"
+          "inject": "appendContext",
+          "sensesMode": "shadow"
         }
       }
     }

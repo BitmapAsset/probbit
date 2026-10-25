@@ -41,7 +41,7 @@ const MARKERS: Record<string, Flag> = {
   win: "win",
   energy: "wants_energy",
 };
-const MARKER_RE = /\[(praise|correction|failure|upset|security|win|energy)\]/gi;
+export const MARKER_RE = /\[(praise|correction|failure|upset|security|win|energy)\]/gi;
 
 const KEYWORDS: Array<[Flag, RegExp]> = [
   ["praise", /\b(thanks|thank you|great (work|job|stuff)|well done|nailed it|love it|perfect)\b|^\s*yes\b/i],

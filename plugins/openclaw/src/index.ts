@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { OpenClawPluginApi, OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
 import { buildBlock, footerInputs, movedNames } from "./block.js";
-import { baselineClassification, extractCurrentMessage, classify, type Classification, type DecisionEvaluate } from "./classify.js";
+import {
+  baselineClassification,
+  extractCurrentMessage,
+  classify,
+  MARKER_RE,
+  sanitize,
+  type Classification,
+  type DecisionEvaluate,
+} from "./classify.js";
 import { createJevEvaluate, loadJevKey, type FetchLike } from "./jev.js";
 import { CONFIG_JSON_SCHEMA, resolveConfig, resolveLane, type StanceConfig } from "./config.js";
 import { carefulFromDoc, carefulFromState, detectDestructive, digest, redactPreview } from "./gate.js";
@@ -21,8 +29,19 @@ import {
   writeLastEpoch,
   type DeclaredInputsCache,
   type LogMeta,
+  type Reading,
   type StanceDoc,
 } from "./probbit.js";
+import {
+  appendSensesLine,
+  feedRefusal,
+  FED_SENSES,
+  heuristicTimePressure,
+  READING_SRC,
+  readDeclaredSenses,
+  tempoNow,
+  type DeclaredSensesCache,
+} from "./senses.js";
 
 export const PLUGIN_ID = "probbit-stance";
 
@@ -38,6 +57,8 @@ export type StanceDeps = {
 };
 
 const SEEN_LIMIT = 256;
+/** Runs per lane remembered as event turns, so after_tool_call counts only tool calls made while answering a user message. */
+const EVENT_RUNS_LIMIT = 16;
 const TIMED_OUT = Symbol("timed-out");
 
 function sha(text: string): string {
@@ -143,6 +164,13 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
   const declaredCache: DeclaredInputsCache = new Map();
   const warnedFlags = new Set<string>();
   let warnedUnreadable = false;
+  const sensesCache: DeclaredSensesCache = new Map();
+  const warnedSenses = new Set<string>();
+  /** Tool calls (and failed ones) seen by after_tool_call per lane since the lane's previous event. */
+  const toolTally = new Map<string, { calls: number; errors: number }>();
+  const eventRuns = new Map<string, string[]>();
+  // The persona's senses are read once here; the cache re-reads the file only when it changes.
+  if (cfg.sensesMode !== "off") readDeclaredSenses(cfg.personaPath, sensesCache);
 
   /** Version skew, both ways: only flags the persona declares reach probbit; one warn per unknown flag per process. */
   const declaredOnly = (flags: string[]): { kept: string[]; dropped: string[] } => {
@@ -234,9 +262,73 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
     const hours = elapsedHours(nowSec, readLastEpoch(paths.last));
     const { kept: flags, dropped } = declaredOnly(fed.flags);
     const declared = readDeclaredInputs(cfg.personaPath, declaredCache);
-    const timePressure =
-      fed.timePressure !== undefined && fed.timePressure >= 0.05 && declared?.has("time_pressure") ? fed.timePressure : undefined;
-    const eventLine = buildEventLine(flags, hours, timePressure !== undefined ? { time_pressure: timePressure } : {});
+    const tpDeclared = declared?.has("time_pressure") === true;
+    const questionTp = fed.timePressure !== undefined && fed.timePressure >= 0.05 ? fed.timePressure : undefined;
+    let timePressure = cfg.timePressureSource !== "off" && tpDeclared ? questionTp : undefined;
+    let timePressureSrc: "heuristic" | undefined;
+    const fedSenses: Record<string, Reading> = {};
+    let sensesLine: Omit<Parameters<typeof appendSensesLine>[1], "n"> | undefined;
+    let tally: { calls: number; errors: number } | undefined;
+    if (cfg.sensesMode !== "off") {
+      tally = toolTally.get(lane) ?? { calls: 0, errors: 0 };
+      toolTally.delete(lane);
+      const heur = heuristicTimePressure(sanitize(text).replace(MARKER_RE, " "));
+      const chosen =
+        cfg.timePressureSource === "off"
+          ? undefined
+          : questionTp !== undefined
+            ? { v: questionTp, src: "question" as const }
+            : cfg.timePressureSource === "heuristic" && heur.value >= 0.05
+              ? { v: heur.value, src: "heuristic" as const }
+              : undefined;
+      const tempo = tempoNow(paths.strand, hours);
+      const toolFail = tally.errors > 0;
+      const senses = readDeclaredSenses(cfg.personaPath, sensesCache);
+      const takes: string[] = [];
+      for (const id of FED_SENSES) {
+        const refusal = feedRefusal(id, senses);
+        if (refusal === undefined) takes.push(id);
+        else if (cfg.sensesMode === "feed" && !warnedSenses.has(id)) {
+          warnedSenses.add(id);
+          warn(`sense "${id}": ${refusal} in the persona; not fed (warned once per process)`);
+        }
+      }
+      if (tpDeclared) takes.push("time_pressure");
+      const fedNow: string[] = [];
+      if (cfg.sensesMode === "feed") {
+        if (takes.includes("tempo")) {
+          const range = senses?.get("tempo")?.range;
+          fedSenses.tempo = { v: range ? Math.min(range[1], Math.max(range[0], tempo)) : tempo, src: READING_SRC };
+          fedNow.push("tempo");
+        }
+        if (takes.includes("tool_fail")) {
+          fedSenses.tool_fail = { v: toolFail, src: READING_SRC };
+          fedNow.push("tool_fail");
+        }
+        if (chosen?.src === "heuristic" && tpDeclared) {
+          timePressure = chosen.v;
+          timePressureSrc = "heuristic";
+          fedNow.push("time_pressure");
+        }
+      }
+      sensesLine = {
+        ts: isoSeconds(now()),
+        mode: cfg.sensesMode,
+        tempo,
+        tempo_src: "strand",
+        time_pressure: chosen?.v ?? null,
+        time_pressure_src: chosen?.src ?? "none",
+        time_pressure_heuristic: heur.value,
+        time_pressure_features: heur.features,
+        tool_fail: toolFail,
+        tool_fail_src: "after_tool_call",
+        tool_calls: tally.calls,
+        tool_errors: tally.errors,
+        declared: takes,
+        fed: fedNow,
+      };
+    }
+    const eventLine = buildEventLine(flags, hours, timePressure !== undefined ? { time_pressure: timePressure } : {}, fedSenses);
     const run = await runLiveEvent({
       binary: cfg.binary,
       personaPath: cfg.personaPath,
@@ -247,6 +339,11 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
     });
     const cls: Classification = shadow ? ((await clsSettled) ?? fed) : fed;
     if (!run.ok) {
+      if (tally && (tally.calls > 0 || tally.errors > 0)) {
+        // The event did not happen: its tool calls count toward the next one.
+        const next = toolTally.get(lane) ?? { calls: 0, errors: 0 };
+        toolTally.set(lane, { calls: next.calls + tally.calls, errors: next.errors + tally.errors });
+      }
       if (!state.warned) {
         state.warned = true;
         warn(`lane ${lane}: no stance this turn (${run.reason})`);
@@ -254,6 +351,13 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       return undefined;
     }
     writeLastEpoch(paths.last, nowSec);
+    if (sensesLine) {
+      try {
+        appendSensesLine(join(cfg.stateDir, "strands", `${lane}.senses.jsonl`), { n: run.n, ...sensesLine });
+      } catch (err) {
+        warn(`lane ${lane}: senses line not written (${String(err).slice(0, 200)})`);
+      }
+    }
     const inputs = footerInputs(flags, timePressure);
     const moved = movedNames(lastByLane.get(lane)?.doc, run.doc);
     const meta: LogMeta = {
@@ -270,6 +374,10 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       ...(cls.decisionNote ? { decisionNote: cls.decisionNote } : {}),
       ...(dropped.length > 0 ? { dropped } : {}),
       ...(timePressure !== undefined ? { timePressure } : {}),
+      ...(timePressureSrc ? { timePressureSrc } : {}),
+      ...(Object.keys(fedSenses).length > 0
+        ? { senses: Object.fromEntries(Object.entries(fedSenses).map(([id, r]) => [id, r.v])) }
+        : {}),
       ...(cls.classifier ? { classifier: cls.classifier as unknown as Record<string, unknown> } : {}),
       inputs,
       ...(moved ? { moved } : {}),
@@ -286,6 +394,14 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       if (ctx.trigger === "heartbeat" || ctx.trigger === "cron") return;
       if (ctx.inputProvenance && ctx.inputProvenance.kind !== "external_user") return;
       if (cfg.senderIds.length > 0 && !(typeof ctx.senderId === "string" && cfg.senderIds.includes(ctx.senderId))) return;
+      if (cfg.sensesMode !== "off" && typeof ctx.runId === "string") {
+        const runs = eventRuns.get(lane) ?? [];
+        if (!runs.includes(ctx.runId)) {
+          runs.push(ctx.runId);
+          if (runs.length > EVENT_RUNS_LIMIT) runs.shift();
+          eventRuns.set(lane, runs);
+        }
+      }
       const hasCurrent = typeof event?.currentUserMessage === "string";
       let text: string;
       let textSource: string;
@@ -401,6 +517,26 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
         appendFileSync(paths.gateLog, `${JSON.stringify(line)}\n`);
       } catch (err) {
         warn(`before_tool_call shadow gate skipped: ${String(err).slice(0, 200)}`);
+      }
+      return;
+    });
+  }
+  if (cfg.sensesMode !== "off") {
+    // tool_fail: the reading at event n is true when a tool call made in the lane since event n-1 reported an error. The
+    // hook observes; it never changes a result. Calls from runs that produced no event (cron, heartbeat, an unlisted
+    // sender) are not counted; a call without a run id is.
+    api.on("after_tool_call", (event, ctx) => {
+      try {
+        const lane = resolveLane(cfg.lanes, ctx?.sessionKey);
+        if (!lane) return;
+        const runId = ctx?.runId ?? event?.runId;
+        if (runId !== undefined && !(eventRuns.get(lane) ?? []).includes(runId)) return;
+        const t = toolTally.get(lane) ?? { calls: 0, errors: 0 };
+        t.calls += 1;
+        if (typeof event?.error === "string" && event.error.trim()) t.errors += 1;
+        toolTally.set(lane, t);
+      } catch (err) {
+        warn(`after_tool_call skipped: ${String(err).slice(0, 200)}`);
       }
       return;
     });

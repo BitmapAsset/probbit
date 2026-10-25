@@ -3,9 +3,10 @@
  * `OpenClawPluginApi["on"]` per hook, so a shape drift in 2026.9.7's types fails `tsc`, not just a test.
  * Source of the shapes: /opt/homebrew/lib/node_modules/openclaw/dist/channel-core-BrH0n2qr.d.ts
  * (PluginHookBeforePromptBuildEvent :17549, PluginHookBeforePromptBuildResult :17558, PluginHookAgentContext :18236,
- *  PluginHookToolContext :18584, PluginHookBeforeToolCallEvent :18607, PluginHookBeforeToolCallResult :17588).
+ *  PluginHookToolContext :18584, PluginHookBeforeToolCallEvent :18607, PluginHookBeforeToolCallResult :17588,
+ *  PluginHookAfterToolCallEvent :18629).
  * Runner semantics mirrored from docs/plugins/hooks/reference.md: before_prompt_build logs and skips a throwing
- * handler; before_tool_call fails closed (a throw blocks the call).
+ * handler; before_tool_call fails closed (a throw blocks the call); after_tool_call is observe-only (a throw is logged).
  */
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +23,8 @@ export type ToolCallHandler = Parameters<typeof sdkApi.on<"before_tool_call">>[1
 export type ToolCallEvent = Parameters<ToolCallHandler>[0];
 export type ToolCtx = Parameters<ToolCallHandler>[1];
 export type ToolCallResult = Awaited<ReturnType<ToolCallHandler>>;
+export type AfterToolHandler = Parameters<typeof sdkApi.on<"after_tool_call">>[1];
+export type AfterToolEvent = Parameters<AfterToolHandler>[0];
 
 /** The probbit binary: $PROBBIT_BIN, else `probbit` on PATH. */
 export const PROBBIT = process.env.PROBBIT_BIN ?? "probbit";
@@ -29,6 +32,8 @@ export const PROBBIT = process.env.PROBBIT_BIN ?? "probbit";
 export const PERSONA_SRC = fileURLToPath(new URL("../../personas/assistant.yaml", import.meta.url));
 /** An older-style persona (no `win`/`wants_energy` inputs): the bundled one without those two. */
 export const PERSONA_V01 = fileURLToPath(new URL("../../test/fixtures/assistant-v0.1.yaml", import.meta.url));
+/** The bundled persona plus a senses block declaring `tempo` (number, src env) and `tool_fail` (flag, src env). */
+export const PERSONA_SENSES = fileURLToPath(new URL("../../test/fixtures/assistant-senses.yaml", import.meta.url));
 export const GROUP_KEY = "agent:main:telegram:group:-1001234567890";
 
 export type LogLine = { level: string; message: string };
@@ -40,6 +45,7 @@ export function tempStateDir(): string {
 export function createHost(pluginConfig: Record<string, unknown>, extra: { config?: unknown; runtime?: unknown } = {}) {
   const promptHandlers: PromptBuildHandler[] = [];
   const toolHandlers: ToolCallHandler[] = [];
+  const afterToolHandlers: AfterToolHandler[] = [];
   const logs: LogLine[] = [];
   const registered: string[] = [];
   const logger = {
@@ -59,6 +65,7 @@ export function createHost(pluginConfig: Record<string, unknown>, extra: { confi
       registered.push(name);
       if (name === "before_prompt_build") promptHandlers.push(handler as PromptBuildHandler);
       if (name === "before_tool_call") toolHandlers.push(handler as ToolCallHandler);
+      if (name === "after_tool_call") afterToolHandlers.push(handler as AfterToolHandler);
     },
   } as unknown as OpenClawPluginApi;
 
@@ -90,6 +97,17 @@ export function createHost(pluginConfig: Record<string, unknown>, extra: { confi
       }
       const blocked = threw || (result !== undefined && result !== null && (result as { block?: boolean }).block === true);
       return { result, threw, blocked };
+    },
+    async afterToolCall(event: AfterToolEvent, ctx: ToolCtx): Promise<{ threw: boolean }> {
+      let threw = false;
+      for (const h of afterToolHandlers) {
+        try {
+          await h(event, ctx);
+        } catch {
+          threw = true;
+        }
+      }
+      return { threw };
     },
   };
 }
