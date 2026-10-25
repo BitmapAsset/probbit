@@ -1600,7 +1600,8 @@ probbit monitor --demo drives --open             # eight synthetic events with g
 ```
 
 **What it shows.** The latest event (or a selected historical event in the browser). In the terminal, a header: persona and version, seed, the individual's digest, the event number, the hours
-since the event before, the replay badge. The stance: one row per trait, its levels as segments sized by their odds, the level
+since the event before, the replay badge; with a glyph (section 2.18) the glyph after the persona's name and, on the line
+under it, a GLYPH row with `glyph_why` (in plain ASCII the row keeps the rule and drops the glyph). The stance: one row per trait, its levels as segments sized by their odds, the level
 taken in colour and the phrase it says. The moods, with a sparkline of the last 50 events. The inputs: the event's inputs as the
 turn used them (flags lit, numbers as bars, levels by name, the clock) and the history features against their caps. The senses,
 with a senses block (section 2.11): one row per sense, its normal as a tick over the range, this event's reading, z and n (a
@@ -1648,7 +1649,7 @@ cannot read the documents:
 | route | answer |
 |---|---|
 | `/` | the page: one file embedded in the binary (under 64 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
-| `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}`, that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
+| `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order, and `face`, the two moods the face's meters show), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}` (with `engine.trajectory` also `trajectory` and `settle`, below), that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
 
 The browser opens a compact **Activity Monitor for one individual**, not a fleet dashboard. Its utility-style toolbar,
@@ -1656,6 +1657,23 @@ channel table and inspector use system fonts and an automatic light/dark appeara
 The desktop list scrolls inside the utility; at narrow widths the inspector sits below it. This is a browser-rendered CLI
 surface, not a native Swift, WinUI or Electron app. For a native terminal snapshot, use `probbit monitor STRAND --once`;
 `--plain` adds a portable text-only form. No separate application installation is needed.
+
+**The face.** The top bar is the face: the stance document's `glyph` (section 2.18) at about 2.5 times the body size, labelled
+with `glyph_why` in words so the emoji is never the only carrier, then the persona's name, version, seed, the event number and
+the receiver age of the last event; a strand without a glyph draws the same bar without the glyph slot. Beside it, two mood
+meters: the moods `display.glyphs` names (else the persona's first two; `meta.face`), each with every level's odds as
+proportional segments, the level taken at full strength, and the moods' recent positions (`spark`) as a sparkline. A changed
+glyph scales and fades for 0.4 s; a changed mood level highlights its meter for 0.6 s; under `prefers-reduced-motion` neither
+moves and the state still updates. **Why this glyph** opens a panel under the bar (closed by default; the choice is kept in
+the browser's `localStorage`): the glyph's rule (`glyph_why`), the inputs this event carried (`given`; a stored document shows
+the inputs as the turn used them), the habits in force with the bound ones and the one that gave the glyph marked, the
+surprise reading (`deviation.z`, registers yes or no) when the stance has one, and the stance line. With `engine.trajectory`
+(section 2.17) a settle strip draws, once per new event, the trait odds of the event's exact trajectory step by step from
+the hottest inverse temperature to beta = 1 within 600 ms ("forming", then "settled"; under reduced motion only the settled
+step). Its frame field `settle` is the frame's `trajectory` by level name: `{betas, h, vars: [{id, kind, levels, odds}]}` with
+`odds[k]` the odds at step k, rounded to 6 places. Every number on the face is a field of the frame: the page draws the
+engine's own numbers and computes none of its own; the trajectory is the latest received event's and is not drawn for a
+stored document.
 
 **Channels.** Every declared trait and mood gets a row; when present, `pursue` and each goal's wanting, afterglow and
 prediction error become drive rows. All/Traits/Moods/Drives filters, a text filter, sortable columns and keyboard selection
@@ -1701,7 +1719,9 @@ No strand is changed, and nothing leaves the machine. Real Chrome/Chromium regre
 `cargo build --release -p probbit-cli`, then `node probbit-cli/tests/monitor_browser.mjs`. Only authored synthetic fixtures are
 used, visibly labelled in screenshots. Generated evidence defaults to a temporary directory, not the repository. The checks
 cover sorting/filtering/keyboard selection, arbitrary and traits-only personas, unreleased levels, append/hold/backfill,
-missing history gaps, checkpoint bounds, 50 documents/four fetches, stale/frozen/retired/disconnected states and metadata reset.
+missing history gaps, checkpoint bounds, 50 documents/four fetches, stale/frozen/retired/disconnected states and metadata reset,
+the face (the glyph and its label, the meters, a strand without a glyph, the why-panel opening, closing and being remembered,
+the settle strip) and no console errors.
 
 **Demo.** `probbit monitor --demo` replays the week of `probbit live examples/persona/tutor.yaml --seed 2 --demo week` (section
 5.7; the week is written to a temporary file, read back and removed), paced 1 s per hour and each night in 2 s, under a minute:
