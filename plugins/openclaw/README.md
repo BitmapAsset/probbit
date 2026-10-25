@@ -52,7 +52,7 @@ the Jev adapter does (`classifier: jev`, OpenRouter, shadow by default: logged b
 engine until you turn `classifierShadow` off); otherwise a conservative keyword list (a correction outranks a "thanks").
 The method lands in the log line of every event. Flags the persona does not declare are dropped with one warning each;
 `time_pressure` is fed when the classifier scores it (the urgency question, asked by the Jev adapter in live mode). With
-`sensesMode` set, the plugin also measures readings of its own (next section).
+`sensesMode` set (unreleased, on `main`), the plugin also measures readings of its own (next section).
 
 ## Senses: tempo, tool failures and time pressure (`sensesMode`)
 
@@ -132,7 +132,9 @@ Requirements: OpenClaw 2026.9.7 or later, the `probbit` binary on the gateway's 
    The install writes `plugins.entries.probbit-stance.enabled: true` and nothing else; with no `lanes` configured the
    plugin registers no hooks and logs one warning, so it is inert until step 3.
 3. Tell it which sessions get a stance. Merge into `plugins.entries` of `~/.openclaw/openclaw.json`
-   (the full example is `install/openclaw-entries.json`; `hooks` sits next to `config`, not inside it):
+   (the full example is `install/openclaw-entries.json`; `hooks` sits next to `config`, not inside it). On `main` that
+   example sets `"sensesMode": "shadow"`, which is unreleased: with `probbit-stance` 0.1.0 from npm leave that line out,
+   or `openclaw config validate` reports `must not have additional properties: "sensesMode"`:
    ```json
    "probbit-stance": {
      "enabled": true,
@@ -212,15 +214,15 @@ file-tool writes to `~/.openclaw/openclaw.json`. The gate never blocks; it write
 - `log/<lane>.jsonl`: `iso \t event \t stance-document \t meta`, where meta holds the event number, the idempotency key,
   the classification method and flags, the text source, the milliseconds, and (with jev) the classifier's answers.
 - `last/<lane>.ts`: the epoch of the previous event, for the hours the engine decays moods over.
-- `strands/<lane>.senses.jsonl` (`sensesMode` shadow or feed): one line per event with the readings the plugin measured,
-  the source of each and what it fed.
+- `strands/<lane>.senses.jsonl` (`sensesMode` shadow or feed; unreleased, on `main`): one line per event with the
+  readings the plugin measured, the source of each and what it fed.
 
 ## Safety properties
 
 - Only the listed sessions are touched. Heartbeats, cron runs and inter-session messages never produce events.
 - One event per admitted user message (the native message id when the host gives one; a retry reuses the event).
 - Any failure (no binary, bad persona, timeout) means no injection and one warning; the hooks never throw into the host,
-  and the tool hooks never block (`after_tool_call` only counts).
+  and the tool hooks never block (`after_tool_call`, unreleased and registered only with `sensesMode`, only counts).
 - The strand is append-only and never rewritten. The plugin serialises its own events per lane; do not write the same
   strand from another process.
 

@@ -1,6 +1,6 @@
 # Reproduce a number
 
-Every number in BENCHMARKS.md regenerates from this repository. Three ways in, from five minutes to an afternoon, and one
+Every number in BENCHMARKS.md regenerates from this repository. Four ways in, from five minutes to an afternoon, and one
 place to report what you got. An outside reproduction (or a disagreement) is worth more to this project than a star.
 
 ## Five minutes: the engine, a rule, a recorded life
@@ -40,8 +40,12 @@ Use a Python that has a numpy 1.26.4 wheel: 3.9 to 3.12 (CI uses 3.12; `python3.
 newer). On 3.13 or later pip compiles numpy from source; a source-built numpy moved the bootstrap columns of three rows of
 `bars.tsv` in the fourth decimal on one machine (every verdict the same), so its sha256 no longer matched. `rerun.sh`
 refuses a Python outside 3.9 to 3.12 with a one-line message; `PYTHON=<python> experiments/rerun.sh` runs another
-interpreter anyway, with a warning. The archive is packed without macOS extended attributes, so GNU tar extracts it
-without warnings; its 726 strands are byte for byte the ones of the run.
+interpreter anyway, with a warning; under it, `DIFFERS tables/bars.tsv 330247693c40…` is the known case of a
+source-built numpy on Python 3.14. If you already made `venv011` with a newer Python, `rm -rf venv011` before making it
+again (`python3.12 -m venv venv011` over an existing venv can keep the old interpreter), then run the pip line again.
+After a `DIFFERS`, the regenerated tables are left in place; `git checkout -- tables` restores the committed ones. The
+archive is packed without macOS extended attributes, so GNU tar extracts it without warnings; its 726 strands are byte
+for byte the ones of the run.
 
 `rerun.sh` runs the judge twice and prints `two passes identical` with a sha256 for each output (`stdout.txt` is the bars
 table as printed, so its sha256 is the one of `bars.tsv`); that line compares the two passes with each other. It then
@@ -92,7 +96,8 @@ python3 -m venv venv && venv/bin/pip install numpy==2.0.2
 PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
 ```
 
-numpy 2.0.2 has wheels for Python 3.9 to 3.12; on a newer `python3` use `python3.12 -m venv venv`. Each `rerun.sh` refuses
+numpy 2.0.2 has wheels for Python 3.9 to 3.12; on a newer `python3` use `python3.12 -m venv venv` (if `venv` already
+exists from that newer Python, `rm -rf venv` first). Each `rerun.sh` refuses
 another Python unless `PYTHON=<python>` is set (then it warns), and prints `MATCH` or `DIFFERS` per table against the
 kit's `tables/original.sha256`.
 

@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- Documentation, from a second dress rehearsal (main and the v0.12.1 binary, every README and REPRODUCE.md command run as
+  written on Ubuntu 24.04 x86_64 and macOS arm64): REPRODUCE.md says how to recover when a venv was first made with a
+  Python outside 3.9 to 3.12 (`python3.12 -m venv` over it can keep the old interpreter), names the `bars.tsv` sha256 that a
+  source-built numpy on Python 3.14 gives, how to restore the tables after a `DIFFERS` run, and that it has four tiers;
+  `plugins/openclaw/README.md` says that the example entry's `sensesMode` line is unreleased and that probbit-stance 0.1.0
+  rejects it, and marks the senses log and the `after_tool_call` hook unreleased.
+
 - `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky.
 - OpenClaw plugin (`plugins/openclaw`): it now measures the readings a persona's senses declare, shadow first.
   `sensesMode` (`off` by default, so existing installs are unchanged; the example entry shows `shadow`): `shadow` writes
