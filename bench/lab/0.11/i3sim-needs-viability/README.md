@@ -22,7 +22,7 @@ PROBBIT=$(command -v probbit) experiments/rerun.sh venv/bin/python
 
 `rerun.sh` runs the three frozen configurations (`baseline`, `best`, `best_coupling`), the loop-endpoint check and the
 deficit-only ablation twice, compares the sha256 of the 14 tables with `tables/original.sha256` and with each other, prints
-`tables: byte-identical (original, rerun 1, rerun 2): 14 files`, then verifies the 240 strands it wrote (20 episodes x 4
+one `MATCH` line per table and `tables: byte-identical (original, rerun 1, rerun 2): 14 files`, then verifies the 240 strands it wrote (20 episodes x 4
 arms x 3 configurations) with `probbit live verify` and prints `strands: 240 verified, 0 failed`. Strands go to `strands/`
 and the generated persona documents to `work/` (neither committed). `git status --short tables` is empty after a
 reproduction.
@@ -68,5 +68,9 @@ verifies every strand (measured 2026-10-25). Python: the run used CPython 3.9.6 
 Path lines changed for publication (nothing else): `bridge.py` reads the binary from `PROBBIT`; `run_arms.py` writes the
 generated persona documents under `work/`; `rerun.sh` and `finalize.sh` take the interpreter as their argument and
 `rerun.sh` the binary from `PROBBIT` and the process count from `PROCS`.
+
+Added after the run (no effect on the tables): `rerun.sh` prints `MATCH <file> <sha256>` or `DIFFERS <file> <sha256>
+(committed <sha256>)` per table against `tables/original.sha256` and refuses a Python outside 3.9 to 3.12 (numpy 2.0.2
+wheels) unless `PYTHON=<python>` is set, in which case it warns.
 
 Not in this kit: the 240 strands themselves (the rerun writes them), and the loop's run log.

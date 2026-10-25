@@ -33,7 +33,8 @@ venv/bin/python judge_v2res.py
 ```
 
 `rerun.sh` runs the eight arms twice from `experiments/config_baseline.json`, compares the sha256 of the four tables with
-`tables/original.sha256` and with each other, prints `tables: byte-identical (original, rerun 1, rerun 2): 4 files`, then
+`tables/original.sha256` and with each other, prints one `MATCH` line per table and `tables: byte-identical (original,
+rerun 1, rerun 2): 4 files`, then
 verifies every strand it wrote (A 1,000 + 60 for each other arm = 1,420) with `probbit live verify` and prints
 `strands: 1420 verified, 0 failed`. `judge_v2res.py` reads only the tables (this kit's and `../v011-viability/tables/`) and
 rewrites `tables/rbars_v2res.tsv` (bars R1-R3). Strands and generated persona documents go to `out/` (not committed).
@@ -67,6 +68,10 @@ Path lines changed for publication (nothing else): `bridge.py` reads the binary 
 strands and personas under `out/`; `rerun.sh` takes the interpreter as its argument, the binary from `PROBBIT` and the
 process count from `PROCS`, and sets `LC_ALL=C` so its globs list the arms in byte order, as on the machine that ran it;
 `judge_v2res.py` reads the v-run's tables from `../v011-viability/tables/`.
+
+Added after the run (no effect on the tables): `rerun.sh` prints `MATCH <file> <sha256>` or `DIFFERS <file> <sha256>
+(committed <sha256>)` per table against `tables/original.sha256` and refuses a Python outside 3.9 to 3.12 (numpy 2.0.2
+wheels) unless `PYTHON=<python>` is set, in which case it warns.
 
 Not in this kit: the run's logs. A first attempt of the run was stopped before any table was written or any number read;
 the registered run is the second attempt, from scratch.

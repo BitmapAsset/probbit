@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 - `CITATION.cff` at the repository root (GitHub's "Cite this repository" box and Zenodo read it).
+- Reproduction scripts: `bench/agentdojo/experiments/rerun.sh` and `e3/experiments/rerun_e3.sh` now compare every
+  regenerated table with the committed file (git `HEAD`, or the file on disk before the run outside git) and print
+  `MATCH <file> <sha256>` or `DIFFERS <file> <sha256> (committed <sha256>)`, exiting non-zero on any `DIFFERS`; the old
+  `identical` line, which compared the two passes with each other, now reads `two passes identical`. The three lab kits'
+  `rerun.sh` (`bench/lab/0.11/`) print the same per-table lines against their `tables/original.sha256`. All five refuse a
+  Python outside 3.9 to 3.12 (the numpy wheel range) unless `PYTHON=<python>` is set, which warns instead. The CI job
+  `agentdojo-tables` also runs the E3 rerun. Table contents unchanged. `tables/frozen.sha256` records both hashes of
+  `rerun.sh` (as run, and this copy).
+- `bench/agentdojo/tables/strands-A.tar.gz` repacked without macOS extended attributes (no AppleDouble `._` members, no
+  owner names, numeric owner 0, the original newest mtime): GNU tar extracts it without warnings; the 726 strand files
+  inside are byte-identical to the previous archive's.
 - `probbit monitor` page: a face header (docs/persona.md §5.8). The top bar shows the stance's glyph large, labelled with
   `glyph_why`, the persona's name, version, seed, event number and receiver age, and two mood meters (the moods
   `display.glyphs` names, else the first two) with every level's odds as proportional segments and the existing sparkline. A
