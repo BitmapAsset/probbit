@@ -119,7 +119,8 @@ and corrections, within a cap that keeps the individual itself.
 Requirements: OpenClaw 2026.9.7 or later, probbit 0.13.0 or later on the gateway's PATH (`npm i -g probbit`, or
 [one curl line](https://github.com/BitmapAsset/probbit#install)), Node 22+. `probbit-stance` 0.2.0 checks the binary's
 version at load: an older probbit gets one warning naming both versions (`probbit-stance 0.2.0 needs probbit 0.13.0 or
-later; probbit is probbit 0.12.1: ...`) and no event runs until it is upgraded. With probbit 0.12.x keep
+later; probbit is probbit 0.12.1: ...`), each lane's first turn logs one more (`lane <lane>: no stance this turn (...)`,
+the same reason), and no event runs until it is upgraded. With probbit 0.12.x keep
 `probbit-stance` 0.1.0.
 
 1. Back up your config: `cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.pre-probbit-stance`.

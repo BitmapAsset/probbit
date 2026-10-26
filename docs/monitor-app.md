@@ -24,7 +24,10 @@ The release notes say which kind of app a release carries.
   - macOS 15 and later: open the app once (it is refused), then System Settings → Privacy & Security → **Open Anyway**, and
     confirm.
   - macOS 13 and 14: right-click (or Control-click) the app → **Open** → **Open**.
-  - From a terminal, instead: `xattr -dr com.apple.quarantine "/Applications/probbit Monitor.app"`.
+  - From a terminal, instead, before the first open: `xattr -dr com.apple.quarantine "/Applications/probbit Monitor.app"`.
+    If macOS already refused the app at that path, removing the mark there was not enough on macOS 26.5 (the next launch
+    stopped before its window and started no engine): after the `xattr` line, move the app to another folder (for example
+    from Downloads to Applications) and open it there, or use **Open Anyway** as above.
 
 To see which one you have: `spctl --assess --type execute -v "/Applications/probbit Monitor.app"` prints
 `accepted` and `source=Notarized Developer ID` for a notarized app, `rejected` for an ad-hoc one. After the first launch
@@ -37,9 +40,11 @@ either kind opens like any app. A copy you build yourself (below) has no quarant
   several files, or a folder.
 - **Try the demo**: the first window's second button, or File → Try the Demo: the tutor's synthetic week
   (`probbit monitor --demo week`), no strand needed.
-- **Several strands, a folder**: the app passes every file you open, and a folder as `--dir FOLDER`, to its probbit. A probbit
-  that watches one strand at a time refuses that; the app then shows the first strand you chose (for a folder, its most
-  recently changed `*.strand` file) and says so under the window title.
+- **Several strands, a folder**: the app passes every file you open, and a folder as `--dir FOLDER`, to its probbit. The
+  bundled probbit (0.13.0) serves them all on one page, with a rail on the left to switch between strands and each strand's
+  labels ([persona.md §5.8](persona.md#58-monitor-watch-an-individuals-inner-state)). A probbit that watches one strand at a
+  time (0.12.1 and earlier, if you build the app around one) refuses that; the app then shows the first strand you chose
+  (for a folder, its most recently changed `*.strand` file) and says so under the window title.
 - The window title is the page's title. When the page's title starts with a glyph, the Dock icon shows that glyph as its badge.
 - File → Open Recent lists what you opened; the app reopens the last selection when it starts with nothing else to open.
 - View → Reload (⌘R) reloads the page; **Follow Latest** (⌘L) loads the page's root again, the latest event with no event
