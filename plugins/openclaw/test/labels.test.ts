@@ -6,6 +6,7 @@ import plugin, { registerStance } from "../src/index.js";
 import { resolveConfig } from "../src/config.js";
 import { labelArgs, laneLabels, parseLabelsConfig, sessionLabel, sidecarPath, syncSidecar } from "../src/labels.js";
 import { cliEvent, createHost, GROUP_KEY, groupCtx, tempStateDir } from "./host.js";
+import { MIN_PROBBIT } from "../src/version.js";
 
 const LANE = "team-room";
 const DIRECT_KEY = "agent:main:telegram:direct:5550001234";
@@ -127,6 +128,7 @@ function fakeBinary(takesLabels: boolean): { bin: string; argv: () => string[] }
     [
       "#!/bin/sh",
       `printf '%s\\n' "$*" >> '${log}'`,
+      `if [ "$1" = --version ]; then echo 'probbit ${MIN_PROBBIT}'; exit 0; fi`,
       `if [ "$1" = live ] && [ "$2" = --help ]; then echo '${help}'; exit 0; fi`,
       'prev=""; out=""; strand=""',
       'for a in "$@"; do [ "$prev" = --out ] && out="$a"; [ "$prev" = --strand ] && strand="$a"; prev="$a"; done',
