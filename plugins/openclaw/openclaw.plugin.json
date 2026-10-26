@@ -123,6 +123,19 @@
         ],
         "description": "Default question: time_pressure only from the urgency question (live jev). heuristic: that answer, else the documented text heuristic (fed only with sensesMode feed). off: never."
       },
+      "agentName": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "description": "The agent label of every lane's strand (default: the agent id of the session key)."
+      },
+      "labels": {
+        "type": "object",
+        "description": "Labels written beside every lane's strand (strands/<lane>.labels.json) for probbit monitor. Keys 1-64 of [A-Za-z0-9_.-], values 1-64 characters; at most 4 keys besides agent, host, lane, session. A reserved key here overrides the value the plugin computes. Invalid entries are dropped with one warning.",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
       "destructive": {
         "type": "array",
         "items": {

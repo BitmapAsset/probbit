@@ -199,6 +199,8 @@ rules before you ship it), and set `personaPath`. Keep the input ids the plugin 
 | `senderIds` | `[]` | when set, only these sender ids produce events (other group members are skipped) |
 | `sensesMode` | `off` | unreleased: `shadow` measures tempo, tool_fail and the heuristic time_pressure and logs them to `strands/<lane>.senses.jsonl`; `feed` also sends the ones the persona declares ([Senses](#senses-tempo-tool-failures-and-time-pressure-sensesmode)) |
 | `timePressureSource` | `question` | unreleased: `question` (the urgency question only), `heuristic` (the question, else the text heuristic; fed with `sensesMode` feed), `off` |
+| `agentName` | the session key's agent id | unreleased: the `agent` label of every lane ([Labels](#labels-for-the-monitor-labels-agentname)) |
+| `labels` | `{}` | unreleased: labels for every lane's sidecar; free keys are added, and `agent`, `host`, `lane` or `session` here override the computed value |
 | `destructive` | built-in list | `{id, tools, regex, param?}` or `{id, tools, pathPrefix}`; replaces the defaults |
 
 Default destructive list (shadow gate): `rm -rf`, `git push --force`, `curl | sh`, `openclaw config set/unset`, shell or
@@ -206,11 +208,38 @@ file-tool writes to `~/.openclaw/openclaw.json`. The gate never blocks; it write
 `log/<lane>-gate.jsonl` with the rule, the tool, the stance that would have denied it, and a digest plus a redacted
 160-character preview of the detail (the raw command or path is never written in clear).
 
+## Labels for the monitor (`labels`, `agentName`)
+
+Unreleased (on `main`, not in 0.1.0). Beside each lane's strand the plugin keeps `strands/<lane>.labels.json`, the
+sidecar `probbit monitor` reads to say who wrote the strand ([docs/agents.md](../../docs/agents.md), "How a host
+identifies itself"). Per lane it computes:
+
+| key | value |
+|---|---|
+| `host` | `OpenClaw <version>` from the plugin runtime (`OpenClaw` when the runtime gives no version) |
+| `lane` | the lane name |
+| `agent` | `agentName` when set, else the agent id of the session key (`agent:<agentId>:...`) |
+| `session` | the channel and kind of the session key plus the first 8 hex of its sha256, e.g. `telegram group #3fa9c2d1`; `#3fa9c2d1` for other shapes. Never the session key, a chat id or a user id |
+
+The `labels` config key adds free keys (at most 4, so a lane stays within the sidecar's 8) and **overrides** the computed
+ones: `"labels": {"host": "gateway A", "team": "support"}` writes `host` = `gateway A`, your word over the plugin's.
+Keys are 1-64 of `A-Z a-z 0-9 _ . -`, values 1-64 characters without control characters; an invalid entry is dropped
+with one warning at start and the rest of the config still loads.
+
+When a lane's first event creates its strand and the binary's `probbit live --help` lists `--label` (asked once per
+process), the labels go to that `probbit live` call as `--label k=v` and the CLI writes the sidecar. Otherwise, and on
+every later event, the plugin writes the sidecar itself when it is missing or differs from its current keys merged with
+the lane's labels: keys you added by hand stay, the computed and configured ones are put back, and an equal file is not
+rewritten. The write is atomic and never touches the strand. A lane shared by several sessions (a `prefix*` entry)
+shows the session of its latest event. A sidecar that is not a flat JSON object of strings, or a merge past 8 keys, is
+left as is with one warning per lane.
+
 ## Logs and receipts
 
 - `strands/<lane>.strand`: the life. Header (persona document, initial state, engine), then one line per event with the
   inputs as used and the chained digests. `probbit live verify` replays it; `python3 python/probbit_host.py receipts`
   (in the probbit repo) renders one record per decision ([docs/receipts.md](../../docs/receipts.md)).
+- `strands/<lane>.labels.json` (unreleased, on `main`): the lane's labels for `probbit monitor` (above).
 - `log/<lane>.jsonl`: `iso \t event \t stance-document \t meta`, where meta holds the event number, the idempotency key,
   the classification method and flags, the text source, the milliseconds, and (with jev) the classifier's answers.
 - `last/<lane>.ts`: the epoch of the previous event, for the hours the engine decays moods over.

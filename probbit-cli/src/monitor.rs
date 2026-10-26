@@ -12,6 +12,7 @@
 //! `--serve` draws the same in a browser: one page embedded in the binary, fed by server-sent events from a server on
 //! 127.0.0.1. It changes no file (the demo's week goes through a temporary one, removed at once) and sends nothing anywhere.
 use crate::json::{self, Json};
+use crate::labels::{self, Labels};
 use crate::live::Replay;
 use crate::persona::{self, Engine};
 use crate::theme::{self, Col, Theme, CYAN, DIM, GREEN, GREY, MAGENTA, YELLOW};
@@ -666,8 +667,28 @@ fn ascii(args: &[String]) -> bool {
 /// `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N]`
 pub fn cmd(args: &[String]) {
     if args.iter().any(|a| ["--host", "--bind", "--address"].iter().any(|f| a == f || a.starts_with(&format!("{f}=")))) { crate::fail("monitor --serve binds 127.0.0.1 and no other address, so the page stays on this machine: there is no --host") }
-    let path = args.get(1).filter(|a| !a.starts_with("--")).cloned();
-    let mut a = vec!["monitor".to_string()]; a.extend(args.iter().skip(if path.is_some() { 2 } else { 1 }).cloned());
+    // §5.8: any number of STRAND [--label KEY=VALUE]... and --dir DIR (the page); the other flags as before
+    let (vals, _) = crate::flags_of("monitor");
+    let (mut strands, mut dir, mut rest): (Vec<(String, Labels)>, Option<String>, Vec<String>) = (vec![], None, vec![args[0].clone()]);
+    let mut i = 1;
+    while i < args.len() { let x = &args[i];
+        if x == "--label" {
+            let Some(v) = args.get(i + 1) else { crate::fail("monitor: --label needs KEY=VALUE") };
+            let (k, v) = labels::parse(v).unwrap_or_else(|e| crate::fail(&format!("monitor: {e}")));
+            let Some(last) = strands.last_mut() else { crate::fail("monitor: --label KEY=VALUE follows the STRAND it labels: probbit monitor STRAND --label agent=NAME --serve") };
+            labels::set(&mut last.1, k, v).unwrap_or_else(|e| crate::fail(&format!("monitor: {}: {e}", last.0))); i += 2;
+        } else if x == "--dir" {
+            if dir.is_some() { crate::fail("monitor: --dir given twice") }
+            let Some(v) = args.get(i + 1).filter(|v| !v.starts_with("--")) else { crate::fail("monitor: --dir needs a value") };
+            dir = Some(v.clone()); i += 2;
+        } else if x == "--demo" { rest.push(x.clone()); if let Some(v) = args.get(i + 1).filter(|v| !v.starts_with('-')) { rest.push(v.clone()); i += 1; } i += 1; }
+        else if vals.contains(&x.as_str()) { rest.extend(args[i..].iter().take(2).cloned()); i += 2; }
+        else if x.starts_with("--") { rest.push(x.clone()); i += 1; }
+        else { strands.push((x.clone(), Labels::new())); i += 1; }
+    }
+    let args = &rest[..];
+    let path = strands.first().map(|s| s.0.clone());
+    let mut a = args.to_vec();
     let mut demo_kind = Demo::Week;
     if a.iter().filter(|x| *x == "--demo").count() > 1 { crate::fail("monitor: --demo given twice") }
     if let Some(i) = a.iter().position(|x| x == "--demo") {
@@ -691,10 +712,25 @@ pub fn cmd(args: &[String]) {
     let tty = theme::stdout_is_terminal();
     let s = Style { th: theme::stdout(args), ascii: ascii(args), cols: if tty { theme::size(1).0.max(20) } else { usize::MAX } };
     if has("--demo") {
-        if path.is_some() { crate::fail("monitor --demo plays a synthetic scenario: give no STRAND") }
+        if path.is_some() || dir.is_some() { crate::fail("monitor --demo plays a synthetic scenario: give no STRAND") }
         if has("--follow") { crate::fail("monitor --demo: --follow does not apply (the demo is a synthetic scenario)") }
-        if serve_ { serve(port, has("--open"), &mut |hub| feed_demo(hub, demo_kind, eng)) }
+        if serve_ { let hub = Hub::default(); let site = Arc::new(Site { demo: Some(hub.clone()), ..Site::default() });
+            serve(port, has("--open"), &site, &mut || feed_demo(&hub, demo_kind, eng)) }
         return demo(&s, has("--once"), demo_kind, eng);
+    }
+    // several strands, a directory or labels: the page only (its identity header and switcher)
+    let many = strands.len() > 1 || dir.is_some() || strands.iter().any(|s| !s.1.is_empty());
+    if many && !serve_ { crate::fail(if strands.len() > 1 || dir.is_some() { "monitor: several strands (or --dir) go with --serve or --open: the terminal draws one" } else { "monitor: --label goes with --serve or --open (the page's identity header)" }) }
+    if serve_ {
+        if strands.is_empty() && dir.is_none() { crate::fail("monitor: the strand file comes before the flags: probbit monitor STRAND [flags] (or probbit monitor --dir DIR --serve, or probbit monitor --demo)") }
+        for (p, _) in &strands { std::fs::read(p).unwrap_or_else(|e| crate::fail(&format!("monitor: cannot read {p}: {e}"))); }
+        if let Some(d) = &dir { if !std::path::Path::new(d).is_dir() { crate::fail(&format!("monitor: --dir {d}: not a directory")) } }
+        let site = Arc::new(Site { dir: dir.clone(), ..Site::default() });
+        for (p, l) in strands.iter() { let bytes = std::fs::read(p).unwrap_or_default(); let t = String::from_utf8_lossy(&bytes);
+            if let Some(h) = t.split_inclusive('\n').next().filter(|h| h.ends_with('\n')) { if json::parse(h.trim_end()).ok().and_then(|h| h.get("probbit_strand").and_then(Json::as_f64)) != Some(1.0) { crate::fail(&format!("monitor: {p} is not a probbit strand (format 1)")) } }
+            add(&site, p.clone(), l.clone()); }
+        if let Some(d) = &dir { for p in scan(d) { add(&site, p, Labels::new()); } }
+        serve(port, has("--open"), &site, &mut || watch_dir(&site));
     }
     let Some(path) = path else { crate::fail("monitor: the strand file comes before the flags: probbit monitor STRAND [flags] (or probbit monitor --demo)") };
     let bytes = std::fs::read(&path).unwrap_or_else(|e| crate::fail(&format!("monitor: cannot read {path}: {e}")));
@@ -704,8 +740,7 @@ pub fn cmd(args: &[String]) {
     let lines = crate::live::lines(done);
     let strand = |h: &str| json::parse(h).ok().and_then(|h| h.get("probbit_strand").and_then(Json::as_f64)) == Some(1.0);
     if let Some(h) = lines.first() { if !strand(h) { crate::fail(&format!("monitor: {path} is not a probbit strand (format 1)")) } }
-    // --follow and --serve wait for a header still to be written; one frame needs it now
-    if serve_ { serve(port, has("--open"), &mut |hub| feed_strand(&path, hub, eng)) }
+    // --follow waits for a header still to be written; one frame needs it now
     if has("--follow") { follow(&path, &s, fps, eng) }
     let head = lines.first().copied().unwrap_or(rest);
     if head.is_empty() { crate::fail(&format!("monitor: {path} is empty: not a strand")) }
@@ -816,7 +851,7 @@ fn demo(s: &Style, once: bool, kind: Demo, eng: Engine) {
 /// counter that moves when it changes; layout 0 = nothing replayed yet) and the latest stance documents (`last` = the event
 /// number of the newest)
 #[derive(Default)]
-struct Board { meta: String, frame: String, layout: u64, seq: u64, docs: VecDeque<String>, last: u64 }
+struct Board { meta: String, frame: String, layout: u64, seq: u64, docs: VecDeque<String>, last: u64, name: String, glyph: String }
 type Hub = Arc<(Mutex<Board>, Condvar)>;
 fn board(hub: &Hub) -> std::sync::MutexGuard<'_, Board> { hub.0.lock().unwrap_or_else(|e| e.into_inner()) }
 /// The board once the replay has published (a request that comes in while the strand is read waits for it, at most 30 s)
@@ -828,8 +863,11 @@ fn ready(hub: &Hub) -> std::sync::MutexGuard<'_, Board> {
 /// Show a new frame (and the layout, if it changed) to every page; `docs`: the events replayed since the last publish, with their
 /// numbers; `over`: the strand starts over (the documents kept so far go)
 fn publish(hub: &Hub, meta: &Json, frame: &Json, docs: Vec<(u64, String)>, over: bool) {
+    // the switcher's row (`/strands`): the persona's name and the latest glyph
+    let name = meta.get("persona").and_then(|p| p.get("name")).and_then(Json::as_str).unwrap_or("").to_string();
+    let glyph = frame.get("doc").and_then(|d| d.get("glyph")).and_then(Json::as_str).unwrap_or("").to_string();
     let (meta, frame) = (persona::canon(meta), persona::canon(frame));
-    let mut b = board(hub);
+    let mut b = board(hub); b.name = name; b.glyph = glyph;
     if over { b.docs.clear(); b.last = 0; }
     for (n, d) in docs { b.docs.push_back(d); b.last = n; if b.docs.len() > KEEP { b.docs.pop_front(); } }
     if b.meta != meta || b.layout == 0 { b.meta = meta; b.layout += 1; }
@@ -839,9 +877,62 @@ fn publish(hub: &Hub, meta: &Json, frame: &Json, docs: Vec<(u64, String)>, over:
 /// An event's stance document as `probbit live` prints it
 fn doc_of(w: &Watch) -> (u64, String) { w.last.as_ref().map_or((0, String::new()), |f| (f.n, persona::canon(&f.doc))) }
 
+/// One strand the page serves (§5.8): its id (the file name without its extension, made unique), its path, the labels given
+/// with `--label` after it (over its sidecar's), and its board
+struct Entry { id: String, path: String, over: Labels, hub: Hub }
+/// What `--serve` serves: the demo's board, or the strands (in the order given, then as found in `dir`)
+#[derive(Default)]
+struct Site { demo: Option<Hub>, list: Mutex<Vec<Arc<Entry>>>, dir: Option<String> }
+fn entries(site: &Site) -> std::sync::MutexGuard<'_, Vec<Arc<Entry>>> { site.list.lock().unwrap_or_else(|e| e.into_inner()) }
+/// The strand's id: its file name without the extension, characters other than A-Z a-z 0-9 _ . - as `-`, and `-2`, `-3`, ...
+/// after one already taken
+fn id_of(path: &str, taken: &[Arc<Entry>]) -> String {
+    let stem: String = std::path::Path::new(path).file_stem().map_or(String::new(), |s| s.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() || "_.-".contains(c) { c } else { '-' }).collect());
+    let stem = if stem.is_empty() { "strand".to_string() } else { stem };
+    let mut id = stem.clone(); let mut k = 2;
+    while taken.iter().any(|e| e.id == id) { id = format!("{stem}-{k}"); k += 1; }
+    id
+}
+/// Serve one more strand: its entry, and a thread that follows it (`feed_strand`, with its own engine)
+fn add(site: &Site, path: String, over: Labels) {
+    let hub = Hub::default();
+    { let mut l = entries(site); if l.iter().any(|e| e.path == path) { return; } let id = id_of(&path, &l); l.push(Arc::new(Entry { id, path: path.clone(), over, hub: hub.clone() })); }
+    std::thread::spawn(move || { let engine = crate::persona_engine(); feed_strand(&path, &hub, &engine); });
+}
+/// The `*.strand` files in `dir`, by name
+fn scan(dir: &str) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "strand") && p.is_file()).map(|p| p.to_string_lossy().into_owned()).collect();
+    v.sort(); v
+}
+/// With --dir, every second: the strands added to it since are served too (a strand removed stays listed, as gone); without, nothing
+fn watch_dir(site: &Site) -> ! {
+    loop { if let Some(d) = &site.dir { for p in scan(d) { add(site, p, Labels::new()); } } std::thread::sleep(Duration::from_secs(1)); }
+}
+/// `/strands`: the strands served, for the page's identity header and switcher: id, file name, labels (the sidecar's, with
+/// `--label` over them; `labels_error` when the sidecar breaks the rules), persona, latest event, its glyph, and the seconds
+/// since the strand file was last written (null when it cannot be read)
+fn strands_json(site: &Site) -> String {
+    let name = |p: &str| std::path::Path::new(p).file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+    let now = std::time::SystemTime::now();
+    let rows: Vec<Json> = entries(site).iter().map(|e| {
+        let (mut l, mut err) = match labels::read(&e.path) { Ok(l) => (l, None), Err(x) => (Labels::new(), Some(x.replace(&labels::sidecar(&e.path), &name(&labels::sidecar(&e.path))))) };
+        for (k, v) in &e.over { if let Err(x) = labels::set(&mut l, k.clone(), v.clone()) { err = Some(format!("{k}: {x}")); } }
+        let age = std::fs::metadata(&e.path).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).map_or(Json::Null, |d| json::num(d.as_secs() as f64));
+        let b = board(&e.hub); let opt = |x: &str| if x.is_empty() { Json::Null } else { json::str(x) };
+        let mut kv = vec![("id", json::str(&e.id)), ("strand", json::str(&name(&e.path))), ("labels", labels::to_json(&l)), ("persona", opt(&b.name)), ("n", json::num(b.last as f64)), ("glyph", opt(&b.glyph)), ("age_s", age)];
+        if let Some(x) = err { kv.push(("labels_error", json::str(&x))); }
+        json::obj(kv) }).collect();
+    persona::canon(&json::obj(vec![("demo", Json::Bool(site.demo.is_some())), ("dir", site.dir.as_deref().map_or(Json::Null, |d| json::str(&name(d)))), ("strands", Json::Arr(rows))])) + "\n"
+}
+/// The board for `/events` and `/doc/N` (the demo's, else the first strand's) or for `/s/ID/...` (strand ID's)
+fn hub_for(site: &Site, id: Option<&str>) -> Option<Hub> {
+    match id { None => site.demo.clone().or_else(|| entries(site).first().map(|e| e.hub.clone())), Some(id) => entries(site).iter().find(|e| e.id == id).map(|e| e.hub.clone()) }
+}
+
 /// `--serve`: listen on 127.0.0.1:`port` (0: a free port), say the URL on stdout, open the browser if asked, serve every
-/// connection on its own thread, and run `feed` (it publishes the frames; it never returns)
-fn serve(port: u16, open: bool, feed: &mut dyn FnMut(&Hub)) -> ! {
+/// connection on its own thread, and run `feed` (it publishes the frames, or watches the directory; it never returns)
+fn serve(port: u16, open: bool, site: &Arc<Site>, feed: &mut dyn FnMut()) -> ! {
     let l = TcpListener::bind((Ipv4Addr::LOCALHOST, port)).unwrap_or_else(|e| crate::fail(&if e.kind() == std::io::ErrorKind::AddrInUse {
         format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}: another program holds this port; pick another with --port N, or leave --port out for a free one")
     } else { format!("monitor --serve: cannot listen on 127.0.0.1:{port}: {e}") }));
@@ -849,8 +940,7 @@ fn serve(port: u16, open: bool, feed: &mut dyn FnMut(&Hub)) -> ! {
     let url = format!("http://127.0.0.1:{port}/");
     out(&format!("{url}\n"));
     crate::err_line(&format!("probbit monitor: the page is at {url} (on this machine, 127.0.0.1); Ctrl-C quits"));
-    let hub: Hub = Arc::new((Mutex::new(Board::default()), Condvar::new()));
-    let h = hub.clone();
+    let h = site.clone();
     std::thread::spawn(move || {
         let open = Arc::new(AtomicUsize::new(0));
         for c in l.incoming() { match c {
@@ -858,7 +948,7 @@ fn serve(port: u16, open: bool, feed: &mut dyn FnMut(&Hub)) -> ! {
             Err(_) => std::thread::sleep(Duration::from_millis(50)) } }
     });
     if open { browse(&url); }
-    feed(&hub);
+    feed();
     loop { std::thread::park(); }
 }
 /// The strand followed for the page: every 100 ms, what was appended is replayed and published
@@ -902,9 +992,10 @@ fn feed_demo(hub: &Hub, kind: Demo, eng: Engine) -> ! {
     }
 }
 
-/// One connection: a GET of `/`, `/events` or `/doc/N` addressed to 127.0.0.1:PORT or localhost:PORT (a page of another site
-/// that resolves its name to 127.0.0.1 is refused: it would read the documents); anything else is answered with an error
-fn handle(mut c: TcpStream, hub: &Hub, port: u16) {
+/// One connection: a GET of `/`, `/events`, `/doc/N`, `/strands`, `/s/ID/events` or `/s/ID/doc/N` addressed to 127.0.0.1:PORT
+/// or localhost:PORT (a page of another site that resolves its name to 127.0.0.1 is refused: it would read the documents);
+/// anything else is answered with an error
+fn handle(mut c: TcpStream, site: &Site, port: u16) {
     let _ = c.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = c.set_write_timeout(Some(Duration::from_secs(30)));
     let mut head = vec![]; let mut buf = [0u8; 2048];
@@ -920,8 +1011,14 @@ fn handle(mut c: TcpStream, hub: &Hub, port: u16) {
     if !host.is_some_and(|h| h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}")) { return reply(&mut c, "403 Forbidden", "text/plain", b"this monitor answers requests addressed to 127.0.0.1 or localhost\n"); }
     if method != "GET" { return reply(&mut c, "405 Method Not Allowed", "text/plain", b"this server answers GET\n"); }
     let path = target.split(['?', '#']).next().unwrap_or("");
+    // `/s/ID/rest`: strand ID's `/rest`; every other path is the single-strand one (the demo's, else the first strand's)
+    let (id, path) = match path.strip_prefix("/s/") { Some(r) => r.split_once('/').map_or((Some(r), ""), |(id, _)| (Some(id), &path[3 + id.len()..])), None => (None, path) };
+    if id.is_none() && path == "/" { return reply(&mut c, "200 OK", "text/html; charset=utf-8", PAGE.as_bytes()); }
+    if id.is_none() && path == "/strands" { return reply(&mut c, "200 OK", "application/json; charset=utf-8", strands_json(site).as_bytes()); }
+    let Some(hub) = hub_for(site, id).filter(|_| path == "/events" || path.starts_with("/doc/")) else {
+        return reply(&mut c, "404 Not Found", "text/plain", if id.is_some() { b"not found: /s/ID/events and /s/ID/doc/N serve the strand ID that /strands lists\n" } else { b"not found: / is the page, /events its stream, /doc/N a stance document, /strands the strands served\n" }) };
+    let hub = &hub;
     match path {
-        "/" => reply(&mut c, "200 OK", "text/html; charset=utf-8", PAGE.as_bytes()),
         "/events" => events(c, hub, Duration::from_secs(BEAT)),
         p if p.starts_with("/doc/") => {
             let b = ready(hub); let k = b.docs.len() as u64;
@@ -929,7 +1026,7 @@ fn handle(mut c: TcpStream, hub: &Hub, port: u16) {
             let msg = format!("no document for {}: events {}..={} are kept\n", &p[5..], (b.last + 1).saturating_sub(k).max(1), b.last);
             drop(b);
             match doc { Some(d) => reply(&mut c, "200 OK", "application/json; charset=utf-8", d.as_bytes()), None => reply(&mut c, "404 Not Found", "text/plain", msg.as_bytes()) } }
-        _ => reply(&mut c, "404 Not Found", "text/plain", b"not found: / is the page, /events its stream, /doc/N a stance document\n") }
+        _ => {} }
 }
 /// The headers every answer carries: no caching, no sniffing, and for the page a policy that lets it load nothing and connect
 /// to nothing but its own server

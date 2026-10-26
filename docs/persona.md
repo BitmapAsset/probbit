@@ -1648,9 +1648,31 @@ cannot read the documents:
 
 | route | answer |
 |---|---|
-| `/` | the page: one file embedded in the binary (under 64 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
+| `/` | the page: one file embedded in the binary (under 72 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
 | `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order, and `face`, the two moods the face's meters show), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}` (with `engine.trajectory` also `trajectory` and `settle`, below), that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
+| `/strands` | the strands served, canonical JSON: `{demo, dir, strands: [{id, strand, labels, persona, n, glyph, age_s, labels_error?}]}` (the file name, never its directory; `age_s`: seconds since the strand file was last written); the demo lists none |
+| `/s/ID/events`, `/s/ID/doc/N` | as `/events` and `/doc/N`, for strand ID; `/events` and `/doc/N` are the first strand's, so a single-strand page is as before |
+
+**Who and where: labels, many strands.** A strand says which persona and engine; it does not say which agent, on which
+harness, in which session. Presentation labels do, string to string: the keys `agent`, `host`, `lane` and `session` (a short,
+non-secret label, never a raw session key or a chat id), and free keys; at most 8 keys, a key of 1 to 64 of `A-Z a-z 0-9 _ . -`,
+a value of 1 to 64 printable characters (no newline or other control character). They live in a sidecar next to the strand,
+`NAME.labels.json` for `NAME.strand` (one flat JSON object, keys sorted, a trailing newline), never in the strand: the header is
+the chain's first link and an engine refuses a header key it does not know (probbit 0.12.1 says `unsupported by this engine:
+labels`), so a label in the header would move every `prev` and stop older engines from verifying the strand. The sidecar moves
+nothing: the strand's bytes, its chain, the persona and state digests are those of the same life without labels, and `live
+verify` never reads it. `probbit live PERSONA --strand F --label agent=Nova --label host="OpenClaw 2026.9.7" --label
+lane=support` merges the keys into F's sidecar (keys not named stay); a host can also write the file itself (docs/agents.md,
+"How a host identifies itself"). `probbit monitor A.strand --label agent=Nova B.strand --serve` serves several strands, each
+`--label` applying to the path before it, over its sidecar and for the page only (nothing is written), so a life recorded
+before labels gets an identity without being rewritten; `probbit monitor --dir DIR --serve` serves every `*.strand` in DIR and
+picks up new ones within a second. A strand's id is its file name without the extension (made unique with `-2`, `-3`, ...).
+Above the face, the page names the agent (its `agent` label, else the persona's name), then host · lane · session, the
+persona's name and version, the engine, the strand's file name and when it was last written; the tab title is `glyph agent ·
+lane — probbit` (no glyph without a display block) and the favicon is the glyph (else the probbit mark). With two or more
+strands a left rail lists each with its glyph, agent, lane and last write; a click, Cmd/Ctrl+1 to 9 or the arrow keys switch,
+`/?strand=ID` opens one. Switching closes the old stream and drops the view, its pending history requests and settle steps.
 
 The browser opens a compact **Activity Monitor for one individual**, not a fleet dashboard. Its utility-style toolbar,
 channel table and inspector use system fonts and an automatic light/dark appearance (also selectable in the toolbar).

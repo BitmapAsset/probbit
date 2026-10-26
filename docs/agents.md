@@ -230,3 +230,32 @@ Practical notes for agent use:
 - A persona's character rules in CI: `probbit persona lint PERSONA --props rules.json` proves each rule or, when the bound
   cannot decide it, fuzzes it (exit 1 when one breaks; exit 3 when one stays unproven: unknown and no counterexample found); `probbit persona fuzz` / `prove` with `--json` give the documents
   (docs/persona.md §5.6). They test the stance a host gets, not the words a model writes.
+
+## How a host identifies itself
+
+Unreleased (on `main`, not in 0.12.1). `probbit monitor` heads each strand with who wrote it. Those labels live in a
+**sidecar** next to the strand, never in the strand: the strand path with its last extension replaced by `.labels.json`
+(`strands/support.strand` -> `strands/support.labels.json`, `pip` -> `pip.labels.json`). The strand's header is the chain's
+first link, so a label in it would change every digest; the sidecar can change without touching the receipt.
+
+- Format: one flat JSON object of string -> string, keys sorted, compact, raw UTF-8, one trailing newline
+  (`JSON.stringify(sorted) + "\n"`; in Python `json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"`),
+  written atomically (a temp file in the same directory, then a rename).
+- Rules: at most 8 keys; a key is 1-64 of `A-Z a-z 0-9 _ . -`; a value is 1-64 characters with no control character
+  (no newline, no tab).
+- Keys with a meaning: `agent` (who), `host` (the harness and its version), `lane`, `session`. Any other key is free.
+  `session` is a short label for people reading the monitor: never a raw session key, a chat or user id, or anything secret.
+- Writing: `probbit live PERSONA --strand F --label agent=support-bot --label host="my harness 2.1"` merges those keys into
+  F's sidecar (keys not named stay); `--label` without `--strand` is an error. A host that does not run the CLI for its
+  events writes the file itself with the same merge.
+- Reading: `probbit monitor F --serve` (or `--dir DIR --serve`, each strand with its own sidecar) shows them;
+  `probbit monitor F --label lane=night G --label lane=day --serve` overrides a strand's labels for the page only and
+  writes nothing.
+
+What the shipped hosts write:
+
+| host | labels |
+|---|---|
+| OpenClaw plugin ([plugins/openclaw](../plugins/openclaw/README.md)) | `host` = `OpenClaw <version>` (`OpenClaw` when the runtime gives no version), `lane` = the lane name, `agent` = the `agentName` config key, else the agent id of the session key, `session` = the channel and kind of the session key plus 8 hex of its sha256 (`telegram group #3fa9c2d1`; `#3fa9c2d1` for other shapes); the `labels` config key adds free keys and overrides any of these |
+| Claude Code hook ([examples/hosts/claude-code](../examples/hosts/claude-code/README.md)) | `host` = `Claude Code`, `session` = `#` + the first 8 characters of the session id, `agent` = `$PROBBIT_AGENT` when set |
+| Python (`probbit.live_event(..., labels=)`, `StanceHost(..., labels=)`) and the LangChain, OpenAI Agents SDK and Vercel AI SDK examples | what the caller passes; the examples pass `host` = the framework's name |

@@ -16,6 +16,7 @@ import {
 import { createJevEvaluate, loadJevKey, type FetchLike } from "./jev.js";
 import { CONFIG_JSON_SCHEMA, resolveConfig, resolveLane, type StanceConfig } from "./config.js";
 import { carefulFromDoc, carefulFromState, detectDestructive, digest, redactPreview } from "./gate.js";
+import { labelArgs, laneLabels, liveTakesLabels, syncSidecar } from "./labels.js";
 import {
   appendEventLog,
   buildEventLine,
@@ -128,7 +129,7 @@ function raceTimeout<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIM
 export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): StanceConfig {
   const home = deps.home ?? homedir();
   const now = deps.now ?? (() => Date.now());
-  const { config: cfg, warnings } = resolveConfig(api.pluginConfig, home);
+  const { config: cfg, warnings, notices } = resolveConfig(api.pluginConfig, home);
   const warn = (message: string): void => {
     try {
       api.logger.warn(`[${PLUGIN_ID}] ${message}`);
@@ -136,7 +137,7 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       // logging must never break a hook
     }
   };
-  for (const w of warnings) warn(`config: ${w}`);
+  for (const w of [...warnings, ...notices]) warn(`config: ${w}`);
   if (Object.keys(cfg.lanes).length === 0) {
     warn("no lanes configured; no hooks registered");
     return cfg;
@@ -169,6 +170,15 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
   /** Tool calls (and failed ones) seen by after_tool_call per lane since the lane's previous event. */
   const toolTally = new Map<string, { calls: number; errors: number }>();
   const eventRuns = new Map<string, string[]>();
+  /** The host's version for the `host` label (`OpenClaw <version>`), when the runtime exposes it. */
+  let hostVersion: string | undefined;
+  try {
+    const v = (api as unknown as { runtime?: { version?: unknown } }).runtime?.version;
+    if (typeof v === "string") hostVersion = v;
+  } catch {
+    hostVersion = undefined;
+  }
+  const warnedLabels = new Set<string>();
   // The persona's senses are read once here; the cache re-reads the file only when it changes.
   if (cfg.sensesMode !== "off") readDeclaredSenses(cfg.personaPath, sensesCache);
 
@@ -230,6 +240,7 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
 
   const takeEvent = async (
     lane: string,
+    sessionKey: string,
     key: string,
     keyBasis: string,
     text: string,
@@ -329,13 +340,17 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       };
     }
     const eventLine = buildEventLine(flags, hours, timePressure !== undefined ? { time_pressure: timePressure } : {}, fedSenses);
+    const labels = laneLabels({ lane, sessionKey, hostVersion, agentName: cfg.agentName, extra: cfg.labels });
+    const killAfterMs = Math.max(5_000, cfg.timeoutMs * 10);
     const run = await runLiveEvent({
       binary: cfg.binary,
       personaPath: cfg.personaPath,
       seed: cfg.seed,
       paths,
       eventLine,
-      killAfterMs: Math.max(5_000, cfg.timeoutMs * 10),
+      killAfterMs,
+      // A new strand: the CLI writes the sidecar when it takes --label (probed once per process); else the plugin does below.
+      newStrandArgs: async () => ((await liveTakesLabels(cfg.binary, killAfterMs)) ? labelArgs(labels) : []),
     });
     const cls: Classification = shadow ? ((await clsSettled) ?? fed) : fed;
     if (!run.ok) {
@@ -351,6 +366,16 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       return undefined;
     }
     writeLastEpoch(paths.last, nowSec);
+    if (!run.labeled) {
+      try {
+        syncSidecar(paths.strand, labels);
+      } catch (err) {
+        if (!warnedLabels.has(lane)) {
+          warnedLabels.add(lane);
+          warn(`lane ${lane}: labels not written (${String(err).slice(0, 200)}; warned once per lane)`);
+        }
+      }
+    }
     if (sensesLine) {
       try {
         appendSensesLine(join(cfg.stateDir, "strands", `${lane}.senses.jsonl`), { n: run.n, ...sensesLine });
@@ -435,7 +460,7 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
         }
         const state = { late: false, warned: false };
         const promise = withLaneLock(lane, () =>
-          takeEvent(lane, key, basis, text, textSource, ctx.agentId, state),
+          takeEvent(lane, sessionKey, key, basis, text, textSource, ctx.agentId, state),
         )
           .then(
             (entry) => {

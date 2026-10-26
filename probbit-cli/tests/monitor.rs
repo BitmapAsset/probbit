@@ -284,7 +284,8 @@ fn serve_answers_the_page_the_events_and_the_documents() {
     let (st, h, page) = get(port, "/", &host);
     assert_eq!(st, "HTTP/1.1 200 OK"); assert!(h.contains("Content-Type: text/html") && h.contains("connect-src 'self'"), "{h}");
     // The self-contained activity monitor keeps channel selection and document history offline.
-    assert!(page.contains("<title>probbit · Activity Monitor</title>") && page.contains("new EventSource('/events')") && page.len() < 64_000, "{} bytes", page.len());
+    // 72 KB since the identity header and the switcher (A2: +8 KB over the 64 KB bound the face kept)
+    assert!(page.contains("<title>probbit · Activity Monitor</title>") && page.contains("new EventSource(base+'events')") && page.len() < 72_000, "{} bytes", page.len());
     // the page fetches nothing from anywhere else: no URL in it but the SVG namespace
     assert!(page.match_indices("http").all(|(i, _)| page[i..].starts_with("http://www.w3.org/2000/svg")), "a URL in the page");
     for k in 1..=3 { let (st, _, d) = get(port, &format!("/doc/{k}"), &host); assert_eq!((st.as_str(), d.as_str()), ("HTTP/1.1 200 OK", format!("{}\n", docs[k - 1]).as_str()), "doc {k}"); }
@@ -387,4 +388,78 @@ fn viability_rows_and_the_worst_need() {
     assert!(rows[3].trim_start().starts_with("integrity") && rows[3].ends_with("margin 0.80  beyond 0"), "{}", rows[3]);
     let (c, out, _) = probbit(&["monitor", WEEK, "--once", "--plain"]); assert_eq!(c, 0); assert!(!out.contains("VIABILITY"), "no row without a bound");
     for x in [&f, &ev, &format!("{f}.lock")] { let _ = std::fs::remove_file(x); }
+}
+
+/// Spawn `probbit monitor ARGS --serve --port 0` -> (the child, its port)
+fn served(args: &[&str]) -> (Reap, u16) {
+    let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).arg("monitor").args(args).args(["--serve", "--port", "0"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap());
+    let mut url = String::new(); std::io::BufRead::read_line(&mut std::io::BufReader::new(child.0.stdout.take().unwrap()), &mut url).unwrap();
+    let port = url.trim_end().strip_prefix("http://127.0.0.1:").and_then(|p| p.strip_suffix('/')).unwrap_or_else(|| panic!("the URL line: {url:?}")).parse().unwrap();
+    (child, port)
+}
+/// `probbit live` on the fixed clock over `events` into the strand `f` (removed first) -> the stance documents it printed
+fn lived(f: &str, seed: &str, extra: &[&str], events: &str) -> Vec<String> {
+    let _ = std::fs::remove_file(f);
+    let mut live = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["live", "../examples/persona/tutor.yaml", "--seed", seed, "--clock", "fixed", "--strand", f]).args(extra)
+        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    live.stdin.take().unwrap().write_all(events.as_bytes()).unwrap();
+    let o = live.wait_with_output().unwrap(); assert!(o.status.success());
+    String::from_utf8(o.stdout).unwrap().lines().map(String::from).collect()
+}
+
+/// §5.8 labels: `live --label` writes the strand's sidecar and moves nothing (the strand's bytes are those of the same life
+/// without labels, so `live verify` says what it said); `monitor --label` only reads
+#[test]
+fn labels_go_to_the_sidecar_and_move_nothing() {
+    let (bare, labelled) = (tmp("labels-bare"), tmp("labels-on"));
+    let evs = "{\"praise\":true,\"elapsed_hours\":1}\n{\"loss\":true,\"elapsed_hours\":2}\n";
+    let d0 = lived(&bare, "2", &[], evs); let d1 = lived(&labelled, "2", &["--label", "agent=Nova", "--label", "host=Test host 1.0", "--label", "lane=support"], evs);
+    assert_eq!(d0, d1, "the stance documents"); assert_eq!(std::fs::read(&bare).unwrap(), std::fs::read(&labelled).unwrap(), "the strand bytes");
+    let side = labelled.replace(".strand", ".labels.json");
+    assert_eq!(std::fs::read_to_string(&side).unwrap(), "{\"agent\":\"Nova\",\"host\":\"Test host 1.0\",\"lane\":\"support\"}\n");
+    let (c0, v0, _) = probbit(&["live", "verify", &bare]); let (c1, v1, _) = probbit(&["live", "verify", &labelled]); assert_eq!((c0, &v0), (c1, &v1)); assert_eq!(c0, 0, "{v0}");
+    // the demo week too, byte for byte
+    let (w0, w1) = (tmp("labels-week-bare"), tmp("labels-week-on")); for f in [&w0, &w1] { let _ = std::fs::remove_file(f); }
+    assert_eq!(probbit(&["live", "../examples/persona/tutor.yaml", "--seed", "2", "--demo", "week", "--strand", &w0]).0, 0);
+    assert_eq!(probbit(&["live", "../examples/persona/tutor.yaml", "--seed", "2", "--demo", "week", "--strand", &w1, "--label", "agent=Atlas"]).0, 0);
+    assert_eq!(std::fs::read(&w0).unwrap(), std::fs::read(&w1).unwrap()); assert!(std::path::Path::new(&w1.replace(".strand", ".labels.json")).exists());
+    for (args, msg) in [(vec!["live", "../examples/persona/tutor.yaml", "--label", "agent=x"], "--label goes with --strand"),
+        (vec!["live", "../examples/persona/tutor.yaml", "--strand", &w1, "--label", "agent"], "KEY=VALUE"),
+        (vec!["live", "verify", &w1, "--label", "agent=x"], "--label labels a strand being written"),
+        (vec!["monitor", &w1, "--label", "agent=x"], "--label goes with --serve"), (vec!["monitor", &w0, &w1], "several strands"),
+        (vec!["monitor", "--label", "agent=x", &w1, "--serve"], "follows the STRAND"), (vec!["monitor", &w1, "--label", "agent=two\nlines", "--serve"], "printable")] {
+        let (c, out, err) = probbit(&args); assert_eq!((c, out.as_str()), (2, ""), "{args:?}: {err}"); assert!(err.contains(msg), "{args:?}: {err}");
+    }
+    for f in [&bare, &labelled, &w0, &w1] { let _ = std::fs::remove_file(f); let _ = std::fs::remove_file(f.replace(".strand", ".labels.json")); }
+}
+
+/// §5.8 many strands: `/strands` lists them (id, file name, labels: the sidecar's with `--label` over them), `/s/ID/doc/N` and
+/// `/s/ID/events` serve strand ID, the single-strand paths serve the first; `--dir` picks up a strand added while serving
+#[test]
+fn one_monitor_serves_many_strands() {
+    let dir = std::env::temp_dir().join(format!("probbit-monitor-many-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let at = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    let (a, b) = (at("nova.strand"), at("atlas.strand"));
+    let da = lived(&a, "2", &["--label", "agent=Nova", "--label", "lane=support"], "{\"praise\":true}\n{\"loss\":true}\n");
+    let db = lived(&b, "5", &[], "{\"error\":true}\n");
+    let (child, port) = served(&[&a, "--label", "session=demo-1", "--label", "agent=Nova B", &b, "--label", "agent=Atlas"]);
+    let host = format!("127.0.0.1:{port}");
+    let (st, h, list) = get(port, "/strands", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(h.contains("application/json"), "{h}");
+    assert!(list.starts_with(r#"{"demo":false,"dir":null,"strands":[{"age_s":"#), "{list}");
+    assert!(list.contains(r#""id":"nova","labels":{"agent":"Nova B","lane":"support","session":"demo-1"}"#) && list.contains(r#""id":"atlas","labels":{"agent":"Atlas"}"#), "{list}");
+    assert!(list.contains(r#""strand":"nova.strand""#) && !list.contains(&*dir.to_string_lossy()), "file names only: {list}");
+    assert_eq!(get(port, "/s/atlas/doc/1", &host).2, format!("{}\n", db[0])); assert_eq!(get(port, "/s/nova/doc/2", &host).2, format!("{}\n", da[1]));
+    assert_eq!(get(port, "/doc/2", &host).2, format!("{}\n", da[1]), "the single-strand paths serve the first strand");
+    for p in ["/s/nope/events", "/s/atlas", "/s/atlas/", "/s/atlas/doc/9", "/s/"] { assert_eq!(get(port, p, &host).0, "HTTP/1.1 404 Not Found", "{p}"); }
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /s/atlas/events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2); assert!(evs[1].1.contains(&format!(r#""doc":{},"#, db[0])), "{}", evs[1].1);
+    drop(child);
+    // --dir: every *.strand in it, labelled by its sidecar; a strand added while serving is listed within a second or two
+    let (child, port) = served(&["--dir", &dir.to_string_lossy()]); let host = format!("127.0.0.1:{port}");
+    let list = get(port, "/strands", &host).2; assert!(list.contains(r#""dir":"probbit-monitor-many-"#) && list.contains(r#""id":"atlas""#) && list.contains(r#""id":"nova","labels":{"agent":"Nova","lane":"support"}"#), "{list}");
+    std::fs::copy(&b, at("zeta.strand")).unwrap();
+    let t = Instant::now(); while !get(port, "/strands", &host).2.contains(r#""id":"zeta""#) { assert!(t.elapsed() < Duration::from_secs(10), "zeta picked up"); std::thread::sleep(Duration::from_millis(200)); }
+    assert_eq!(get(port, "/s/zeta/doc/1", &host).2, format!("{}\n", db[0]));
+    drop(child); let _ = std::fs::remove_dir_all(&dir);
 }

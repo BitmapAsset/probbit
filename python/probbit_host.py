@@ -131,11 +131,17 @@ class StanceHost:
     memory. strand: the strand file (the receipts); a new file gets the header, an existing one is continued from `state`.
     clock: "fixed" (default) stamps elapsed_hours = 0 unless the caller passes it; "real" stamps the hours since the
     previous event of this host from a monotonic clock, so moods decay between calls as in a live chat.
-    name: the header of the block (default: the persona's name, once the first stance is known)."""
+    name: the header of the block (default: the persona's name, once the first stance is known).
+    labels: {key: value} for the strand's sidecar (`probbit monitor` shows them), merged in after every event; e.g.
+    {"agent": "support-bot", "host": "my harness 2.1"} (probbit.write_labels: the rules; ValueError on bad labels)."""
 
-    def __init__(self, persona, *, seed=None, state=None, strand=None, name=None, clock="fixed", binary=None, timeout_s=30):
+    def __init__(self, persona, *, seed=None, state=None, strand=None, name=None, clock="fixed", binary=None, timeout_s=30,
+                 labels=None):
         if clock not in ("fixed", "real"):
             raise ValueError("clock must be 'fixed' or 'real'")
+        if labels is not None and strand is None:
+            raise ValueError("labels need a strand: they live in its sidecar")
+        self.labels = probbit.check_labels(labels) if labels is not None else None
         self.persona = persona
         self.seed = seed
         self.strand = os.fspath(strand) if strand is not None else None
@@ -177,7 +183,7 @@ class StanceHost:
         else:
             ev.setdefault("elapsed_hours", 0)
         out = probbit.live_event(self.persona, state=self.state, event=ev, seed=self.seed if self.state is None else None,
-                                 strand=self.strand, timeout_s=self.timeout_s, binary=self.binary)
+                                 strand=self.strand, labels=self.labels, timeout_s=self.timeout_s, binary=self.binary)
         self.state, self.last = out["state"], out["stance"]
         self.n = int(self.state.get("turn") or self.n + 1)   # the state's turn = events so far (the stance's is 0-based)
         if self.name is None:
