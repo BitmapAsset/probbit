@@ -90,10 +90,18 @@ jobs:
           if-no-files-found: error
   macos-app:
     # probbit Monitor.app: the two macOS builds above joined into one universal probbit (lipo), wrapped by
-    # apps/macos/ProbbitMonitor/build.sh (the script ci.yml runs on every commit), signed ad-hoc (not notarized), launched once,
-    # zipped. The zip and its .sha256 go to the release job with the other archives.
+    # apps/macos/ProbbitMonitor/build.sh (the script ci.yml runs on every commit), launched once, zipped. The zip and its
+    # .sha256 go to the release job with the other archives.
+    # Signing: with the repository secrets APPLE_DEVELOPER_ID_P12 (the Developer ID Application certificate and key, a
+    # base64 .p12), APPLE_DEVELOPER_ID_P12_PASSWORD and APPLE_TEAM_ID, the app is signed with that Developer ID and the
+    # hardened runtime, from a keychain made for this job and deleted at its end; with APPLE_NOTARY_KEY_P8 (an App Store
+    # Connect API key, a base64 .p8), APPLE_NOTARY_KEY_ID and APPLE_NOTARY_ISSUER_ID as well, it is notarized and the ticket
+    # stapled. Without them it is signed ad-hoc, as before, and the job says so. The secrets are given only to the steps
+    # that use them.
     needs: build
     runs-on: macos-latest
+    outputs:
+      signature: ${{ steps.app.outputs.signature }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -115,8 +123,102 @@ jobs:
           lipo -create "probbit-${GITHUB_REF_NAME}-aarch64-apple-darwin/probbit" "probbit-${GITHUB_REF_NAME}-x86_64-apple-darwin/probbit" -output probbit
           lipo -archs probbit
           ./probbit version
+      - name: signing credentials
+        id: creds
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          # names only: which secrets are set (never their values)
+          missing() { for n in "$@"; do [ -n "${!n:-}" ] || printf ' %s' "$n"; done; }
+          sign_missing=$(missing APPLE_DEVELOPER_ID_P12 APPLE_DEVELOPER_ID_P12_PASSWORD APPLE_TEAM_ID)
+          notary_missing=$(missing APPLE_NOTARY_KEY_P8 APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID)
+          sign=false; notarize=false
+          [ -n "$sign_missing" ] || sign=true
+          [ "$sign" = false ] || [ -n "$notary_missing" ] || notarize=true
+          echo "sign=$sign" >> "$GITHUB_OUTPUT"
+          echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
+          if [ "$sign" = false ]; then
+            echo "No Developer ID secrets (missing:$sign_missing): the app is signed ad-hoc and not notarized."
+          elif [ "$notarize" = false ]; then
+            echo "Developer ID signing; no notary secrets (missing:$notary_missing): the app is not notarized."
+          else
+            echo "Developer ID signing and notarization."
+          fi
+      - name: the Developer ID certificate, in a keychain of this job
+        if: steps.creds.outputs.sign == 'true'
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KC="$RUNNER_TEMP/probbit-signing-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.keychain-db"
+          KC_PASS=$(openssl rand -hex 24)
+          echo "::add-mask::$KC_PASS"
+          security create-keychain -p "$KC_PASS" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KC_PASS" "$KC"
+          umask 077
+          printf '%s' "$APPLE_DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$KC" -f pkcs12 -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign > /dev/null
+          rm -f "$RUNNER_TEMP/developer-id.p12"
+          # the intermediate that issues Developer ID certificates, in case the runner lacks it (public, pinned by hash)
+          curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          echo "f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a  $RUNNER_TEMP/DeveloperIDG2CA.cer" | shasum -a 256 -c > /dev/null
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KC" > /dev/null 2>&1 || true
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASS" "$KC" > /dev/null
+          # codesign is given this keychain (build.sh --keychain); it is also put on the search list so that the
+          # certificate chain is found there
+          OLD=(); while IFS= read -r k; do k=${k#*\"}; OLD+=("${k%\"}"); done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$KC" "${OLD[@]}"
+          # the identity by its SHA-1 (codesign checks the certificate when it signs)
+          ID=$(security find-identity -p codesigning "$KC" | awk -v t="($APPLE_TEAM_ID)\"" 'index($0, "\"Developer ID Application: ") && index($0, t) { print $2; exit }')
+          [ -n "$ID" ] || { echo "The certificate holds no Developer ID Application identity of APPLE_TEAM_ID."; exit 1; }
+          echo "SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
+          echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          echo "Developer ID Application identity imported (SHA-1 ${ID:0:8}...)."
+      - name: the notary API key
+        if: steps.creds.outputs.notarize == 'true'
+        env:
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$APPLE_NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary-key.p8"
+          echo "NOTARY_KEY=$RUNNER_TEMP/notary-key.p8" >> "$GITHUB_ENV"
       - name: build the app
-        run: apps/macos/ProbbitMonitor/build.sh --binary darwin/probbit --asset-version "$GITHUB_REF_NAME" --out app-dist
+        id: app
+        env:
+          SIGN: ${{ steps.creds.outputs.sign }}
+          NOTARIZE: ${{ steps.creds.outputs.notarize }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          set -- --binary darwin/probbit --asset-version "$GITHUB_REF_NAME" --out app-dist
+          signature=ad-hoc
+          if [ "$SIGN" = true ]; then
+            set -- "$@" --identity "$SIGN_IDENTITY" --keychain "$SIGN_KEYCHAIN"
+            signature=developer-id
+          fi
+          if [ "$NOTARIZE" = true ]; then
+            set -- "$@" --notarize-key "$NOTARY_KEY" --notarize-key-id "$APPLE_NOTARY_KEY_ID" --notarize-issuer "$APPLE_NOTARY_ISSUER_ID"
+            signature=notarized
+          fi
+          apps/macos/ProbbitMonitor/build.sh "$@"
+          echo "signature=$signature" >> "$GITHUB_OUTPUT"
+      - name: Gatekeeper accepts it
+        if: steps.creds.outputs.notarize == 'true'
+        run: |
+          set -euo pipefail
+          xcrun stapler validate "app-dist/probbit Monitor.app"
+          spctl --assess --type execute -v "app-dist/probbit Monitor.app" 2>&1 | tee spctl.txt
+          grep -q "source=Notarized Developer ID" spctl.txt
       - name: launch it, quit it
         run: apps/macos/ProbbitMonitor/smoke.sh "app-dist/probbit Monitor.app" --quit term -- --demo week
       - uses: actions/upload-artifact@v7
@@ -126,6 +228,19 @@ jobs:
             app-dist/probbit-Monitor-${{ github.ref_name }}-macos.zip
             app-dist/probbit-Monitor-${{ github.ref_name }}-macos.zip.sha256
           if-no-files-found: error
+      - name: the notarization record (kept with the run, not attached to the release)
+        if: always() && steps.creds.outputs.notarize == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: notarization-record
+          path: app-dist/probbit-Monitor-${{ github.ref_name }}-macos.notarization*.json
+          if-no-files-found: warn
+      - name: delete the keychain and the keys
+        if: always()
+        run: |
+          KC="$RUNNER_TEMP/probbit-signing-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.keychain-db"
+          if [ -f "$KC" ]; then security delete-keychain "$KC" && echo "keychain deleted"; fi
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/notary-key.p8" "$RUNNER_TEMP/DeveloperIDG2CA.cer"
   release:
     needs: [build, macos-app]
     runs-on: ubuntu-latest
@@ -138,13 +253,21 @@ jobs:
       - name: create or update the draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          APP_SIGNATURE: ${{ needs.macos-app.outputs.signature }}
         run: |
           set -euo pipefail
+          rm -f dist/*.notarization*.json   # the notarization record stays with the workflow run
           cp docs/probbit.1 dist/   # the manual page (`probbit man`), also inside every archive under docs/
           ls -la dist
+          APP="probbit-Monitor-$GITHUB_REF_NAME-macos.zip is probbit Monitor, the monitor as a universal Mac app"
+          case "$APP_SIGNATURE" in
+            notarized) APP="$APP, signed with a Developer ID and notarized by Apple: it opens on double-click." ;;
+            developer-id) APP="$APP, signed with a Developer ID, not notarized: allow its first launch once (docs/monitor-app.md)." ;;
+            *) APP="$APP, signed ad-hoc, not notarized: allow its first launch once (docs/monitor-app.md)." ;;
+          esac
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
             gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --title "probbit $GITHUB_REF_NAME" \
-              --notes "Portable builds (no CPU pin) for Linux x86_64 (glibc >= 2.34, or static musl), Linux arm64 (static musl), macOS (Apple silicon and Intel) and Windows x86_64 (static C runtime). Verify an archive with the .sha256 file beside it. What changed: see CHANGELOG.md."
+              --notes "Portable builds (no CPU pin) for Linux x86_64 (glibc >= 2.34, or static musl), Linux arm64 (static musl), macOS (Apple silicon and Intel) and Windows x86_64 (static C runtime). Verify an archive with the .sha256 file beside it. $APP What changed: see CHANGELOG.md."
           fi

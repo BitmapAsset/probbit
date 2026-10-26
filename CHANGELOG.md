@@ -31,6 +31,12 @@ All notable changes to this project are documented here. The format follows
   third-party code) around a bundled probbit, opened from Finder, the Dock or File → Open; ad-hoc signed, not notarized.
   `release.yml` attaches `probbit-Monitor-<tag>-macos.zip` (universal) to each release; `ci.yml` builds and launches it on
   every commit. See docs/monitor-app.md.
+- probbit Monitor for macOS, signing: `build.sh --identity` signs with a Developer ID and the hardened runtime (the bundled
+  engine first, then the app, with a secure timestamp), and `--notarize-profile` or `--notarize-key` submits the app to
+  Apple's notary service, staples the ticket and zips the stapled app; a notarization that is not accepted fails the build
+  and leaves no zip. `release.yml` signs and notarizes when the six `APPLE_*` repository secrets exist (from a keychain made
+  for the job and deleted at its end), signs ad-hoc as before when they do not, and its release notes say "notarized" only
+  when the app was. `ci.yml` builds the app ad-hoc with the hardened runtime, so a runtime violation shows on every commit.
 
 - Documentation, from a second dress rehearsal (main and the v0.12.1 binary, every README and REPRODUCE.md command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): REPRODUCE.md says how to recover when a venv was first made with a
