@@ -81,7 +81,36 @@ Details:
   <version>`), `lane`, `agent` (new `agentName` key, else the session key's agent id) and a non-secret `session` label
   (`telegram group #3fa9c2d1`). The new `labels` config key adds free keys and overrides the computed ones; invalid
   entries are dropped with one warning. A binary whose `probbit live --help` lists `--label` gets the labels when it
+<<<<<<< HEAD
   creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand). (#75)
+=======
+  creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand).
+- Python: `probbit.write_labels` / `labels_path` / `check_labels`, and a `labels=` argument on `probbit.live_event` and
+  `StanceHost` that merges the labels into the strand's sidecar after every event (ValueError on bad labels, before the
+  event runs).
+- Hosts: the Claude Code hook writes `host` = `Claude Code`, `session` = `#` + 8 characters of the session id and `agent`
+  from `PROBBIT_AGENT`; the LangChain, OpenAI Agents SDK and Vercel AI SDK examples label their strands with the
+  framework's name. docs/agents.md: "How a host identifies itself".
+- probbit Monitor for macOS (`apps/macos/ProbbitMonitor`): the monitor page in a native window (Swift, AppKit and WebKit, no
+  third-party code) around a bundled probbit, opened from Finder, the Dock or File → Open; ad-hoc signed, not notarized.
+  `release.yml` attaches `probbit-Monitor-<tag>-macos.zip` (universal) to each release; `ci.yml` builds and launches it on
+  every commit. See docs/monitor-app.md.
+- probbit Monitor for macOS, signing: `build.sh --identity` signs with a Developer ID and the hardened runtime (the bundled
+  engine first, then the app, with a secure timestamp), and `--notarize-profile` or `--notarize-key` submits the app to
+  Apple's notary service, staples the ticket and zips the stapled app; a notarization that is not accepted fails the build
+  and leaves no zip. `release.yml` signs and notarizes when the six `APPLE_*` repository secrets exist (from a keychain made
+  for the job and deleted at its end), signs ad-hoc as before when they do not, and its release notes say "notarized" only
+  when the app was. `ci.yml` builds the app ad-hoc with the hardened runtime, so a runtime violation shows on every commit.
+
+- Documentation, from a second dress rehearsal (main and the v0.12.1 binary, every README and REPRODUCE.md command run as
+  written on Ubuntu 24.04 x86_64 and macOS arm64): REPRODUCE.md says how to recover when a venv was first made with a
+  Python outside 3.9 to 3.12 (`python3.12 -m venv` over it can keep the old interpreter), names the `bars.tsv` sha256 that a
+  source-built numpy on Python 3.14 gives, how to restore the tables after a `DIFFERS` run, and that it has four tiers;
+  `plugins/openclaw/README.md` says that the example entry's `sensesMode` line is unreleased and that probbit-stance 0.1.0
+  rejects it, and marks the senses log and the `after_tool_call` hook unreleased.
+
+- `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky.
+>>>>>>> origin/main
 - OpenClaw plugin (`plugins/openclaw`): it now measures the readings a persona's senses declare, shadow first.
   `sensesMode` (`off` by default, so existing installs are unchanged; the example entry shows `shadow`): `shadow` writes
   one JSON line per event to `strands/<lane>.senses.jsonl` (`tempo`, `time_pressure`, `tool_fail`, the source of each,
