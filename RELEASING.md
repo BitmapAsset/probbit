@@ -28,8 +28,8 @@ the RFC). `probbit-cli/tests/readme_release.rs` fails when the README's current 
    check` with the release build gives 0 differences (its corpus is never regenerated); `cargo publish --dry-run
    --workspace --locked` and `npm pack --dry-run` (in `npm/`) package version X.Y.Z; the four required checks pass.
 2. **Tag** the release squash commit on `main`: `git tag -a vX.Y.Z <sha> -m "probbit X.Y.Z"`, then
-   `git push origin vX.Y.Z` (the tag only). `release.yml` builds a draft release with 13 assets: 6 archives, 6 `.sha256`
-   files and `probbit.1`.
+   `git push origin vX.Y.Z` (the tag only). `release.yml` builds a draft release with 15 assets: 6 archives, the macOS app
+   (`probbit-Monitor-vX.Y.Z-macos.zip`, docs/monitor-app.md), 7 `.sha256` files and `probbit.1`.
 3. **Check the draft**: download the macOS arm64 archive, check it against its `.sha256`, run `./probbit version`: it
    prints `probbit X.Y.Z`.
 4. **Publish**: `gh release edit vX.Y.Z --draft=false --title "probbit X.Y.Z" --notes-file <notes>`. Then the installers

@@ -88,8 +88,46 @@ jobs:
             dist/${{ env.ASSET }}
             dist/${{ env.ASSET }}.sha256
           if-no-files-found: error
-  release:
+  macos-app:
+    # probbit Monitor.app: the two macOS builds above joined into one universal probbit (lipo), wrapped by
+    # apps/macos/ProbbitMonitor/build.sh (the script ci.yml runs on every commit), signed ad-hoc (not notarized), launched once,
+    # zipped. The zip and its .sha256 go to the release job with the other archives.
     needs: build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: aarch64-apple-darwin
+          path: darwin
+      - uses: actions/download-artifact@v8
+        with:
+          name: x86_64-apple-darwin
+          path: darwin
+      - name: one universal probbit
+        run: |
+          set -euo pipefail
+          cd darwin
+          for T in aarch64-apple-darwin x86_64-apple-darwin; do
+            shasum -a 256 -c "probbit-${GITHUB_REF_NAME}-$T.tar.gz.sha256"
+            tar xzf "probbit-${GITHUB_REF_NAME}-$T.tar.gz"
+          done
+          lipo -create "probbit-${GITHUB_REF_NAME}-aarch64-apple-darwin/probbit" "probbit-${GITHUB_REF_NAME}-x86_64-apple-darwin/probbit" -output probbit
+          lipo -archs probbit
+          ./probbit version
+      - name: build the app
+        run: apps/macos/ProbbitMonitor/build.sh --binary darwin/probbit --asset-version "$GITHUB_REF_NAME" --out app-dist
+      - name: launch it, quit it
+        run: apps/macos/ProbbitMonitor/smoke.sh "app-dist/probbit Monitor.app" --quit term -- --demo week
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-app
+          path: |
+            app-dist/probbit-Monitor-${{ github.ref_name }}-macos.zip
+            app-dist/probbit-Monitor-${{ github.ref_name }}-macos.zip.sha256
+          if-no-files-found: error
+  release:
+    needs: [build, macos-app]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
