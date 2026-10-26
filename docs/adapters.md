@@ -60,7 +60,7 @@ the strand's sidecar `run.labels.json` after every event, keys already there and
 hook writes `host` = `Claude Code`, `session` = `#` + the first 8 characters of the session id and `agent` from
 `PROBBIT_AGENT`; the OpenClaw plugin computes `host`, `lane`, `agent` and `session` per lane and takes overrides from its
 `labels` config key. A host that drives the CLI directly passes `--label k=v` to the `probbit live` call that creates the strand
-(a build from `main`; 0.12.1 has no `--label`).
+(probbit 0.13.0 or later; 0.12.1 has no `--label`).
 
 Keep one strand per conversation. At the end: `probbit live verify run.strand` (exit 0: every line replays) and
 `python3 python/probbit_host.py receipts run.strand` (one record per decision).

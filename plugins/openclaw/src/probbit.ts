@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync, appendFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The part of `probbit live`'s stance document this plugin reads (persona.md §4/§5.7). */
@@ -224,9 +224,13 @@ export async function runLiveEvent(opts: {
   eventLine: string;
   killAfterMs: number;
   newStrandArgs?: () => Promise<string[]>;
+  /** A refusal of the binary itself (its version); undefined to go ahead. A refused binary never runs an event. */
+  binaryCheck?: () => Promise<string | undefined>;
 }): Promise<LiveRun> {
   const t0 = Date.now();
   const { paths } = opts;
+  // Asked beside `persona init` too (cached per binary, so usually already settled at load).
+  const check = opts.binaryCheck ? opts.binaryCheck().catch(() => undefined) : Promise.resolve(undefined);
   const hasState = existsSync(paths.state);
   const hasStrand = existsSync(paths.strand);
   if (!hasState && hasStrand) return { ok: false, reason: "strand exists without its state; refusing to fork the life", ms: Date.now() - t0 };
@@ -239,10 +243,18 @@ export async function runLiveEvent(opts: {
       "",
       opts.killAfterMs,
     );
+    const refused = await check;
+    if (refused) {
+      // The state this call just made belongs to no strand: remove it, so a refused binary leaves nothing behind.
+      if (init.code === 0) rmSync(paths.state, { force: true });
+      return { ok: false, reason: refused, ms: Date.now() - t0 };
+    }
     if (init.spawnError || init.code !== 0) {
       return { ok: false, reason: `persona init failed: ${init.spawnError ?? `exit ${init.code ?? init.signal}`} ${init.stderr.slice(0, 200)}`.trim(), ms: Date.now() - t0 };
     }
   }
+  const refused = await check;
+  if (refused) return { ok: false, reason: refused, ms: Date.now() - t0 };
   const extra = await extraArgs;
   const res = await runBinary(
     opts.binary,

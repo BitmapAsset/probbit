@@ -43,6 +43,7 @@ import {
   tempoNow,
   type DeclaredSensesCache,
 } from "./senses.js";
+import { checkBinaryVersion } from "./version.js";
 
 export const PLUGIN_ID = "probbit-stance";
 
@@ -142,6 +143,10 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
     warn("no lanes configured; no hooks registered");
     return cfg;
   }
+  // The binary's version, checked at load: an older probbit is named here once, and every event refuses it.
+  void checkBinaryVersion(cfg.binary, Math.max(5_000, cfg.timeoutMs * 10)).then((check) => {
+    if (!check.ok) warn(check.reason);
+  });
 
   // The Jev key is read once here and only ever placed in the request header; it is never logged.
   let jevEvaluate: DecisionEvaluate | undefined;
@@ -351,6 +356,11 @@ export function registerStance(api: OpenClawPluginApi, deps: StanceDeps = {}): S
       killAfterMs,
       // A new strand: the CLI writes the sidecar when it takes --label (probed once per process); else the plugin does below.
       newStrandArgs: async () => ((await liveTakesLabels(cfg.binary, killAfterMs)) ? labelArgs(labels) : []),
+      // probbit older than MIN_PROBBIT: no event at all (probed once per process, at load).
+      binaryCheck: async () => {
+        const check = await checkBinaryVersion(cfg.binary, killAfterMs);
+        return check.ok ? undefined : check.reason;
+      },
     });
     const cls: Classification = shadow ? ((await clsSettled) ?? fed) : fed;
     if (!run.ok) {

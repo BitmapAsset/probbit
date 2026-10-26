@@ -962,10 +962,9 @@ trajectory PERSONA --state S [--inputs I]` (or `--program FILE` for any probbit-
 entropy of p_beta is non-increasing in beta (dH/dbeta = -beta Var(log w)); a single variable's marginal entropy can rise
 (measured in RFC 0009).
 
-### 2.18 Display glyphs (optional; unreleased)
+### 2.18 Display glyphs (optional; since 0.13.0)
 
-Not in a release yet: the block is on `main` after 0.12.1. probbit 0.12.1 and earlier refuse a persona that has it
-(`display: unknown field`, exit 2); build from `main` to use it.
+Since probbit 0.13.0. probbit 0.12.1 and earlier refuse a persona that has it (`display: unknown field`, exit 2).
 
 One emoji per stance, computed by the engine from the stance document, never chosen by the model. Off by default and outside
 the persona digest (as `bound` and `expectation` are): a persona without `display` gives every document byte for byte as
@@ -1428,7 +1427,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.12.1","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.13.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",

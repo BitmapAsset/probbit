@@ -30,13 +30,25 @@ the RFC). `probbit-cli/tests/readme_release.rs` fails when the README's current 
 2. **Tag** the release squash commit on `main`: `git tag -a vX.Y.Z <sha> -m "probbit X.Y.Z"`, then
    `git push origin vX.Y.Z` (the tag only). `release.yml` builds a draft release with 15 assets: 6 archives, the macOS app
    (`probbit-Monitor-vX.Y.Z-macos.zip`, docs/monitor-app.md), 7 `.sha256` files and `probbit.1`.
+   Signing of the app asset: with the six `APPLE_*` repository secrets set (docs/monitor-app.md, "Signing and
+   notarization"), `release.yml` signs the app with the Developer ID and the hardened runtime, notarizes it and staples the
+   ticket, and its notes say "notarized"; without them the asset is signed ad-hoc and the notes say so. A notarization that
+   is not accepted fails the job and leaves no app asset.
 3. **Check the draft**: download the macOS arm64 archive, check it against its `.sha256`, run `./probbit version`: it
    prints `probbit X.Y.Z`.
 4. **Publish**: `gh release edit vX.Y.Z --draft=false --title "probbit X.Y.Z" --notes-file <notes>`. Then the installers
    on a clean directory: the `install.sh` one-liner (latest) and `PROBBIT_VERSION=vX.Y.Z` both install `probbit X.Y.Z`.
 5. **npm**, after the release is published (`npm/install.js` downloads its assets): `npm pack --dry-run`, then
    `npm publish --access public`; `npm view probbit version` and `dist-tags.latest` give X.Y.Z, and a clean-prefix
-   `npm i -g probbit@X.Y.Z` prints `probbit X.Y.Z`.
+   `npm i -g probbit@X.Y.Z` prints `probbit X.Y.Z`. The token stays out of every file: a throwaway `--userconfig`
+   whose one line is `//registry.npmjs.org/:_authToken=${NPM_TOKEN}` (npm expands the variable), with `NPM_TOKEN` set
+   only in that shell, `npm --userconfig <file> whoami` first, the file deleted after.
+   **The OpenClaw plugin** (`plugins/openclaw`, npm `probbit-stance`), when its version changed: after `probbit` is on
+   npm, `npm ci && PROBBIT_BIN=$(command -v probbit) npm test` with the released binary, `npm pack --dry-run` (15 files at 0.2.0:
+   `dist/src/*.js`, `openclaw.plugin.json`, `personas/assistant.yaml`, `install/openclaw-entries.json`, `README.md`,
+   `package.json`; no tests), then
+   `npm publish --access public` with the same userconfig; `npm view probbit-stance version` gives the new version. Its
+   `MIN_PROBBIT` (`src/version.ts`) names the oldest probbit it runs.
 6. **crates.io**: `cargo publish --workspace --locked` from the tag (`probbit-core`, `probbit-ir`, `probbit-decide`,
    `probbit-cli`; `probbit-wasm` has `publish = false`).
 7. **Back to development**: `main` moves to the next `-dev` version (`Cargo.toml`, the path dependencies, `Cargo.lock`,
