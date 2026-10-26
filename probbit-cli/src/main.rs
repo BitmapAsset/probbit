@@ -20,6 +20,7 @@
 mod evaluate;
 mod fuzz;
 mod json;
+mod labels;
 mod live;
 mod mcp;
 mod monitor;
@@ -302,8 +303,8 @@ pub(crate) static COMMANDS: &[Command] = &[
             "probbit persona lint examples/persona/tutor.yaml"],
         run: persona_cmd },
     Command { name: "live", aliases: &[], group: "live", summary: "a resident individual: JSONL events in, one stance per event out",
-        usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]",
-            "live PERSONA --demo week [--seed N] [--strand FILE] [--plain]",
+        usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE [--label KEY=VALUE]...] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]",
+            "live PERSONA --demo week [--seed N] [--strand FILE [--label KEY=VALUE]...] [--plain]",
             "live verify STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]",
             "live control STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]"],
         about: "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n--strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.",
@@ -318,6 +319,7 @@ pub(crate) static COMMANDS: &[Command] = &[
             Flag { name: "--demo", arg: "week", help: "one individual's scripted week on the fixed clock (7 days, events hourly 09:00-15:00): praise for short answers moves the learned verbosity deltas to their cap, a quiet night relaxes the mood to its resting level, a campaign praising jokes raises humour while failure turns stay joke-free; a persona without a learning block gets the demo's (said in the opening line). Bars on stderr at a terminal, paced 1 s per hour (nights fast-forward in 2 s); otherwise one line per event on stdout, no waiting. With --seed, --strand" },
             F_PLAIN,
             Flag { name: "--checkpoint-every", arg: "K", help: "with --strand: a checkpoint line (the whole state) after every K-th event (default 1000; 0: none); `verify --from-checkpoint` and `monitor` start at the last one" },
+            Flag { name: "--label", arg: "KEY=VALUE", help: "with --strand, repeatable: a presentation label for the monitor (agent, host, lane, session, or a free key; at most 8 keys, values of 1 to 64 printable characters) merged into the strand's sidecar FILE.labels.json (FILE without its extension); the strand itself, its chain and its digests are not touched" },
         ]],
         subs: &[
             Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]", help: "replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
@@ -356,6 +358,7 @@ pub(crate) static COMMANDS: &[Command] = &[
         run: check_cmd },
     Command { name: "monitor", aliases: &[], group: "monitor", summary: "an individual's inner state, live: terminal bars or a page on 127.0.0.1",
         usage: &["monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N]",
+            "monitor STRAND [--label KEY=VALUE]... [STRAND [--label KEY=VALUE]...]... [--dir DIR] [--serve] [--open] [--port N]",
             "monitor --demo [week|drives] [--once] [--plain] [--serve] [--open] [--port N]"],
         about: "Watch an individual's inner state (docs/persona.md §5.8): replays the strand (`probbit live --strand` writes it) with the rules of `probbit live verify`, recomputing every stance document from the strand alone, and draws the latest event as horizontal bars: the stance (each trait's levels with their reported odds, the level taken highlighted, the phrase it says), the moods with a sparkline of the last 50 events, the senses (the event's inputs, the history features), the habits in force and the ones that bound, the learned deltas, the drives when the documents carry them, and the stance line.\nIt changes no file (--demo: its week goes through a temporary one, removed at once) and sends nothing anywhere.",
         before: &[("modes", "one frame on stdout, then exit (--once; the default without --follow) · the terminal, redrawn as the strand grows (--follow) · a page in the browser (--serve; --open also opens it).")],
@@ -364,10 +367,12 @@ pub(crate) static COMMANDS: &[Command] = &[
             Flag { name: "--once", arg: "", help: "one frame on stdout, then exit (the default without --follow)" },
             Flag { name: "--plain", arg: "", help: "plain ASCII, no colour (NO_COLOR=1: no colour; PROBBIT_THEME=plain or TERM=dumb: as --plain)" },
             Flag { name: "--fps", arg: "N", help: "with --follow, at most N redraws per second (1-60, default 10)" },
-            Flag { name: "--serve", arg: "", help: "the page instead of the terminal, following the strand (or looping the selected synthetic demo): its URL http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept). It binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or localhost, and sends nothing anywhere; Ctrl-C quits" },
+            Flag { name: "--serve", arg: "", help: "the page instead of the terminal, following the strand (or looping the selected synthetic demo): its URL http://127.0.0.1:PORT/ is the line on stdout. GET / the page (one file; it fetches no fonts, styles or scripts), /events its server-sent events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s; events that land within one 100 ms poll, or while a page falls behind, come as the latest frame), /doc/N event N's stance document, as `probbit live` printed it (the latest 10000 are kept), /strands the strands served (id, file name, labels, latest event and glyph, seconds since the file was written); with several strands (or --dir) /s/ID/events and /s/ID/doc/N are strand ID's, /events and /doc/N the first's, and /?strand=ID opens the page on ID. It binds 127.0.0.1 and no other address (there is no --host), answers requests addressed to 127.0.0.1 or localhost, and sends nothing anywhere; Ctrl-C quits" },
             Flag { name: "--open", arg: "", help: "serve the page (as --serve does) and open it in the default browser (BROWSER if set; else open on macOS, start on Windows, xdg-open elsewhere); a browser that does not start fails nothing" },
             Flag { name: "--port", arg: "N", help: "with --serve or --open, the port (default 0: a free one)" },
             Flag { name: "--demo", arg: "[week|drives]", help: "synthetic data, never a live individual (default week); see demo below" },
+            Flag { name: "--label", arg: "KEY=VALUE", help: "after a STRAND, repeatable, with --serve or --open: a label for that strand's identity header (agent, host, lane, session, or a free key), over the ones in its sidecar STRAND.labels.json (STRAND without its extension); nothing is written" },
+            Flag { name: "--dir", arg: "DIR", help: "with --serve or --open: every *.strand in DIR (files added while serving are picked up within a second), each labelled by DIR/NAME.labels.json; with two or more strands the page has a switcher, and /s/ID/events, /s/ID/doc/N serve strand ID (its file name without the extension)" },
         ]],
         subs: &[], list_subs: false, shared: false,
         after: &[("demo", "the tutor's week is the one `probbit live examples/persona/tutor.yaml --seed 2 --demo week` writes, replayed in memory: at a terminal or with --serve paced 1 s per hour, each night in 2 s (under a minute); otherwise, or with --once, its last frame. `--demo drives` plays a short goal-signal scenario with wanting, afterglow and prediction errors. The page labels each loop and its restart; Ctrl-C quits."),
@@ -782,6 +787,10 @@ fn fuzz_cmd(args: &[String], path: &str, p: &persona::Persona, eng: fuzz::SyncEn
 /// `probbit live PERSONA [--seed N | --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]`;
 /// `probbit live PERSONA --demo week`; `probbit live verify STRAND [--from-checkpoint] [--actions FILE]`; `probbit live control STRAND pause|resume|retire|erase --by WHO --reason TEXT`
 fn live_cmd(args: &[String]) {
+    // §5.8: `--label k=v` (repeatable) goes to the strand's sidecar, outside the strand and both digests
+    let (args, labels) = labels::take(args, "live"); let args = &args[..];
+    if !labels.is_empty() && matches!(args.get(1).map(String::as_str), Some("verify" | "control")) { fail("live: --label labels a strand being written: probbit live PERSONA --strand FILE --label KEY=VALUE") }
+    if !labels.is_empty() && !args.iter().any(|a| a == "--strand") { fail("live: --label goes with --strand FILE (the labels are written next to the strand, in FILE's .labels.json)") }
     let engine = persona_engine(); let eng: persona::Engine = &engine;
     let opt = |f: &str| -> Option<String> { args.iter().position(|x| x == f).and_then(|k| args.get(k + 1)).cloned() };
     // an error object on stdout, a line on stderr, then the exit: 4 for a lock held by another writer or a paused / retired individual
@@ -848,6 +857,7 @@ fn live_cmd(args: &[String]) {
         let th = theme::stderr(args); let lines = th.is_none() || !theme::stdout_is_terminal();
         // the week's strand is written under the writer lock too
         let lock = opt("--strand").map(|f| live::Lock::take(&f).unwrap_or_else(|e| refuse("live: ", e)));
+        if let Some(f) = opt("--strand").filter(|_| !labels.is_empty()) { labels::merge_into(&f, &labels).unwrap_or_else(|e| fail(&format!("live: {e}"))); }
         live::week(&doc, seed_arg(args, "--seed"), opt("--strand").as_deref(), th, &mut |l: &str| if lines { emit(l) }, eng).unwrap_or_else(|e| bad_input("live: ", e));
         drop(lock); return;
     }
@@ -865,6 +875,7 @@ fn live_cmd(args: &[String]) {
     let strand = opt("--strand");
     let lock = strand.as_ref().map(|f| live::Lock::take(f).unwrap_or_else(|e| refuse("live: ", e)));
     if let Some(f) = &strand { if std::path::Path::new(f).exists() && state_file.is_none() { fail(&format!("live: {f} exists: continue it with --state FILE (the state after its last line), or log to a new file")) } }
+    if let Some(f) = strand.as_ref().filter(|_| !labels.is_empty()) { labels::merge_into(f, &labels).unwrap_or_else(|e| fail(&format!("live: {e}"))); }
     let (mut lv, header) = match &strand { Some(f) => live::open(f, p, &doc, st, clock).unwrap_or_else(|e| bad_input("live: ", e)), None => (live::Live::start(p, &doc, st, clock, &live::engine()).0, None) };
     // every append first checks the lock is still this writer's: a lock removed or taken over under it stops the run unwritten
     let log = |ls: &[&str]| if let Some(f) = &strand {

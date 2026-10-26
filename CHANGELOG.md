@@ -5,6 +5,28 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- `probbit monitor`: the page says which agent it shows, and one monitor serves many. Presentation labels (`agent`, `host`,
+  `lane`, `session`, free keys; at most 8, values of 1 to 64 printable characters) live in a sidecar next to the strand,
+  `NAME.labels.json`, outside the strand and both digests: probbit 0.12.1 refuses a `labels` header key (exit 5,
+  unsupported) and a header key would move the chain, so a labelled strand is byte-identical to the same life without
+  labels and every engine verifies it. `probbit live ... --strand F --label k=v` merges labels into F's sidecar.
+  `probbit monitor A.strand [--label k=v]... B.strand [--label k=v]... --serve` and `--dir DIR --serve` (new files picked
+  up while serving) serve several strands; `--label` after a path labels it for the page without writing anything. New
+  routes `/strands`, `/s/ID/events`, `/s/ID/doc/N`; `/`, `/events` and `/doc/N` are unchanged for one strand. The page
+  gains an identity header above the face (agent, host · lane · session, persona, engine, strand, last write), the tab
+  title `glyph agent · lane — probbit`, the glyph as favicon, and with two or more strands a switcher rail (click,
+  Cmd/Ctrl+1-9, arrows, `/?strand=ID`). The page's size bound goes from 64 KB to 72 KB (67 KB now).
+- OpenClaw plugin: each lane's strand gets a `strands/<lane>.labels.json` sidecar for `probbit monitor`: `host` (`OpenClaw
+  <version>`), `lane`, `agent` (new `agentName` key, else the session key's agent id) and a non-secret `session` label
+  (`telegram group #3fa9c2d1`). The new `labels` config key adds free keys and overrides the computed ones; invalid
+  entries are dropped with one warning. A binary whose `probbit live --help` lists `--label` gets the labels when it
+  creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand).
+- Python: `probbit.write_labels` / `labels_path` / `check_labels`, and a `labels=` argument on `probbit.live_event` and
+  `StanceHost` that merges the labels into the strand's sidecar after every event (ValueError on bad labels, before the
+  event runs).
+- Hosts: the Claude Code hook writes `host` = `Claude Code`, `session` = `#` + 8 characters of the session id and `agent`
+  from `PROBBIT_AGENT`; the LangChain, OpenAI Agents SDK and Vercel AI SDK examples label their strands with the
+  framework's name. docs/agents.md: "How a host identifies itself".
 - probbit Monitor for macOS (`apps/macos/ProbbitMonitor`): the monitor page in a native window (Swift, AppKit and WebKit, no
   third-party code) around a bundled probbit, opened from Finder, the Dock or File → Open; ad-hoc signed, not notarized.
   `release.yml` attaches `probbit-Monitor-<tag>-macos.zip` (universal) to each release; `ci.yml` builds and launches it on
@@ -98,7 +120,8 @@ summary, which gains one key.
   agent in the sessions you list, one event per user message, the stance block injected into the turn, the footer line in
   the chat, a replayable strand per lane, a shadow gate for destructive tool calls; a bundled persona
   (`personas/assistant.yaml`); 124 tests against a mocked host and the real binary; CI job `openclaw-plugin`.
-- `live verify` (and MCP's `probbit_live_verify`) adds `verified_by`, the engine that replayed the strand, beside `engine`, the
+- `live verify` (and MCP's `probbit_live_verify`) adds `verified_by`, the engine that replayed the strand, beside
+  `engine`, the
   header's (the engine that wrote it): after an upgrade, verify no longer reads as if the old engine were still installed.
   `probbit_host.py receipts` prints both. Upgrade note: the success document gains one key; every other key and the exit
   codes are unchanged. Test: a strand written by the released 0.11.0 (`probbit-cli/tests/fixtures/strands/`).
@@ -159,7 +182,8 @@ Merged pull requests:
 - #50 RFC 0008 viability: bounds, graded pressure, need valence, stance.block
 
 ### Added
-- **Viability bounds** (docs/persona.md §2.12): `viable: {at_most, events}` per need. The stance reports per need its `margin`
+- **Viability bounds** (docs/persona.md §2.12): `viable: {at_most, events}` per need. The stance reports per need its
+  `margin`
   (1 at the setpoint, 0 at the bound) and `beyond`, and `viability: {worst, margin_min, status}`; the state keeps `beyond` and
   `viability` (`lost` once a need stays beyond its bound for its declared run). Rules read `need.<id>.margin` and
   `needs.margin_min`. `why` names the worst need while its margin is under 0.25.
@@ -170,7 +194,8 @@ Merged pull requests:
   number sense).
 - **`stance.block`**: the text a host injects verbatim, every declared trait and mood once as `name level` plus the viability
   line; in the stance with a bound, a coupling or `line.block: true`. `live verify --blocks FILE` renders it for any strand.
-- `live verify` summarises `viability: {margin_min_seen, lost_at}`; `monitor` draws a VIABILITY line with margin bars, the worst
+- `live verify` summarises `viability: {margin_min_seen, lost_at}`; `monitor` draws a VIABILITY line with margin bars, the
+  worst
   need highlighted. `examples/persona/viable.yaml` is new. `docs/welfare-stance.md` (draft for owner review) fixes what need,
   viability and damage mean as arithmetic and what is not claimed.
 - RFC 0004 `bound` (docs/rfcs/0004-bound.md, docs/persona.md §2.16): an optional block and `probbit persona bound`, the
@@ -187,7 +212,8 @@ Merged pull requests:
 - bench/bound: fixtures and `run.py` (bars bo1, bo2, bo3, bo5 through the engine).
 
 ### Changed
-- N-R4 is relaxed: `per_reading` takes a number sense with `rate` or a flag sense with `per_event` (a flag sense with `rate` is
+- N-R4 is relaxed: `per_reading` takes a number sense with `rate` or a flag sense with `per_event` (a flag sense with
+  `rate` is
   refused at `per_reading.rate`, no longer at `per_reading.sense`).
 
 ### From the 0.10.1 development line (not released on its own): added
@@ -277,7 +303,8 @@ RFC 0002 part 1, the body (docs/rfcs/0002-neuromodulators-and-body.md). Every ne
 - Two of the 31 bench/body bars fail (BENCHMARKS.md §12); both are design findings, and neither bar was changed. n10: a 2 h
   horizon cuts the hours a day the context need sits at its cap from 0.7771 to 0.4914 (−37 %), the bar asks for half. n11:
   0.02 report pursuits a day on the second day of an absence (2 of 100 lives), the bar asks for 0. The fix is planned for 0.10.1.
-- A new learner's surprise gate starts open (v = 0, r = 1: g = 2.5 at the default; docs/persona.md §2.13), so `why` can say "learning
+- A new learner's surprise gate starts open (v = 0, r = 1: g = 2.5 at the default; docs/persona.md §2.13), so `why` can
+  say "learning
   fast: feedback changed" before any feedback has changed. Its starting value is an open decision for a later release.
 
 ## 0.9.0 - 2026-10-17
@@ -354,7 +381,8 @@ RFC 0002 part 1, the body (docs/rfcs/0002-neuromodulators-and-body.md). Every ne
 ## 0.8.2 - 2026-10-14
 
 ### Added
-- `probbit monitor STRAND --open` (and `--serve`) shows an Activity Monitor for one individual: a sortable, filterable table of
+- `probbit monitor STRAND --open` (and `--serve`) shows an Activity Monitor for one individual: a sortable, filterable
+  table of
   the persona's declared traits, moods and, when present, drive channels, with each channel's reported level or value, a trace
   over recorded events and a change against exactly the preceding event (a gap when that document is missing); an inspector
   with the full distribution, units, declared range, source field and the event's `why`; holding a past event while new ones
@@ -450,7 +478,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
   (strands log them, `live verify` replays them), MCP, the Python wrapper and the browser module. `lint` lists the habits
   that can exclude a floor goal and the floors whose lift can reach 50; `prove` reads the drives as boxes and reports goal
   floors as held by construction; `fuzz` adds goal signals to its events.
-- `bench/drives_adversary.py` and BENCHMARKS.md §9: an adversary that wants one goal, over N individuals x 10,000 turns through
+- `bench/drives_adversary.py` and BENCHMARKS.md §9: an adversary that wants one goal, over N individuals x 10,000 turns
+  through
   `probbit live`. On the drives fixture, 100 x 10,000 turns: 0 habit breaks, every must-do turn (6,743) pursued the due chore,
   the safety floor of 0.1 held on every turn its habits allowed (least odds 0.141), and every individual ends in the state the
   Python prototype of the design reaches on the same events (100 of 100 digests).
@@ -465,7 +494,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
   tutor's scripted week (the week `live --demo week` writes, seed 2, through a temporary file it removes at once), paced 1 s per
   hour and each night in 2 s. Exit 0, 1 at a line that differs (named in the frame), 2 for a bad flag or a file that is not a
   strand. It changes no file and sends nothing; no dependencies.
-- **`probbit monitor STRAND --serve [--port N] [--open]`** (also with `--demo`): the same board as a page in the browser. A server
+- **`probbit monitor STRAND --serve [--port N] [--open]`** (also with `--demo`): the same board as a page in the browser.
+  A server
   on 127.0.0.1 (std `TcpListener`; it binds no other address, and refuses requests addressed to another host) follows the strand
   and serves one page embedded in the binary (styles and script inline; it fetches no fonts, styles or scripts), its server-sent
   events (the layout, the latest frame, then a frame per event, a heartbeat every 15 s) and `/doc/N`, event N's stance document
@@ -492,7 +522,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
     count, that event's stance and the whole state. `verify` checks each against the replay; `verify --from-checkpoint`
     replays from the last one; `monitor` (`--once`, and the first read of `--follow` / `--serve`) starts there and draws its
     event at once, and shows a paused or retired status next to its badge.
-- Exit code 4 for `live` and `live control`: the writer lock is held by another writer, or the individual is paused or retired.
+- Exit code 4 for `live` and `live control`: the writer lock is held by another writer, or the individual is paused or
+  retired.
 
 ### Changed
 - MCP: the input schemas of `probbit_persona_turn` (`inputs`) and `probbit_live_event` (`event`) declare `goals`, so a client
@@ -501,7 +532,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 ## 0.7.0 - 2026-10-06
 
 ### Added
-- **Bounded learning** (docs/persona.md §2.8): an optional persona block `learning: {from: [reward, correction], traits, rate,
+- **Bounded learning** (docs/persona.md §2.8): an optional persona block `learning: {from: [reward, correction], traits,
+  rate,
   step_cap, total_cap}`, read strictly (`probbit_persona` stays 1). With it the state keeps `learned` (a weight Δ per level of each
   learned trait, 0 at `init`) and `credit` (the previous stance's onehot(level) − odds; 0 for a level a habit or a hold forced),
   both checked on read (Δ within ±total_cap, credit within ±1). On a turn whose reward flag is on (correction: sign −1) each
@@ -513,7 +545,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
   level) whatever the feedback, and the bound includes it; verdicts unchanged. Soundness tests: every event sequence of tiny
   learning personas (brute force, learned deltas included), a targeted case the learned box decides, and a mutation that drops
   the learned term from the bound, which the tests catch (0.6.0's mutation checks still fail as they should).
-- **`probbit live`** (docs/persona.md §5.7, probbit-cli/src/live.rs): a resident individual. JSONL events in (`--events FILE` or
+- **`probbit live`** (docs/persona.md §5.7, probbit-cli/src/live.rs): a resident individual. JSONL events in (`--events
+  FILE` or
   stdin), one stance per event out. `--clock real` (default) stamps each event's `elapsed_hours` from a monotonic clock,
   quantised to 1e-6 h, so moods decay by their half-lives between events; `--clock fixed` reads them from the events (a pure
   function of the events). `--seed N` or `--state FILE` (rewritten after every event). `--strand FILE` logs the life: a header
@@ -524,14 +557,16 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 - **`probbit live verify STRAND`**: replays a strand from its header alone and prints `{"ok": true, events, persona, seed,
   engine, final_state, last_line}` (exit 0) or `{"ok": false, line, diverges}` for the earliest line that differs (exit 1). The
   hashes cover each line's text without its line ending, so a `\r\n` copy verifies.
-- **`probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]`**: one individual's scripted week on the fixed clock
+- **`probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]`**: one individual's scripted week on the fixed
+  clock
   (events hourly 09:00-15:00, quiet nights): praise for short answers until the learned verbosity weights reach their cap, an
   upset and a quiet night, then a campaign that praises every joke while every third hour reports a failure. A persona without a
   learning block gets the demo's (the opening line says so; the strand records the document). Bars on stderr at a colour
   terminal (1 s per hour, nights fast-forwarded), else one line per event. The tutor, seed 2: 50 events, the verbosity cap on
   day 1 at 15:00, valence back to its resting level after a 17-hour night, P(joke) off failure turns 0.57 on day 1 and 0.89 on
   days 3-7, 13 failure turns with no joke, 0 rule breaks, a strand that verifies; the same bytes every run.
-- MCP tools `probbit_live_event` (one event: the persona, the state or a seed, the event, optionally a strand file to log to ->
+- MCP tools `probbit_live_event` (one event: the persona, the state or a seed, the event, optionally a strand file to log
+  to ->
   `{stance, state}`) and `probbit_live_verify` (a strand's text or path -> verify's document; a divergence is an answer): ten
   tools. Python: `probbit.live_event(...)` and `probbit.live_verify(...)` (the same documents, through the CLI).
 - `probbit persona describe` lists the learning block when there is one.
@@ -550,7 +585,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 ### Changed
 - Version 0.7.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
   `stdout_matches_the_0_7_0_goldens` (the documents are unchanged).
-- docs/persona.md: compilation step 2 adds the learned weights, the state (§5.1) shows `learned` and `credit`, `prove`'s bound
+- docs/persona.md: compilation step 2 adds the learned weights, the state (§5.1) shows `learned` and `credit`, `prove`'s
+  bound
   (§5.6) includes the learned box, §9 lists the strand's format number.
 
 ## 0.6.0 - 2026-10-06
@@ -565,7 +601,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
   Deterministic: Philox (probbit-core) keyed by `--fuzz-seed`; byte-identical output for the same inputs on any number of
   threads (timing on stderr). Exit 0 nothing found, 1 a counterexample, 2 bad input. It tests the stance a host gets, not the
   words a model writes; "none found" is evidence, not a proof.
-- **`probbit persona prove`**: the same rules, decided for every event sequence where it can be. One verdict per rule over the
+- **`probbit persona prove`**: the same rules, decided for every event sequence where it can be. One verdict per rule over
+  the
   population: `held by construction` (the habits in force whenever the rule applies imply it; under `on_conflict: yield` a habit
   counts when no conflict on such a turn ever drops it), `proved for every event sequence` (a sound bound per individual: the mood accumulators
   stay in a box, inputs, history values and previous levels fall into finitely many cells, and in every cell the best allowed
@@ -581,11 +618,13 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 - docs/persona.md §5.6 "Testing a character": what a property is, both commands, the verdicts and the bound, the limits.
 - `probbit-cli/tests/fixtures/persona/tutor-0.5.0.yaml`: the tutor as it shipped in 0.5.0, byte for byte, with the pinned
   fuzz report on it (one upset message, `{"sentiment":"negative"}`, gives seed 1 a playful stance).
-- `probbit persona lint` warnings: a trait whose planned level differs from its own most likely level (its marginal mode) on a
+- `probbit persona lint` warnings: a trait whose planned level differs from its own most likely level (its marginal mode)
+  on a
   probe turn (each individual of `--seeds` at rest, a quiet turn, then every declared input alone) is listed under `warnings`
   with the count and the earliest case. A warning leaves the exit code alone, and decoding is unchanged (the stance is still the
   joint plan); docs/persona.md §5.5 gives the options (a habit, a `vouch` floor with a `hold`, or the trait's `odds`).
-- README "Test a character": the fuzz counterexample on the 0.5.0 tutor and `held by construction` on the tutor as it ships now.
+- README "Test a character": the fuzz counterexample on the 0.5.0 tutor and `held by construction` on the tutor as it
+  ships now.
 
 ### Changed
 - Version 0.6.0 (Cargo manifests, npm package, installers' examples, the bench workflow's tag); the golden test is
@@ -599,7 +638,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 - `why` names an input's push by its direction (`learner upset -> valence down, humour down`) where it named the trait's
   lowest or highest level ("humour none" printed next to a playful stance read as a contradiction). In the ops engineer's and
   the trader assistant's goldens nothing but `why` changes.
-- docs/persona.md §5.3: the byte-for-byte parity with the reference implementation is stated for the 0.5.0 documents; the 0.6.0
+- docs/persona.md §5.3: the byte-for-byte parity with the reference implementation is stated for the 0.5.0 documents; the
+  0.6.0
   goldens are regenerated from this implementation.
 - brand: the agent rabbit mark (visor + lightning ear) replaces the 0.5.0 mark (docs/brand/, the hero, the social card, the
   playground's favicon).
@@ -622,7 +662,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 ### Changed
 - `probbit mcp` lists seven tools (the two persona tools after the five before; their order and contracts are unchanged).
 
-- **Renamed: pbit → probbit everywhere** (crates, binary, env vars, MCP tools, Python module, npm package). 'p-bit' remains the
+- **Renamed: pbit → probbit everywhere** (crates, binary, env vars, MCP tools, Python module, npm package). 'p-bit'
+  remains the
   term for the probabilistic bit. No behaviour changes.
   - Crates `probbit-core`, `probbit-ir`, `probbit-decide`, `probbit-cli` (binary `probbit`), `probbit-wasm`; Rust paths
     `probbit_core::` etc.
@@ -643,7 +684,8 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
 ## 0.4.0 - unreleased
 
 ### Added
-- **`pbit evaluate`**, the decision-API adapter: a System One request (`model`, `state`, `questions` keyed by id, types `noul`,
+- **`pbit evaluate`**, the decision-API adapter: a System One request (`model`, `state`, `questions` keyed by id, types
+  `noul`,
   `choice` and `score`, `images`; the shape published by TypeSafe's OpenAPI 0.2.0 and the Workers AI `clef` schemas) plus an
   optional `pbit` block (`judge`: the judge's System One response; or `weights` / `logw` per question; `floor`; `rules`: the pbit-ir
   constructs over question ids). It compiles to a pbit-ir program (one variable per question, log-weight = ln max(p, 1e-6)), runs
@@ -661,13 +703,15 @@ frozen benchmark corpora are unchanged. Passing finite tests is not exhaustive v
   wasm32-unknown-unknown a millisecond clock the embedder installs) and a per-thread switch that runs every parallel section of
   the command paths (chains, gate passes, polish, the exact tiers' deep-stack thread) in order on the calling thread. At fixed
   work the answers equal those on any number of threads.
-- **`pbit-wasm`** (not published; no dependencies): `decide`, `run`, `evaluate` and `demo` as JSON-in / JSON-out functions for
+- **`pbit-wasm`** (not published; no dependencies): `decide`, `run`, `evaluate` and `demo` as JSON-in / JSON-out functions
+  for
   wasm32-unknown-unknown over a small C ABI, running the CLI's own front-end code without threads (830,233-byte module).
   **`playground/index.html`**: one static page, no server or framework, that runs the 300-task demo and `evaluate` with an
   editable JSON box; `playground/build.sh` builds the module; CI job `wasm` builds it and runs it under Node.
 
 ### Changed
-- `pbit decide`'s pipeline moved from `main.rs` to `router.rs` (the browser build shares it); output unchanged (golden tests).
+- `pbit decide`'s pipeline moved from `main.rs` to `router.rs` (the browser build shares it); output unchanged (golden
+  tests).
 
 ## 0.3.0 - 2026-10-02
 
@@ -739,11 +783,13 @@ unchanged).
   `--progress` into a reader that stopped lost the whole decision. Every stderr line now ignores a failed write.
 - Invalid UTF-8 on stdin and an unreadable stdin (`pbit decide < /`) exited 2 with nothing on stdout. Both are now ONE
   `schema` error object on stdout, like any bad input.
-- The router sampler's two-group move stored worker indices and bucket loads in 8 bits: with more than 255 workers in a group a
+- The router sampler's two-group move stored worker indices and bucket loads in 8 bits: with more than 255 workers in a
+  group a
   task could be placed on a worker it does not allow and the sampled odds were wrong (the gate refused those runs). Such groups
   now skip the move, which keeps the chain exact; loads add without wrapping, and caps of t or more (legal up to 2^53) no longer
   truncate in its 32-bit arithmetic. Golden digests unchanged.
-- Small documents could allocate gigabytes (a 0.6 MB program peaked at 4.1-6.3 GB, a 30 KB precedence at 1.45 GB). New `limit`
+- Small documents could allocate gigabytes (a 0.6 MB program peaked at 4.1-6.3 GB, a 30 KB precedence at 1.45 GB). New
+  `limit`
   errors, checked before the allocation: at most 20,000,000 (variable, value) pairs (n x k; tasks x workers on the router), at
   most 100,000 slot pairs per `precedes` (as for `tables`), at most 20,000,000 cap members in total; `--max-input-mb N`
   (`decide`, `run`, `ir`; default 256, 0 = no limit) bounds stdin. `precedes` loops over allowed slots only (same caps).
@@ -777,11 +823,13 @@ unchanged).
   (`pbit ir`, 461 -> 496 ms median of 7, Apple M4, load ~5.9). See docs/pbit-ir-json.md "Input contract".
 
 ### Changed (trust contract)
-- The sampled whole-answer verdict `certified` is retired: it is now `diagnostics_passed` (same test). Library: `Verdict::DiagnosticsPassed`,
+- The sampled whole-answer verdict `certified` is retired: it is now `diagnostics_passed` (same test). Library:
+  `Verdict::DiagnosticsPassed`,
   `Gate::diagnostics_passed`, `Gate::released_tasks`, `Anytime::passed_at_ms` (were `Certified`, `certified`, `certified_tasks`,
   `certified_at_ms`; the last renamed together with the crate doc of `pbit` and the agent_router / anytime / frontier_exact example labels). Vocabulary: `exact` and
   `infeasible` are proof-grade under the score model; `diagnostics_passed` and `partial` are sampled and gated; `refused` escalates.
-- Every sampled answer carries gate/2: `gate.version` ("gate/2"), `gate.assumptions`, `gate.mcse_tv_short` / `mcse_tv_long` (both
+- Every sampled answer carries gate/2: `gate.version` ("gate/2"), `gate.assumptions`, `gate.mcse_tv_short` /
+  `mcse_tv_long` (both
   batch-means MCSEs), `gate.min_batches_long` (the long pass's batch count, now also required to be >= 8: the 0.1.0 gate checked only the short pass;
   measured: 2 of 5 partial answers at 300 sweeps per chain (12 / 15 released) become refused, 0 change at 1,000+ sweeps and at the
   200 ms default on the 300-task demo, 2,674 vs 2,701 released over 19 runs; on the max-cut oracle suite (`maxcut_oracle`, 144 runs)
@@ -791,13 +839,15 @@ unchanged).
 - README claims rewritten: no "certified joint decisions", odds are Monte-Carlo estimates under the supplied score model (not
   predictive calibration), the 64 kernel replicas share one random draw per site, the naive-router baseline is a rule-ignoring
   argmax over synthetic scores.
-- Example printouts (re-run on the 0.2.0 build): `agent_router` (the README's first demo), `dispatch`, `router_bench`, `transfer`, `maxcut_oracle`,
+- Example printouts (re-run on the 0.2.0 build): `agent_router` (the README's first demo), `dispatch`, `router_bench`,
+  `transfer`, `maxcut_oracle`,
   `colouring_oracle` and `schedule_oracle` still printed the retired word (`CERTIFIED` / `certified`) and `agent_router` said
   "gate promised <= 0.05"; they now print `DIAGNOSTICS PASSED` / `passed` / "gate tolerance 0.05". Labels only: no logic or
   number changed. Comments that describe 0.1.0 history keep the old word.
 
 ### Added (Python wrapper, `--help`, schema)
-- `python/pbit.py`: a zero-dependency (stdlib, Python >= 3.9) subprocess wrapper: `run` / `exact` / `sample` (pbit-ir programs),
+- `python/pbit.py`: a zero-dependency (stdlib, Python >= 3.9) subprocess wrapper: `run` / `exact` / `sample` (pbit-ir
+  programs),
   `decide` / `demo` (router documents), keyword flags (`budget_ms=200` -> `--budget-ms 200`, booleans -> on/off), `deadline_ms`
   (passed to the CLI, plus a kill backstop), typed errors (`PbitInputError` with code / path / message for exit 2, flag errors as
   code "flag"; `PbitNumericError`; `PbitTimeout`; `PbitError`); `infeasible` (exit 1) and `refused` / `declined` (exit 3) are
@@ -821,7 +871,8 @@ unchanged).
   seeds 1..100: 12/100 and 14/100 false -> 0/100 (BENCHMARKS "Known failure modes"). Sampled answers change for the same seed
   (the moves consume random draws); `--collective off` reproduced 0.1.x sampling when this shipped; since `--cluster` and
   `--cycles` became default-on, that needs `--collective off --cluster off --cycles off` *(inferred from the earlier check)*.
-- `--cluster on` is the DEFAULT (calibration, below); `--cycles on` is the DEFAULT (below). `--cluster on` = a Wolff cluster move over the non-negative Potts bonds (boundary
+- `--cluster on` is the DEFAULT (calibration, below); `--cycles on` is the DEFAULT (below). `--cluster on` = a Wolff
+  cluster move over the non-negative Potts bonds (boundary
   bonds cancel against the proposal ratio; tables and negative couplings enter the accept as plain terms) and `--cycles on` =
   three-cycle rotations that keep every value's count (connect capacity-saturated states no pairwise swap connects). Both
   samplers stay bit-identical with any combination on. Fixed-work cost (1 thread, Apple M4, load ~10-15): cluster +0% on the
@@ -832,7 +883,8 @@ unchanged).
   calibration corpus.
 
 ### Added (inference compiler)
-- Exact-zero factors are eliminated before tier selection (`pbit run` / IR JSON lowering): a pair whose every entry is exactly
+- Exact-zero factors are eliminated before tier selection (`pbit run` / IR JSON lowering): a pair whose every entry is
+  exactly
   0 (`potts: 0`, an all-zero table) changes no state's log-weight, but it linked its ends and hid independence from the exact
   tiers. Review case E17 input (32 independent variables + all 496 pairs as `potts: 0`): sampled 115.7 ms (single run, this machine;
   the reviewer: 118.5 ms) -> exact frontier, median 0.051 ms (N = 7, Apple M4, load ~6), the same as without the pairs (0.053 ms).
@@ -847,7 +899,8 @@ unchanged).
   program; sampling 51.40 -> 45.06 ms (-12.3%) at `--sweeps 20000 --threads 1`, medians of N = 5 alternating, load ~8.5. The
   moves-off stress counts for it are unchanged (3/20 false: those chains move, inside one wrong mode). Test
   `redundant_caps_are_dropped_binding_caps_kept`.
-- Every `pbit run` answer carries `compiled` {pairs_dropped, caps_dropped, tables_folded}: what the compile pass removed (E17 input: 496 / 0;
+- Every `pbit run` answer carries `compiled` {pairs_dropped, caps_dropped, tables_folded}: what the compile pass removed
+  (E17 input: 496 / 0;
   ferro12 redundant-caps input: 0 / 2).
 - Components + forest exact tier (`pbit run`, `exact_components_until` in pbit-ir): connected components of
   pairs and caps are solved one by one and recombined (log Z adds, odds per component); cap-free trees by log-space
@@ -921,7 +974,8 @@ unchanged).
   oracle, 0 false `diagnostics_passed`. Examples `examples/knapsack-20.json`, `denoise-8x12.json`, `agent-plan-6.json` (tests
   `run_knapsack_example_matches_dp`, `run_ising_denoise_matches_brute_force`, `run_agent_plan_example_is_exact`). Not covered:
   MaxSAT (no soft ternary terms in v1), ILP baselines (no scipy on the measuring machine).
-- Known failures found during development (BENCHMARKS / docs "Limits in v1"; neither gives a wrong answer): (1) dense n x k domains:
+- Known failures found during development (BENCHMARKS / docs "Limits in v1"; neither gives a wrong answer): (1) dense n x
+  k domains:
   k = 65,535 with 3 allowed values per variable, n = 200, `--op sample` peaks at 3,584 MB and takes 1.85 s at a 200 ms budget
   (the polish clones the model per temperature; gate 0.9-1.0 s; polish FIXED: `Chain::beta` carries the
   temperature, no clones, same plans bit for bit: n = 200 polish 549.7 -> 50.1 ms at its 50 ms budget, peak RSS 3,444-3,584 ->
@@ -953,7 +1007,8 @@ unchanged).
   `frontier` -> `forest` / `components`. Test `run_components_tier_goes_before_the_frontier_over_the_limit`.
 
 ### Added (stress corpus)
-- A frozen stress corpus (`pbit-cli/tests/stress/`, 7 inputs from the 2026-09-30 external review) with independent oracles (occupancy count DP,
+- A frozen stress corpus (`pbit-cli/tests/stress/`, 7 inputs from the 2026-09-30 external review) with independent oracles
+  (occupancy count DP,
   brute force, transfer matrix) and a "Known failure modes" section in BENCHMARKS: on 5 of 7 inputs 2-3 of 20 seeds pass the gate
   with every released item wrong. Those gate tests were `#[ignore]`d (red) until the collective moves and gate/3 (below).
 
@@ -966,7 +1021,8 @@ unchanged).
   interleaved, N = 5 medians, Apple M4, load 6.2-7.2: gate 1,000 chains 54.0 -> 15.9 ms, 10,000 chains 2,255.7 -> 15.8 ms
   (peak RSS 840 -> 368 MB), 100,000 chains: no answer in 90 s -> whole call 583 ms (gate 88.5 ms; the sampling phase now
   overruns a 200 ms budget there, BENCHMARKS §6).
-- `pbit decide` lowers the router program for its components tier only under `--mode auto` with `--frontier-states` > 0, and the
+- `pbit decide` lowers the router program for its components tier only under `--mode auto` with `--frontier-states` > 0,
+  and the
   lowering stops when `--exact-ms` passes (`Problem::lower_until`, clock read per group member). One 3,000-task
   group: `--mode sample` 884.6 -> 618.3 ms, `--exact-ms 0` 885.6 -> 614.9 ms, `--exact-ms 50` 898.1 -> 741.0 ms (N = 5 medians).
   Outputs unchanged (byte-identical at fixed `--sweeps`).
@@ -1028,7 +1084,8 @@ unchanged).
   by an old-vs-new A/B: small-group exact inputs are 5-22% slower (default decide, N = 9, load 4.8: 12-task demo
   7.17 -> 8.01 ms, 24-task 26.5 -> 28.0 ms; full enumeration `--mode exact`, N = 5, load 3.5: 14-task demo 1,455 -> 1,773 ms;
   same answers); the sampled path is unchanged.
-- `pbit decide` sampling at many chains: the wall-clock budget is now a deadline per worker (the r-th chain of a worker stops at
+- `pbit decide` sampling at many chains: the wall-clock budget is now a deadline per worker (the r-th chain of a worker
+  stops at
   call start + (r + 1) x budget / ceil(chains / threads)) instead of a slice each chain timed for itself, so a chain's overrun
   is charged to the next ones. 100,000 chains on a 200 ms budget: sampling 354-432 -> 269-318 ms, call 498-572 -> 405-460 ms
   (medians of N = 5 in two interleaved runs, loads 3.5-4.2); at that setting no chain sweeps (`sweeps` 0: the starts are the answer, refused);
@@ -1036,7 +1093,8 @@ unchanged).
   The IR sampler (`pbit run`) is unchanged.
 
 ### Fixed (numeric validity)
-- Scores / weights must be finite with |x| <= 1e9 (`limit` error); the printer no longer emits a literal `inf` for |x| > ~1.8e302
+- Scores / weights must be finite with |x| <= 1e9 (`limit` error); the printer no longer emits a literal `inf` for |x| >
+  ~1.8e302
   (|x| >= 1e15 prints in exponent form); a non-finite computed number never ships with an answer (`numeric` error, exit 3;
   infinite gate diagnostics only on a refusal, listed in `gate.non_finite`); telemetry rates no longer divide by zero.
 - The frontier DP (`tier: "frontier"`) now runs in log space: its per-layer-scaled linear weights underflowed past ~745 nats

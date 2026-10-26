@@ -15,6 +15,7 @@
     verdicts = probbit.persona_prove(persona, props=[rule1, rule2], seeds="0-9")  # held_by_construction | proved | unknown per rule
     r = probbit.live_event(persona, state, {"praise": True, "elapsed_hours": 2.5}, strand="pip.strand")   # one event of a resident individual
     report = probbit.live_verify("pip.strand")                                   # {"ok": True, ...} or {"ok": False, "line": n, "diverges": ...}
+    probbit.write_labels("pip.strand", {"agent": "pip", "host": "my harness 2.1"})   # pip.labels.json beside the strand, for `probbit monitor`
                                                                                  # or {"ok": False, "line": n, "unsupported": field, "engine", "strand_engine"}
 
 Answers: `probbit run` reports per-variable odds under "marginals", `probbit decide` under "odds" (docs/probbit-ir-json.md, README).
@@ -34,9 +35,9 @@ cycles take on / off); any other boolean is a switch: summary=True -> --summary,
 The binary: `binary=` argument, else $PROBBIT_BIN, else `probbit` on PATH, else ../target/release/probbit next to this file.
 An explicitly selected binary that is missing or not executable raises; it never falls back to another version.
 """
-import hashlib, json, os, shutil, subprocess, tempfile, urllib.error, urllib.parse, urllib.request
+import hashlib, json, os, re, shutil, subprocess, tempfile, unicodedata, urllib.error, urllib.parse, urllib.request
 
-__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "persona_fuzz", "persona_prove", "live_event", "live_verify", "find_binary", "ProbbitError",
+__all__ = ["run", "exact", "sample", "decide", "demo", "evaluate", "persona_init", "persona_turn", "persona_replay", "persona_fuzz", "persona_prove", "live_event", "live_verify", "labels_path", "check_labels", "write_labels", "find_binary", "ProbbitError",
            "ProbbitInputError", "ProbbitNumericError", "ProbbitTimeout", "ProbbitJudgeError", "ProbbitControlError"]
 
 
@@ -371,15 +372,21 @@ def _live_call(args, timeout_s, binary, answers=(0,)):
     raise ProbbitError(f"probbit live exited {p.returncode}: {p.stderr.strip()[:300]}", p.returncode, p.stdout, p.stderr)
 
 
-def live_event(persona, state=None, event=None, *, seed=None, strand=None, timeout_s=None, binary=None):
+def live_event(persona, state=None, event=None, *, seed=None, strand=None, labels=None, timeout_s=None, binary=None):
     """`probbit live`, one event (docs/persona.md §5.7): the persona (a file path or a dict), the individual's state (None: a new
     individual at seed) and one event (a dict of inputs; elapsed_hours = hours since the previous event from the host's clock,
     quantised to 1e-6 h; default 0) -> {"stance": ..., "state": ...}, the shape of the MCP tool probbit_live_event. Moods decay over
     the elapsed hours; with a learning block the reward / correction flags move the learned deltas within their caps.
     strand: a strand file path; a new file gets the header, an existing one is continued (state must be the state after its last
-    line), and the result gets "strand": {"path", "events", "head"}. A bad persona, state or event raises ProbbitInputError."""
+    line), and the result gets "strand": {"path", "events", "head"}. A bad persona, state or event raises ProbbitInputError.
+    labels: {key: value} merged into the strand's sidecar after the event (see write_labels; needs strand). Bad labels raise
+    ValueError before the event runs."""
     if state is not None and seed is not None:
         raise TypeError("give state (a stored individual) or seed (a new one), not both")
+    if labels is not None:
+        if strand is None:
+            raise ValueError("labels need a strand: they live in its sidecar")
+        _merged_labels(labels_path(strand), labels)
     with tempfile.TemporaryDirectory() as d:
         path = _persona_path(persona, d)
         if state is None:
@@ -405,6 +412,8 @@ def live_event(persona, state=None, event=None, *, seed=None, strand=None, timeo
         if index + 1 < len(matches) and matches[index + 1][1].get("checkpoint") == row["n"]:
             line = matches[index + 1][0]
         out["strand"] = {"path": os.fspath(strand), "events": row["n"], "head": "sha256:" + hashlib.sha256(line.encode("utf-8")).hexdigest()}
+        if labels is not None:
+            write_labels(strand, labels)
     return out
 
 
@@ -415,3 +424,69 @@ def live_verify(strand, *, timeout_s=None, binary=None):
     "strand_engine": the header's engine} at the earliest line with a field or line kind this engine does not know (a newer
     engine's strand: not verified, and not a divergence; verify it with the engine that wrote it). Answers, not errors."""
     return _live_call(["verify", os.fspath(strand)], timeout_s, binary, answers=(0, 1, 5))
+
+
+# ---------------------------------------------------------------- labels: who wrote a strand (the sidecar `probbit monitor` reads)
+LABELS_MAX = 8
+_LABEL_KEY = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def labels_path(strand):
+    """The sidecar of a strand: its path with the last extension replaced by `.labels.json` (`lanes/support.strand` ->
+    `lanes/support.labels.json`, `pip` -> `pip.labels.json`). Labels never go into the strand itself."""
+    return os.path.splitext(os.fspath(strand))[0] + ".labels.json"
+
+
+def check_labels(labels):
+    """A checked copy of `labels`, a dict of str -> str: at most 8 keys; a key is 1-64 of A-Z a-z 0-9 _ . -; a value is 1-64
+    characters with no control character (newline, tab, ...). Keys with a meaning: agent (who), host (harness + version), lane,
+    session (a short label, never a secret or a raw id); any other key is free. Raises ValueError."""
+    if not isinstance(labels, dict):
+        raise ValueError("labels: expected a dict of str -> str")
+    if len(labels) > LABELS_MAX:
+        raise ValueError(f"labels: at most {LABELS_MAX} keys, got {len(labels)}")
+    for k, v in labels.items():
+        if not isinstance(k, str) or not _LABEL_KEY.fullmatch(k):
+            raise ValueError(f"label key {k!r}: 1 to 64 of A-Z a-z 0-9 _ . -")
+        if not isinstance(v, str) or not 1 <= len(v) <= 64 or any(unicodedata.category(c) in ("Cc", "Cs") for c in v):
+            raise ValueError(f"label {k}: 1 to 64 characters, no newline or other control character")
+    return dict(labels)
+
+
+def _merged_labels(path, labels):
+    """(the sidecar's current text or None, its keys with `labels` merged over them), checked."""
+    add = check_labels(labels)
+    raw, current = None, {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", newline="") as f:
+            raw = f.read()
+        try:
+            current = json.loads(raw)
+        except ValueError:
+            current = None
+        if not isinstance(current, dict) or not all(isinstance(v, str) for v in current.values()):
+            raise ValueError(f"{path}: not a flat JSON object of strings; left as is")
+    return raw, check_labels({**current, **add})
+
+
+def write_labels(strand, labels):
+    """Merge `labels` into the strand's sidecar (labels_path; keys not named stay, as `probbit live --label` does) and write it
+    when its bytes change: sorted keys, compact JSON, raw UTF-8, one trailing newline, atomically (a temp file in the same
+    directory, then a rename). The strand is not touched. Returns the merged labels; bad labels (or a merge past 8 keys, or a
+    sidecar that is not a flat object of strings) raise ValueError and nothing is written."""
+    path = labels_path(strand)
+    raw, merged = _merged_labels(path, labels)
+    text = json.dumps(merged, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+    if raw != text:
+        fd, tmp = tempfile.mkstemp(prefix="." + os.path.basename(path) + ".", suffix=".tmp", dir=os.path.dirname(os.path.abspath(path)))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                f.write(text)
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    return merged

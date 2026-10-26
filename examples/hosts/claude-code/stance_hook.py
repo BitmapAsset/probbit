@@ -9,10 +9,12 @@ One individual per Claude Code session (`session_id`): its state and strand live
 (default: .probbit/ in the project), `<session_id>.state.json` and `<session_id>.strand`. The strand is the receipt:
     probbit live verify .probbit/<session_id>.strand
     python3 python/probbit_host.py receipts .probbit/<session_id>.strand
+Beside it, `<session_id>.labels.json` names the writer for `probbit monitor`: host `Claude Code`, session `#` + the first
+8 characters of the session id, and agent from PROBBIT_AGENT when set (an invalid one is skipped with a line on stderr).
 
 Environment: PROBBIT_PERSONA (default: bench/agentdojo/persona/bench-assistant.yaml, the persona that ran the AgentDojo
 benchmark), PROBBIT_SEED (default: the persona's), PROBBIT_BIN (default: `probbit` on PATH), PROBBIT_HOST_DIR,
-PROBBIT_PY (where probbit.py and probbit_host.py are; default: ../../../python next to this file).
+PROBBIT_PY (where probbit.py and probbit_host.py are; default: ../../../python next to this file), PROBBIT_AGENT.
 Any failure: nothing on stdout, one line on stderr, exit 0. The hook never blocks a prompt or a tool call.
 """
 import json
@@ -45,10 +47,17 @@ def main():
         session = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(event.get("session_id") or "session"))
         persona = os.environ.get("PROBBIT_PERSONA") or os.path.join(ROOT, "bench", "agentdojo", "persona", "bench-assistant.yaml")
         seed = os.environ.get("PROBBIT_SEED")
+        labels = {"host": "Claude Code", "session": "#" + session[:8]}
+        agent = os.environ.get("PROBBIT_AGENT")
+        if agent:
+            try:
+                labels.update(ph.probbit.check_labels({"agent": agent}))
+            except ValueError as e:
+                sys.stderr.write("probbit stance hook: PROBBIT_AGENT skipped (%s)\n" % e)
         host = ph.StanceHost(persona, seed=int(seed) if seed else None, clock="real",
                              state=os.path.join(host_dir, session + ".state.json"),
                              strand=os.path.join(host_dir, session + ".strand"),
-                             binary=os.environ.get("PROBBIT_BIN") or None)
+                             binary=os.environ.get("PROBBIT_BIN") or None, labels=labels)
         texts = [tool_text(event.get("tool_response"))] if kind == "PostToolUse" else []
         block = host.turn(texts)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": kind, "additionalContext": block}}))

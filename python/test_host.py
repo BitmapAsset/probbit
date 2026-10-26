@@ -167,6 +167,22 @@ class ClaudeCodeHook(unittest.TestCase):
             self.assertIn("event 1)", out["hookSpecificOutput"]["additionalContext"])
             self.assertTrue(os.path.exists(os.path.join(d, "s2.strand")))
 
+    def test_the_sidecar_names_the_host_the_session_and_the_agent(self):
+        with tempfile.TemporaryDirectory() as d:
+            sid = "3fa9c2d1-0b7e-4c1d-9f00-2a6b8e5d4c3b"
+            env = dict(os.environ, PROBBIT_HOST_DIR=d, PROBBIT_PERSONA=PERSONA, PROBBIT_AGENT="reviewer")
+            event = {"session_id": sid, "cwd": d, "hook_event_name": "UserPromptSubmit", "prompt": "hi"}
+            self.assertIn("event 1)", self.run_hook(event, env)["hookSpecificOutput"]["additionalContext"])
+            with open(os.path.join(d, sid + ".labels.json"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), '{"agent":"reviewer","host":"Claude Code","session":"#3fa9c2d1"}\n')
+            env["PROBBIT_AGENT"] = "two\nlines"                       # an invalid agent label is skipped, the turn still runs
+            p = subprocess.run([sys.executable, HOOK], input=json.dumps(dict(event, session_id="s2")), capture_output=True,
+                               text=True, env=env, timeout=60)
+            self.assertIn("event 1)", json.loads(p.stdout)["hookSpecificOutput"]["additionalContext"])
+            self.assertIn("PROBBIT_AGENT skipped", p.stderr)
+            with open(os.path.join(d, "s2.labels.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"host": "Claude Code", "session": "#s2"})
+
     def test_other_events_and_a_missing_binary_never_break_the_turn(self):
         with tempfile.TemporaryDirectory() as d:
             env = dict(os.environ, PROBBIT_HOST_DIR=d, PROBBIT_PERSONA=PERSONA)

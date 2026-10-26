@@ -18,6 +18,10 @@ probbit live verify .probbit/<session_id>.strand       # the receipt replays
 python3 python/probbit_host.py receipts .probbit/<session_id>.strand
 ```
 
+Beside each strand the hook writes `<session_id>.labels.json`, the labels `probbit monitor` heads the strand with:
+`host` = `Claude Code`, `session` = `#` + the first 8 characters of the session id, and `agent` = `PROBBIT_AGENT` when that
+is set ([docs/agents.md](../../../docs/agents.md), "How a host identifies itself").
+
 Any project: set `PROBBIT_PY=/path/to/probbit/python` and `PROBBIT_PERSONA=/path/to/persona.yaml` in the hook's
 environment (or copy `python/probbit.py`, `python/probbit_host.py` and the persona next to the script). The persona
 default is the one that ran the benchmark; `examples/persona/` has others, `docs/persona.md` says how to write one.
