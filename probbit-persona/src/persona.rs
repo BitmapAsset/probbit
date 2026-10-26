@@ -3913,9 +3913,11 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
         mem.mean += a * dx; mem.var = (1.0 - a) * (mem.var + a * dx * dx); mem.n += 1; }
 }
 impl Deviation {
-    /// The stance's `deviation` (full precision)
-    pub fn to_json(&self) -> Json {
-        Json::Obj(vec![("self".into(), Json::Num(self.s_self)), ("pred".into(), Json::Num(self.pred)), ("input".into(), Json::Num(self.input)), ("cold".into(), Json::Bool(self.cold)),
+    /// The stance's `deviation`: every number at 6 decimals (the canonical number rule), so a checkpoint line carries the same
+    /// bytes on every platform's libm; `full`: self, pred and input at full precision, as engines before 0.14.0 wrote them
+    pub fn to_json(&self, full: bool) -> Json {
+        let n = |x: f64| Json::Num(if full { x } else { r6(x) });
+        Json::Obj(vec![("self".into(), n(self.s_self)), ("pred".into(), n(self.pred)), ("input".into(), n(self.input)), ("cold".into(), Json::Bool(self.cold)),
             ("z".into(), self.z.map_or(Json::Null, |z| Json::Num(r6(z)))), ("registers".into(), Json::Bool(self.z.is_some_and(|z| z >= DEV_Z)))])
     }
     /// The strand line's receipt: self, pred and input at 5 significant digits, `cold: true` while cold

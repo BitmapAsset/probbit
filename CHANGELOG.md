@@ -11,6 +11,12 @@ All notable changes to this project are documented here. The format follows
   byte for byte as 0.13.0. probbit-core, probbit-ir, probbit-decide and probbit-persona gain the features `std` (default) and
   `nostd` (`no_std` + `alloc`, through the new `probbit-nostd` facade), checked on `xtensa-esp32s3-none-elf`; probbit-wasm
   depends on the crate instead of including the CLI's files.
+- **Cross-platform parity of the deviation** (docs/persona.md section 2.17, docs/embedding.md): the stance's `deviation`
+  (`self`, `pred`, `input`) is rounded to 6 decimals like every other number of a stance, so a checkpoint line has the same
+  bytes on every libm (a `nostd` build's `libm` crate differed from the host's by 2 ULP, which broke the chain at the second
+  checkpoint). Gated on the strand header's engine: a strand written before 0.14.0 keeps its full-precision deviation, and
+  `live verify` accepts its checkpoint when it equals the replay's at 6 decimals; strands without an expectation block are
+  unchanged.
 
 ## 0.13.0 - 2026-10-26
 

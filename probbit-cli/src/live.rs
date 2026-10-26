@@ -779,6 +779,44 @@ mod tests {
         for i in from.max(1)..ls.len() { let mut j = json::parse(&ls[i]).unwrap(); put(&mut j, &["prev"], Json::Str(persona::digest_of(&ls[i - 1]))); ls[i] = persona::canon(&j); }
         ls.join("\n") + "\n"
     }
+    /// Cross-platform parity of the deviation (0.14.0): a strand of 0.13.0 with an expectation block and checkpoint lines (the
+    /// stance's `deviation` at full precision, as that engine wrote it) verifies as recorded, and verifies with a deviation's last
+    /// bits changed as another platform's libm gives them (the chain re-made after it); a change at the 6th decimal still
+    /// diverges. From 0.14.0 every number of the deviation is at 6 decimals, so the line is the same on every libm. The fixture
+    /// was recorded by the 0.13.0 release build (Linux x86_64): `probbit live` on this module's DOC with `"expectation": {}`,
+    /// `--seed 2 --clock fixed --checkpoint-every 4`, 16 events (3 time-only, then `ev(3..16)`).
+    #[test]
+    fn the_deviation_is_the_same_on_every_libm() {
+        assert_eq!(engine_version("probbit 0.13.0"), Some((0, 13, 0))); assert_eq!(engine_version("probbit 0.14.0-dev"), Some((0, 14, 0)));
+        assert_eq!(engine_version("probbit test"), None); assert_eq!(engine_version("probbit 0.14"), None); assert_eq!(engine_version("other 0.13.0"), None);
+        const F: &str = include_str!("../tests/fixtures/strands/expectation-0.13.0.strand");
+        let ok = verify(F, &run).unwrap(); assert_eq!((ok.get("engine"), ok.get("checkpoints")), (Some(&Json::Str("probbit 0.13.0".into())), Some(&Json::Num(4.0))));
+        let ls: Vec<String> = F.lines().map(str::to_string).collect();
+        let dev = |l: &str, k: &str| json::parse(l).unwrap().get("stance").and_then(|s| s.get("deviation")).and_then(|d| d.get(k)).and_then(Json::as_f64);
+        let at = ls.iter().position(|l| dev(l, "pred").is_some_and(|x| persona::r6(x) != x)).expect("a checkpoint with a full-precision deviation");
+        let pred = dev(&ls[at], "pred").unwrap();
+        let with = |x: f64| { let mut j = json::parse(&ls[at]).unwrap(); put(&mut j, &["stance", "deviation", "pred"], Json::Num(x)); let mut tt = ls.clone(); tt[at] = persona::canon(&j); rechain(tt, at) };
+        // 2 ULP (the `libm` crate of a nostd build against the platform's libm): verifies
+        let other = with(f64::from_bits(pred.to_bits() + 2)); assert_ne!(other, F);
+        assert_eq!(verify(&other, &run).map(|d| d.get("events").cloned()), Ok(ok.get("events").cloned()));
+        // a change the 6 decimals show: diverges at that line
+        assert_eq!(verify(&with(pred + 1e-5), &run).unwrap_err(), (at + 1, "the checkpoint's state or stance differs from the replay".to_string()));
+        // from 0.14.0: the same life logs every number of the deviation at 6 decimals and verifies; 0.13.0 logged more
+        let h = json::parse(&ls[0]).unwrap(); let doc = h.get("document").unwrap().clone(); let p = persona::build(&doc).unwrap();
+        let evs: Vec<Json> = ls[1..].iter().filter_map(|l| json::parse(l).ok()).filter(|j| matches!(kind(j), Kind::Event)).map(|j| j.get("inputs").unwrap().clone()).collect();
+        let life = |engine: &str| { let st = State::read(&p, h.get("state").unwrap()).unwrap(); let (mut lv, head) = Live::start(p.clone(), &doc, st, Clock::Fixed, engine); let mut text = format!("{head}\n");
+            for e in &evs { let (s, l) = lv.event(e, &run).unwrap(); text += &l; text.push('\n'); if lv.n % 4 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } } text };
+        let (old, new) = (life("probbit 0.13.0"), life("probbit 0.14.0"));
+        assert_eq!(old, F, "0.13.0's bytes, as recorded");
+        let nums = |t: &str| t.lines().filter_map(|l| json::parse(l).ok()?.get("stance")?.get("deviation").cloned()).flat_map(|d| ["self", "pred", "input", "z"].map(|k| d.get(k).and_then(Json::as_f64))).flatten().collect::<Vec<f64>>();
+        let n = nums(&new); assert_eq!(n.len(), 16); assert!(n.iter().all(|x| persona::r6(*x) == *x), "{n:?}"); assert!(nums(&old).iter().any(|x| persona::r6(*x) != *x));
+        assert_eq!(verify(&new, &run).map(|d| d.get("checkpoints").cloned()), Ok(Some(Json::Num(4.0))));
+        // a 0.14.0 checkpoint is checked byte for byte: a rounded number's last bits changed diverge
+        let ln: Vec<String> = new.lines().map(str::to_string).collect(); let c = ln.iter().position(|l| dev(l, "pred").is_some_and(|x| x > 0.0)).unwrap();
+        let mut j = json::parse(&ln[c]).unwrap(); put(&mut j, &["stance", "deviation", "pred"], Json::Num(f64::from_bits(dev(&ln[c], "pred").unwrap().to_bits() + 2))); let mut tt = ln.clone(); tt[c] = persona::canon(&j);
+        assert_eq!(verify(&rechain(tt, c), &run).unwrap_err().0, c + 1);
+    }
+
     /// docs/persona.md §5.7, "Unsupported": a header key, a persona field, a state field, a line kind or a line field this engine
     /// does not know (a newer engine's strand, its chain whole) is `unsupported by this engine: FIELD` at the line that has it,
     /// never a divergence; `verify_doc` (the MCP tool's document) is {ok, line, unsupported, engine, strand_engine}. A tampered

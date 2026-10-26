@@ -84,6 +84,12 @@ names the earliest line that differs (a changed, removed or reordered line, or a
 not reproduce), or the earliest field this engine does not know (`unsupported`: not verified, and not a divergence).
 `strand::Replay` steps a strand line by line, and `strand::resume(text, &p, st, clock)` continues one from its last state.
 
+A `nostd` build takes its transcendentals (`ln`, `exp`) from the `libm` crate, which can differ from the host's libm in the
+last bits (2 ULP measured on one deviation). Every number a strand line carries is rounded (6 decimals, or 5 significant
+digits for the deviation receipt), so the device's strand and the host's replay have the same bytes; from engine 0.14.0 this
+includes the stance's `deviation` on checkpoint lines (`strand::DEV_R6_SINCE`). A strand whose header names an earlier engine
+keeps its full-precision deviation, and verify accepts it when it equals the replay at 6 decimals.
+
 ## The host hooks
 
 `probbit_persona::hooks` lets a host see the decision pipeline: `set_monitor(tier, gate_seen)` (the CLI's `--top` view) and

@@ -955,6 +955,14 @@ line logs excludes `deviation`. Bound (by construction): per variable, `pred_i <
 the block verifies from its header (`--from-checkpoint` refuses: the memory reads every event). The deviation is absent
 (`null`) when a program is not solved by the exact tier.
 
+Every number of the stance's `deviation` is rounded to 6 decimals (the rule every other number of a stance and a state
+follows), so a checkpoint line, which carries the stance, has the same bytes on every platform: `self`, `pred` and `input` come
+from `ln`, whose last bits differ between libm implementations (macOS, glibc, the `libm` crate of a `nostd` build differ by a
+few ULP). Engines before 0.14.0 wrote `self`, `pred` and `input` at full precision; a strand whose header names such an engine
+keeps that formatting when it is replayed or continued, and `live verify` accepts its checkpoint line when it equals the
+replay's at 6 decimals (the chain goes on from the logged bytes), so a strand written on one platform verifies on another.
+The event line's receipt (5 significant digits) is checked exactly, as before.
+
 **Trajectory.** p_beta, proportional to p^beta, of the event's program at the k betas, each solved by the exact tier on
 `Model::scaled(beta)`: no sampler, a pure function of the program. It is derived and never logged: `probbit monitor`
 shows a `TRAJECTORY` row (mean marginal entropy per step) and its JSON frame a `trajectory` key; `probbit persona
@@ -1535,7 +1543,9 @@ event line: `{"checkpoint":n,"prev":"sha256:...","stance":{...},"state":{...}}`,
 and the whole state after it, chained like the others. A full `verify` replays from the header and checks every checkpoint
 against the replay (its `"checkpoints": N` is in the summary); `verify --from-checkpoint` reads the header, checks the last
 checkpoint against the event line before it (prev, the stance digest, the state digest, the state read as any state is) and
-replays only what follows (`"from_checkpoint": n`); the lines before it are trusted, so run a full `verify` to check them.
+replays only what follows (`"from_checkpoint": n`); the lines before it are trusted, so run a full `verify` to check them. Every
+number a checkpoint line carries is rounded (6 decimals; genes 4), so the line is the same on every platform's libm; for the
+stance's `deviation` this holds from engine 0.14.0 on (section 2.17).
 
 **Senses in live** (section 2.11). An event carries `senses` as `persona turn` does; the strand logs each reading as used, with
 its source, and `verify` recomputes the normals from the logged readings: its summary adds `"normals": {"<id>": {"mean", "n",

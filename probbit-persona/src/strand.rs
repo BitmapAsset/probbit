@@ -52,7 +52,30 @@ pub const CHECKPOINT_EVERY: u64 = 1000;
 /// A live individual: the persona, the current state, the clock, the strand's chain and its status (control lines)
 pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: String, pub n: u64, pub status: Status, pub controls: u64, pub checkpoints: u64, pub rests: u64,
     /// RFC 0009: the expectation's memory (a fold of the logged events) and the last event's exact trajectory (derived, never logged)
-    pub expect: Option<persona::ExpectMem>, pub traj: Option<Json> }
+    pub expect: Option<persona::ExpectMem>, pub traj: Option<Json>,
+    /// The strand's engine is before 0.14.0 (DEV_R6_SINCE): the stance's `deviation` keeps full precision, as that engine wrote it
+    pub dev_full: bool }
+/// The engine from which the stance's `deviation` (on checkpoint lines) is rounded to 6 decimals: a transcendental's last bits
+/// differ between platforms' libm (macOS, glibc, the `libm` crate of a `nostd` build), and 6 decimals make the line's bytes,
+/// and so the chain, the same on all of them
+pub const DEV_R6_SINCE: (u64, u64, u64) = (0, 14, 0);
+/// A strand header's engine `probbit X.Y.Z` (a `-pre` or `+build` suffix ignored) -> (X, Y, Z); None for any other name
+pub fn engine_version(engine: &str) -> Option<(u64, u64, u64)> {
+    let v = engine.strip_prefix("probbit ")?.split(['-', '+']).next()?;
+    let mut it = v.split('.').map(|x| x.parse::<u64>().ok());
+    let r = (it.next()??, it.next()??, it.next()??);
+    if it.next().is_some() { None } else { Some(r) }
+}
+/// A line with its stance's `deviation` self, pred and input at 6 decimals, as canonical JSON (None when it is not JSON): a
+/// checkpoint of a strand before 0.14.0 verifies when it is the replay's at the 6 decimals 0.14.0 writes (the libm's last bits
+/// set aside); the stance digest excludes `deviation` and the event line's receipt is checked exactly
+fn dev_r6(l: &str) -> Option<String> {
+    fn field<'a>(j: &'a mut Json, k: &str) -> Option<&'a mut Json> { match j { Json::Obj(v) => v.iter_mut().find(|(x, _)| x == k).map(|(_, y)| y), _ => None } }
+    let mut j = json::parse(l).ok()?;
+    if let Some(d) = field(&mut j, "stance").and_then(|s| field(s, "deviation")) {
+        for k in ["self", "pred", "input"] { if let Some(Json::Num(x)) = field(d, k) { *x = persona::r6(*x); } } }
+    Some(persona::canon(&j))
+}
 /// A document with its keys sorted at every level (`persona::text` of it is its canonical JSON)
 fn sorted(j: &Json) -> Json {
     match j { Json::Obj(v) => { let mut o: Vec<(String, Json)> = v.iter().map(|(k, x)| (k.clone(), sorted(x))).collect(); o.sort_by(|a, b| a.0.cmp(&b.0)); Json::Obj(o) }
@@ -73,7 +96,8 @@ impl Live {
             ("seed".into(), Json::Num(st.seed as f64)), ("state".into(), sorted(&st.to_json(&p))), ("document".into(), doc.clone())]));
         let prev = persona::digest_of(&header);
         let expect = p.expect.as_ref().map(|_| persona::ExpectMem::new());
-        (Live { p, st, clock, last: 0.0, prev, n: 0, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None }, header)
+        let dev_full = engine_version(engine).is_some_and(|v| v < DEV_R6_SINCE);
+        (Live { p, st, clock, last: 0.0, prev, n: 0, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None, dev_full }, header)
     }
     /// One event: stamp its elapsed hours, run the turn, chain the strand line -> (the stance document, the strand line). A bad
     /// event is an error and changes nothing (no turn, no line); so is every event while the individual is paused or retired.
@@ -93,7 +117,7 @@ impl Live {
         let traj = persona::trajectory(&self.p, &self.st, &inputs);
         let (mut stance, ns) = persona::turn(&self.p, &self.st, &inputs, false, eng, false)?;
         let sd = persona::stance_sha(&stance);
-        if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, persona::Deviation::to_json))); } }
+        if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, |d| d.to_json(self.dev_full)))); } }
         // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
         persona::set_glyph(&self.p, &mut stance);
         // RFC 0002 part 2: a rest line due before this event is its own line, chained before the event line (the turn applied it)
@@ -282,7 +306,12 @@ impl Replay {
                 if !self.checkpoint_ready { return Err((i, "a checkpoint must immediately follow an event line".into())); }
                 if j.get("checkpoint").and_then(Json::as_f64) != Some(live.n as f64) { return Err((i, format!("the checkpoint is not at event {}", live.n))); }
                 let Some(stance) = self.last.as_ref() else { return Err((i, "a checkpoint follows an event line".into())) };
-                if live.checkpoint(stance) != l { return Err((i, "the checkpoint's state or stance differs from the replay".into())); }
+                let line = live.checkpoint(stance);
+                if line != l {
+                    // before 0.14.0 the deviation is at full precision: equal at 6 decimals, the chain goes on from the logged bytes
+                    if !(live.dev_full && dev_r6(&line) == dev_r6(l)) { return Err((i, "the checkpoint's state or stance differs from the replay".into())); }
+                    live.prev = persona::digest_of(l);
+                }
                 self.line = i; self.checkpoint_ready = false; return Ok(None) }
             Kind::Event => {} }
         if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i, format!("n is not {}", live.n + 1))); }
@@ -559,7 +588,8 @@ pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, 
         for l in lines.iter().skip(1) { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
             let lp = d.filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64);
             persona::expect_step(&q, &mut m, j.get("inputs").unwrap_or(&Json::Null), lp); } } } m });
-    let mut lv = Live { p: q, st, clock, last: 0.0, prev: persona::digest_of(last), n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None };
+    let mut lv = Live { p: q, st, clock, last: 0.0, prev: persona::digest_of(last), n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None,
+        dev_full: engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE) };
     for c in tail.iter().rev() { let what = c.get("control").and_then(Json::as_str).unwrap_or("");
         lv.status = lv.status.after(what).unwrap_or(Status::Retired); lv.st = lv.st.zero_credit(&lv.p); lv.controls += 1; }
     Ok(lv)
