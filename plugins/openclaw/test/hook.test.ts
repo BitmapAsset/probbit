@@ -162,7 +162,8 @@ test("safety: a hung binary -> no injection within the 500 ms budget, one log li
   assert.equal(threw, false);
   assert.ok(waited < 900, `waited ${waited} ms`);
   assert.equal(host.logs.filter((l) => l.level === "warn").length, 1);
-  await sleep(2600);
+  // The stand-in sleeps 1 s on every call: the version probe (at load), persona init and live, plus spawn time.
+  await sleep(3600);
   const log = lines(join(dir, "log", `${LANE}.jsonl`));
   assert.equal(log.length, 1, "the late event is logged so log and strand stay aligned");
   assert.equal(JSON.parse(log[0]!.split("\t")[3]!).late, true);
