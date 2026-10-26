@@ -29,7 +29,7 @@ One binary of 3 to 4 MB, zero third-party dependencies, nothing phones home. Als
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
 <p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
 
-## What's new in 0.12.0
+## What's new in 0.12.0 to 0.13.0
 
 - **The engine's own expectation, and the exact surprise of every event** (RFC 0009, engine side; opt-in `expectation`
   block). Per live event the engine compiles, beside the turn's program, its own expectation of that turn (a decayed
@@ -68,6 +68,16 @@ One binary of 3 to 4 MB, zero third-party dependencies, nothing phones home. Als
   compute, or the full $3 rerun) with the sha256s to compare, and a CI job that recomputes the §14 tables on every push;
   the OpenClaw plugin [`probbit-stance`](plugins/openclaw/README.md) on npm; the E3 control above; `live verify` names
   the engine that replayed the strand (`verified_by`).
+- **0.13.0, the face and the app** ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.13.0)): the
+  monitor page gains a face header (the stance's glyph, two mood meters with every level's odds, a "why this glyph" panel,
+  the settle strip over the exact trajectory); an opt-in `display.glyphs` persona block maps each stance to one emoji by a
+  fixed rule order ([docs/persona.md](docs/persona.md) §2.18; a persona without it gives every document byte for byte as
+  before, P0: 653 outputs, 0 differ); **probbit Monitor**, the page in its own Mac window around a bundled probbit
+  ([docs/monitor-app.md](docs/monitor-app.md)); identity labels in a sidecar beside each strand and one monitor for many
+  strands (`--dir`, a switcher rail); the OpenClaw plugin `probbit-stance` 0.2.0 (the glyph line, the senses feed shadow
+  first, the labels; it needs probbit 0.13.0); the rerun scripts print `MATCH` or `DIFFERS` per table, and the lab tables
+  behind Result 2 are reproduction kits ([REPRODUCE.md](REPRODUCE.md), four tiers). The release has 15 assets: six
+  archives, `probbit-Monitor-v0.13.0-macos.zip` (universal), a `.sha256` for each, and `probbit.1`.
 
 0.11.0 added the certified persuadability bound and viability in the engine ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.11.0)); 0.10.0 added the body: needs, valence, surprise, pace and dispositions ([release notes](https://github.com/BitmapAsset/probbit/releases/tag/v0.10.0)).
 

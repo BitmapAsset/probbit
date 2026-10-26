@@ -962,10 +962,9 @@ trajectory PERSONA --state S [--inputs I]` (or `--program FILE` for any probbit-
 entropy of p_beta is non-increasing in beta (dH/dbeta = -beta Var(log w)); a single variable's marginal entropy can rise
 (measured in RFC 0009).
 
-### 2.18 Display glyphs (optional; unreleased)
+### 2.18 Display glyphs (optional; since 0.13.0)
 
-Not in a release yet: the block is on `main` after 0.12.1. probbit 0.12.1 and earlier refuse a persona that has it
-(`display: unknown field`, exit 2); build from `main` to use it.
+Since probbit 0.13.0. probbit 0.12.1 and earlier refuse a persona that has it (`display: unknown field`, exit 2).
 
 One emoji per stance, computed by the engine from the stance document, never chosen by the model. Off by default and outside
 the persona digest (as `bound` and `expectation` are): a persona without `display` gives every document byte for byte as

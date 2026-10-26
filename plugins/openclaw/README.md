@@ -22,8 +22,8 @@ Mood glyph: 🔒 (valence even 0.64, pressure keyed 0.58). Use at most one mood 
 Write from this stance. End the visible reply with one line: "Assistant 🔒 stance #14 · valence even · pressure keyed · security means careful, no play · in: +2 · moved: pressure, +1".
 ```
 
-That block is what the plugin on `main` writes (unreleased, see "The glyph" below). `probbit-stance` 0.1.0, the version
-on npm, writes it without the `Mood glyph:` line and ends with `"Assistant stance #14 · valence even · pressure keyed ·
+That block is what `probbit-stance` 0.2.0 writes (the `Mood glyph:` line: see "The glyph" below). `probbit-stance`
+0.1.0 wrote it without the `Mood glyph:` line and ended with `"Assistant stance #14 · valence even · pressure keyed ·
 security means careful, no play · in: correction, security · moved: pressure, caution"`.
 
 The footer is optional (`footer: false` removes it). With it on, the agent's visible reply ends with a line that says
@@ -31,8 +31,8 @@ which event this was, the two moods, a few words of the stance, the inputs the p
 and traits whose level changed since the previous event (`moved:`), 120 characters at most. People in the chat can see
 the state move; the strand proves it did.
 
-**The glyph (unreleased).** Not in `probbit-stance` 0.1.0 on npm nor in probbit 0.12.1: it is on `main` and needs a
-probbit built from `main`. With a persona that has `display.glyphs` (the bundled one on `main` does; [docs/persona.md](../../docs/persona.md)
+**The glyph** (`probbit-stance` 0.2.0 with probbit 0.13.0; `probbit-stance` 0.1.0 and probbit 0.12.1 have none). With a
+persona that has `display.glyphs` (the bundled one does; [docs/persona.md](../../docs/persona.md)
 §2.18), the engine computes one emoji from the stance: the glyph of a habit in force first, else the valence x pressure
 table, then 👀 when the expectation block reports a surprise. The footer opens with it (`Assistant 🙂 stance #14 · …`, or `◆🙂 stance
 #14 · …` with a symbol prefix), and the block gives the model one more line, `Mood glyph: 🙂 (valence even 0.71, pressure
@@ -52,11 +52,11 @@ the Jev adapter does (`classifier: jev`, OpenRouter, shadow by default: logged b
 engine until you turn `classifierShadow` off); otherwise a conservative keyword list (a correction outranks a "thanks").
 The method lands in the log line of every event. Flags the persona does not declare are dropped with one warning each;
 `time_pressure` is fed when the classifier scores it (the urgency question, asked by the Jev adapter in live mode). With
-`sensesMode` set (unreleased, on `main`), the plugin also measures readings of its own (next section).
+`sensesMode` set (since 0.2.0), the plugin also measures readings of its own (next section).
 
 ## Senses: tempo, tool failures and time pressure (`sensesMode`)
 
-Unreleased (on `main`, not in 0.1.0). A persona can declare senses (docs/persona.md §2.11): readings the host measures,
+Since 0.2.0 (not in 0.1.0). A persona can declare senses (docs/persona.md §2.11): readings the host measures,
 which the engine judges against a learned normal. The plugin measures three things per event and, depending on
 `sensesMode`, sends them or only logs them:
 
@@ -116,8 +116,11 @@ and corrections, within a cap that keeps the individual itself.
 
 ## Install
 
-Requirements: OpenClaw 2026.9.7 or later, the `probbit` binary on the gateway's PATH (`npm i -g probbit`, or
-[one curl line](https://github.com/BitmapAsset/probbit#install)), Node 22+.
+Requirements: OpenClaw 2026.9.7 or later, probbit 0.13.0 or later on the gateway's PATH (`npm i -g probbit`, or
+[one curl line](https://github.com/BitmapAsset/probbit#install)), Node 22+. `probbit-stance` 0.2.0 checks the binary's
+version at load: an older probbit gets one warning naming both versions (`probbit-stance 0.2.0 needs probbit 0.13.0 or
+later; probbit is probbit 0.12.1: ...`) and no event runs until it is upgraded. With probbit 0.12.x keep
+`probbit-stance` 0.1.0.
 
 1. Back up your config: `cp ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.pre-probbit-stance`.
 2. Install the plugin:
@@ -127,14 +130,13 @@ Requirements: OpenClaw 2026.9.7 or later, the `probbit` binary on the gateway's 
    The flag is the host's consent step for a plugin that registers hooks (without it the install stops and asks for it).
    The host also asks you to confirm a source outside ClawHub (npm): answer yes, or add `--force` in a script.
    From a clone instead: `cd plugins/openclaw && npm ci && npm run build && openclaw plugins install --link "$PWD" --force --accept-capabilities`.
-   A clone of `main` is ahead of the npm package: its bundled persona has `display.glyphs`, which probbit 0.12.1 refuses
-   (`display: unknown field`), so pair it with a probbit built from the same clone, or check out the tag `v0.12.1` first.
+   A clone of `main` may be ahead of the npm package: pair it with a probbit built from the same clone.
    The install writes `plugins.entries.probbit-stance.enabled: true` and nothing else; with no `lanes` configured the
    plugin registers no hooks and logs one warning, so it is inert until step 3.
 3. Tell it which sessions get a stance. Merge into `plugins.entries` of `~/.openclaw/openclaw.json`
-   (the full example is `install/openclaw-entries.json`; `hooks` sits next to `config`, not inside it). On `main` that
-   example sets `"sensesMode": "shadow"`, which is unreleased: with `probbit-stance` 0.1.0 from npm leave that line out,
-   or `openclaw config validate` reports `must not have additional properties: "sensesMode"`:
+   (the full example is `install/openclaw-entries.json`; `hooks` sits next to `config`, not inside it). That example
+   sets `"sensesMode": "shadow"`, a key of `probbit-stance` 0.2.0: with 0.1.0 leave that line out, or `openclaw config
+   validate` reports `must not have additional properties: "sensesMode"`:
    ```json
    "probbit-stance": {
      "enabled": true,
@@ -164,7 +166,7 @@ the strand), or `--follow` in a terminal.
 
 ## Your own persona
 
-Copy `personas/assistant.yaml` (on `main` it carries a `display` block; delete it for probbit 0.12.1), rename the identity, change the priors, the `say` words and the habits
+Copy `personas/assistant.yaml` (its `display` block needs probbit 0.13.0), rename the identity, change the priors, the `say` words and the habits
 ([docs/persona.md](../../docs/persona.md) is the reference; `probbit persona prove` and `probbit check` test a persona's
 rules before you ship it), and set `personaPath`. Keep the input ids the plugin sets (`praise`, `correction`, `failure`,
 `owner_upset`, `security`) if you want those readings; drop any you do not want and the plugin skips them with a warning.
@@ -182,13 +184,13 @@ rules before you ship it), and set `personaPath`. Keep the input ids the plugin 
 | `lanes` | `{}` | exact session key, or prefix ending in `*`, → lane name (`[a-z0-9][a-z0-9._-]*`). Only these sessions are hooked. |
 | `personaPath` | bundled `personas/assistant.yaml` | persona for `probbit live` / `persona init` |
 | `stateDir` | `~/.openclaw/probbit-stance` | `state/`, `strands/`, `last/`, `log/`, one file per lane |
-| `binary` | `probbit` | the probbit binary (0.11.0+; a persona with `display.glyphs` needs a build from `main`); a path or a name on PATH |
+| `binary` | `probbit` | the probbit binary (0.13.0 or later, checked at load); a path or a name on PATH |
 | `seed` | `42` | seed for `persona init` when a lane has neither state nor strand |
 | `timeoutMs` | `500` | the hook's wait for probbit; a late run still finishes and logs `"late": true` |
 | `gateMode` | `shadow` | `shadow` logs would-deny lines for destructive tool calls under a careful stance; `off` registers no tool hook |
 | `footer` | `true` | ask for the footer line |
 | `footerPrefix` | the persona's name | opens the footer line (an emoji or a short handle works; 24 characters at most) |
-| `glyphInReply` | `true` | unreleased (on `main`, not in 0.1.0); with a persona that has `display.glyphs`: the block's `Mood glyph:` line (the footer shows the glyph either way) |
+| `glyphInReply` | `true` | since 0.2.0; with a persona that has `display.glyphs`: the block's `Mood glyph:` line (the footer shows the glyph either way) |
 | `inject` | `appendContext` | `appendSystemContext` puts the block in the system prompt instead (changes the cached prefix every turn) |
 | `classifier` | `auto` | `auto`: the agent's decision model when configured, else keywords; `jev`: the Jev adapter; `keyword` |
 | `classifierShadow` | `true` | with `jev`: log Jev's answers, feed the engine the keyword flags |
@@ -197,10 +199,10 @@ rules before you ship it), and set `personaPath`. Keep the input ids the plugin 
 | `jevModel` | `typesafe/jev-1.13` | pinned Jev model id |
 | `jevKeyFile` | `~/.openclaw/probbit-stance/openrouter.env` | env-style file with `OPENROUTER_API_KEY`; read once at start, never logged |
 | `senderIds` | `[]` | when set, only these sender ids produce events (other group members are skipped) |
-| `sensesMode` | `off` | unreleased: `shadow` measures tempo, tool_fail and the heuristic time_pressure and logs them to `strands/<lane>.senses.jsonl`; `feed` also sends the ones the persona declares ([Senses](#senses-tempo-tool-failures-and-time-pressure-sensesmode)) |
-| `timePressureSource` | `question` | unreleased: `question` (the urgency question only), `heuristic` (the question, else the text heuristic; fed with `sensesMode` feed), `off` |
-| `agentName` | the session key's agent id | unreleased: the `agent` label of every lane ([Labels](#labels-for-the-monitor-labels-agentname)) |
-| `labels` | `{}` | unreleased: labels for every lane's sidecar; free keys are added, and `agent`, `host`, `lane` or `session` here override the computed value |
+| `sensesMode` | `off` | since 0.2.0: `shadow` measures tempo, tool_fail and the heuristic time_pressure and logs them to `strands/<lane>.senses.jsonl`; `feed` also sends the ones the persona declares ([Senses](#senses-tempo-tool-failures-and-time-pressure-sensesmode)) |
+| `timePressureSource` | `question` | since 0.2.0: `question` (the urgency question only), `heuristic` (the question, else the text heuristic; fed with `sensesMode` feed), `off` |
+| `agentName` | the session key's agent id | since 0.2.0: the `agent` label of every lane ([Labels](#labels-for-the-monitor-labels-agentname)) |
+| `labels` | `{}` | since 0.2.0: labels for every lane's sidecar; free keys are added, and `agent`, `host`, `lane` or `session` here override the computed value |
 | `destructive` | built-in list | `{id, tools, regex, param?}` or `{id, tools, pathPrefix}`; replaces the defaults |
 
 Default destructive list (shadow gate): `rm -rf`, `git push --force`, `curl | sh`, `openclaw config set/unset`, shell or
@@ -210,7 +212,7 @@ file-tool writes to `~/.openclaw/openclaw.json`. The gate never blocks; it write
 
 ## Labels for the monitor (`labels`, `agentName`)
 
-Unreleased (on `main`, not in 0.1.0). Beside each lane's strand the plugin keeps `strands/<lane>.labels.json`, the
+Since 0.2.0 (not in 0.1.0). Beside each lane's strand the plugin keeps `strands/<lane>.labels.json`, the
 sidecar `probbit monitor` reads to say who wrote the strand ([docs/agents.md](../../docs/agents.md), "How a host
 identifies itself"). Per lane it computes:
 
@@ -239,19 +241,19 @@ left as is with one warning per lane.
 - `strands/<lane>.strand`: the life. Header (persona document, initial state, engine), then one line per event with the
   inputs as used and the chained digests. `probbit live verify` replays it; `python3 python/probbit_host.py receipts`
   (in the probbit repo) renders one record per decision ([docs/receipts.md](../../docs/receipts.md)).
-- `strands/<lane>.labels.json` (unreleased, on `main`): the lane's labels for `probbit monitor` (above).
+- `strands/<lane>.labels.json` (since 0.2.0): the lane's labels for `probbit monitor` (above).
 - `log/<lane>.jsonl`: `iso \t event \t stance-document \t meta`, where meta holds the event number, the idempotency key,
   the classification method and flags, the text source, the milliseconds, and (with jev) the classifier's answers.
 - `last/<lane>.ts`: the epoch of the previous event, for the hours the engine decays moods over.
-- `strands/<lane>.senses.jsonl` (`sensesMode` shadow or feed; unreleased, on `main`): one line per event with the
+- `strands/<lane>.senses.jsonl` (`sensesMode` shadow or feed; since 0.2.0): one line per event with the
   readings the plugin measured, the source of each and what it fed.
 
 ## Safety properties
 
 - Only the listed sessions are touched. Heartbeats, cron runs and inter-session messages never produce events.
 - One event per admitted user message (the native message id when the host gives one; a retry reuses the event).
-- Any failure (no binary, bad persona, timeout) means no injection and one warning; the hooks never throw into the host,
-  and the tool hooks never block (`after_tool_call`, unreleased and registered only with `sensesMode`, only counts).
+- Any failure (no binary, a probbit older than 0.13.0, bad persona, timeout) means no injection and one warning; the hooks never throw into the host,
+  and the tool hooks never block (`after_tool_call`, since 0.2.0 and registered only with `sensesMode`, only counts).
 - The strand is append-only and never rewritten. The plugin serialises its own events per lane; do not write the same
   strand from another process.
 

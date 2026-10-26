@@ -5,6 +5,61 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.13.0 - 2026-10-26
+
+The monitor face and the Mac app, identity labels and many strands in one monitor, and the OpenClaw plugin 0.2.0. A persona
+without the new `display` block gives every document byte for byte as 0.12.1 (the P0 corpus, 653 recorded outputs, 0
+differ).
+
+- Monitor face: the page's top bar shows the stance's glyph, two mood meters with every level's odds, a "why this glyph"
+  panel and a settle strip over the exact trajectory (#70, #72).
+- Display glyphs: an opt-in `display.glyphs` persona block maps each stance to one emoji by a fixed rule order; the stance,
+  the strand line and the plugin footer carry it, and `live verify` recomputes it (#65, #67).
+- probbit Monitor for macOS: the monitor page in a native window around a bundled probbit; a universal
+  `probbit-Monitor-<tag>-macos.zip` on every release, signed ad-hoc (#74).
+- Identity labels: a `NAME.labels.json` sidecar beside each strand says which agent, host, lane and session it is, outside
+  the strand and its digests; `probbit live --label`, and `probbit monitor` serves many strands (`--dir`, a switcher
+  rail) (#75).
+- OpenClaw plugin `probbit-stance` 0.2.0: the `Mood glyph:` line (#65, #67), the senses feed, shadow first (#69), the
+  per-lane labels (#75), and a hard requirement of probbit 0.13.0 or later, checked at load (this release).
+- Reproduction: `rerun.sh` and `rerun_e3.sh` print `MATCH` or `DIFFERS` per table against the committed files and exit
+  non-zero on a difference; a Python guard for the numpy wheel range; the strand archive repacked without extended
+  attributes (#68).
+- Lab kits: the lab tables behind Result 2 as reproduction kits under `bench/lab/0.11/` (#64).
+- Documentation: `CITATION.cff` (#71); fixes from two dress rehearsals of the published 0.12.1 artifacts (#66, #73).
+
+Upgrade notes:
+- `probbit-stance` 0.2.0 needs probbit 0.13.0 or later and refuses an older binary (one warning, no stance). With probbit
+  0.12.x keep `probbit-stance` 0.1.0. The example entry `install/openclaw-entries.json` sets `sensesMode`, a 0.2.0 key.
+- probbit 0.12.1 and earlier refuse a persona with a `display` block (`display: unknown field`, exit 2), and a `labels`
+  strand header key (exit 5); labels live in the sidecar, so every labelled strand verifies under every engine.
+- `rerun.sh`'s line `identical` now reads `two passes identical`, and the script exits non-zero on any `DIFFERS`; a Python
+  outside 3.9 to 3.12 is refused (exit 2) unless `PYTHON=<python>` is set.
+- The monitor page's size bound goes from 64 KB to 72 KB.
+
+Details:
+- `probbit monitor` page: a face header (docs/persona.md §5.8). The top bar shows the stance's glyph large, labelled with
+  `glyph_why`, the persona's name, version, seed, event number and receiver age, and two mood meters (the moods
+  `display.glyphs` names, else the first two) with every level's odds as proportional segments and the existing sparkline. A
+  changed mood level highlights its meter for 0.6 s (still under `prefers-reduced-motion`). **Why this glyph** opens a panel
+  (closed by default, remembered in `localStorage`) with `glyph_why`, the inputs the event carried, the habits in force (bound
+  and glyph-giving marked), the surprise reading and the stance line. With `engine.trajectory` a settle strip steps through
+  the event's exact trajectory (trait odds, hottest inverse temperature to beta = 1, at most 600 ms). Frames gain `settle`
+  (the trajectory by level name) and `meta.face`; the terminal gains a GLYPH row with `glyph_why` under the header. A strand
+  without a glyph draws the header without the glyph slot. Browser check: face assertions and console errors fail the run. (#70)
+- `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky. (#72)
+- Display glyphs (docs/persona.md §2.18): an optional `display.glyphs` block (outside the persona digest, effects {}) maps
+  the stance to one emoji by a fixed rule order: the first listed habit in `habits.active` (the habit applies this turn,
+  whether or not it bound), else the cell of a two-mood table
+  (valence x pressure by default), then a surprise modifier when `deviation.registers` and `z >= z_at_least`. The stance
+  document gains `glyph` and `glyph_why`; `probbit live` strand lines carry `glyph` and `live verify` recomputes it ("the
+  glyph differs" on an edit). Every glyph is one code point, optionally followed by U+FE0F (so `🛠️` and `❤️` pass;
+  `persona lint` refuses ZWJ, skin-tone, flag, keycap, tag and other combining sequences). A persona without the block gives every document byte for byte as before (P0: 653
+  outputs, 0 differ). `probbit monitor` shows the glyph next to the persona's name (terminal and page). (#65, #67)
+- probbit Monitor for macOS (`apps/macos/ProbbitMonitor`): the monitor page in a native window (Swift, AppKit and WebKit, no
+  third-party code) around a bundled probbit, opened from Finder, the Dock or File → Open; ad-hoc signed, not notarized.
+  `release.yml` attaches `probbit-Monitor-<tag>-macos.zip` (universal) to each release; `ci.yml` builds and launches it on
+  every commit. See docs/monitor-app.md. (#74)
 - `probbit monitor`: the page says which agent it shows, and one monitor serves many. Presentation labels (`agent`, `host`,
   `lane`, `session`, free keys; at most 8, values of 1 to 64 printable characters) live in a sidecar next to the strand,
   `NAME.labels.json`, outside the strand and both digests: probbit 0.12.1 refuses a `labels` header key (exit 5,
@@ -15,31 +70,18 @@ All notable changes to this project are documented here. The format follows
   routes `/strands`, `/s/ID/events`, `/s/ID/doc/N`; `/`, `/events` and `/doc/N` are unchanged for one strand. The page
   gains an identity header above the face (agent, host · lane · session, persona, engine, strand, last write), the tab
   title `glyph agent · lane — probbit`, the glyph as favicon, and with two or more strands a switcher rail (click,
-  Cmd/Ctrl+1-9, arrows, `/?strand=ID`). The page's size bound goes from 64 KB to 72 KB (67 KB now).
+  Cmd/Ctrl+1-9, arrows, `/?strand=ID`). The page's size bound goes from 64 KB to 72 KB (67 KB now). (#75)
+- Python: `probbit.write_labels` / `labels_path` / `check_labels`, and a `labels=` argument on `probbit.live_event` and
+  `StanceHost` that merges the labels into the strand's sidecar after every event (ValueError on bad labels, before the
+  event runs). (#75)
+- Hosts: the Claude Code hook writes `host` = `Claude Code`, `session` = `#` + 8 characters of the session id and `agent`
+  from `PROBBIT_AGENT`; the LangChain, OpenAI Agents SDK and Vercel AI SDK examples label their strands with the
+  framework's name. docs/agents.md: "How a host identifies itself". (#75)
 - OpenClaw plugin: each lane's strand gets a `strands/<lane>.labels.json` sidecar for `probbit monitor`: `host` (`OpenClaw
   <version>`), `lane`, `agent` (new `agentName` key, else the session key's agent id) and a non-secret `session` label
   (`telegram group #3fa9c2d1`). The new `labels` config key adds free keys and overrides the computed ones; invalid
   entries are dropped with one warning. A binary whose `probbit live --help` lists `--label` gets the labels when it
-  creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand).
-- Python: `probbit.write_labels` / `labels_path` / `check_labels`, and a `labels=` argument on `probbit.live_event` and
-  `StanceHost` that merges the labels into the strand's sidecar after every event (ValueError on bad labels, before the
-  event runs).
-- Hosts: the Claude Code hook writes `host` = `Claude Code`, `session` = `#` + 8 characters of the session id and `agent`
-  from `PROBBIT_AGENT`; the LangChain, OpenAI Agents SDK and Vercel AI SDK examples label their strands with the
-  framework's name. docs/agents.md: "How a host identifies itself".
-- probbit Monitor for macOS (`apps/macos/ProbbitMonitor`): the monitor page in a native window (Swift, AppKit and WebKit, no
-  third-party code) around a bundled probbit, opened from Finder, the Dock or File → Open; ad-hoc signed, not notarized.
-  `release.yml` attaches `probbit-Monitor-<tag>-macos.zip` (universal) to each release; `ci.yml` builds and launches it on
-  every commit. See docs/monitor-app.md.
-
-- Documentation, from a second dress rehearsal (main and the v0.12.1 binary, every README and REPRODUCE.md command run as
-  written on Ubuntu 24.04 x86_64 and macOS arm64): REPRODUCE.md says how to recover when a venv was first made with a
-  Python outside 3.9 to 3.12 (`python3.12 -m venv` over it can keep the old interpreter), names the `bars.tsv` sha256 that a
-  source-built numpy on Python 3.14 gives, how to restore the tables after a `DIFFERS` run, and that it has four tiers;
-  `plugins/openclaw/README.md` says that the example entry's `sensesMode` line is unreleased and that probbit-stance 0.1.0
-  rejects it, and marks the senses log and the `after_tool_call` hook unreleased.
-
-- `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky.
+  creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand). (#75)
 - OpenClaw plugin (`plugins/openclaw`): it now measures the readings a persona's senses declare, shadow first.
   `sensesMode` (`off` by default, so existing installs are unchanged; the example entry shows `shadow`): `shadow` writes
   one JSON line per event to `strands/<lane>.senses.jsonl` (`tempo`, `time_pressure`, `tool_fail`, the source of each,
@@ -52,7 +94,17 @@ All notable changes to this project are documented here. The format follows
   `heuristic`; `off`): with `heuristic`, a message the urgency question does not score gets `time_pressure` from a fixed
   mapping of deadline words, an imperative first word, emphasis and length to [0, 0.8], written out in the plugin
   README, and fed only with `sensesMode` feed. 146 tests (mocked host and the real binary; `npm run test:host` against
-  the installed 2026.9.7 types), the config schema regenerated in `openclaw.plugin.json`, `check:host` green.
+  the installed 2026.9.7 types), the config schema regenerated in `openclaw.plugin.json`, `check:host` green. (#69)
+- `plugins/openclaw`: the footer opens with the glyph when the stance carries one (`<prefix><glyph> stance #N · …`, a space
+  after a prefix ending in a letter or digit); the block gains `Mood glyph: 🙂 (valence even 0.71, pressure steady 0.80). Use
+  at most one mood emoji in this reply and make it this one.`, behind the new config key `glyphInReply` (default true);
+  with the surprise modifier the line names the base glyph as the one mood emoji and reports the modifier apart (`…;
+  surprise registered this turn (z 2.3), shown as 👀 in the footer. … make it 🙂.`), while the footer keeps `🙂👀`; the
+  bundled persona carries the default map. (#65, #67)
+- `plugins/openclaw` 0.2.0: the plugin checks the binary's version at load (`probbit --version`, once per process) and
+  runs no event with a probbit older than 0.13.0; one warning names both versions (`probbit-stance 0.2.0 needs probbit
+  0.13.0 or later; probbit is probbit 0.12.1: ...`). A binary that does not print `probbit X.Y.Z` is not judged by the
+  check. A state that `persona init` made for a refused binary is removed, so nothing is left behind. 160 tests (this release)
 - Reproduction scripts: `bench/agentdojo/experiments/rerun.sh` and `e3/experiments/rerun_e3.sh` now compare every
   regenerated table with the committed file (git `HEAD`, or the file on disk before the run outside git) and print
   `MATCH <file> <sha256>` or `DIFFERS <file> <sha256> (committed <sha256>)`, exiting non-zero on any `DIFFERS`; the old
@@ -60,48 +112,44 @@ All notable changes to this project are documented here. The format follows
   `rerun.sh` (`bench/lab/0.11/`) print the same per-table lines against their `tables/original.sha256`. All five refuse a
   Python outside 3.9 to 3.12 (the numpy wheel range) unless `PYTHON=<python>` is set, which warns instead. The CI job
   `agentdojo-tables` also runs the E3 rerun. Table contents unchanged. `tables/frozen.sha256` records both hashes of
-  `rerun.sh` (as run, and this copy).
+  `rerun.sh` (as run, and this copy). (#68)
 - `bench/agentdojo/tables/strands-A.tar.gz` repacked without macOS extended attributes (no AppleDouble `._` members, no
   owner names, numeric owner 0, the original newest mtime): GNU tar extracts it without warnings; the 726 strand files
-  inside are byte-identical to the previous archive's.
-- `probbit monitor` page: a face header (docs/persona.md §5.8). The top bar shows the stance's glyph large, labelled with
-  `glyph_why`, the persona's name, version, seed, event number and receiver age, and two mood meters (the moods
-  `display.glyphs` names, else the first two) with every level's odds as proportional segments and the existing sparkline. A
-  changed mood level highlights its meter for 0.6 s (still under `prefers-reduced-motion`). **Why this glyph** opens a panel
-  (closed by default, remembered in `localStorage`) with `glyph_why`, the inputs the event carried, the habits in force (bound
-  and glyph-giving marked), the surprise reading and the stance line. With `engine.trajectory` a settle strip steps through
-  the event's exact trajectory (trait odds, hottest inverse temperature to beta = 1, at most 600 ms). Frames gain `settle`
-  (the trajectory by level name) and `meta.face`; the terminal gains a GLYPH row with `glyph_why` under the header. A strand
-  without a glyph draws the header without the glyph slot. Browser check: face assertions and console errors fail the run.
-
+  inside are byte-identical to the previous archive's. (#68)
+- `bench/lab/0.11/`: the lab runs behind Result 2 as reproduction kits: the v-run (`v011-viability/`), I3-sim
+  (`i3sim-needs-viability/`) and the V2 residual follow-up (`v2res-valence-residual/`). Each carries its harness, frozen
+  configuration, tables, replay record and the bars as registered (`PREREGISTRATION.md`); `experiments/rerun.sh`
+  regenerates every table twice and checks it byte for byte (no API calls). All three regenerate byte-identical with
+  0.12.1. `docs/results/0.11/README.md` (Replication) and `REPRODUCE.md` point at them; N1 and N1-b stay pending. (#64)
+- `CITATION.cff`: how to cite probbit (title, version, release date, license, repository, authors); GitHub shows it as
+  "Cite this repository" (#71)
 - Documentation, from a dress rehearsal of the published v0.12.1 artifacts (every install and reproduction command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): the glyph material in `plugins/openclaw/README.md`, docs/persona.md
   §2.18 and the cheat sheet is marked unreleased (probbit 0.12.1 refuses a persona with `display`, and the npm plugin 0.1.0
   has no glyph); REPRODUCE.md names the Python range with numpy wheels (3.9 to 3.12), the harmless GNU tar warning, what
   `identical` compares, the E3 rerun with its sha256s, and that a report needs a GitHub account; the README's binary size
   (3 to 4 MB) and its OpenClaw subsection moved below the `--budget-ms` and `--summary` paragraphs it had split from their
-  section; docs/agents.md points at the README section that exists.
+  section; docs/agents.md points at the README section that exists. (#66)
+- Documentation, from a second dress rehearsal (main and the v0.12.1 binary, every README and REPRODUCE.md command run as
+  written on Ubuntu 24.04 x86_64 and macOS arm64): REPRODUCE.md says how to recover when a venv was first made with a
+  Python outside 3.9 to 3.12 (`python3.12 -m venv` over it can keep the old interpreter), names the `bars.tsv` sha256 that a
+  source-built numpy on Python 3.14 gives, how to restore the tables after a `DIFFERS` run, and that it has four tiers;
+  `plugins/openclaw/README.md` says that the example entry's `sensesMode` line is unreleased and that probbit-stance 0.1.0
+  rejects it, and marks the senses log and the `after_tool_call` hook unreleased. (#73)
 
-- Display glyphs (docs/persona.md §2.18): an optional `display.glyphs` block (outside the persona digest, effects {}) maps
-  the stance to one emoji by a fixed rule order: the first listed habit in `habits.active` (the habit applies this turn,
-  whether or not it bound), else the cell of a two-mood table
-  (valence x pressure by default), then a surprise modifier when `deviation.registers` and `z >= z_at_least`. The stance
-  document gains `glyph` and `glyph_why`; `probbit live` strand lines carry `glyph` and `live verify` recomputes it ("the
-  glyph differs" on an edit). Every glyph is one code point, optionally followed by U+FE0F (so `🛠️` and `❤️` pass;
-  `persona lint` refuses ZWJ, skin-tone, flag, keycap, tag and other combining sequences). A persona without the block gives every document byte for byte as before (P0: 653
-  outputs, 0 differ). `probbit monitor` shows the glyph next to the persona's name (terminal and page).
-- `plugins/openclaw`: the footer opens with the glyph when the stance carries one (`<prefix><glyph> stance #N · …`, a space
-  after a prefix ending in a letter or digit); the block gains `Mood glyph: 🙂 (valence even 0.71, pressure steady 0.80). Use
-  at most one mood emoji in this reply and make it this one.`, behind the new config key `glyphInReply` (default true);
-  with the surprise modifier the line names the base glyph as the one mood emoji and reports the modifier apart (`…;
-  surprise registered this turn (z 2.3), shown as 👀 in the footer. … make it 🙂.`), while the footer keeps `🙂👀`; the
-  bundled persona carries the default map.
-
-- `bench/lab/0.11/`: the lab runs behind Result 2 as reproduction kits: the v-run (`v011-viability/`), I3-sim
-  (`i3sim-needs-viability/`) and the V2 residual follow-up (`v2res-valence-residual/`). Each carries its harness, frozen
-  configuration, tables, replay record and the bars as registered (`PREREGISTRATION.md`); `experiments/rerun.sh`
-  regenerates every table twice and checks it byte for byte (no API calls). All three regenerate byte-identical with
-  0.12.1. `docs/results/0.11/README.md` (Replication) and `REPRODUCE.md` point at them; N1 and N1-b stay pending.
+Merged pull requests:
+- #64 bench/lab/0.11: the lab tables behind Result 2 as reproduction kits (v-run, I3-sim, V2 residual)
+- #65 Display glyphs: the engine's glyph in the stance, the strand and the footer
+- #66 docs: fixes from a dress rehearsal of the published v0.12.1 artifacts
+- #67 Display glyphs 2: the habit in force, the base glyph under the modifier, U+FE0F allowed
+- #68 bench: rerun scripts say MATCH or DIFFERS against the committed tables; Python guard; strand archive without xattrs
+- #69 plugin: feed the senses the persona declares (tempo, tool_fail, time_pressure), shadow first
+- #70 Monitor face: glyph header, mood meters, why-panel, settle strip
+- #71 Add CITATION.cff
+- #72 Monitor: the settle strip hides on stored documents and held views; fix the CI race
+- #73 docs: second dress rehearsal fixes (Python-guard recovery, plugin README markings for 0.1.0, four tiers)
+- #74 apps/macos: probbit Monitor as a macOS app (bundled engine, ad-hoc signed, release asset built by CI)
+- #75 Monitor identity: who the page shows, many agents in one monitor (labels sidecar, --dir, switcher rail, hosts write labels)
 
 ## 0.12.1 - 2026-10-24
 

@@ -233,7 +233,7 @@ Practical notes for agent use:
 
 ## How a host identifies itself
 
-Unreleased (on `main`, not in 0.12.1). `probbit monitor` heads each strand with who wrote it. Those labels live in a
+Since probbit 0.13.0 (not in 0.12.1). `probbit monitor` heads each strand with who wrote it. Those labels live in a
 **sidecar** next to the strand, never in the strand: the strand path with its last extension replaced by `.labels.json`
 (`strands/support.strand` -> `strands/support.labels.json`, `pip` -> `pip.labels.json`). The strand's header is the chain's
 first link, so a label in it would change every digest; the sidecar can change without touching the receipt.
