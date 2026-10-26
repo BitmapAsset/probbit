@@ -13,7 +13,7 @@ class Sidecar(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.TemporaryDirectory()
         self.strand = os.path.join(self.d.name, "support.strand")
-        with open(self.strand, "w", encoding="utf-8") as f:
+        with open(self.strand, "w", encoding="utf-8", newline="") as f:
             f.write(STRAND)
         self.side = os.path.join(self.d.name, "support.labels.json")
 
@@ -39,7 +39,7 @@ class Sidecar(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.d.name)), ["support.labels.json", "support.strand"], "no temp file left")
 
     def test_merge_keeps_keys_not_named_and_skips_an_equal_write(self):
-        with open(self.side, "w", encoding="utf-8") as f:
+        with open(self.side, "w", encoding="utf-8", newline="") as f:
             f.write('{"note":"hand-added","host":"old"}')
         self.assertEqual(probbit.write_labels(self.strand, {"host": "new", "agent": "a"}), {"agent": "a", "host": "new", "note": "hand-added"})
         self.assertEqual(self.read(self.side), '{"agent":"a","host":"new","note":"hand-added"}\n')
@@ -62,14 +62,14 @@ class Sidecar(unittest.TestCase):
 
     def test_a_merge_past_8_keys_or_a_broken_sidecar_is_refused_and_left_as_is(self):
         full = json.dumps({c: c for c in "abcdefgh"})
-        with open(self.side, "w", encoding="utf-8") as f:
+        with open(self.side, "w", encoding="utf-8", newline="") as f:
             f.write(full)
         with self.assertRaises(ValueError):
             probbit.write_labels(self.strand, {"agent": "x"})
         self.assertEqual(self.read(self.side), full)
         probbit.write_labels(self.strand, {"a": "replaced"})   # replacing a key is still 8
         for broken in ("[1]", '{"a": 1}', "not json"):
-            with open(self.side, "w", encoding="utf-8") as f:
+            with open(self.side, "w", encoding="utf-8", newline="") as f:
                 f.write(broken)
             with self.assertRaises(ValueError):
                 probbit.write_labels(self.strand, {"agent": "x"})
