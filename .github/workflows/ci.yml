@@ -174,7 +174,8 @@ jobs:
           path: target/browser-check/
   macos-app:
     # apps/macos/ProbbitMonitor, the monitor as a Mac app: its build.sh (the one release.yml runs) builds the Swift shell
-    # around the probbit built from this commit and signs the bundle ad-hoc, then smoke.sh launches it: the bundled engine
+    # around the probbit built from this commit and signs the bundle ad-hoc with the hardened runtime (what a Developer ID
+    # signature in release.yml adds, so a runtime violation shows here first), then smoke.sh launches it: the bundled engine
     # must serve the page on 127.0.0.1 only, and quitting the app (SIGTERM, and SIGKILL for the crash case) must leave no
     # engine process. No upload.
     runs-on: macos-latest
@@ -185,7 +186,7 @@ jobs:
       - name: build probbit
         run: cargo build --release --locked -p probbit-cli
       - name: build the app
-        run: apps/macos/ProbbitMonitor/build.sh --binary target/release/probbit
+        run: apps/macos/ProbbitMonitor/build.sh --binary target/release/probbit --identity -   # ad-hoc, with the hardened runtime
       - name: launch it, quit it
         run: |
           APP="apps/macos/ProbbitMonitor/dist/probbit Monitor.app"

@@ -698,11 +698,11 @@ from the [release page](https://github.com/BitmapAsset/probbit/releases), unzip 
 then double-click a `.strand` file (or drag one, several, or a folder onto the app), or press "Try the demo". The app is a
 small Swift window (AppKit and WebKit, no third-party code) around the probbit binary inside it: it runs
 `probbit monitor <your files> --serve --port 0` and shows that page, so it opens no network address beyond 127.0.0.1, and
-quitting it stops the engine. It is signed ad-hoc and **not notarized** (that needs a paid Apple Developer account), so
-macOS refuses the first launch of a downloaded copy: on macOS 15 and later, open it once, then System Settings → Privacy &
-Security → Open Anyway; on macOS 13 and 14, right-click the app → Open. How it works and how to build it:
-[docs/monitor-app.md](docs/monitor-app.md). On Linux and Windows, `probbit monitor STRAND --open` shows the same page in the
-browser. The page: [docs/probbit-monitor.png](docs/probbit-monitor.png).
+quitting it stops the engine. A release whose notes say "notarized" is signed with a Developer ID and notarized by Apple,
+and opens on double-click; one signed ad-hoc is refused at its first launch until you allow it once (macOS 15 and later:
+System Settings → Privacy & Security → Open Anyway; macOS 13 and 14: right-click the app → Open). How it works and how to
+build it: [docs/monitor-app.md](docs/monitor-app.md). On Linux and Windows, `probbit monitor STRAND --open` shows the same
+page in the browser. The page: [docs/probbit-monitor.png](docs/probbit-monitor.png).
 
 ## After any judge: `probbit evaluate`
 
