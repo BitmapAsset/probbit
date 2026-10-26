@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **`probbit-persona`, the document layer and the strand writer as a library crate** (docs/embedding.md): `json`, `yaml`,
+  `persona`, `run`, `router` and `evaluate` (feature `decide`), `sys`, and `strand` (the pure half of `probbit live`: `Live`, the
+  line writers, `Replay`, `verify*`, with no file I/O) move out of probbit-cli, which uses them unchanged; every CLI output is
+  byte for byte as 0.13.0. probbit-core, probbit-ir, probbit-decide and probbit-persona gain the features `std` (default) and
+  `nostd` (`no_std` + `alloc`, through the new `probbit-nostd` facade), checked on `xtensa-esp32s3-none-elf`; probbit-wasm
+  depends on the crate instead of including the CLI's files.
+
 ## 0.13.0 - 2026-10-26
 
 The monitor face and the Mac app, identity labels and many strands in one monitor, and the OpenClaw plugin 0.2.0. A persona

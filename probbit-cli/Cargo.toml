@@ -18,3 +18,4 @@ path = "src/main.rs"
 probbit-core = { path = "../probbit-core", version = "0.13.0" }
 probbit-decide = { path = "../probbit-decide", version = "0.13.0" }
 probbit-ir = { path = "../probbit-ir", version = "0.13.0" }
+probbit-persona = { path = "../probbit-persona", version = "0.13.0" }

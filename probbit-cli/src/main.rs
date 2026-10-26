@@ -17,23 +17,18 @@
 //!   probbit <command> --help | -h               # usage, every flag with its default, exit codes
 //!   probbit --help | -h                          # the usage above (stdout, exit 0); at a terminal the hero screen
 //!   --top, --summary (decide, run), --live (demo), --plain: see `probbit <command> --help`; visuals go to stderr (theme.rs)
-mod evaluate;
 mod fuzz;
-mod json;
 mod labels;
 mod live;
 mod mcp;
 mod monitor;
-mod persona;
-mod router;
-mod run;
-mod sys;
 mod theme;
 mod tui;
 mod usage;
-mod yaml;
+// the document layer and the strand writer: the probbit-persona library (the CLI's modules name them as `crate::json` etc.)
+use probbit_persona::{evaluate, json, persona, router, run, sys};
 use json::{num, obj, str as jstr, Json};
-pub(crate) use router::{demo_doc, from_json, item_bars, DEMO_TPL};
+pub(crate) use router::{demo_doc, from_json, DEMO_TPL};
 use probbit_decide::*;
 use std::io::{Read, Write};
 use usage::{Command, Flag, Sub};
@@ -98,10 +93,6 @@ fn polish_ms_arg(args: &[String]) -> f64 {
 fn exact_ms(args: &[String]) -> Option<f64> {
     args.iter().any(|a| a == "--exact-ms").then(|| { let x: f64 = arg(args, "--exact-ms", 0.0);
         if !(x.is_finite() && (0.0..=1e9).contains(&x)) { fail("--exact-ms must be a number of milliseconds from 0 to 1e9") } x })
-}
-/// Telemetry fields of a sampled answer when --exact-ms was given (none otherwise): the cap and whether the exact tiers hit it.
-pub(crate) fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
-    xms.map_or(vec![], |x| vec![("exact_ms", num(x)), ("exact_ms_reached", Json::Bool(reached))])
 }
 /// Every stdout document goes through here. `println!` panicked on a closed pipe (`probbit demo --tasks 3000 | head -c 20`:
 /// "failed printing to stdout: Broken pipe", exit 134 with panic = abort); a reader that went away is not an error, so a broken
@@ -1150,6 +1141,8 @@ fn help_cmd(args: &[String]) {
 }
 
 fn main() {
+    // the library's hooks: the `--top` monitor and the config echo in telemetry
+    probbit_persona::hooks::set_monitor(tui::tier, tui::gate_seen); probbit_persona::hooks::set_config_echo(config_echo);
     // an argument that is not valid Unicode (a file name in a legacy encoding on Linux, an unpaired surrogate on Windows) is
     // refused by name; std::env::args would panic on it
     let args: Vec<String> = std::env::args_os().skip(1).enumerate().map(|(i, a)| a.into_string().unwrap_or_else(|a|

@@ -1,7 +1,7 @@
 //! Human formatting must not change machine values, persisted state or replay records.
 use std::process::{Command, Output};
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 
 const PERSONA: &str = "../examples/persona/tutor.yaml";

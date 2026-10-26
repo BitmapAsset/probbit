@@ -8,6 +8,17 @@
 //! updates restricted to feasible values + Metropolis swap moves, multi-chain), `gate_stats` (the certification gate
 //! over generic marginals), `Model::with_clamp` (what-if). Front-ends lower to this form: the assignment router in
 //! probbit-decide is one (`Problem::lower`), and its results through the lowering are bit-identical to its own engine.
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate probbit_nostd as std;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate alloc;
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use probbit_core::Philox4x32;
 use std::collections::HashMap;
 

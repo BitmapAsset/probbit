@@ -2,6 +2,8 @@
 //! Chain-of-blocks Dispatch: B blocks x M=10 tasks. Block b may use 2 private agents plus the "bridge"
 //! agents shared with blocks b-1 and b+1 (capacity couples neighbours). Groups of 5 within a block, affinity lam.
 //! Exact marginals + bridge-load distributions by transfer-matrix DP over bridge loads.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::Problem;
 use probbit_core::Philox4x32;
 

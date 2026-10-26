@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["probbit-core", "probbit-ir", "probbit-decide", "probbit-cli", "probbit-wasm"]
+members = ["probbit-nostd", "probbit-core", "probbit-ir", "probbit-decide", "probbit-persona", "probbit-cli", "probbit-wasm"]
 
 [workspace.package]
 version = "0.13.0"

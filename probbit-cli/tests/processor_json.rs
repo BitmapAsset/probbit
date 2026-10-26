@@ -1,5 +1,5 @@
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 
 #[test]

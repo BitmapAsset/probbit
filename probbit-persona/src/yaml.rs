@@ -8,6 +8,8 @@
 //! `miniyaml.py`; this is a port of it). Differences, both on inputs it got wrong: a quoted scalar as a block-sequence item
 //! (`- "x"`) is read (miniyaml refused it), and a number that is not exact in a double (an integer beyond 2^53, `1e999`) is an
 //! error (miniyaml kept the integer exact, or read infinity).
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::json::Json;
 
 pub struct YamlError { pub line: usize, pub msg: String }

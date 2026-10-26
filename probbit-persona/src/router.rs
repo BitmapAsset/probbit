@@ -1,18 +1,23 @@
 //! `probbit decide`, the router front-end: the router document -> `probbit_decide::Problem` (the strict input contract), and the decision
 //! pipeline (the exact tiers, then the gated sampler and the polish) as one function that returns the document and its exit code.
 //! main.rs parses the flags and prints it; probbit-wasm runs the same code in a browser.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::json::{self, num, obj, str as jstr, Json};
-use crate::{config_echo, exact_cap, sys, tui};
+use crate::hooks::{self as tui, config_echo};
+use crate::run::exact_cap;
+pub use crate::run::item_bars;
+use crate::sys;
 use probbit_core::rt::Instant;
 use probbit_decide::*;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub(crate) struct Named { pub(crate) p: Problem, pub(crate) tasks: Vec<String>, pub(crate) workers: Vec<String> }
+pub struct Named { pub p: Problem, pub tasks: Vec<String>, pub workers: Vec<String> }
 
 /// JSON problem -> Problem. See README "Problem format"; the strict contract (types, unknown fields, duplicates, empty domains,
 /// structured errors) is docs/probbit-ir-json.md "Input contract".
-pub(crate) fn from_json(j: &Json) -> Result<Named, json::InErr> {
+pub fn from_json(j: &Json) -> Result<Named, json::InErr> {
     use json::{arr, at, fields, ix, limit, opt, req, schema, text, value, weight};
     fields(j, "", &["workers", "tasks", "affinity", "comment"])?;
     if let Some(c) = opt(j, "comment") { text(c, "comment")?; }
@@ -92,13 +97,13 @@ fn components_tier(n: &Named, lowered: &probbit_ir::Model, exact_limit: u64, fr_
     Some((obj(std::mem::take(out)), 0))
 }
 /// The decision flags of `probbit decide` (main.rs reads them from the command line, probbit-wasm from a `flags` object).
-pub(crate) struct Opts { pub(crate) budget: f64, pub(crate) seed: u64, pub(crate) exact_limit: u64, pub(crate) polish_ms: f64, pub(crate) polish_sweeps: usize,
-    pub(crate) fr_states: usize, pub(crate) sweeps: usize, pub(crate) mode: String, pub(crate) chains: usize, pub(crate) threads: usize, pub(crate) cpu_pct: u32,
-    pub(crate) xms: Option<f64> }
+pub struct Opts { pub budget: f64, pub seed: u64, pub exact_limit: u64, pub polish_ms: f64, pub polish_sweeps: usize,
+    pub fr_states: usize, pub sweeps: usize, pub mode: String, pub chains: usize, pub threads: usize, pub cpu_pct: u32,
+    pub xms: Option<f64> }
 /// `probbit decide` on a parsed document: the exact tiers, then the gated sampler and the polish. -> (the decision document, its exit
 /// code: 0 answer, 1 infeasible, 3 refused / declined; the per-task error bars for `--summary`). `mem` = (--mem-limit-mb, rows per
 /// chain), read only when the sampler runs.
-pub(crate) fn decide(n: &Named, o: &Opts, mem: &dyn Fn() -> (usize, usize)) -> (Json, i32, Vec<f64>) {
+pub fn decide(n: &Named, o: &Opts, mem: &dyn Fn() -> (usize, usize)) -> (Json, i32, Vec<f64>) {
     let (mut doc, code, bars) = decide_inner(n, o, mem);
     crate::run::release_contract(&mut doc); (doc, code, bars)
 }
@@ -180,11 +185,8 @@ fn decide_inner(n: &Named, o: &Opts, mem: &dyn Fn() -> (usize, usize)) -> (Json,
         ("ms", num(t0.elapsed().as_secs_f64() * 1e3))]);
     (obj(out), if verdict == "refused" { 3 } else { 0 }, item_bars(&g))
 }
-/// Per item, the error bar the gate compares with `tv_tol`: z x max(MCSE short, MCSE long) (`Gate::released_tasks`).
-pub(crate) fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&s, &l)| GATE.z * if s.is_nan() || l.is_nan() { f64::NAN } else { s.max(l) }).collect() }
-
 /// The demo's task templates: (text, PII, production DB, judge fit per worker in `DEMO_W` order).
-pub(crate) const DEMO_TPL: [(&str, bool, bool, [f64; 6]); 8] = [
+pub const DEMO_TPL: [(&str, bool, bool, [f64; 6]); 8] = [
         ("draft reply: refund dispute (PII)", true, false, [2.0, 1.6, 1.0, 0.6, -1.0, 1.2]),
         ("summarize 40-page contract (PII)", true, false, [2.2, 1.8, 0.8, 0.9, -1.0, 0.5]),
         ("refactor auth middleware", false, false, [1.6, 1.2, 0.0, -0.5, 2.0, -1.0]),
@@ -194,7 +196,7 @@ pub(crate) const DEMO_TPL: [(&str, bool, bool, [f64; 6]); 8] = [
         ("fix flaky CI test", false, false, [1.0, 0.8, 0.2, -0.5, 1.8, -2.0]),
         ("investor update draft", false, false, [1.8, 1.4, 0.6, 0.2, -1.0, 0.8])];
 /// The demo document for `n` tasks (seeded): the bytes of `probbit demo` since 0.1.
-pub(crate) fn demo_doc(n: usize, seed: u64, hard: bool) -> Json {
+pub fn demo_doc(n: usize, seed: u64, hard: bool) -> Json {
     const W: [(&str, usize); 6] = [("opus", 2), ("sonnet", 2), ("luna-pro", 3), ("local-gemma", 2), ("codex", 2), ("human", 3)];
     const CUST: [&str; 8] = ["acme", "globex", "initech", "umbrella", "hooli", "stark", "wayne", "wonka"];
     const TPL: [(&str, bool, bool, [f64; 6]); 8] = DEMO_TPL;

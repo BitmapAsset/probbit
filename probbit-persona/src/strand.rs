@@ -1,0 +1,601 @@
+//! The strand writer and its checks (docs/persona.md §5.7), with no file I/O: the pure half of `probbit live`. Events come in as
+//! JSON objects of inputs; the clock stamps each one's `elapsed_hours` (the time since the previous event, quantised to 1e-6 h),
+//! so moods decay by their half-lives while nobody is talking to it, and feedback moves the learned deltas (§2.8). Every event
+//! appends one line to the strand: the inputs as the turn used them, the stance's and the new state's digests, and the sha256 of
+//! the line before. The strand's header carries the persona document, the initial state and the engine version, so `verify`
+//! replays the whole life from the strand alone and names the earliest line that differs, or the earliest line with a field or
+//! line kind this engine does not know (`unsupported`, a newer engine's strand: not verified, and not a divergence).
+//!
+//! Control lines (pause, resume, retire: appended by `probbit live control`, never by an event; no credit crosses them) and
+//! checkpoint lines (the whole state every K events, so a replay can start there) are written here; `verify` replays all three.
+//! The writer returns each line as a `String` and the caller stores it (the CLI appends to a file under a writer lock,
+//! probbit-cli/src/live.rs; a firmware writes flash). Every function here takes the strand as text, so it runs on `no_std`.
+use crate::json::{self, InErr, Json};
+use crate::persona::{self, perr, Engine, Persona, State};
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
+
+/// The strand format
+pub const FORMAT: f64 = 1.0;
+/// The clock. `Real`: a monotonic clock started with the run; each event's elapsed hours are the time since the previous event
+/// (the opening event: since the start). `Fixed`: time comes from the events, each carrying its own `elapsed_hours` (default 0), so a
+/// run is a pure function of its events.
+pub enum Clock { Real(probbit_core::rt::Instant), Fixed }
+/// Hours quantised to 1e-6 h (3.6 ms): the value the turn uses is the value the strand logs
+fn q6(h: f64) -> f64 { persona::r6(h) }
+
+/// A strand's life as its control lines leave it: events are answered only while `Active`
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Status { Active, Paused, Retired }
+impl Status {
+    pub fn name(self) -> &'static str { match self { Status::Active => "active", Status::Paused => "paused", Status::Retired => "retired" } }
+    /// The status a control line leads to: pause an active individual, resume a paused one, retire either; nothing after retire
+    pub fn after(self, what: &str) -> Result<Status, InErr> {
+        match (what, self) {
+            (_, Status::Retired) => Err(refusal(Status::Retired)),
+            ("pause", Status::Active) => Ok(Status::Paused), ("resume", Status::Paused) => Ok(Status::Active), ("retire", _) => Ok(Status::Retired),
+            // RFC 0004 amendment A2: `erase` returns the learned weights to zero and leaves the status as it was
+            ("erase", s) => Ok(s),
+            ("pause", _) => Err(perr("control", "already paused")), ("resume", _) => Err(perr("control", "not paused (resume follows a pause)")),
+            _ => Err(perr("control", "pause | resume | retire")) }
+    }
+}
+/// The refusal of an event (or a control line) by a paused or retired individual: code `paused` / `retired` (`live` exits 4)
+fn refusal(s: Status) -> InErr {
+    let msg = if s == Status::Retired { "the individual is retired: every event is refused, for good (probbit live control ... retire)" }
+        else { "the individual is paused: every event is refused until `probbit live control STRAND resume`" };
+    InErr { code: s.name(), path: "strand".into(), msg: msg.into() }
+}
+/// The default number of events between two checkpoint lines
+pub const CHECKPOINT_EVERY: u64 = 1000;
+
+/// A live individual: the persona, the current state, the clock, the strand's chain and its status (control lines)
+pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: String, pub n: u64, pub status: Status, pub controls: u64, pub checkpoints: u64, pub rests: u64,
+    /// RFC 0009: the expectation's memory (a fold of the logged events) and the last event's exact trajectory (derived, never logged)
+    pub expect: Option<persona::ExpectMem>, pub traj: Option<Json> }
+/// A document with its keys sorted at every level (`persona::text` of it is its canonical JSON)
+fn sorted(j: &Json) -> Json {
+    match j { Json::Obj(v) => { let mut o: Vec<(String, Json)> = v.iter().map(|(k, x)| (k.clone(), sorted(x))).collect(); o.sort_by(|a, b| a.0.cmp(&b.0)); Json::Obj(o) }
+        Json::Arr(v) => Json::Arr(v.iter().map(sorted).collect()), x => x.clone() }
+}
+/// One line of a strand without its line ending: strands are written with `\n`; a `\r\n` copy (Windows text mode, an editor)
+/// reads the same, since a canonical JSON line never ends in `\r` itself
+fn bare(l: &str) -> &str { l.strip_suffix('\r').unwrap_or(l) }
+impl Live {
+    /// Start a life from `st` (an `init` state or a stored one) -> (the individual, the strand's header line). The header keeps
+    /// the persona document in its own key order (the compiled program follows it, and `engine.program` with it) and the
+    /// state as canonical JSON (keys sorted), so a state read from a file and the same state from `init` give one header; the
+    /// header is compact JSON, not key-sorted.
+    pub fn start(p: Persona, doc: &Json, st: State, clock: Clock, engine: &str) -> (Live, String) {
+        let s = |x: &str| Json::Str(x.to_string());
+        let header = persona::text(&Json::Obj(vec![("probbit_strand".into(), Json::Num(FORMAT)), ("engine".into(), s(engine)),
+            ("persona".into(), Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest))])),
+            ("seed".into(), Json::Num(st.seed as f64)), ("state".into(), sorted(&st.to_json(&p))), ("document".into(), doc.clone())]));
+        let prev = persona::digest_of(&header);
+        let expect = p.expect.as_ref().map(|_| persona::ExpectMem::new());
+        (Live { p, st, clock, last: 0.0, prev, n: 0, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None }, header)
+    }
+    /// One event: stamp its elapsed hours, run the turn, chain the strand line -> (the stance document, the strand line). A bad
+    /// event is an error and changes nothing (no turn, no line); so is every event while the individual is paused or retired.
+    pub fn event(&mut self, ev: &Json, eng: Engine) -> Result<(Json, String), InErr> {
+        if self.status != Status::Active { return Err(refusal(self.status)); }
+        let Json::Obj(kv) = ev else { return Err(perr("event", "must be a JSON object of inputs")) };
+        let mut kv: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect();
+        let given = ev.get("elapsed_hours");
+        let (elapsed, now) = match &self.clock {
+            Clock::Real(t0) => { if given.is_some() { return Err(perr("event.elapsed_hours", "the clock stamps it (--clock fixed reads it from the events)")); }
+                let now = t0.elapsed().as_secs_f64() / 3600.0; (q6((now - self.last).max(0.0)), now) }
+            Clock::Fixed => { let e = match given { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err(perr("event.elapsed_hours", "a number >= 0")) }; (q6(e), self.last) } };
+        kv.push(("elapsed_hours".into(), Json::Num(elapsed)));
+        let inputs = Json::Obj(kv);
+        // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without them)
+        let dev = self.expect.as_ref().and_then(|m| persona::deviation(&self.p, &self.st, &inputs, m, eng));
+        let traj = persona::trajectory(&self.p, &self.st, &inputs);
+        let (mut stance, ns) = persona::turn(&self.p, &self.st, &inputs, false, eng, false)?;
+        let sd = persona::stance_sha(&stance);
+        if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, persona::Deviation::to_json))); } }
+        // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
+        persona::set_glyph(&self.p, &mut stance);
+        // RFC 0002 part 2: a rest line due before this event is its own line, chained before the event line (the turn applied it)
+        let (rest, prev) = match persona::rest_line(&self.p, &self.st, &inputs) {
+            Some((r, rs)) => { let l = rest_line(&self.prev, r, &rs.digest); let d = persona::digest_of(&l); (Some(l), d) }
+            None => (None, self.prev.clone()) };
+        let mut lj = vec![("n".into(), Json::Num((self.n + 1) as f64)), ("inputs".into(), inputs.clone()), ("stance".into(), Json::Str(sd)),
+            ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), Json::Str(prev))];
+        if let Some(d) = &dev { lj.push(("deviation".into(), d.receipt())); }
+        if let Some(g) = stance.get("glyph") { lj.push(("glyph".into(), g.clone())); }
+        let line = persona::canon(&Json::Obj(lj));
+        if let Some(m) = self.expect.as_mut() { persona::expect_step(&self.p, m, &inputs, dev.as_ref().and_then(persona::Deviation::logged_pred)); }
+        self.traj = traj;
+        self.n += 1; self.last = now; self.prev = persona::digest_of(&line); self.st = ns;
+        if let Some(r) = &rest { self.rests += 1; return Ok((stance, format!("{r}\n{line}"))); }
+        Ok((stance, line))
+    }
+    /// A control line (pause, resume or retire) `by` a person or a sensor (`human[:id]`, `env[:id]`) for `reason`, stamped `at`:
+    /// the status moves, the credit is zeroed (no feedback after the line credits a stance before it) and the line is chained ->
+    /// the line. Nothing else changes: moods, drives, learned weights and the clock are the individual's as before.
+    pub fn control(&mut self, what: &str, by: &str, reason: &str, at: &str) -> Result<String, InErr> {
+        let to = self.status.after(what)?;
+        let line = control_line(&self.prev, what, by, reason, at)?;
+        self.st = self.st.zero_credit(&self.p); if what == "erase" { self.st = self.st.erased(&self.p); } self.status = to; self.controls += 1; self.prev = persona::digest_of(&line);
+        Ok(line)
+    }
+    /// A checkpoint line after event n: the event count, the whole state after it and that event's stance document, chained ->
+    /// the line. A replay can start there (the state) and a board can be drawn there (the stance) without the events before.
+    pub fn checkpoint(&mut self, stance: &Json) -> String {
+        let line = persona::canon(&Json::Obj(vec![("checkpoint".into(), Json::Num(self.n as f64)), ("prev".into(), Json::Str(self.prev.clone())), ("stance".into(), stance.clone()),
+            ("state".into(), self.st.to_json(&self.p))]));
+        self.checkpoints += 1; self.prev = persona::digest_of(&line); line
+    }
+    /// The sha256 of the strand's last line (the header's before any event)
+    pub fn head(&self) -> &str { &self.prev }
+}
+/// A control line after the line whose sha256 is `prev` (canonical JSON: at, by, control, prev, reason). `by` names who: a
+/// person or a sensor, never the individual or the clock; the reason is 1-500 characters.
+pub fn control_line(prev: &str, what: &str, by: &str, reason: &str, at: &str) -> Result<String, InErr> {
+    if !["pause", "resume", "retire", "erase"].contains(&what) { return Err(perr("control", "pause | resume | retire")); }
+    if !matches!(persona::src_kind(by), Some("human" | "env")) { return Err(perr("control.by", "who: human[:id] or env[:id] (id: 1-64 of A-Z a-z 0-9 _ . - @ / :); the individual cannot control itself")); }
+    if reason.trim().is_empty() || reason.chars().count() > 500 { return Err(perr("control.reason", "1-500 characters")); }
+    if at.is_empty() || at.len() > 64 { return Err(perr("control.at", "a time stamp, 1-64 characters (RFC 3339 by default)")); }
+    let s = |x: &str| Json::Str(x.to_string());
+    Ok(persona::canon(&Json::Obj(vec![("at".into(), s(at)), ("by".into(), s(by)), ("control".into(), s(what)), ("prev".into(), s(prev)), ("reason".into(), s(reason))])))
+}
+/// A rest line (RFC 0002 part 2) after the line whose sha256 is `prev` (canonical JSON: prev, rest, state): what the line did
+/// (downscale, prune, the pressure, the learned weights after it, each gate as kept) and the digest of the state after it. It is
+/// written only together with the event it precedes, and that event's line chains to it.
+fn rest_line(prev: &str, rest: Json, state: &str) -> String {
+    persona::canon(&Json::Obj(vec![("prev".into(), Json::Str(prev.into())), ("rest".into(), rest), ("state".into(), Json::Str(state.into()))]))
+}
+/// What kind of strand line `j` is
+pub enum Kind { Event, Control, Checkpoint, Rest }
+pub fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else if j.get("rest").is_some() { Kind::Rest } else { Kind::Event } }
+/// The header's keys, as this engine writes them
+const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state", "document"];
+/// The earliest key of a line after the header that its kind does not have (the line's keys in canonical order): a line kind
+/// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "nap": ...}`
+/// gives `nap`) or a field it does not know on a known one
+fn unknown_key(j: &Json) -> Option<&str> {
+    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
+        Kind::Checkpoint => &["checkpoint", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"] };
+    j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
+}
+/// The start of a replay's `why` that is not a divergence: the line has a field or a line kind this engine does not know (a
+/// strand from a newer engine). Nothing from that line on was checked: the strand is not verified, and not shown to differ.
+/// `verify` reports it as `unsupported` (exit 5), never as `diverges`; a changed value of a field this engine knows still
+/// diverges.
+pub const UNSUPPORTED: &str = "unsupported by this engine: ";
+/// The `why` of an unsupported field: UNSUPPORTED, then its path (a persona field as the persona validator names it, a state
+/// field under `state.`, otherwise its path in the strand line)
+fn unsupported(path: &str) -> String { format!("{UNSUPPORTED}{path}") }
+/// The field path of an unsupported `why`; None for a divergence
+pub fn unsupported_field(why: &str) -> Option<&str> { why.strip_prefix(UNSUPPORTED) }
+/// A persona, state or event error for a field this engine does not know (the validators' "unknown field" at its path) -> the
+/// unsupported `why`; any other error -> `what` + the error, a divergence
+fn read_err(e: InErr, what: &str) -> String { if e.msg.starts_with("unknown field") { unsupported(&e.path) } else { format!("{what}{}: {}", e.path, e.msg) } }
+/// Now as RFC 3339 UTC to the second (the control lines' default `at`); `std` only (a firmware passes its own `at`)
+#[cfg(feature = "std")]
+pub fn utc_now() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let (z, t) = ((secs / 86_400) as i64 + 719_468, secs % 86_400); // days since 0000-03-01 (civil-from-days)
+    let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097)); let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); let mp = (5 * doy + 2) / 153; let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 }; let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", t / 3600, t % 3600 / 60, t % 60)
+}
+
+/// A strand replayed line by line: `verify` and `probbit monitor` (§5.8) share it, so both read a strand with one set of
+/// rules. `open` checks the header and rebuilds the individual; each `step` replays one event line on the fixed clock and
+/// checks it (`prev`, `n`, the stance and state digests, the bytes). After an error the replay is spent: the chain past the
+/// line that differs cannot be checked.
+pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool, norms: Normals, at_cap: Vec<f64>, seen: (f64, Vec<f64>), viab: Option<(f64, Option<u64>)>, rest: Option<String> }
+/// A senses block's normals over the replay (§2.11): per sense the means after the last 50 events, the largest move of a mean
+/// within 50 events so far, and the latest event's move (the monitor's alert: over drift_cap / 2)
+#[derive(Default)]
+pub struct Normals { window: Vec<std::collections::VecDeque<f64>>, pub max_move: Vec<f64>, pub moved: Vec<f64> }
+impl Normals {
+    fn start(p: &Persona, st: &State) -> Normals {
+        let n = persona::normals(p, st);
+        Normals { window: n.iter().map(|x| std::collections::VecDeque::from(vec![x.1])).collect(), max_move: vec![0.0; n.len()], moved: vec![0.0; n.len()] }
+    }
+    fn track(&mut self, p: &Persona, st: &State) {
+        for (k, (_, m, _, _)) in persona::normals(p, st).iter().enumerate() { let q = &mut self.window[k];
+            let mv = persona::r6(q.iter().fold(0.0f64, |a, x| a.max((m - x).abs())));
+            self.moved[k] = mv; self.max_move[k] = self.max_move[k].max(mv); q.push_back(*m); if q.len() > 50 { q.pop_front(); } }
+    }
+}
+impl Replay {
+    /// The header line (without its line ending) -> the replay, ready for event lines; Err((1, what differs)), or Err((1, the
+    /// unsupported `why`)) for a header key, persona field or state field this engine does not know
+    pub fn open(head: &str) -> Result<Replay, (usize, String)> {
+        let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
+        if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
+        if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()))) { return Err((1, unsupported(k))); }
+        let doc = h.get("document").cloned().ok_or((1, "the header has no persona document".to_string()))?;
+        let p = persona::build(&doc).map_err(|e| (1, read_err(e, "the persona document: ")))?;
+        if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
+        let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, read_err(e, "the initial state: ")))?;
+        let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
+        if header != head { return Err((1, "the header is not as written".into())); }
+        let norms = Normals::start(&live.p, &live.st); let at_cap = vec![0.0; persona::deficits(&live.p, &live.st).len()]; let seen = (0.0, vec![0.0; persona::gate_gains(&live.p, &live.st).len()]);
+        let viab = viab_start(&live);
+        Ok(Replay { live, header: h, doc, line: 1, from: None, last: None, checkpoint_ready: false, norms, at_cap, seen, viab, rest: None })
+    }
+    /// The replay from a checkpoint line (`cp`, without its line ending, at 1-based line `at`; `before` = the event line before it)
+    /// instead of the header: the header is read as by `open`; the checkpoint must follow `before` (prev), at its event count, with
+    /// its stance (the digest `before` logs) and its state (read as any state is, with the digest `before` logs); the chain goes on
+    /// from the checkpoint line. The lines before it are taken as written: a full `verify` replays them and checks the checkpoint.
+    pub fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Replay, (usize, String)> {
+        let mut r = Replay::open(head)?;
+        // RFC 0009: the expectation's memory is a fold of every event line, so a strand with the block replays from its header
+        if r.live.p.expect.is_some() { return Err((at, "the persona's expectation block reads every event before this checkpoint: verify this strand from its header".into())); }
+        let j = json::parse(cp).map_err(|e| (at, format!("not JSON: {}", e.msg)))?;
+        let b = json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?;
+        if persona::canon(&j) != cp { return Err((at, "not canonical JSON".into())); }
+        if let Some(k) = unknown_key(&j) { return Err((at, unsupported(k))); }
+        if !j.as_obj().is_some_and(|kv| kv.len() == 4 && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()))) {
+            return Err((at, "checkpoint fields must be checkpoint, prev, stance and state".into()));
+        }
+        // §2.18: an event line of a persona with glyphs also carries `glyph`
+        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + usize::from(kv.iter().any(|(k, _)| k == "glyph")) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph"].contains(&k.as_str()))) {
+            return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
+        }
+        if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
+        let n = j.get("checkpoint").and_then(Json::as_f64).filter(|x| *x >= 1.0 && x.fract() == 0.0).ok_or((at, "not a checkpoint line".to_string()))? as u64;
+        if b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
+        let stance = j.get("stance").cloned().unwrap_or(Json::Null);
+        if b.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
+        let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, read_err(e, "the checkpoint's state: ")))?;
+        if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
+        r.live.st = st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
+        r.norms = Normals::start(&r.live.p, &r.live.st); r.at_cap = vec![0.0; r.at_cap.len()]; r.seen = (0.0, vec![0.0; r.seen.1.len()]); r.viab = viab_start(&r.live);
+        Ok(r)
+    }
+    /// The stance document of the last event replayed (or of the checkpoint the replay started from)
+    pub fn last_stance(&self) -> Option<&Json> { self.last.as_ref() }
+    /// The senses' normals over the replay so far (§2.11)
+    pub fn normals(&self) -> &Normals { &self.norms }
+    /// One line (without its line ending) -> the stance document an event line replays to (None for a control or checkpoint
+    /// line); Err((its 1-based line number, what differs)). A control line must be a valid move of the status and the line its
+    /// fields give; a checkpoint line must immediately follow an event while active and carry
+    /// the event count and the state the replay reached. The last stance remains available to
+    /// the monitor after controls/checkpoints, but that does not authorize another checkpoint. A chained line with a key its
+    /// kind does not have (a newer line kind, a newer field), or an event whose inputs have a field this engine does not know,
+    /// is Err((its line number, the unsupported `why`)).
+    pub fn step(&mut self, l: &str, eng: Engine) -> Result<Option<Json>, (usize, String)> {
+        let (i, live) = (self.line + 1, &mut self.live);
+        let j = json::parse(l).map_err(|e| (i, format!("not JSON: {}", e.msg)))?;
+        if persona::canon(&j) != l { return Err((i, "not canonical JSON".into())); }
+        let head = self.rest.as_deref().map_or(live.head().to_string(), persona::digest_of);
+        if j.get("prev").and_then(Json::as_str) != Some(head.as_str()) { return Err((i, PREV.into())); }
+        if let Some(k) = unknown_key(&j) { return Err((i, unsupported(k))); }
+        if self.rest.is_some() && !matches!(kind(&j), Kind::Event) { return Err((i, "a rest line must be followed by its event line".into())); }
+        match kind(&j) {
+            // RFC 0002 part 2: a rest line is checked with the event after it (the replay recomputes it there)
+            Kind::Rest => { if live.status != Status::Active { return Err((i, format!("rest line while {}", live.status.name()))); }
+                self.rest = Some(l.to_string()); self.line = i; self.checkpoint_ready = false; return Ok(None) }
+            Kind::Control => { let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
+                let line = live.control(f("control"), f("by"), f("reason"), f("at")).map_err(|e| (i, format!("control line: {}: {}", e.path, e.msg)))?;
+                if line != l { return Err((i, "the control line differs".into())); }
+                self.line = i; self.checkpoint_ready = false; return Ok(None) }
+            Kind::Checkpoint => {
+                if live.status != Status::Active { return Err((i, format!("checkpoint while {}", live.status.name()))); }
+                if !self.checkpoint_ready { return Err((i, "a checkpoint must immediately follow an event line".into())); }
+                if j.get("checkpoint").and_then(Json::as_f64) != Some(live.n as f64) { return Err((i, format!("the checkpoint is not at event {}", live.n))); }
+                let Some(stance) = self.last.as_ref() else { return Err((i, "a checkpoint follows an event line".into())) };
+                if live.checkpoint(stance) != l { return Err((i, "the checkpoint's state or stance differs from the replay".into())); }
+                self.line = i; self.checkpoint_ready = false; return Ok(None) }
+            Kind::Event => {} }
+        if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i, format!("n is not {}", live.n + 1))); }
+        let ev = j.get("inputs").ok_or((i, "no inputs".to_string()))?;
+        // a needs block (RFC 0002): the stamped hours of events that found a deficit at its cap (it sat there since the event before)
+        let before = persona::deficits(&live.p, &live.st); let h = ev.get("elapsed_hours").and_then(Json::as_f64).unwrap_or(0.0);
+        let logged = self.rest.take();
+        let (stance, both) = live.event(ev, eng).map_err(|e| (i, read_err(e, "")))?;
+        let line = match (both.split_once('\n'), logged) {
+            (Some((r, e)), Some(lr)) => { if r != lr { return Err((i - 1, "the rest line differs".into())); } e.to_string() }
+            (Some(_), None) => return Err((i, "a rest line is due before this event and missing".into())),
+            (None, Some(_)) => return Err((i - 1, "a rest line where none is due".into())),
+            (None, None) => both };
+        for (k, (_, x, cap)) in before.iter().enumerate() { if *x >= cap - 5e-7 { self.at_cap[k] = persona::r6(self.at_cap[k] + h); } }
+        if j.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((i, "the stance differs".into())); }
+        // RFC 0009: the logged deviation is recomputed (an edited receipt diverges here)
+        if json::parse(&line).ok().and_then(|x| x.get("deviation").cloned()) != j.get("deviation").cloned() { return Err((i, "the deviation differs".into())); }
+        // §2.18: the logged glyph is recomputed from the replayed stance (an edited glyph diverges here)
+        if stance.get("glyph") != j.get("glyph") { return Err((i, "the glyph differs".into())); }
+        if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
+        if line != l { return Err((i, "the line differs".into())); }
+        self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true; self.norms.track(&self.live.p, &self.live.st);
+        // RFC 0002: the largest R̄ (Design C) and per learned trait the largest gain (Design B) after any event replayed
+        if let Some((r, _, _)) = persona::pace_rbar(&self.live.p, &self.live.st) { self.seen.0 = self.seen.0.max(r); }
+        for (k, (_, g, _)) in persona::gate_gains(&self.live.p, &self.live.st).iter().enumerate() { if let Some(m) = self.seen.1.get_mut(k) { *m = m.max(*g); } }
+        // RFC 0008 E: the smallest margin_min after any event replayed, and the event at which viability was lost
+        if let (Some((seen, lost_at)), Some((_, m, lost))) = (self.viab.as_mut(), persona::viability(&self.live.p, &self.live.st)) {
+            *seen = seen.min(m); if lost && lost_at.is_none() { *lost_at = Some(self.live.n); } }
+        Ok(Some(stance))
+    }
+    /// The end of the strand: a rest line (RFC 0002 part 2) is only ever written with the event after it, so a strand that ends
+    /// on one diverges at it
+    pub fn end(&self) -> Result<(), (usize, String)> {
+        if self.rest.is_some() { return Err((self.line, "a rest line must be followed by its event line".into())); } Ok(())
+    }
+    /// `verify`'s summary of the lines replayed so far: `engine` is the strand header's (the engine that wrote it), `verified_by`
+    /// the engine that replayed it
+    pub fn summary(&self) -> Json {
+        let (s, live) = (|x: &str| Json::Str(x.to_string()), &self.live);
+        let mut v = vec![("ok".into(), Json::Bool(true)), ("events".into(), Json::Num(live.n as f64)), ("persona".into(), s(&live.p.name)), ("seed".into(), Json::Num(live.st.seed as f64)),
+            ("engine".into(), self.header.get("engine").cloned().unwrap_or(Json::Null)), ("verified_by".into(), Json::Str(engine())), ("final_state".into(), s(&live.st.digest)),
+            ("last_line".into(), s(live.head()))];
+        // a strand with control or checkpoint lines says so (a strand without them gives the summary of before)
+        if live.controls > 0 { v.push(("controls".into(), Json::Num(live.controls as f64))); v.push(("status".into(), s(live.status.name()))); }
+        if live.checkpoints > 0 { v.push(("checkpoints".into(), Json::Num(live.checkpoints as f64))); }
+        // RFC 0002 part 2: rest lines replayed, the pressure now; the load now
+        if live.rests > 0 { v.push(("rest_lines".into(), Json::Num(live.rests as f64))); }
+        if let Some((sp, pend)) = persona::rest_pressure(&live.st) { v.push(("pressure".into(), Json::Obj(vec![("s".into(), Json::Num(sp)), ("pending".into(), Json::Bool(pend))]))); }
+        if let Some((l, _)) = persona::load_level(&live.p, &live.st) { v.push(("load".into(), Json::Obj(vec![("l".into(), Json::Num(l))]))); }
+        if let Some(n) = self.from { v.push(("from_checkpoint".into(), Json::Num(n as f64))); }
+        // a senses block (§2.11): per sense the normal now and the largest move of its mean within 50 events
+        let nm = persona::normals(&live.p, &live.st);
+        if !nm.is_empty() { v.push(("normals".into(), Json::Obj(nm.iter().enumerate().map(|(k, (id, m, n, _))| (id.clone(), Json::Obj(vec![("mean".into(), Json::Num(*m)),
+            ("n".into(), Json::Num(*n as f64)), ("max_move_50".into(), Json::Num(self.norms.max_move.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
+        // a needs block (RFC 0002): per need its deficit now and the stamped hours it sat at its cap
+        let dx = persona::deficits(&live.p, &live.st);
+        if !dx.is_empty() { v.push(("needs".into(), Json::Obj(dx.iter().enumerate().map(|(k, (id, x, _))| (id.clone(), Json::Obj(vec![("deficit".into(), Json::Num(*x)),
+            ("at_cap_hours".into(), Json::Num(self.at_cap.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
+        // RFC 0002 Design C: R̄ now and the largest after any event replayed; Design B: per learned trait the largest gain seen
+        if let Some((r, _, _)) = persona::pace_rbar(&live.p, &live.st) { v.push(("pace".into(), Json::Obj(vec![("rbar".into(), Json::Num(r)), ("max".into(), Json::Num(self.seen.0))]))); }
+        let gg = persona::gate_gains(&live.p, &live.st);
+        if !gg.is_empty() { v.push(("surprise".into(), Json::Obj(gg.iter().enumerate().map(|(k, (t, _, _))| (t.clone(),
+            Json::Obj(vec![("g_max_seen".into(), Json::Num(self.seen.1.get(k).copied().unwrap_or(0.0)))]))).collect()))); }
+        // RFC 0008 E: with a bound, recomputed from the logged readings and amounts
+        if let Some((seen, lost_at)) = self.viab { v.push(("viability".into(), Json::Obj(vec![("margin_min_seen".into(), Json::Num(seen)), ("lost_at".into(), lost_at.map_or(Json::Null, |n| Json::Num(n as f64)))]))); }
+        // a credit block (§2.8): the decisions still awaiting an outcome
+        if let Some(o) = persona::open_decisions(&live.p, &live.st) { v.push(("open".into(), Json::Arr(o.iter().map(|(t, _)| Json::Num(*t as f64)).collect()))); }
+        Json::Obj(v)
+    }
+}
+/// RFC 0008 E: the viability record a replay starts from: the margin_min of its first state, and lost_at (the event count when the
+/// state is already lost, as after a checkpoint); none without a bound
+fn viab_start(live: &Live) -> Option<(f64, Option<u64>)> { persona::viability(&live.p, &live.st).map(|(_, m, lost)| (m, lost.then_some(live.n))) }
+/// Per event line its n and its block
+pub type Blocks = Vec<(u64, String)>;
+/// `live verify --blocks`: replay from the header -> (the summary, per event line its n and the block its stance renders, RFC 0008 E)
+pub fn verify_blocks(text: &str, eng: Engine) -> Result<(Json, Blocks), (usize, String)> {
+    let lines = lines(text);
+    let replay = || -> Result<(Json, Blocks), (usize, String)> {
+        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut out = vec![];
+        for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? { out.push((r.live.n, persona::block(&r.live.p, &doc))); } }
+        Ok((r.summary(), out)) };
+    replay().map_err(|e| chain_first(&lines, e))
+}
+/// A strand's text -> its lines without their line endings (a final newline ends the last line; it does not start another).
+/// One leading UTF-8 byte-order mark is skipped, as `\r` before `\n` is: a Windows editor adds both on save, and neither is
+/// part of the line text the chain hashes.
+pub fn lines(text: &str) -> Vec<&str> {
+    let mut lines: Vec<&str> = text.strip_prefix('\u{feff}').unwrap_or(text).split('\n').map(bare).collect();
+    if lines.last() == Some(&"") { lines.pop(); }
+    lines
+}
+/// `probbit live verify`: replay a strand from its header -> Ok(summary) when every line is as recorded; Err((1-based line
+/// number, what differs)) at the earliest line that is not. Lines end in `\n` or `\r\n`; the chain hashes the line text alone.
+/// A line with a field or line kind this engine does not know stops the replay as unsupported, unless a later line breaks the
+/// chain (`chain_first`).
+pub fn verify(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
+    let lines = lines(text);
+    let replay = || -> Result<Json, (usize, String)> {
+        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+        for l in lines.iter().skip(1) { r.step(l, eng)?; }
+        r.end()?; Ok(r.summary()) };
+    replay().map_err(|e| chain_first(&lines, e))
+}
+/// The divergence the hash chain shows after an unsupported line: a strand this engine cannot replay to the end is still checked
+/// for what the format alone says, so an edited, removed or reordered line after it (or the unsupported line itself, edited:
+/// the next line's `prev`) diverges at the earliest line that breaks the chain (not JSON, not canonical JSON, or a `prev` that is
+/// not the sha256 of the line before), as in a replay. `unsupported` is left only for a strand whose chain is whole; a
+/// divergence passes unchanged.
+fn chain_first(lines: &[&str], (line, why): (usize, String)) -> (usize, String) {
+    if unsupported_field(&why).is_none() { return (line, why); }
+    for i in line.max(1)..lines.len() {
+        let j = match json::parse(lines[i]) { Ok(j) => j, Err(e) => return (i + 1, format!("not JSON: {}", e.msg)) };
+        if persona::canon(&j) != lines[i] { return (i + 1, "not canonical JSON".into()); }
+        if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(lines[i - 1]).as_str()) { return (i + 1, PREV.into()); }
+    }
+    (line, why)
+}
+/// The divergence of a line whose `prev` is not the sha256 of the line before
+const PREV: &str = "prev is not the sha256 of the line before (a line before it was changed, removed or reordered)";
+/// The 0-based index of the strand's last checkpoint line followed by at least `after` lines, if any (a cheap scan: the key)
+pub fn last_checkpoint(lines: &[&str], after: usize) -> Option<usize> {
+    (1..lines.len().saturating_sub(after)).rev().find(|&i| lines[i].starts_with(r#"{"checkpoint":"#))
+}
+/// `verify --from-checkpoint`: replay from the last checkpoint line (the header read as always), not from the header
+pub fn verify_from_checkpoint(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
+    let lines = lines(text);
+    let Some(k) = last_checkpoint(&lines, 0) else { return verify(text, eng) };
+    let replay = || -> Result<Json, (usize, String)> {
+        let mut r = Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1)?;
+        for l in lines.iter().skip(k + 1) { r.step(l, eng)?; }
+        r.end()?; Ok(r.summary()) };
+    replay().map_err(|e| chain_first(&lines, e))
+}
+/// `verify` from the header, keeping the stance documents of the given turns (what `--actions` compares with)
+pub fn verify_keep(text: &str, eng: Engine, keep: &[u64]) -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
+    let lines = lines(text);
+    let replay = || -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
+        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut kept = vec![];
+        for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? {
+            if let Some(t) = doc.get("turn").and_then(Json::as_f64).map(|x| x as u64).filter(|t| keep.contains(t)) { kept.push((t, doc)); } } }
+        r.end()?; Ok((r.summary(), kept, r.live.p.clone())) };
+    replay().map_err(|e| chain_first(&lines, e))
+}
+/// One line of a host's action log (`live verify --actions FILE`, §5.7): the decision's turn and, per trait the host acted on,
+/// the level it acted on
+pub struct Action { pub line: usize, pub turn: u64, pub levels: Vec<(String, String)> }
+/// A host's action log: one JSON object per line, {"turn": T, "action": {trait: level, ...}} (blank lines skipped)
+pub fn read_actions(text: &str) -> Result<Vec<Action>, InErr> {
+    let mut out = vec![];
+    for (i, l) in text.split('\n').map(bare).enumerate() { if l.trim().is_empty() { continue; } let path = format!("actions.line{}", i + 1);
+        let bad = |m: &str| perr(&path, m.to_string());
+        let j = json::parse(l).map_err(|e| perr(&path, format!("not JSON: {}", e.msg)))?;
+        let kv = j.as_obj().filter(|kv| kv.len() == 2 && kv.iter().all(|(k, _)| k == "turn" || k == "action")).ok_or_else(|| bad("an object {\"turn\": T, \"action\": {trait: level}}"))?;
+        let turn = kv.iter().find(|(k, _)| k == "turn").and_then(|(_, x)| x.as_f64()).filter(|x| *x >= 0.0 && x.fract() == 0.0 && *x <= 9_007_199_254_740_992.0)
+            .ok_or_else(|| bad("turn: a whole number >= 0 (the stance's turn)"))? as u64;
+        let act = kv.iter().find(|(k, _)| k == "action").and_then(|(_, x)| x.as_obj()).filter(|a| !a.is_empty()).ok_or_else(|| bad("action: an object trait -> level"))?;
+        let levels = act.iter().map(|(t, x)| x.as_str().map(|l| (t.clone(), l.to_string())).ok_or_else(|| bad("action: each level a string"))).collect::<Result<Vec<_>, InErr>>()?;
+        out.push(Action { line: i + 1, turn, levels }); }
+    Ok(out)
+}
+/// The earliest turn (then the earliest line) whose host action differs from the level its stance released -> (actions
+/// checked, the difference: {turn, line, trait, action, released (null: not released or no such turn), why}); an action on a
+/// trait the persona does not have is an input error
+pub fn first_difference(p: &Persona, actions: &[Action], stances: &[(u64, Json)]) -> Result<(usize, Option<Json>), InErr> {
+    let mut order: Vec<&Action> = actions.iter().collect(); order.sort_by_key(|a| (a.turn, a.line));
+    let s = |x: &str| Json::Str(x.to_string()); let mut checked = 0;
+    for a in order { checked += 1; let doc = stances.iter().find(|(t, _)| *t == a.turn).map(|x| &x.1);
+        for (t, level) in &a.levels {
+            let e = match doc { Some(d) => persona::doc_entry(p, d, t), None => None };
+            if doc.is_some() && e.is_none() { return Err(perr(&format!("actions.line{}.action.{t}", a.line), "not a trait of the persona")); }
+            let released = e.as_ref().filter(|e| e.get("released") == Some(&Json::Bool(true))).and_then(|e| e.get("level")).and_then(Json::as_str).map(str::to_string);
+            let why = match (doc, &released) { (None, _) => "the strand has no stance with this turn", (_, None) => "the stance did not release this trait",
+                (_, Some(r)) if r != level => "the host acted on another level", _ => continue };
+            return Ok((checked, Some(Json::Obj(vec![("turn".into(), Json::Num(a.turn as f64)), ("line".into(), Json::Num(a.line as f64)), ("trait".into(), s(t)), ("action".into(), s(level)),
+                ("released".into(), released.map_or(Json::Null, |r| s(&r))), ("why".into(), s(why))])))); } }
+    Ok((checked, None))
+}
+/// `verify` as one document: the summary, or `failure`'s document
+pub fn verify_doc(text: &str, eng: Engine) -> Json { verify(text, eng).unwrap_or_else(|(line, why)| failure(text, line, &why)) }
+/// The document of a strand that does not verify at `line`: {ok: false, line, diverges: what differs}, or, for a field or line
+/// kind this engine does not know, {ok: false, line, unsupported: the field's path, engine: this engine, strand_engine: the
+/// header's `engine` (null if it names none)}
+pub fn failure(text: &str, line: usize, why: &str) -> Json {
+    let mut v = vec![("ok".into(), Json::Bool(false)), ("line".into(), Json::Num(line as f64))];
+    match unsupported_field(why) {
+        Some(f) => { v.push(("unsupported".into(), Json::Str(f.to_string()))); v.push(("engine".into(), Json::Str(engine()))); v.push(("strand_engine".into(), strand_engine(text))); }
+        None => v.push(("diverges".into(), Json::Str(why.to_string()))) }
+    Json::Obj(v)
+}
+/// The engine a strand's header names: its `engine` string, or null when the header is not JSON or has none
+pub fn strand_engine(text: &str) -> Json {
+    json::parse(lines(text).into_iter().next().unwrap_or("")).ok().and_then(|h| h.get("engine").cloned()).filter(|e| matches!(e, Json::Str(_))).unwrap_or(Json::Null)
+}
+/// This binary's engine (the strand header's `engine`)
+pub fn engine() -> String { format!("probbit {}", env!("CARGO_PKG_VERSION")) }
+
+/// Validate the stored chain and lifecycle before extending it. This is deliberately not
+/// inference replay or authentication: verify still recomputes every event. In particular, a
+/// checkpoint cannot reactivate a retired individual or hide an invalid earlier control.
+pub fn check_chain(text: &str) -> Result<Status, InErr> {
+    let ls = lines(text);
+    let err = |line: usize, why: String| perr("strand", format!("line {line}: {why}"));
+    let r = Replay::open(ls.first().copied().unwrap_or("")).map_err(|(i, why)| err(i, why))?;
+    let mut status = Status::Active;
+    let mut n = 0u64;
+    for i in 1..ls.len() {
+        let j = json::parse(ls[i]).map_err(|e| err(i + 1, e.msg))?;
+        if persona::canon(&j) != ls[i] { return Err(err(i + 1, "not canonical JSON".into())); }
+        if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(ls[i - 1]).as_str()) {
+            return Err(err(i + 1, "prev is not the sha256 of the line before".into()));
+        }
+        if let Some(k) = unknown_key(&j) { return Err(err(i + 1, unsupported(k))); }
+        match kind(&j) {
+            Kind::Control => {
+                let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
+                status = status.after(f("control")).map_err(|e| err(i + 1, e.msg))?;
+                let line = control_line(f("prev"), f("control"), f("by"), f("reason"), f("at")).map_err(|e| err(i + 1, e.msg))?;
+                if line != ls[i] { return Err(err(i + 1, "the control line differs".into())); }
+            }
+            Kind::Event => {
+                if status != Status::Active { return Err(err(i + 1, format!("event while {}", status.name()))); }
+                n += 1;
+                if j.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err(err(i + 1, format!("n is not {n}"))); }
+                let Some(Json::Obj(_)) = j.get("inputs") else { return Err(err(i + 1, "no input object".into())) };
+                for k in ["state", "stance"] {
+                    if !j.get(k).and_then(Json::as_str).is_some_and(|s| s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_hexdigit())) {
+                        return Err(err(i + 1, format!("invalid {k} digest")));
+                    }
+                }
+            }
+            Kind::Rest => {
+                if status != Status::Active { return Err(err(i + 1, format!("rest line while {}", status.name()))); }
+                if !ls.get(i + 1).and_then(|x| json::parse(x).ok()).is_some_and(|x| matches!(kind(&x), Kind::Event)) { return Err(err(i + 1, "a rest line must be followed by its event line".into())); }
+            }
+            Kind::Checkpoint => {
+                if status != Status::Active { return Err(err(i + 1, format!("checkpoint while {}", status.name()))); }
+                // Full state validation plus links to the immediately preceding event; no inference.
+                let cp = Replay::open_at(ls[0], ls[i - 1], ls[i], i + 1).map_err(|(at, why)| err(at, why))?;
+                if cp.live.n != n { return Err(err(i + 1, "checkpoint event count differs".into())); }
+                // Keep the header persona/state check independent of the caller's state.
+                debug_assert_eq!(cp.live.p.digest, r.live.p.digest);
+            }
+        }
+    }
+    Ok(status)
+}
+
+/// Continue a strand: `text` is the strand so far and `st` the individual after its last line -> the individual, ready for the
+/// next event (no header to write). The header's persona must be `p` (the same digest); the run uses the header's document, the
+/// key order the strand replays with. The lines before are not replayed here (`verify` does that).
+pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, InErr> {
+    let bad = |m: String| perr("strand", m);
+    if !text.ends_with('\n') { return Err(bad("its last line is incomplete (no newline at the end)".into())); }
+    check_chain(text)?;
+    let lines = lines(text);
+    let h = json::parse(lines.first().copied().unwrap_or("")).map_err(|e| bad(format!("the header is not JSON: {}", e.msg)))?;
+    if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err(bad("not a probbit strand (format 1)".into())); }
+    let q = persona::build(h.get("document").unwrap_or(&Json::Null)).map_err(|e| bad(format!("the header's persona: {}: {}", e.path, e.msg)))?;
+    if q.digest != p.digest { return Err(bad(format!("it is another persona's ({} != {})", &q.digest[..19], &p.digest[..19]))); }
+    let last = lines[lines.len() - 1];
+    // the control lines after the last event or checkpoint line (the anchor; the header without either) set the status: an
+    // event or a checkpoint is only ever written while active
+    let (mut a, mut tail) = (lines.len() - 1, vec![]);
+    while a > 0 { let j = json::parse(lines[a]).map_err(|e| bad(format!("line {} is not JSON: {}", a + 1, e.msg)))?;
+        if !matches!(kind(&j), Kind::Control) { break; } tail.push(j); a -= 1; }
+    let (n, want) = if a == 0 { (0, h.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string()) } else {
+        let j = json::parse(lines[a]).map_err(|e| bad(format!("line {} is not JSON: {}", a + 1, e.msg)))?;
+        match kind(&j) { Kind::Checkpoint => (j.get("checkpoint").and_then(Json::as_f64).unwrap_or(0.0) as u64, j.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string()),
+            _ => (j.get("n").and_then(Json::as_f64).unwrap_or(0.0) as u64, j.get("state").and_then(Json::as_str).unwrap_or("").to_string()) } };
+    if st.digest != want { return Err(perr("state", format!("not the strand's last state ({} != {})", &st.digest[..st.digest.len().min(19)], &want[..want.len().min(19)]))); }
+    // RFC 0009: the expectation's memory, folded from every event line's inputs and logged deviation
+    let expect = q.expect.as_ref().map(|_| { let mut m = persona::ExpectMem::new();
+        for l in lines.iter().skip(1) { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
+            let lp = d.filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64);
+            persona::expect_step(&q, &mut m, j.get("inputs").unwrap_or(&Json::Null), lp); } } } m });
+    let mut lv = Live { p: q, st, clock, last: 0.0, prev: persona::digest_of(last), n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None };
+    for c in tail.iter().rev() { let what = c.get("control").and_then(Json::as_str).unwrap_or("");
+        lv.status = lv.status.after(what).unwrap_or(Status::Retired); lv.st = lv.st.zero_credit(&lv.p); lv.controls += 1; }
+    Ok(lv)
+}
+
+/// The audit of a recorded life (`probbit persona bound PERSONA --audit STRAND`): the strand replayed line by line; after every
+/// event and control line, per learned trait the resting TV between the individual and the same individual with its learned
+/// weights at zero, as a share of its epsilon (the room used). An exceedance is impossible by the theorem; the audit shows it
+/// on the recorded life.
+pub fn bound_audit(text: &str, b: &persona::bound::Bound, eng: Engine) -> Result<(Json, bool), (usize, String)> {
+    let lines = lines(text);
+    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+    let p = r.live.p.clone(); let (traits, cap) = persona::bound::learned_traits(&p).ok_or((1, "the strand's persona has no learning block: nothing to audit".to_string()))?;
+    let rest = b.rest_hours.unwrap_or_else(|| persona::bound::default_rest(&p)); let seed = r.live.st.seed;
+    let e = |x: InErr| (0usize, format!("{}: {}", x.path, x.msg));
+    let st0 = persona::init(&p, Some(seed), true, eng); let p0 = persona::bound::rest_odds(&p, &st0, rest, eng).map_err(e)?;
+    let mut eps = vec![]; let mut rr = vec![];
+    for (k, t) in traits.iter().enumerate() { let sc = persona::bound::scope(&p, b, t, rest, Some(&st0));
+        let bs = persona::bound::bases(&p, &sc, &st0).ok_or((0, format!("{t}: more than {} enumerated history combinations: the audit needs an exact epsilon", persona::bound::MAX_HISTORY)))?;
+        eps.push(persona::bound::search(&p, k, &sc.coords, cap, &bs, &p0[k], rest, eng).map_err(e)?.0); rr.push((sc.d_r / 4.0).tanh()); }
+    let nt = traits.len(); let (mut maxr, mut at_n, mut cur, mut exceed) = (vec![0.0f64; nt], vec![0u64; nt], vec![0.0f64; nt], 0usize);
+    let (mut events, mut feedback, mut erasures) = (0u64, 0u64, 0u64); let mut last = persona::bound::learned_of(&r.live.st);
+    let measure = |st: &persona::State| -> Result<Vec<f64>, (usize, String)> { let a = persona::bound::rest_odds(&p, st, rest, eng).map_err(e)?;
+        let z = persona::bound::rest_odds(&p, &persona::bound::with_learned(&p, st, &persona::bound::learned_of(st).iter().map(|d| vec![0.0; d.len()]).collect::<Vec<_>>()), rest, eng).map_err(e)?;
+        Ok(a.iter().zip(&z).map(|(x, y)| persona::bound::tv(x, y)).collect()) };
+    for l in lines.iter().skip(1) { if l.trim().is_empty() { continue; }
+        let was_event = r.step(l, eng)?.is_some(); if was_event { events += 1; } else if l.contains(r#""control":"erase""#) { erasures += 1; }
+        let now = persona::bound::learned_of(&r.live.st); if now != last { if was_event { feedback += 1; } last = now; }
+        let tvs = measure(&r.live.st)?;
+        for k in 0..nt { cur[k] = tvs[k]; if eps[k] > 0.0 && tvs[k] / eps[k] > maxr[k] { maxr[k] = tvs[k] / eps[k]; at_n[k] = r.live.n; } if tvs[k] > eps[k] + rr[k] + 1e-6 { exceed += 1; } } }
+    let s = |x: &str| Json::Str(x.to_string());
+    let rows: Vec<Json> = traits.iter().enumerate().map(|(k, t)| Json::Obj(vec![("trait".into(), s(t)), ("epsilon".into(), Json::Num(eps[k])),
+        ("room_used_max".into(), Json::Num(persona::r6(maxr[k]))), ("at_event".into(), Json::Num(at_n[k] as f64)), ("room_used_now".into(), Json::Num(persona::r6(if eps[k] > 0.0 { cur[k] / eps[k] } else { 0.0 }))),
+        ("distance_to_ceiling".into(), Json::Num(persona::r6(eps[k] - cur[k]))), ("tv_now".into(), Json::Num(persona::r6(cur[k])))])).collect();
+    let ok = exceed == 0;
+    Ok((Json::Obj(vec![("persona".into(), s(&p.name)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(seed as f64)), ("rest_hours".into(), Json::Num(rest)),
+        ("events".into(), Json::Num(events as f64)), ("feedback_events".into(), Json::Num(feedback as f64)), ("erasures".into(), Json::Num(erasures as f64)),
+        ("traits".into(), Json::Arr(rows)), ("exceedances".into(), Json::Num(exceed as f64)), ("ok".into(), Json::Bool(ok))]), ok))
+}

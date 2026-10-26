@@ -5,7 +5,7 @@
 //! optional `flags` object, as in `probbit mcp`:
 //! `{"workers": [...], "tasks": [...], "flags": {"sweeps": 3200, "polish_ms": 0}}`.
 //!
-//! The code is the CLI's (probbit-cli's json.rs, run.rs, router.rs, evaluate.rs, persona.rs, yaml.rs and sys.rs, included below) run with
+//! The code is the CLI's (the probbit-persona library: json, run, router, evaluate, persona, yaml and sys) run with
 //! `probbit_core::rt::set_sequential(true)`: every chain, gate pass and polish chain runs in order on the calling thread. At fixed
 //! work the documents equal the CLI's at any `--threads` (timings and `telemetry.threads` aside; tests/no_threads.rs).
 //! Not here: `--summary`, `--pretty`, `--top`, `--progress`, `--cpu-limit`, `--priority` and the config file (an unknown flag is
@@ -16,42 +16,9 @@
 //! input buffer is consumed);
 //! `probbit_out_ptr()` / `probbit_out_code()` -> the output bytes and the CLI's exit code (0 answer, 1 infeasible, 2 bad input or flag,
 //! 3 refused / declined). The clock is the import `probbit.now_ms` (`performance.now()`). No dependencies (no wasm-bindgen).
-#[allow(dead_code)]
-#[path = "../../probbit-cli/src/json.rs"]
-mod json;
-#[allow(dead_code)]
-#[path = "../../probbit-cli/src/run.rs"]
-mod run;
-#[allow(dead_code)]
-#[path = "../../probbit-cli/src/router.rs"]
-mod router;
-#[allow(dead_code)]
-#[path = "../../probbit-cli/src/evaluate.rs"]
-mod evaluate;
-#[allow(dead_code, unused_imports)]
-#[path = "../../probbit-cli/src/sys.rs"]
-mod sys;
-#[allow(dead_code)]
-#[path = "../../probbit-cli/src/persona.rs"]
-mod persona;
-#[allow(dead_code)]
-#[path = "../../probbit-cli/src/yaml.rs"]
-mod yaml;
-/// The CLI's `--top` monitor hooks (probbit-cli/src/tui.rs): nothing is drawn here.
-mod tui {
-    pub fn tier(_: &'static str) {}
-    pub fn gate_seen(_: f64, _: f64, _: usize, _: usize) {}
-}
-use json::{num, str as jstr, InErr, Json};
+use probbit_persona::{evaluate, json, persona, router, run};
+use json::{str as jstr, InErr, Json};
 use probbit_core::rt::Instant;
-use router::item_bars;
-
-/// The telemetry fields of `--exact-ms` (as probbit-cli/src/main.rs).
-fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
-    xms.map_or(vec![], |x| vec![("exact_ms", num(x)), ("exact_ms_reached", Json::Bool(reached))])
-}
-/// No configuration file in a browser (the CLI echoes probbit.json / $PROBBIT_CONFIG here).
-fn config_echo() -> Vec<(&'static str, Json)> { vec![] }
 
 /// `probbit decide` on a router document (+ optional `flags`) -> (the decision JSON, the CLI's exit code).
 pub fn decide(input: &str) -> (String, i32) { call(input, "decide") }

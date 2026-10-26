@@ -2,6 +2,8 @@
 //! Instructions (`--op`): `decide` (default: exact enumeration if the feasible set is <= --exact-limit, else the exact
 //! frontier DP if the program allows it (--frontier-states, 0 = off), else 4 gated chains),
 //! `exact` (enumeration only), `sample` (chains + gate, never enumerate). What-if = `"clamp"` on a variable.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::json::{num, obj, str as jstr, InErr, Json};
 use probbit_ir::*;
 
@@ -185,6 +187,7 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
         Some(x) } };
     let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
     let mut m = Model::new(n, k, h, allowed, clamp, pairs, caps).map_err(|e| value("", e))?; m.start = start;
+    drop(vindex); // no_std: hashbrown's map drop is not `may_dangle`, so the borrow of `values` ends here, not at the scope end
     Ok(Prog { m, vars, values, compiled })
 }
 
@@ -245,13 +248,14 @@ fn ids(p: &Prog, mask: &[bool], want: bool) -> Json { Json::Arr(p.vars.iter().en
 /// Preserve the legacy full candidate `plan`, but make its release status explicit.
 /// `released_plan` is a projection of that same feasible candidate, not a separately
 /// solved complete plan; escalated variables still require a joint completion.
-pub(crate) fn release_contract(doc: &mut Json) {
+pub fn release_contract(doc: &mut Json) {
     let Some(Json::Obj(plan)) = doc.get("plan") else { return; };
     let verdict = doc.get("verdict").and_then(Json::as_str).unwrap_or("");
     let status = match verdict { "exact" | "diagnostics_passed" => "released", "partial" => "partial", _ => "diagnostic" };
     let released: std::collections::HashSet<&str> = doc.get("released").and_then(Json::as_arr)
         .map_or_else(Default::default, |a| a.iter().filter_map(Json::as_str).collect());
     let projection = Json::Obj(plan.iter().filter(|(id, _)| status != "diagnostic" && released.contains(id.as_str())).cloned().collect());
+    drop(released); // as above: the set borrows `doc`
     if let Json::Obj(v) = doc { v.push(("plan_status".into(), jstr(status))); v.push(("released_plan".into(), projection)); }
 }
 
@@ -336,7 +340,7 @@ fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polis
     // budget, and if a chain finds no start the exact search runs again, past its gap budget, to the end of --budget-ms: its
     // first plan is also the proof of infeasibility. An earlier version gave the exact tier half the budget BEFORE sampling, which
     // cost feasible programs sampler time (200-job schedules at 5 s: 174 -> 97 and 157 -> 0 released). `--sweeps N`: no fallback.
-    let fallback = op == "decide" && sweeps == 0 && !m.is_partition(); crate::tui::tier("sampler");
+    let fallback = op == "decide" && sweeps == 0 && !m.is_partition(); crate::hooks::tier("sampler");
     let s = match sample_on_starting(m, chains, threads, sweeps, if sweeps > 0 { None } else { Some(budget) }, seed, false, cpu_pct, mem.1, if fallback { 0.5 } else { 1.0 }) { Some(s) => s, None => {
         // Matching (quota-shaped programs) proves infeasibility; the bounded search for other programs does not
         if m.is_partition() { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no assignment satisfies every rule (capacitated matching)")), ("ms", ms(t0))]); return (obj(out), 1); }
@@ -358,9 +362,9 @@ fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polis
         let hint = if op == "decide" { "no feasible start found within the search budget, and the bounded exact search (run again to the end of --budget-ms) found no plan (not a proof of infeasibility); --op exact searches exhaustively and can prove infeasibility, or raise --budget-ms" }
             else { "no feasible start found within the search budget (not a proof of infeasibility); try --op decide" };
         out.extend([("verdict", jstr("refused")), ("reason", jstr(hint)), ("ms", ms(t0))]); return (obj(out), 3); } };
-    let sample_s = ts.elapsed().as_secs_f64(); let tg = probbit_core::rt::Instant::now(); crate::tui::tier("gate");
+    let sample_s = ts.elapsed().as_secs_f64(); let tg = probbit_core::rt::Instant::now(); crate::hooks::tier("gate");
     let g = gate_stats(m, &s); let gate_ms = tg.elapsed().as_secs_f64() * 1e3; let rel = g.released_tasks(&GATE); let whole = g.diagnostics_passed(&GATE);
-    let nrel = rel.iter().filter(|&&r| r).count(); crate::tui::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { m.n } else { nrel }, m.n); crate::tui::tier("polish"); *bars = crate::item_bars(&g); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
+    let nrel = rel.iter().filter(|&&r| r).count(); crate::hooks::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { m.n } else { nrel }, m.n); crate::hooks::tier("polish"); *bars = item_bars(&g); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
     let mask: Vec<bool> = if whole { vec![true; m.n] } else { rel };
     // plan polish (as `probbit decide`): anneal the chains' best plan through beta 2 -> 32; never worse than that plan
     // --polish-sweeps N = fixed-work polish (deterministic); --polish-ms is wall-clock, so its plan can vary run to run
@@ -377,9 +381,15 @@ fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polis
         ("telemetry", obj([vec![("chains", num(chains as f64)), ("threads", num(threads.clamp(1, chains) as f64)), ("sweeps", num(s.sweeps as f64)), ("site_updates_per_s", num(if sample_s > 0.0 { (s.sweeps as f64 * m.n as f64 / sample_s).round() } else { 0.0 })),
             ("sample_ms", num(sample_s * 1e3)), ("gate_ms", num(gate_ms)), ("polish_ms", num(if polish_sweeps > 0 { 0.0 } else { polish_ms })), ("polish_sweeps", num(polish_sweeps as f64)),
             ("process_cpu_ms", crate::sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", crate::sys::usage().map_or(Json::Null, |u| num(u.1))), ("nice", crate::sys::nice().map_or(Json::Null, |v| num(v as f64))), ("cpu_limit_pct", num(cpu_pct as f64)),
-            ("mem_limit_mb", num(mem.0 as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / m.n).sum::<usize>() as f64))], crate::exact_cap(exact_ms, reached),
+            ("mem_limit_mb", num(mem.0 as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / m.n).sum::<usize>() as f64))], exact_cap(exact_ms, reached),
             if auto && reached { vec![("exact_budget_reached", Json::Bool(true))] } else { vec![] },
-            vec![("exact_phase_ms", num((ts - t0).as_secs_f64() * 1e3)), ("polish_wall_ms", num(polish_wall))], crate::config_echo()].concat())), ("ms", ms(t0))]);
+            vec![("exact_phase_ms", num((ts - t0).as_secs_f64() * 1e3)), ("polish_wall_ms", num(polish_wall))], crate::hooks::config_echo()].concat())), ("ms", ms(t0))]);
     let code = if verdict == "refused" { 3 } else { 0 };
     (obj(out), code)
 }
+/// Telemetry fields of a sampled answer when --exact-ms was given (none otherwise): the cap and whether the exact tiers hit it.
+pub fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
+    xms.map_or(vec![], |x| vec![("exact_ms", num(x)), ("exact_ms_reached", Json::Bool(reached))])
+}
+/// Per item, the error bar the gate compares with `tv_tol`: z x max(MCSE short, MCSE long) (`Gate::released_tasks`).
+pub fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&s, &l)| GATE.z * if s.is_nan() || l.is_nan() { f64::NAN } else { s.max(l) }).collect() }

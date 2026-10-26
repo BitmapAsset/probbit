@@ -4,10 +4,10 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 #[allow(dead_code)]
-#[path = "../src/yaml.rs"]
+#[path = "../../probbit-persona/src/yaml.rs"]
 mod yaml;
 use json::Json;
 

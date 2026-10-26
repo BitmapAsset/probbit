@@ -10,6 +10,13 @@ readme = "../README.md"
 keywords = ["p-bit", "assignment", "routing", "constraints", "probabilistic"]
 categories = ["algorithms", "science"]
 
+[features]
+default = ["std"]
+std = ["probbit-core/std", "probbit-ir/std"]
+# no_std + alloc (a target without an operating system): the std subset comes from probbit-nostd
+nostd = ["dep:probbit-nostd", "probbit-core/nostd", "probbit-ir/nostd"]
+
 [dependencies]
-probbit-core = { path = "../probbit-core", version = "0.13.0" }
-probbit-ir = { path = "../probbit-ir", version = "0.13.0" }
+probbit-nostd = { path = "../probbit-nostd", version = "0.13.0", optional = true }
+probbit-core = { path = "../probbit-core", default-features = false, version = "0.13.0" }
+probbit-ir = { path = "../probbit-ir", default-features = false, version = "0.13.0" }

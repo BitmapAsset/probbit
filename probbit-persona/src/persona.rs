@@ -9,6 +9,8 @@
 //! canonical number rule `canon_num`) and the reference implementation (the R30 prototype, Python) gives the same documents
 //! byte for byte on the examples (`tests/persona.rs`). The engine is a parameter (`Engine`): the CLI and `probbit mcp` run
 //! `run::run` on this process's threads, the browser module without threads; the answer is the same at fixed work.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::json::{self, at, ix, InErr, Json};
 use probbit_core::rt::Instant;
 use std::collections::HashMap;
@@ -100,7 +102,7 @@ pub fn sha(j: &Json) -> String { digest_of(&canon(j)) }
 /// the same way; equal on 300,015 test doubles)
 fn round_to(x: f64, n: usize) -> f64 { format!("{x:.n$}").parse().unwrap_or(x) }
 /// Weights and odds: rounded to 6 decimals, -0 -> 0
-pub(crate) fn r6(x: f64) -> f64 { let v = round_to(x, 6); if v == 0.0 { 0.0 } else { v } }
+pub fn r6(x: f64) -> f64 { let v = round_to(x, 6); if v == 0.0 { 0.0 } else { v } }
 /// A number as Python's `%s` prints it in a message (bounds are whole numbers or Python floats)
 fn pyn(x: f64) -> String { let mut s = String::new(); canon_num(x, &mut s); s }
 /// A standard normal number that is a pure function of its parts: Box-Muller on the first 16 bytes of
@@ -292,7 +294,12 @@ fn effect(e: &Json, path: &str, levels: &[String]) -> R<Vec<f64>> {
     }
 }
 
+/// A persona file: `.json` = JSON, anything else the YAML subset. -> (persona, the document). Without `std` there are no files:
+/// an error (the document comes in as a string: `parse_doc` + `build`).
+#[cfg(not(feature = "std"))]
+pub fn load(path: &str) -> R<(Persona, Json)> { Err(perr(path, "cannot read the persona file: no file system on this target (pass the document as a string: parse_doc + build)")) }
 /// A persona file: `.json` = JSON, anything else the YAML subset. -> (persona, the document)
+#[cfg(feature = "std")]
 pub fn load(path: &str) -> R<(Persona, Json)> {
     let b = std::fs::read(path).map_err(|e| perr(path, format!("cannot read the persona file: {e}")))?;
     let t = String::from_utf8(b).map_err(|e| perr(path, format!("not UTF-8 (byte {})", e.utf8_error().valid_up_to())))?;

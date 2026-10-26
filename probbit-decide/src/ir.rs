@@ -1,6 +1,8 @@
 //! probbit-ir v0: a portable, line-based text form of a constrained Potts decision problem, plus a lowering to a
 //! binary one-hot QUBO/Ising "p-bit topology" (what a hardware p-bit fabric natively samples).
 //! Floats are written as IEEE-754 bit patterns (hex) so the round trip is bit-exact.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::Problem;
 
 pub fn to_ir(p: &Problem) -> String {

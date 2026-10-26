@@ -123,7 +123,7 @@ size limits in "Limits in v1", stdin above `--max-input-mb`). Unreadable stdin a
 the offending field (`""` = the whole document, as for JSON syntax errors and non-finite numbers, whose message gives the byte
 offset). The object goes to stdout when stdout is not a terminal or with `--json` (0.8.2; at a terminal the stderr line alone). Flag
 errors keep their convention: exit 2, a message on stderr, nothing on stdout (with `--json`: one object, code `flag`). The same strict reader parses
-both front-ends (`probbit-cli/src/json.rs`; CLI test `input_contract_rejects_malformed_documents`, which includes the 2026-09-30 external
+both front-ends (`probbit-persona/src/json.rs`; CLI test `input_contract_rejects_malformed_documents`, which includes the 2026-09-30 external
 review's cases: `"allowed": "A"` used to enable every scored worker and answer `exact`; a cap object where the caps array
 belongs was dropped; duplicate value names emitted duplicate keys).
 
@@ -134,7 +134,7 @@ returns `Err(String)` for structural errors (lengths, out-of-range indices, `i =
 ## Numeric contract
 
 - **Inputs.** Every score / weight (`h`, `potts`, `table`, router `scores` and `affinity`) is a finite number with
-  |x| <= 1e9 (`limit` error otherwise; `probbit-cli/src/json.rs` `MAX_WEIGHT`). Why 1e9: weights are natural-log odds, and a
+  |x| <= 1e9 (`limit` error otherwise; `probbit-persona/src/json.rs` `MAX_WEIGHT`). Why 1e9: weights are natural-log odds, and a
   weight difference beyond ~745 already decides (e^745 is past the range of double-precision probability ratios), so the limit
   removes no distribution you can express; it keeps every log-space quantity (log w sums over variables, pairs and
   same-group pairs; log Z) below ~1e9 x (input size), far inside the double range (1.8e308). Caps and limits are integers

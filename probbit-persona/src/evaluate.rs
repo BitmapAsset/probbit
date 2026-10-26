@@ -13,6 +13,8 @@
 //! copied as they are. The program runs exactly as `probbit run` runs it (`--program` prints it).
 //! Response = `model`, `answers` (keyed by question id, each in the judge's answer shape plus a `probbit` object), `usage`, then every
 //! field of the `probbit run` document. Docs: docs/probbit-ir-json.md "Decision API".
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::json::{arr, at, fields, keyed, num, number, obj, opt, req, schema, str as jstr, text, value, weight, InErr, Json};
 use std::collections::{HashMap, HashSet};
 
@@ -105,6 +107,7 @@ pub fn compile(j: &Json) -> Result<Request, InErr> {
         let mut w = vec![0.0; q.options.len()];
         for (o, v) in keyed(x, &p)? { let k = q.options.iter().position(|y| y == o).ok_or_else(|| value(&at(&p, o), format!("question {id}: unknown option {o}")))?; w[k] = weight(v, &at(&p, o))?; }
         set(i, w, "probbit.logw", &p)?; } }
+    drop(qidx); // no_std: hashbrown's map drop is not `may_dangle`, so the borrow of `qs` ends here, not at the scope end (as run.rs)
     for (q, w) in qs.iter_mut().zip(&h) { q.w = w.clone(); }
     // the alphabet: score levels first in order (precedes / linear read values as ordered slots), then "false", "true", then
     // every choice option in order of first appearance; each variable allows its own options only
