@@ -698,6 +698,17 @@ nova.strand --label agent=Nova --label lane=support` writes them, the OpenClaw p
 old.strand --label agent=Nova --open` labels a strand recorded before them without rewriting it.
 See [the monitor guide](docs/persona.md#58-monitor-watch-an-individuals-inner-state) for the data and replay boundaries.
 
+**The monitor as a Mac app.** On a Mac the same page opens in its own window: download `probbit-Monitor-<version>-macos.zip`
+from the [release page](https://github.com/BitmapAsset/probbit/releases), unzip it, move **probbit Monitor** to Applications,
+then double-click a `.strand` file (or drag one, several, or a folder onto the app), or press "Try the demo". The app is a
+small Swift window (AppKit and WebKit, no third-party code) around the probbit binary inside it: it runs
+`probbit monitor <your files> --serve --port 0` and shows that page, so it opens no network address beyond 127.0.0.1, and
+quitting it stops the engine. It is signed ad-hoc and **not notarized** (that needs a paid Apple Developer account), so
+macOS refuses the first launch of a downloaded copy: on macOS 15 and later, open it once, then System Settings → Privacy &
+Security → Open Anyway; on macOS 13 and 14, right-click the app → Open. How it works and how to build it:
+[docs/monitor-app.md](docs/monitor-app.md). On Linux and Windows, `probbit monitor STRAND --open` shows the same page in the
+browser. The page: [docs/probbit-monitor.png](docs/probbit-monitor.png).
+
 ## After any judge: `probbit evaluate`
 
 Decision models (TypeSafe's Jev, Cloudflare's Clef and Clef-flash, local System One servers) are judges: content in, a

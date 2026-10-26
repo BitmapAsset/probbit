@@ -172,6 +172,25 @@ jobs:
         with:
           name: browser-check
           path: target/browser-check/
+  macos-app:
+    # apps/macos/ProbbitMonitor, the monitor as a Mac app: its build.sh (the one release.yml runs) builds the Swift shell
+    # around the probbit built from this commit and signs the bundle ad-hoc, then smoke.sh launches it: the bundled engine
+    # must serve the page on 127.0.0.1 only, and quitting the app (SIGTERM, and SIGKILL for the crash case) must leave no
+    # engine process. No upload.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: build probbit
+        run: cargo build --release --locked -p probbit-cli
+      - name: build the app
+        run: apps/macos/ProbbitMonitor/build.sh --binary target/release/probbit
+      - name: launch it, quit it
+        run: |
+          APP="apps/macos/ProbbitMonitor/dist/probbit Monitor.app"
+          apps/macos/ProbbitMonitor/smoke.sh "$APP" --quit term -- --demo week
+          apps/macos/ProbbitMonitor/smoke.sh "$APP" --quit kill9 -- --demo week
   release-targets:
     # The release archives' targets that `test` does not build (release.yml runs only on tags): built here, so a tag is
     # never the first build of a target. Static musl (x86_64 runs here, aarch64 is cross-linked), macOS x86_64 under

@@ -27,6 +27,10 @@ All notable changes to this project are documented here. The format follows
 - Hosts: the Claude Code hook writes `host` = `Claude Code`, `session` = `#` + 8 characters of the session id and `agent`
   from `PROBBIT_AGENT`; the LangChain, OpenAI Agents SDK and Vercel AI SDK examples label their strands with the
   framework's name. docs/agents.md: "How a host identifies itself".
+- probbit Monitor for macOS (`apps/macos/ProbbitMonitor`): the monitor page in a native window (Swift, AppKit and WebKit, no
+  third-party code) around a bundled probbit, opened from Finder, the Dock or File → Open; ad-hoc signed, not notarized.
+  `release.yml` attaches `probbit-Monitor-<tag>-macos.zip` (universal) to each release; `ci.yml` builds and launches it on
+  every commit. See docs/monitor-app.md.
 
 - Documentation, from a second dress rehearsal (main and the v0.12.1 binary, every README and REPRODUCE.md command run as
   written on Ubuntu 24.04 x86_64 and macOS arm64): REPRODUCE.md says how to recover when a venv was first made with a
