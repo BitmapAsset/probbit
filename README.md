@@ -691,6 +691,11 @@ Select a channel to inspect its units, range, distribution, source and the engin
 arrive, or follow latest. History means **recorded events, not seconds**. This is declared engine state, not thoughts or
 CPU/GPU/memory usage. Replay verification, stale event age, held view, paused/retired strand and lost connection are distinct.
 Everything is embedded in the CLI: no dependencies, external assets, telemetry or Electron installation.
+Several agents on one machine: `probbit monitor nova.strand atlas.strand --open` (or `--dir strands/ --open`) adds a switcher
+rail, and the header above the face says which agent, on which host, in which lane and session the page shows. Those are
+labels in a sidecar next to each strand (`nova.labels.json`), outside the strand and its digests: `probbit live ... --strand
+nova.strand --label agent=Nova --label lane=support` writes them, the OpenClaw plugin writes them per lane, and `probbit monitor
+old.strand --label agent=Nova --open` labels a strand recorded before them without rewriting it.
 See [the monitor guide](docs/persona.md#58-monitor-watch-an-individuals-inner-state) for the data and replay boundaries.
 
 **The monitor as a Mac app.** On a Mac the same page opens in its own window: download `probbit-Monitor-<version>-macos.zip`

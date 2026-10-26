@@ -207,13 +207,14 @@ export function runBinary(binary: string, args: string[], input: string, killAft
 }
 
 export type LiveRun =
-  | { ok: true; doc: StanceDoc; n: number; eventLine: string; outLine: string; ms: number }
+  | { ok: true; doc: StanceDoc; n: number; eventLine: string; outLine: string; ms: number; labeled: boolean }
   | { ok: false; reason: string; ms: number };
 
 /**
  * One event through `probbit live PERSONA --state STATE --strand STRAND --clock fixed` (persona.md §5.7).
  * A missing state is created with `persona init` only when the strand is missing too (stage-0 rule); a state
- * without its strand, or the reverse, is refused rather than forked.
+ * without its strand, or the reverse, is refused rather than forked. `newStrandArgs` is asked only when the strand is
+ * about to be created (the `--label k=v` pairs, when the binary takes them); `labeled` says whether any were passed.
  */
 export async function runLiveEvent(opts: {
   binary: string;
@@ -222,12 +223,15 @@ export async function runLiveEvent(opts: {
   paths: LanePaths;
   eventLine: string;
   killAfterMs: number;
+  newStrandArgs?: () => Promise<string[]>;
 }): Promise<LiveRun> {
   const t0 = Date.now();
   const { paths } = opts;
   const hasState = existsSync(paths.state);
   const hasStrand = existsSync(paths.strand);
   if (!hasState && hasStrand) return { ok: false, reason: "strand exists without its state; refusing to fork the life", ms: Date.now() - t0 };
+  // Asked beside `persona init`, so a probe of the binary adds no wait of its own.
+  const extraArgs = !hasStrand && opts.newStrandArgs ? opts.newStrandArgs().catch(() => [] as string[]) : Promise.resolve([] as string[]);
   if (!hasState) {
     const init = await runBinary(
       opts.binary,
@@ -239,9 +243,10 @@ export async function runLiveEvent(opts: {
       return { ok: false, reason: `persona init failed: ${init.spawnError ?? `exit ${init.code ?? init.signal}`} ${init.stderr.slice(0, 200)}`.trim(), ms: Date.now() - t0 };
     }
   }
+  const extra = await extraArgs;
   const res = await runBinary(
     opts.binary,
-    ["live", opts.personaPath, "--state", paths.state, "--strand", paths.strand, "--clock", "fixed"],
+    ["live", opts.personaPath, "--state", paths.state, "--strand", paths.strand, "--clock", "fixed", ...extra],
     `${opts.eventLine}\n`,
     opts.killAfterMs,
   );
@@ -260,7 +265,7 @@ export async function runLiveEvent(opts: {
   }
   const n = lastStrandEventNumber(paths.strand);
   if (n === undefined) return { ok: false, reason: "strand unreadable after the event", ms };
-  return { ok: true, doc, n, eventLine: opts.eventLine, outLine: outLine.trim(), ms };
+  return { ok: true, doc, n, eventLine: opts.eventLine, outLine: outLine.trim(), ms, labeled: extra.length > 0 };
 }
 
 /** Plugin metadata kept in the 4th TSV column of log/<lane>.jsonl (stage-0 readers see the first three). */

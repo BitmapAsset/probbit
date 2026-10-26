@@ -246,6 +246,10 @@ try {
   assert.equal(bareFace.glyph,true,'No glyph slot without a glyph');assert.ok(!/undefined|null|NaN/.test(bareFace.text),bareFace.text);
   assert.deepEqual(bareFace.meters,['valence']);assert.equal(bareFace.toggle,'Why this stance');assert.equal(bareFace.settle,true,'No trajectory, no settle strip');
   report.face={noGlyph:true};
+  // The identity header of a demo: no strand listed, no switcher, the persona's name, said to be synthetic.
+  assert.deepEqual(await json(demo.url+'strands'),{demo:true,dir:null,strands:[]});
+  const demoWho=await value(`({agent:document.getElementById('who-agent').textContent,where:document.getElementById('who-where').textContent,rail:document.getElementById('rail').hidden,title:document.title})`);
+  assert.deepEqual(demoWho,{agent:'Scout',where:'Synthetic drives demo · not a live agent',rail:true,title:'Scout — probbit'});report.identity={demo:true};
   await shot('activity-desktop-light',1280,820);
   assert.ok((await state()).height<=820,'Useful desktop should fit one viewport');
   await value(`document.getElementById('theme').value='dark'; document.getElementById('theme').dispatchEvent(new Event('change'))`);
@@ -279,6 +283,9 @@ try {
   assert.equal(fs.glyph,faceOut[3].glyph);assert.equal(fs.glyphHidden,false);assert.ok(fs.label.includes(faceOut[3].glyph_why),'The glyph is labelled with its rule: '+fs.label);
   assert.deepEqual(fs.meters.map(m=>m[0]),['valence','pressure']);assert.deepEqual(fs.meters.map(m=>m[1]),[faceOut[3].mood.valence.level,faceOut[3].mood.pressure.level]);assert.ok(fs.meters.every(m=>m[2]===3));
   assert.ok(!/undefined|null|NaN/.test(fs.face),fs.face);
+  // One strand, no labels: the header names the persona; the tab and the favicon carry the glyph.
+  assert.equal(await value(`document.title`),faceOut[3].glyph+' '+faceOut[3].persona.name+' — probbit');assert.equal(await value(`document.getElementById('rail').hidden`),true);
+  assert.ok((await value(`document.getElementById('favicon').getAttribute('href')`)).includes(encodeURIComponent(faceOut[3].glyph)),'The favicon is the glyph');
   assert.equal(fs.settleHidden,false);assert.equal(fs.beta,'settled · β 1.00','Reduced motion: the settled step at once');assert.equal(fs.rows,8);
   assert.equal(await value(`getComputedStyle(document.getElementById('glyph')).transitionDuration`),'0s');
   assert.equal(fs.panelHidden,true,'The why-panel is closed by default');assert.equal(fs.expanded,'false');
@@ -431,6 +438,34 @@ try {
   const cappedServer=await server([cappedStrand],'declared-scales');await navigate(cappedServer.url);await event(1);
   await selected('drive:surprise:repair');assert.ok(await value(`document.getElementById('channel-facts').textContent.includes('-2.5 to 2.5')`));
   assert.ok(await value(`document.getElementById('detail-chart').textContent.includes('2.50')`));report.declaredScales=true;
+  // §5.8 many agents, one monitor: two lives under invented agent names, labelled by a sidecar (live --label) and by
+  // monitor --label; the header, the tab title, the switcher (click, Ctrl/Cmd+digit, arrows), the deep link, /s/ID/doc/N.
+  const nova=path.join(out,'nova.strand'),atlas=path.join(out,'atlas.strand');
+  command(['live','examples/persona/tutor.yaml','--demo','week','--seed','2','--strand',nova,'--label','agent=Nova','--label','host=Fixture host 1','--label','lane=support']);
+  command(['live','examples/persona/tutor.yaml','--demo','week','--seed','5','--strand',atlas]);
+  assert.equal(readFileSync(path.join(out,'nova.labels.json'),'utf8'),'{"agent":"Nova","host":"Fixture host 1","lane":"support"}\n');
+  const pair=await server([nova,atlas,'--label','agent=Atlas','--label','lane=research'],'pair');await viewport(1280,820);await navigate(pair.url);await event(50);
+  const listed=await json(pair.url+'strands');assert.deepEqual(listed.strands.map(x=>[x.id,x.strand,x.labels,x.n]),[['nova','nova.strand',{agent:'Nova',host:'Fixture host 1',lane:'support'},50],['atlas','atlas.strand',{agent:'Atlas',lane:'research'},50]]);
+  const who=()=>value(`({agent:document.getElementById('who-agent').textContent,where:document.getElementById('who-where').textContent,facts:document.getElementById('who-facts').textContent,title:document.title,rail:document.getElementById('rail').hidden,
+    items:[...document.querySelectorAll('#rail-list .rail-item')].map(b=>[b.dataset.strand,b.querySelector('strong').textContent,b.getAttribute('aria-current')]),search:location.search,raw:document.getElementById('raw').getAttribute('href'),event:document.getElementById('ev').textContent})`);
+  const showing=(agent,what)=>until(async()=>{const x=await who();return x.agent===agent&&x.event==='event 50'&&x.raw.includes('/50')&&x;},what);
+  let w=await showing('Nova','identity header');
+  assert.equal(w.where,'Fixture host 1 · support');assert.ok(w.facts.includes('personaPip v1.1.0')&&w.facts.includes('strandnova.strand')&&/written\d+ (s|min) ago/.test(w.facts),w.facts);
+  assert.equal(w.title,'Nova · support — probbit');assert.equal(w.rail,false);assert.deepEqual(w.items,[['nova','Nova','true'],['atlas','Atlas','false']]);
+  await shot('identity-two-strands',1280,820);report.identity.twoStrandsHeight=(await state()).height;
+  await click('#rail-list [data-strand="atlas"]');w=await showing('Atlas','switch by click');
+  assert.equal(w.title,'Atlas · research — probbit');assert.equal(w.where,'research');assert.equal(w.search,'?strand=atlas');assert.equal(w.raw,'/s/atlas/doc/50');
+  assert.deepEqual(w.items.map(i=>i[2]),['false','true']);assert.equal((await state()).line,(await json(pair.url+'s/atlas/doc/50')).line);
+  const mod=process.platform==='darwin'?4:2;
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'1',code:'Digit1',windowsVirtualKeyCode:49,modifiers:mod});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'1',code:'Digit1',windowsVirtualKeyCode:49,modifiers:mod});
+  w=await showing('Nova','switch by keyboard shortcut');assert.equal(w.search,'?strand=nova');
+  await value(`document.querySelector('#rail-list [data-strand="nova"]').focus()`);
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40});
+  await showing('Atlas','switch by arrow key');
+  await navigate(pair.url+'?strand=atlas');w=await showing('Atlas','deep link');assert.deepEqual(w.items.map(i=>i[2]),['false','true']);
+  assert.deepEqual(await json(pair.url+'s/nova/doc/3'),await json(pair.url+'doc/3'),'/doc/N is the first strand');
+  const r404=await fetch(pair.url+'s/nope/events');assert.equal(r404.status,404);await r404.text();
+  report.identity={...report.identity,header:true,title:true,switcher:true,keyboard:true,deepLink:true,perStrandDocs:true};
   assert.equal(failures.length,0,JSON.stringify(failures));report.ok=true;
 } catch (error) {
   report.error = String(error.stack || error);

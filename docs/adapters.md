@@ -30,7 +30,7 @@ the receipt per decision and the bounded state the same mechanism drives.
 | any Node loop | [examples/node/stance-host.mjs](../examples/node/stance-host.mjs) | `await host.turn(toolTexts)`; `verify()` | `node --test examples/node/stance-host.test.mjs` against the release binary |
 | Vercel AI SDK | [examples/hosts/vercel-ai/stance.mjs](../examples/hosts/vercel-ai/stance.mjs) | `prepareStep` rebuilds the step's system message from `host.turn`; `onToolExecutionEnd` collects results | not run here (needs the `ai` package, a provider and a key) |
 | MCP hosts (Claude Code, Codex CLI, Cursor, mcporter) | `probbit mcp` | tools `probbit_live_event`, `probbit_live_verify`, `probbit_persona_turn`, ... ([agents.md](agents.md)) | real calls from Claude Code and Codex CLI (agents.md) |
-| OpenClaw | [plugins/openclaw](../plugins/openclaw/README.md) (`probbit-stance`, `openclaw plugins install npm:probbit-stance --accept-capabilities`) | `before_prompt_build`: one event per user message in the listed sessions, the block injected into the turn, the footer line in the chat; `before_tool_call`: shadow gate; `after_tool_call` (with `sensesMode` shadow or feed, unreleased): counts failed tool calls for the `tool_fail` reading | 146 tests against a mocked host built from the 2026.9.7 SDK types and the real binary; the same code runs live on the author's own agent since 2026-10-06 |
+| OpenClaw | [plugins/openclaw](../plugins/openclaw/README.md) (`probbit-stance`, `openclaw plugins install npm:probbit-stance --accept-capabilities`) | `before_prompt_build`: one event per user message in the listed sessions, the block injected into the turn, the footer line in the chat; `before_tool_call`: shadow gate; `after_tool_call` (with `sensesMode` shadow or feed, unreleased): counts failed tool calls for the `tool_fail` reading | 155 tests against a mocked host built from the 2026.9.7 SDK types and the real binary; the same code runs live on the author's own agent since 2026-10-06 |
 
 "Not run here" means exactly that: the file is written to the framework's documented contract and compiles, but this
 repository's tests do not exercise it. Please open an issue (or a reproduction report) with what you saw.
@@ -52,6 +52,15 @@ The same shape in Node is `examples/node/stance-host.mjs`; in any other language
 (`probbit persona init`, then `probbit live PERSONA --clock fixed --state STATE --strand STRAND` with one JSON line per
 event; [persona.md](persona.md) §5.7). Add senses of your own in the persona (`senses:`; latency, error rate, a budget) and
 set them in the event; flags (`praise`, `correction`, ...) are the persona's inputs and go in the same event.
+
+To name the writer in `probbit monitor`, pass `labels=` (Python: `StanceHost(..., strand="run.strand", labels={"agent":
+"support-bot", "host": "my harness 2.1"})`, or `probbit.live_event(..., strand=..., labels=...)`): the keys are merged into
+the strand's sidecar `run.labels.json` after every event, keys already there and not named stay, and bad labels raise
+`ValueError` before the event runs ([agents.md](agents.md), "How a host identifies itself", has the rules). The Claude Code
+hook writes `host` = `Claude Code`, `session` = `#` + the first 8 characters of the session id and `agent` from
+`PROBBIT_AGENT`; the OpenClaw plugin computes `host`, `lane`, `agent` and `session` per lane and takes overrides from its
+`labels` config key. A host that drives the CLI directly passes `--label k=v` to the `probbit live` call that creates the strand
+(a build from `main`; 0.12.1 has no `--label`).
 
 Keep one strand per conversation. At the end: `probbit live verify run.strand` (exit 0: every line replays) and
 `python3 python/probbit_host.py receipts run.strand` (one record per decision).

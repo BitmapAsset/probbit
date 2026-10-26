@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LABEL_RULES, labelProblem, MAX_FREE_LABELS, parseLabelsConfig, RESERVED_LABELS, type Labels } from "./labels.js";
 
 /** The persona shipped with the plugin (`personas/assistant.yaml`, next to `dist/`): the default when `personaPath` is unset. */
 export function bundledPersonaPath(): string {
@@ -59,6 +60,10 @@ export type StanceConfig = {
   sensesMode: SensesMode;
   /** Where time_pressure comes from; a heuristic value reaches the engine only with sensesMode feed. */
   timePressureSource: TimePressureSource;
+  /** The `agent` label of every lane (default: the agent id of the session key). */
+  agentName?: string;
+  /** Labels added to every lane's sidecar; a reserved key (agent, host, lane, session) overrides the computed value. */
+  labels: Labels;
 };
 
 export const SHELL_TOOLS = ["exec", "bash", "shell"];
@@ -100,11 +105,13 @@ export function expandHome(p: string, home = homedir()): string {
   return p === "~" ? home : p.startsWith("~/") ? join(home, p.slice(2)) : p;
 }
 
-export type ResolvedConfig = { config: StanceConfig; warnings: string[] };
+/** warnings: a field fell back (the schema check fails). notices: logged at start, not a schema failure (dropped labels). */
+export type ResolvedConfig = { config: StanceConfig; warnings: string[]; notices: string[] };
 
 /** Resolves `plugins.entries.probbit-stance.config` with defaults. Never throws; bad fields fall back and warn. */
 export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
   const warnings: string[] = [];
+  const notices: string[] = [];
   const src = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const str = (key: string, fallback: string): string => {
     const v = src[key];
@@ -192,6 +199,16 @@ export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
     timePressureSource = src.timePressureSource;
   } else if (src.timePressureSource !== undefined) warnings.push("timePressureSource: expected question, heuristic or off");
 
+  let agentName: string | undefined;
+  if (typeof src.agentName === "string" && labelProblem("agent", src.agentName.trim()) === undefined) agentName = src.agentName.trim();
+  else if (src.agentName !== undefined) warnings.push("agentName: expected 1-64 characters without control characters");
+  const { labels, dropped } = parseLabelsConfig(src.labels);
+  if (dropped.length > 0) {
+    notices.push(
+      `labels: dropped ${dropped.join(", ")} (${LABEL_RULES}; at most ${MAX_FREE_LABELS} keys besides ${RESERVED_LABELS.join(", ")})`,
+    );
+  }
+
   return {
     config: {
       lanes,
@@ -215,8 +232,11 @@ export function resolveConfig(raw: unknown, home = homedir()): ResolvedConfig {
       senderIds,
       sensesMode,
       timePressureSource,
+      ...(agentName !== undefined ? { agentName } : {}),
+      labels,
     },
     warnings,
+    notices,
   };
 }
 
@@ -301,6 +321,18 @@ export const CONFIG_JSON_SCHEMA = {
       enum: ["question", "heuristic", "off"],
       description:
         "Default question: time_pressure only from the urgency question (live jev). heuristic: that answer, else the documented text heuristic (fed only with sensesMode feed). off: never.",
+    },
+    agentName: {
+      type: "string",
+      minLength: 1,
+      maxLength: 64,
+      description: "The agent label of every lane's strand (default: the agent id of the session key).",
+    },
+    labels: {
+      type: "object",
+      description:
+        "Labels written beside every lane's strand (strands/<lane>.labels.json) for probbit monitor. Keys 1-64 of [A-Za-z0-9_.-], values 1-64 characters; at most 4 keys besides agent, host, lane, session. A reserved key here overrides the value the plugin computes. Invalid entries are dropped with one warning.",
+      additionalProperties: { type: "string" },
     },
     destructive: {
       type: "array",
