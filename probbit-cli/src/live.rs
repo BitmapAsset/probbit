@@ -807,7 +807,7 @@ mod tests {
         let life = |engine: &str| { let st = State::read(&p, h.get("state").unwrap()).unwrap(); let (mut lv, head) = Live::start(p.clone(), &doc, st, Clock::Fixed, engine); let mut text = format!("{head}\n");
             for e in &evs { let (s, l) = lv.event(e, &run).unwrap(); text += &l; text.push('\n'); if lv.n % 4 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } } text };
         let (old, new) = (life("probbit 0.13.0"), life("probbit 0.14.0"));
-        assert_eq!(old, F, "0.13.0's bytes, as recorded");
+        assert_eq!(old, F.replace("\r\n", "\n"), "0.13.0's bytes, as recorded (a Windows checkout has CRLF)");
         let nums = |t: &str| t.lines().filter_map(|l| json::parse(l).ok()?.get("stance")?.get("deviation").cloned()).flat_map(|d| ["self", "pred", "input", "z"].map(|k| d.get(k).and_then(Json::as_f64))).flatten().collect::<Vec<f64>>();
         let n = nums(&new); assert_eq!(n.len(), 16); assert!(n.iter().all(|x| persona::r6(*x) == *x), "{n:?}"); assert!(nums(&old).iter().any(|x| persona::r6(*x) != *x));
         assert_eq!(verify(&new, &run).map(|d| d.get("checkpoints").cloned()), Ok(Some(Json::Num(4.0))));
