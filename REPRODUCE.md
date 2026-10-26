@@ -21,8 +21,9 @@ probbit live verify strands/A/banking-user_task_13-injection_task_1.strand
 python3 python/probbit_host.py receipts strands/A/banking-user_task_13-injection_task_1.strand   # one line per decision
 ```
 
-The strand was written by probbit 0.11.0; 0.12.0 replays it byte for byte (a persona without the 0.12 keys gives every
-document as 0.11.0 did). The 726 strands of arm A are in the archive; `probbit live verify` any of them.
+The strand was written by probbit 0.11.0; later releases replay it byte for byte (`verified_by` names the one that did; a
+persona without the 0.12 and 0.13 keys gives every document as 0.11.0 did). The 726 strands of arm A are in the archive;
+`probbit live verify` any of them.
 
 ## Thirty seconds of compute: the AgentDojo tables (no API calls)
 
