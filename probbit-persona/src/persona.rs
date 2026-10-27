@@ -4043,16 +4043,23 @@ impl ExpectCache {
         // an event that had rows to compare and found none backs off; one that started empty only fills (the next one compares)
         if self.live { if self.hits > 0 { self.back = 0; } else if self.had { self.back = (self.back * 2).clamp(1, 32); self.skip = self.back; } }
         let mut i = 0; self.rows.retain(|_| { i += 1; self.used[i - 1] }); self.used.clear(); }
-    /// The program's exact marginals: from the cache when the program (without its comment) was solved before, else solved
+    /// The program's exact marginals: from the cache when the program (without its comment) was solved before, else solved (the
+    /// key's hasher lives in its own frame, not in the one that calls the engine)
+    #[inline(never)]
     fn marg(&mut self, p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
         if !self.live { self.solves += 1; return exact_marg(p, st, prog, eng); }
-        let mut h = Sha256::new();
-        match prog { Json::Obj(v) => for (k, x) in v.iter().filter(|(k, _)| k != "comment") { hash_str(&mut h, k); hash_json(&mut h, x); }, x => hash_json(&mut h, x) }
-        let key = h.finish();
+        let key = prog_key(prog);
         if let Some(i) = self.rows.iter().position(|r| r.0 == key) { self.used[i] = true; self.hits += 1; return Some(self.rows[i].1.clone()); }
         self.solves += 1; let m = exact_marg(p, st, prog, eng)?;
         self.rows.push((key, m.clone())); self.used.push(true); Some(m)
     }
+}
+/// The cache's key of a program: the sha256 of its structure without `comment`
+#[inline(never)]
+fn prog_key(prog: &Json) -> [u8; 32] {
+    let mut h = Sha256::new();
+    match prog { Json::Obj(v) => for (k, x) in v.iter().filter(|(k, _)| k != "comment") { hash_str(&mut h, k); hash_json(&mut h, x); }, x => hash_json(&mut h, x) }
+    h.finish()
 }
 fn hash_str(h: &mut Sha256, s: &str) { h.update(&(s.len() as u64).to_le_bytes()); h.update(s.as_bytes()); }
 /// A value's structure into `h`: a tag per kind, numbers by their bits (-0 as 0, as the program's text writes both), strings and
@@ -4086,6 +4093,7 @@ pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engi
 pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
     cache.begin(); let d = deviation_in(p, st, raw, mem, eng, cache); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
 }
+#[inline(always)]
 fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
     let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
     let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);

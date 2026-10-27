@@ -137,6 +137,31 @@ on the proxy: expect 15,520 / 66,879, prep 14,880 / 20,221, decode 12,464 / 76,5
 73,957, document 6,192 / 60,295, fold 4,592 / 35,154, line 4,088 / 35,745, input 3,424 / 1,005 (with the feature compiled in,
 which adds about 1.7 KB to the event's stack: 15,520 against 13,808 without it).
 
+### The expectation's cache
+
+`expect` (RFC 0009, a persona with an expectation block) solves, every event, the event's own program, the empty program and
+one program per remembered combination (exact tier each). `Live` keeps the non-twin exact marginals of each program it solved
+(`Live::expect_cache`, a `persona::ExpectCache`, on by default), keyed by the sha256 of the program's structure without its
+`comment` (the only line that names the turn and the seed; each number by its bits, -0 as 0, as the program's text writes
+it). The exact tier's marginals are a function of the program's model alone, so a row is the value the solve would return:
+the stance, its `deviation`, every strand line and digest are the same with the cache on or off (`ExpectCache::new(false)`).
+After each event only the rows that event used are kept: at most `max_combos + 1`. Decay never invalidates a row (marginals
+do not read counts); a row stops being used when its program changes, which happens whenever the state the program is built
+from moves (moods, needs, senses: every event of most lives; the state's digest itself carries the turn, so it is never a
+key). The members' programs are still built every event: the cache skips solves, not compiles. A life whose programs move
+every event gets no hit; after an event without one the cache is not consulted for the next 1, 2, 4, ... 32 events (a hit
+resets the pause), so such a life keys two events in 34. `turn_trace` counts `expect_cached` and `expect_solved` per event.
+
+On the proxy (median of 3–7 runs, cache off → on, `expect`'s share of the turn): a life of one event repeated 500 times
+(the expectation fixture persona, max_combos 16): 52.2% → 37.4%, 95.2% of programs from the cache; 500 events of many
+combos: 80.9% → 81.2% (max_combos 16) and 93.6% → 93.7% (64), no hit; the body persona's recorded day (134 events, max_combos
+6): 74.2% → 74.5%, 0.7% of programs from the cache. The rows' heap on the proxy (x86_64): 13,771 B at most for the body
+persona (7 rows), 46,471 B (17 rows) and 178,327 B (65 rows) for the fixture persona at max_combos 16 and 64; a 32-bit target
+holds about two thirds of that (its `String` and `Vec` headers are 12 bytes, not 24). `ExpectCache::bytes` reports it on the
+target. A host short of heap at a large `max_combos` turns the cache off; the bytes do not move. With the cache the body
+persona's turn on the proxy takes 13,840 B of stack (13,808 before) and its heap peak is 89,990 B (88,153 before: the rows
+the individual holds between events).
+
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
 

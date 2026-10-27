@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **The expectation's cache** (docs/embedding.md "The expectation's cache"): `Live` keeps the exact marginals of the
+  programs the deviation solved, keyed by the program without its comment, so an event whose members' programs are the
+  previous event's solves none of them again (a life of one repeated event: `expect` 52% → 37% of the turn on the proxy, 95%
+  of its programs from the cache). Every stance, strand line and digest is the same with the cache on or off
+  (`Live::expect_cache`, `persona::ExpectCache::new(false)`); at most `max_combos + 1` rows; a life whose programs move every
+  event (most lives: the state moves) backs off and costs about what it cost before. `turn_trace` gains `expect_cached` and
+  `expect_solved`; `persona::deviation_cached`.
 - Development build: the workspace version is `0.14.0-dev` (`probbit --version`, the `engine` of every strand header this
   build writes, `verified_by`), so the strands it writes get the 0.14.0 behaviours below (the rounded deviation, the
   canonical fold, `expect` on checkpoints, segments of a persona with an expectation block). Strands of 0.13.0 and earlier
