@@ -18,6 +18,21 @@ All notable changes to this project are documented here. The format follows
   `live verify` accepts its checkpoint when it equals the replay's at 6 decimals; strands without an expectation block are
   unchanged.
 
+### Fixed
+
+- `probbit monitor` opens a strand with checkpoint lines when its persona has an `expectation` block: it replays such a
+  strand from the header (`--once`, `--follow`, `--serve`, and each strand of `--dir` by its own persona) instead of refusing
+  it at the last checkpoint, which does not carry the expectation's memory. Other personas still start at the last
+  checkpoint; `live verify` is unchanged.
+
+### Documentation
+
+- Documentation, from a dress rehearsal of the published v0.13.0 artifacts (the release page's Mac app zip opened as a
+  download, the README and REPRODUCE.md commands with the released binary on Linux and macOS, `probbit-stance` 0.2.0 from
+  npm): `docs/monitor-app.md` says to remove the quarantine mark before the first open and how to recover after a refused
+  one (move the app, or Open Anyway), and that the bundled probbit serves several strands with a switcher; the plugin
+  README names the second warning an older probbit gives; REPRODUCE.md no longer says only 0.12.0 replays the strand.
+
 ## 0.13.0 - 2026-10-26
 
 The monitor face and the Mac app, identity labels and many strands in one monitor, and the OpenClaw plugin 0.2.0. A persona

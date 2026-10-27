@@ -127,6 +127,13 @@ impl Watch {
         let rep = Replay::open(head)?; let meta = Meta::of(&rep); let n = meta.moods.len();
         Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None })
     }
+    /// Where the replay of `lines` (the header first) starts: the last checkpoint line (index), or None for the header. RFC 0009:
+    /// a persona with an expectation block folds every event line into its memory, which no checkpoint carries, so its strand
+    /// replays from the header (every line, slower; `open_at` refuses that shortcut); any other persona starts at the last one
+    fn start(lines: &[&str]) -> Option<usize> {
+        let k = crate::live::last_checkpoint(lines, 0).filter(|k| *k >= 2)?;
+        (!Replay::open(lines[0]).is_ok_and(|r| r.live.p.expect.is_some())).then_some(k)
+    }
     /// The replay from a checkpoint line (`live::Replay::open_at`; `before` = the event line before it): the lines before it are
     /// not replayed, and the board starts at the checkpoint's event (its stance, the inputs `before` logs, its learned deltas)
     fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Watch, (usize, String)> {
@@ -644,10 +651,11 @@ impl Followed {
     fn poll(&mut self, eng: Engine, each: &mut dyn FnMut(&Watch)) -> Option<bool> {
         match self.tail.poll() {
             Got::Lines(ls) => {
-                // the first read of a strand with checkpoint lines starts at the last one: its event is drawn at once
+                // the first read of a strand with checkpoint lines starts at the last one (`Watch::start`): its event is drawn at
+                // once; after that, appended lines replay from the state in memory
                 let mut skip = 0;
                 if self.w.is_none() && self.bad_head.is_none() { let refs: Vec<&str> = ls.iter().map(String::as_str).collect();
-                    if let Some(k) = crate::live::last_checkpoint(&refs, 0).filter(|k| *k >= 2) {
+                    if let Some(k) = Watch::start(&refs) {
                         if let Ok(x) = Watch::open_at(refs[0], refs[k - 1], refs[k], k + 1) { each(&x); self.w = Some(x); skip = k + 1; } } }
                 for l in ls.into_iter().skip(skip) { if let Some(x) = &mut self.w { let n = x.rep.live.n; x.feed(&l, eng); if x.rep.live.n != n && x.bad.is_none() { each(x); } continue; }
                     if self.bad_head.is_none() { match Watch::open(&l) { Ok(x) => self.w = Some(x), Err(e) => self.bad_head = Some(e) } } }
@@ -746,8 +754,9 @@ pub fn cmd(args: &[String]) {
     if head.is_empty() { crate::fail(&format!("monitor: {path} is empty: not a strand")) }
     if !strand(head) { crate::fail(&format!("monitor: {path} is not a probbit strand (format 1)")) }
     let note = (!rest.is_empty() && !lines.is_empty()).then(|| format!("line {} is incomplete (no newline at its end): not replayed", lines.len() + 1));
-    // a strand with checkpoint lines replays from the last one (the board starts at its event and draws the latest one)
-    let start = crate::live::last_checkpoint(&lines, 0);
+    // a strand with checkpoint lines replays from the last one (the board starts at its event and draws the latest one), unless
+    // its persona has an expectation block: then from the header (`Watch::start`)
+    let start = Watch::start(&lines);
     let opened = match start { Some(k) => Watch::open_at(head, lines[k - 1], lines[k], k + 1), None => Watch::open(head) };
     let (w, bad_head) = match opened { Ok(mut w) => { for l in lines.iter().skip(start.map_or(1, |k| k + 1)) { w.feed(l, eng); } (Some(w), None) } Err(e) => (None, Some(e)) };
     let fr = frame(w.as_ref(), bad_head.as_ref(), &path, note.as_deref(), &s);
@@ -1156,6 +1165,38 @@ mod tests {
         assert_eq!(page.get("status").and_then(Json::as_str), Some("paused"));
         assert_eq!(page.get("from_checkpoint").and_then(Json::as_f64), Some(20.0));
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// RFC 0009: a persona with an expectation block replays a strand with checkpoint lines from its header (the checkpoint does
+    /// not carry the expectation's memory): `--once` and the first poll of `--follow` / `--serve` draw the latest event with no
+    /// checkpoint start, and lines appended after it replay from the state in memory, one by one
+    #[test]
+    fn an_expectation_persona_replays_from_the_header() {
+        let (p, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap();
+        assert!(p.expect.is_some(), "the fixture has an expectation block");
+        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit test");
+        let mut text = format!("{header}\n");
+        let add = |lv: &mut Live, text: &mut String, t: u32| { let ev = json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 3 == 0)).unwrap();
+            let (s, line) = lv.event(&ev, &run).unwrap(); *text += &line; text.push('\n'); if lv.n % 5 == 0 { *text += &lv.checkpoint(&s); text.push('\n'); } };
+        for t in 0..17u32 { add(&mut lv, &mut text, t); }
+        let lines = live::lines(&text); let k = live::last_checkpoint(&lines, 0).unwrap();
+        assert_eq!((lines.iter().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), Watch::start(&lines)), (3, None), "3 checkpoints, no checkpoint start");
+        assert!(Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1).is_err_and(|e| e.1.contains("expectation block")), "the shortcut itself still refuses it");
+        let f = std::env::temp_dir().join(format!("probbit-monitor-expect-{}.strand", std::process::id())); std::fs::write(&f, &text).unwrap();
+        let mut fl = Followed::new(f.to_str().unwrap()); let mut seen = vec![];
+        assert_eq!(fl.poll(&run, &mut |w: &Watch| seen.push(w.rep.live.n)), Some(false));
+        let w = fl.w.as_ref().unwrap(); assert!(w.bad.is_none(), "{:?}", w.bad);
+        assert_eq!((w.rep.from, w.rep.live.n, seen.first().copied(), seen.len()), (None, 17, Some(1), 17), "every event replayed from the header");
+        let mut full = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { full.feed(l, &run); }
+        assert_eq!(persona::canon(&w.last.as_ref().unwrap().doc), persona::canon(&full.last.as_ref().unwrap().doc));
+        assert_eq!(frame_json(fl.w.as_ref(), None, None).get("from_checkpoint"), Some(&Json::Null));
+        // appended: only the new lines replay, on the state in memory
+        for t in 17..21u32 { add(&mut lv, &mut text, t); } std::fs::write(&f, &text).unwrap();
+        seen.clear(); assert_eq!(fl.poll(&run, &mut |w: &Watch| seen.push(w.rep.live.n)), Some(false));
+        assert_eq!(seen, vec![18, 19, 20, 21]); assert!(fl.w.as_ref().unwrap().bad.is_none());
+        assert_eq!(fl.w.as_ref().unwrap().rep.summary(), live::verify(&text, &run).unwrap(), "ends where verify does");
+        let _ = std::fs::remove_file(&f);
+        // the tutor without the block takes the shortcut: `following_starts_at_the_last_checkpoint`
     }
 
     /// Watch a strand line by line: every document's sha256 is its line's `stance` digest, and the replay ends where `verify` does
