@@ -322,7 +322,7 @@ pub fn utc_now() -> String {
 /// rules. `open` checks the header and rebuilds the individual; each `step` replays one event line on the fixed clock and
 /// checks it (`prev`, `n`, the stance and state digests, the bytes). After an error the replay is spent: the chain past the
 /// line that differs cannot be checked.
-pub struct Replay { pub live: Live, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool, norms: Normals, at_cap: Vec<f64>, seen: (f64, Vec<f64>), viab: Option<(f64, Option<u64>)>, rest: Option<String> }
+pub struct Replay { pub live: Box<Live>, pub header: Json, pub doc: Json, pub line: usize, pub from: Option<u64>, last: Option<Json>, checkpoint_ready: bool, norms: Normals, at_cap: Vec<f64>, seen: (f64, Vec<f64>), viab: Option<(f64, Option<u64>)>, rest: Option<String> }
 /// A senses block's normals over the replay (§2.11): per sense the means after the last 50 events, the largest move of a mean
 /// within 50 events so far, and the latest event's move (the monitor's alert: over drift_cap / 2)
 #[derive(Default)]
@@ -341,23 +341,27 @@ impl Normals {
 impl Replay {
     /// The header line (without its line ending) -> the replay, ready for event lines; Err((1, what differs)), or Err((1, the
     /// unsupported `why`)) for a header key, persona field or state field this engine does not know
-    pub fn open(head: &str) -> Result<Replay, (usize, String)> {
-        let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
-        if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
-        if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()) && k != "segment")) { return Err((1, unsupported(k))); }
-    if let Some(sg) = h.get("segment") { check_segment(sg).map_err(|e| (1, format!("the header's segment: {e}")))?; }
-        let doc = h.get("document").cloned().ok_or((1, "the header has no persona document".to_string()))?;
-        let p = persona::build(&doc).map_err(|e| (1, read_err(e, "the persona document: ")))?;
-        if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
-        let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, read_err(e, "the initial state: ")))?;
-        let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
-        let header = match h.get("segment") { None => header, Some(sg) => { let mut b = Vec::new();
-            write_header_seg(&live.p, &doc, &live.st, h.get("engine").and_then(Json::as_str).unwrap_or(""), Some(sg), HEADER_CHUNK, &mut |c: &[u8]| b.extend_from_slice(c));
-            String::from_utf8(b).unwrap_or_default() } };
-        if header != head { return Err((1, "the header is not as written".into())); }
+    pub fn open(head: &str) -> Result<Replay, (usize, String)> { Replay::open_boxed(head).map(|r| *r) }
+    /// `open` on the heap (docs/embedding.md "Stack budget"): the header's checks of `open`, in its order with its messages, run as
+    /// the chain check runs them (the persona built on the heap, the state read into a box, the header written again piece by
+    /// piece against the line, never whole), and the individual is built in its box: no frame holds a `Live`, a `Persona` or the
+    /// header text. `open` is this call with the replay moved out of its box (the replay itself is small: the individual stays
+    /// boxed in it).
+    #[inline(never)]
+    pub fn open_boxed(head: &str) -> Result<Box<Replay>, (usize, String)> {
+        let (p, h, st0, prev) = open_head(head)?;
+        let doc = h.get("document").cloned().unwrap_or(Json::Null);
+        let dev_full = engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
+        let expect = p.expect.as_ref().map(|_| new_mem(dev_full));
+        let live = Live::boxed(p, st0, Clock::Fixed, prev, 0, expect, dev_full);
+        Ok(Box::new(Replay::at_header(live, h, doc)))
+    }
+    /// The replay of a life just started from its header
+    #[inline(never)]
+    fn at_header(live: Box<Live>, header: Json, doc: Json) -> Replay {
         let norms = Normals::start(&live.p, &live.st); let at_cap = vec![0.0; persona::deficits(&live.p, &live.st).len()]; let seen = (0.0, vec![0.0; persona::gate_gains(&live.p, &live.st).len()]);
         let viab = viab_start(&live);
-        Ok(Replay { live, header: h, doc, line: 1, from: None, last: None, checkpoint_ready: false, norms, at_cap, seen, viab, rest: None })
+        Replay { live, header, doc, line: 1, from: None, last: None, checkpoint_ready: false, norms, at_cap, seen, viab, rest: None }
     }
     /// The replay from a checkpoint line (`cp`, without its line ending, at 1-based line `at`; `before` = the event line before it)
     /// instead of the header: the header is read as by `open`; the checkpoint must follow `before` (prev), at its event count, with
@@ -639,9 +643,9 @@ pub fn engine() -> String { format!("probbit {}", env!("CARGO_PKG_VERSION")) }
 pub fn check_chain(text: &str) -> Result<Status, InErr> { check_chain_head(text).map(|(s, _, _)| s) }
 /// The header checks of `Replay::open` without a replay (the same checks, in its order, with its messages): the header read, its
 /// persona built on the heap, its digest and initial state checked, and the header written again piece by piece against the line
-/// (no `Live`, no whole header) -> the persona and the header
+/// (no `Live`, no whole header) -> the persona, the header, its initial state and the header's sha256
 #[inline(never)]
-fn open_head(head: &str) -> Result<(Box<Persona>, Json), (usize, String)> {
+fn open_head(head: &str) -> Result<(Box<Persona>, Json, Box<State>, String), (usize, String)> {
     let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
     if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
     if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()) && k != "segment")) { return Err((1, unsupported(k))); }
@@ -651,9 +655,9 @@ fn open_head(head: &str) -> Result<(Box<Persona>, Json), (usize, String)> {
     if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
     let st0 = read_boxed(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, read_err(e, "the initial state: ")))?;
     let (hb, mut at, mut same) = (head.as_bytes(), 0usize, true);
-    write_header_seg(&p, doc, &st0, h.get("engine").and_then(Json::as_str).unwrap_or(""), h.get("segment"), HEADER_CHUNK, &mut |c: &[u8]| { same = same && hb.get(at..at + c.len()) == Some(c); at += c.len(); });
+    let digest = write_header_seg(&p, doc, &st0, h.get("engine").and_then(Json::as_str).unwrap_or(""), h.get("segment"), HEADER_CHUNK, &mut |c: &[u8]| { same = same && hb.get(at..at + c.len()) == Some(c); at += c.len(); });
     if !same || at != hb.len() { return Err((1, "the header is not as written".into())); }
-    Ok((p, h))
+    Ok((p, h, st0, digest))
 }
 /// A checkpoint line's own checks (`cp`, without its line ending, at 1-based line `at`; `before` = the line before it) for persona
 /// `p`, with `open_at`'s messages: canonical JSON, its four fields, right after an event line (prev), at that event's count, with
@@ -695,7 +699,7 @@ fn read_boxed(p: &Persona, j: &Json) -> Result<Box<State>, InErr> { State::read(
 fn check_chain_head(text: &str) -> Result<(Status, Box<Persona>, Json), InErr> {
     let ls = lines(text);
     let err = |line: usize, why: String| perr("strand", format!("line {line}: {why}"));
-    let (hp, h) = open_head(ls.first().copied().unwrap_or("")).map_err(|(i, why)| err(i, why))?;
+    let (hp, h, _, _) = open_head(ls.first().copied().unwrap_or("")).map_err(|(i, why)| err(i, why))?;
     let canon = !engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
     let mut status = Status::Active;
     let mut n = 0u64;
