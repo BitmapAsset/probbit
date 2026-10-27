@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- Development build: the workspace version is `0.14.0-dev` (`probbit --version`, the `engine` of every strand header this
+  build writes, `verified_by`), so the strands it writes get the 0.14.0 behaviours below (the rounded deviation, the
+  canonical fold, `expect` on checkpoints, segments of a persona with an expectation block). Strands of 0.13.0 and earlier
+  replay as their engine wrote them.
 - **`probbit-persona`, the document layer and the strand writer as a library crate** (docs/embedding.md): `json`, `yaml`,
   `persona`, `run`, `router` and `evaluate` (feature `decide`), `sys`, and `strand` (the pure half of `probbit live`: `Live`, the
   line writers, `Replay`, `verify*`, with no file I/O) move out of probbit-cli, which uses them unchanged; every CLI output is

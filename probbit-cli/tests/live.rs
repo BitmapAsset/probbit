@@ -687,7 +687,7 @@ fn a_strand_with_checkpoints_resumes_with_and_without_an_expectation_block() {
 /// lines, each segment's header and repeated sealed line set aside, are the life logged to one file with a checkpoint after every
 /// 50th event; the stances and the state are the same; each segment verifies on its own (from its header's link) and
 /// `verify --chain` walks back through all three; a previous segment whose last line is not the sealed line exits 1 naming that
-/// file, a missing one exits 6 naming it; before 0.14.0 a persona with an expectation block cannot be segmented
+/// file, a missing one exits 6 naming it; a persona with an expectation block segments too (this engine writes 0.14.0-on strands)
 #[test]
 fn a_segmented_life_equals_one_file_and_verify_chain_walks_back() {
     let evs: Vec<String> = (0..120).map(|t| match t % 3 { 0 => r#"{"elapsed_hours":1,"praise":true}"#, 1 => r#"{"elapsed_hours":0.5,"error":true}"#, _ => r#"{"elapsed_hours":2}"# }.to_string()).collect();
@@ -719,9 +719,14 @@ fn a_segmented_life_equals_one_file_and_verify_chain_walks_back() {
     std::fs::remove_file(seg(1)).unwrap();
     let (c, v, _) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 6, "{v}");
     assert!(v.contains(r#""missing":"life.0001.strand""#) && v.contains(r#""segment_file":"life.0002.strand""#), "{v}");
-    // before 0.14.0 (this engine's strands) an expectation persona is not segmented
-    let (st3, f3) = (init("probbit-cli/tests/fixtures/monitor/tutor-expect.yaml", 2, "seg-x.json"), format!("{dir}/x.strand"));
-    let (c, _, e) = probbit(&["live", "probbit-cli/tests/fixtures/monitor/tutor-expect.yaml", "--state", &st3, "--clock", "fixed", "--events", &a, "--strand", &f3, "--segment-every", "50"]);
-    assert_eq!(c, 2, "{e}"); assert!(e.contains("--segment-every"), "{e}");
-    let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2, &st3]);
+    // this engine (0.14.0 on) segments an expectation persona: each checkpoint carries the memory, so each segment verifies
+    // from its sealed line and the chain walks back
+    let x = "probbit-cli/tests/fixtures/monitor/tutor-expect.yaml";
+    let xev: Vec<String> = (0..60).map(|t| format!(r#"{{"elapsed_hours":1,"praise":{}}}"#, t % 3 == 0)).collect(); let xa = events_file("seg-x.jsonl", &xev);
+    let (st3, f3) = (init(x, 2, "seg-x.json"), format!("{dir}/x.strand"));
+    let (c, _, e) = probbit(&["live", x, "--state", &st3, "--clock", "fixed", "--events", &xa, "--strand", &f3, "--segment-every", "25"]); assert_eq!(c, 0, "{e}");
+    let h = parse(read(&f3).lines().next().unwrap()); assert_eq!(s(&h, &["engine"]), &Json::Str(THIS.into()), "the header names this engine");
+    assert!(read(&format!("{dir}/x.0001.strand")).lines().nth(1).is_some_and(|l| l.contains(r#""expect":{"#)), "the sealed line carries the memory");
+    let (c, v, e) = probbit(&["live", "verify", &format!("{dir}/x.0002.strand"), "--chain"]); assert_eq!(c, 0, "{e}{v}"); assert_eq!(s(&parse(&v), &["segments"]), &Json::Num(3.0));
+    let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2, &st3, &xa]);
 }
