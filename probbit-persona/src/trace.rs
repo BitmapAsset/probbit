@@ -38,9 +38,10 @@ pub const NAMES: [&str; PHASES] = ["input", "expect", "prep", "compile", "solve"
 
 /// One event's breakdown: per phase (indexed by `Phase as usize`) the microseconds and the largest probe value; the event's
 /// total microseconds and the engine calls of the turn; RFC 0009: the expectation's programs answered from its cache
-/// (`expect_cached`) and solved (`expect_solved`)
+/// (`expect_cached`) and solved (`expect_solved`), and the part of `expect` spent building the members' programs
+/// (`expect_build_us`) and solving them (`expect_solve_us`, cache lookups included)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TurnTrace { pub us: [u64; PHASES], pub bytes: [u64; PHASES], pub total_us: u64, pub solves: u32, pub expect_cached: u32, pub expect_solved: u32 }
+pub struct TurnTrace { pub us: [u64; PHASES], pub bytes: [u64; PHASES], pub total_us: u64, pub solves: u32, pub expect_cached: u32, pub expect_solved: u32, pub expect_build_us: u64, pub expect_solve_us: u64 }
 
 /// A resume's walk (`strand::resume_from_record`, `strand::resume_boxed_from`): the lines read after its start, the event lines
 /// applied to a record that was behind (each one turn without the expectation's member solves) and their microseconds, and the
@@ -80,6 +81,7 @@ mod on {
     pub(crate) struct Stopwatch(Instant);
     impl Stopwatch { pub(crate) fn start() -> Stopwatch { Stopwatch(Instant::now()) } pub(crate) fn us(&self) -> u64 { us(self.0) } }
     pub(crate) fn expect_cache(hits: u32, solves: u32) { T.with(|t| { let mut g = t.borrow_mut(); if g.open.is_some() { g.acc.expect_cached += hits; g.acc.expect_solved += solves; } }) }
+    pub(crate) fn expect_split(build: u64, solve: u64) { T.with(|t| { let mut g = t.borrow_mut(); if g.open.is_some() { g.acc.expect_build_us += build; g.acc.expect_solve_us += solve; } }) }
     pub(crate) fn end() {
         let cur = T.with(|t| t.borrow().cur); enter(cur);
         T.with(|t| { let mut g = t.borrow_mut(); if let Some((t0, _)) = g.open.take() { g.acc.total_us = us(t0); g.last = g.acc; } })
@@ -88,7 +90,7 @@ mod on {
 #[cfg(feature = "turn_trace")]
 pub use on::{last, last_resume, set_probe};
 #[cfg(feature = "turn_trace")]
-pub(crate) use on::{begin, end, enter, expect_cache, resumed, Stopwatch};
+pub(crate) use on::{begin, end, enter, expect_cache, expect_split, resumed, Stopwatch};
 #[cfg(not(feature = "turn_trace"))]
 #[inline(always)]
 pub(crate) fn begin() {}
@@ -103,6 +105,9 @@ pub(crate) fn end() {}
 pub(crate) fn expect_cache(_hits: u32, _solves: u32) {}
 #[cfg(not(feature = "turn_trace"))]
 #[inline(always)]
+pub(crate) fn expect_split(_build: u64, _solve: u64) {}
+#[cfg(not(feature = "turn_trace"))]
+#[inline(always)]
 pub(crate) fn resumed(_t: ResumeTrace) {}
 #[cfg(not(feature = "turn_trace"))]
 pub(crate) struct Stopwatch;
@@ -110,12 +115,14 @@ pub(crate) struct Stopwatch;
 impl Stopwatch { #[inline(always)] pub(crate) fn start() -> Stopwatch { Stopwatch } #[inline(always)] pub(crate) fn us(&self) -> u64 { 0 } }
 
 impl TurnTrace {
-    /// As JSON: `{"us": {phase: µs}, "bytes": {phase: value}, "total_us": n, "solves": n, "expect_cached": n, "expect_solved": n}`
+    /// As JSON: `{"us": {phase: µs}, "bytes": {phase: value}, "total_us": n, "solves": n, "expect_cached": n, "expect_solved": n,
+    /// "expect_build_us": n, "expect_solve_us": n}`
     /// (phases in `Phase` order)
     pub fn to_json(&self) -> crate::json::Json {
         use crate::json::Json;
         let row = |v: &[u64; PHASES]| Json::Obj(NAMES.iter().zip(v).map(|(k, x)| (k.to_string(), Json::Num(*x as f64))).collect());
         Json::Obj(vec![("us".into(), row(&self.us)), ("bytes".into(), row(&self.bytes)), ("total_us".into(), Json::Num(self.total_us as f64)), ("solves".into(), Json::Num(self.solves as f64)),
-            ("expect_cached".into(), Json::Num(self.expect_cached as f64)), ("expect_solved".into(), Json::Num(self.expect_solved as f64))])
+            ("expect_cached".into(), Json::Num(self.expect_cached as f64)), ("expect_solved".into(), Json::Num(self.expect_solved as f64)),
+            ("expect_build_us".into(), Json::Num(self.expect_build_us as f64)), ("expect_solve_us".into(), Json::Num(self.expect_solve_us as f64))])
     }
 }

@@ -2487,9 +2487,11 @@ fn flags(p: &Persona, st: &State) -> Flags {
 #[derive(Clone)]
 struct Meta { vals: Vec<(String, Json)>, hist: Vec<(String, f64)>, ignored: Vec<String>, active: Vec<String>, conditional: Vec<String>, active_inputs: Vec<String>,
     rules: Vec<Vec<Json>>, owners: Vec<String>, new_mood: Vec<(String, Vec<f64>)>, new_learned: Table, contrib: Vec<Vec<(String, Vec<f64>)>>, field: Vec<Vec<f64>>, values: Vec<String>, twin: bool,
-    lift: Vec<(String, f64)>, learn_sign: f64 }
+    lift: Vec<(String, f64)>, learn_sign: f64, seed: u64, turn: u64 }
 #[derive(Default, Clone)]
-struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool>, exclude: Vec<String>, hist: Option<Vec<(String, f64)>> }
+struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool>, exclude: Vec<String>, hist: Option<Vec<(String, f64)>>,
+    /// RFC 0009 (the expectation's members): the compiler's arithmetic and the rules in force, no program text (Json::Null)
+    meta_only: bool }
 
 /// Inputs -> (values per declared input, history features, elapsed hours, ignored ids); a bad value is a persona error
 #[allow(clippy::type_complexity)]
@@ -2568,12 +2570,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let mut prev = st.prev.clone(); for v in &p.vars { prev.entry(v.id.clone()).or_insert_with(|| v.fallback.clone()); }
     for h in &active { habit_rules(p, h, &prev, &mut rules, &mut owners); }
     let owners = ordered_owners(owners);
-    // the program: values, vars (traits and moods, then the agenda steps), pairs, rules; positional = level i -> l<i>
-    let pos_vals = p.eng.positional; let sem = values_of(p);
-    let lmax = p.vars.iter().map(|v| v.levels.len()).max().unwrap_or(0);
-    let values: Vec<String> = if pos_vals { (0..lmax).map(|i| format!("l{i}")).chain(p.slots.iter().cloned()).collect() } else { sem.clone() };
-    let name_of = |var: &str, val: &str| -> String { let id = var.strip_prefix("free.").unwrap_or(var);
-        match p.var(id) { Some(v) if pos_vals => format!("l{}", v.levels.iter().position(|l| l == val).unwrap_or(0)), _ => val.to_string() } };
+    let sem = values_of(p);
     // `pursue`'s drive terms after its prior, learned, input and history contributions: genes, wanting, afterglow, deadline (§3 step 2b)
     let pix = dctx.as_ref().and_then(|_| p.vars.iter().position(|v| v.id == "pursue"));
     if let (Some(c), Some(i)) = (&dctx, pix) { for (src, vec) in &c.terms { if vec.iter().any(|x| *x != 0.0) { contrib[i].push((src.to_string(), vec.clone())); } } }
@@ -2586,11 +2583,28 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
         let l = floor_lifts(p, d, &field[i], &pursue_allowed(&p.vars[i].levels, &rules[ti]));
         if l.iter().any(|x| *x != 0.0) { contrib[i].push(("floor".into(), l.clone())); field[i] = total(&contrib[i], l.len()); }
         lift = d.goals.iter().zip(&l).filter(|(_, x)| **x != 0.0).map(|(g, x)| (g.id.clone(), *x)).collect(); } }
+    let use_twin = o.twin.unwrap_or(p.eng.twin);
+    let conditional = active.iter().filter(|h| !h.when.is_empty()).map(|h| h.id.clone()).collect();
+    let meta = Meta { vals, hist, ignored, active: active.iter().map(|h| h.id.clone()).collect(), conditional, active_inputs, rules, owners, new_mood, new_learned, contrib, field, values: sem, twin: use_twin, lift, learn_sign,
+        seed: st.seed, turn: st.turn };
+    if o.meta_only { return Ok((Json::Null, meta)); }
+    Ok((emit(p, &meta, &o.clamps), meta))
+}
+/// The program's text from the compiler's meta: values, vars (traits and moods, then the agenda steps) with their `h` from the
+/// field, pairs, the rules in force (renamed), the comment (persona, seed, turn, active habits); positional = level i -> l<i>
+#[inline(never)]
+fn emit(p: &Persona, meta: &Meta, clamps: &[(String, String)]) -> Json {
+    let (nv, ns) = (p.vars.len(), p.steps.len()); let (field, rules, use_twin) = (&meta.field, &meta.rules, meta.twin);
+    let pos_vals = p.eng.positional;
+    let lmax = p.vars.iter().map(|v| v.levels.len()).max().unwrap_or(0);
+    let values: Vec<String> = if pos_vals { (0..lmax).map(|i| format!("l{i}")).chain(p.slots.iter().cloned()).collect() } else { meta.values.clone() };
+    let name_of = |var: &str, val: &str| -> String { let id = var.strip_prefix("free.").unwrap_or(var);
+        match p.var(id) { Some(v) if pos_vals => format!("l{}", v.levels.iter().position(|l| l == val).unwrap_or(0)), _ => val.to_string() } };
     let mut pv = vec![];
     for (i, v) in p.vars.iter().enumerate() {
         let mut var = vec![("id".to_string(), Json::Str(v.id.clone())), ("allowed".into(), Json::Arr(v.levels.iter().map(|l| Json::Str(name_of(&v.id, l))).collect())),
             ("h".into(), Json::Obj(v.levels.iter().zip(&field[i]).filter(|(_, w)| **w != 0.0).map(|(l, w)| (name_of(&v.id, l), Json::Num(*w))).collect()))];
-        if let Some((_, c)) = o.clamps.iter().find(|(t, _)| *t == v.id) { var.push(("clamp".into(), Json::Str(name_of(&v.id, c)))); }
+        if let Some((_, c)) = clamps.iter().find(|(t, _)| *t == v.id) { var.push(("clamp".into(), Json::Str(name_of(&v.id, c)))); }
         pv.push(Json::Obj(var)); }
     for (j, s) in p.steps.iter().enumerate() {
         pv.push(Json::Obj(vec![("id".into(), Json::Str(format!("step.{s}"))), ("allowed".into(), jstrs(&p.slots)),
@@ -2603,9 +2617,8 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
         pairs.push((a.clone(), b.clone(), t)); }
     let pair_json = |i: &str, j: &str, t: &[Vec<f64>]| Json::Obj(vec![("i".into(), Json::Str(i.into())), ("j".into(), Json::Str(j.into())),
         ("table".into(), Json::Arr(t.iter().map(|r| Json::Arr(r.iter().map(|x| Json::Num(*x)).collect())).collect()))]);
-    let comment = format!("probbit persona {} {} seed {} turn {}; active habits: {}", p.name, p.version, st.seed, st.turn,
-        if active.is_empty() { "none".to_string() } else { active.iter().map(|h| h.id.as_str()).collect::<Vec<_>>().join(", ") });
-    let use_twin = o.twin.unwrap_or(p.eng.twin);
+    let comment = format!("probbit persona {} {} seed {} turn {}; active habits: {}", p.name, p.version, meta.seed, meta.turn,
+        if meta.active.is_empty() { "none".to_string() } else { meta.active.join(", ") });
     let mut twin_vars = vec![];
     if use_twin { for v in &pv { let Json::Obj(f) = v else { continue }; twin_vars.push(Json::Obj(f.iter().filter(|(k, _)| k != "clamp")
         .map(|(k, x)| if k == "id" { (k.clone(), Json::Str(format!("free.{}", x.as_str().unwrap()))) } else { (k.clone(), x.clone()) }).collect())); } }
@@ -2620,9 +2633,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
         lst.extend(rules[ki].iter().map(|r| rename(r, key, &name_of)));
         if *key == "all_different" && ns > 0 && use_twin { lst.push(Json::Obj(vec![("vars".into(), Json::Arr(p.steps.iter().map(|s| Json::Str(format!("free.step.{s}"))).collect()))])); }
         if !lst.is_empty() { prog.push((key.to_string(), Json::Arr(lst))); } }
-    let conditional = active.iter().filter(|h| !h.when.is_empty()).map(|h| h.id.clone()).collect();
-    let meta = Meta { vals, hist, ignored, active: active.iter().map(|h| h.id.clone()).collect(), conditional, active_inputs, rules, owners, new_mood, new_learned, contrib, field, values: sem, twin: use_twin, lift, learn_sign };
-    Ok((Json::Obj(prog), meta))
+    Json::Obj(prog)
 }
 /// A habit rule with its level names renamed to the program's values (positional: l<i>)
 fn rename(r: &Json, key: &str, name_of: &dyn Fn(&str, &str) -> String) -> Json {
@@ -3104,14 +3115,17 @@ pub fn program(p: &Persona, st: &State, raw: &Json) -> R<String> { Ok(text(&prog
 /// `program` as a document (RFC 0009: the expectation's members and the trajectory compile through it); the steps before the
 /// compiler pass the state boxed, as in the turn
 #[inline(never)]
-pub fn program_json(p: &Persona, st: &State, raw: &Json) -> R<Json> {
+pub fn program_json(p: &Persona, st: &State, raw: &Json) -> R<Json> { Ok(program_meta(p, st, raw, false)?.0) }
+/// `program_json` with the compiler's meta; `meta_only`: no program text (Json::Null), the field and the rules in force only
+#[inline(never)]
+fn program_meta(p: &Persona, st: &State, raw: &Json, meta_only: bool) -> R<(Json, Box<Meta>)> {
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     let (src, raw) = if p.senses.is_some() || p.credit().is_some() || p.has_needs() { take_src(p, raw, true)? } else { (None, raw) };
     let (pay, raw) = take_pay(p, raw)?;
     let (st, raw) = prep_boxed(p, st, &raw, src.as_ref(), true)?;
     let st = match &pay { Some(k) => credit_boxed(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
     let st = gate_boxed(p, st, &raw)?;
-    Ok(compile(p, &st, &raw, &Opts::default())?.0)
+    let (j, m) = compile(p, &st, &raw, &Opts { meta_only, ..Default::default() })?; Ok((j, Box::new(m)))
 }
 
 /// Static check: for every conditional habit and every pair of them (with every unconditional one), and every previous level of
@@ -4018,15 +4032,17 @@ fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg>
 /// one the cache is not consulted for the next 1, 2, 4, ... 32 events (a hit resets it; the rows are dropped meanwhile and the event
 /// after the pause fills them for the one after it to compare), so such a life keys two events in 34.
 #[derive(Clone, Debug)]
-pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool }
+pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool, modeled: u32 }
 impl Default for ExpectCache { fn default() -> ExpectCache { ExpectCache::new(true) } }
 impl ExpectCache {
     /// An empty cache; `on: false` solves every program (the receipt is the same)
-    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false } }
+    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false, modeled: 0 } }
     /// Whether the cache is used
     pub fn is_on(&self) -> bool { self.on }
     /// The last event's programs answered from the cache and solved
     pub fn last(&self) -> (u32, u32) { (self.hits, self.solves) }
+    /// The last event's programs solved as the event's own model with their own `h` (the rest of the solves: built and run)
+    pub fn modeled(&self) -> u32 { self.modeled }
     /// The rows held (at most the persona's `max_combos + 1`)
     pub fn len(&self) -> usize { self.rows.len() }
     /// Whether no row is held
@@ -4037,12 +4053,22 @@ impl ExpectCache {
         self.rows.capacity() * size_of::<([u8; 32], Marg)>() + self.used.capacity() + self.rows.iter().map(|(_, m)| m.capacity() * size_of::<(String, Vec<(String, f64)>)>()
             + m.iter().map(|(id, ls)| id.capacity() + ls.capacity() * size_of::<(String, f64)>() + ls.iter().map(|(l, _)| l.capacity()).sum::<usize>()).sum::<usize>()).sum::<usize>()
     }
-    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
+    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.modeled = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
         self.live = self.on && self.skip == 0; self.had = !self.rows.is_empty(); if self.skip > 0 { self.skip -= 1; } }
     fn end(&mut self) {
         // an event that had rows to compare and found none backs off; one that started empty only fills (the next one compares)
         if self.live { if self.hits > 0 { self.back = 0; } else if self.had { self.back = (self.back * 2).clamp(1, 32); self.skip = self.back; } }
         let mut i = 0; self.rows.retain(|_| { i += 1; self.used[i - 1] }); self.used.clear(); }
+    /// A row by key (None when the cache is paused or has none)
+    fn find(&mut self, key: &[u8; 32]) -> Option<Marg> {
+        if !self.live { return None; }
+        let i = self.rows.iter().position(|r| r.0 == *key)?; self.used[i] = true; self.hits += 1; Some(self.rows[i].1.clone())
+    }
+    /// A program solved here, not by `marg`: counted, and kept under `key` while the cache is live
+    fn keep(&mut self, key: Option<[u8; 32]>, m: &Option<Marg>) {
+        self.solves += 1;
+        if let (true, Some(k), Some(m)) = (self.live, key, m) { self.rows.push((k, m.clone())); self.used.push(true); }
+    }
     /// The program's exact marginals: from the cache when the program (without its comment) was solved before, else solved (the
     /// key's hasher lives in its own frame, not in the one that calls the engine)
     #[inline(never)]
@@ -4097,17 +4123,20 @@ pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, en
 fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
     let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
     let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
-    let mut solve = |ins: &Json| program_json(p, st, ins).ok().and_then(|prog| cache.marg(p, st, &prog, eng));
-    let a = solve(raw)?; let ed = solve(&with_elapsed(&Json::Obj(vec![]), &e))?;
     let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
+    // the programs: the event's own (A_t), the one with the hours only (E_t), then each other member's (its combo's latest inputs
+    // with this event's hours), in the mixture's order
+    let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
+    for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
+    let mut ms = members_marg(p, st, raw, &ins, eng, cache)?.into_iter();
+    let a = ms.next()??; let ed = ms.next()??;
     let cold = !mem.warm && key == "{}";
     // the members' marginals, weighted; a member that does not compile or solve exactly folds into the empty member
     let mut parts: Vec<(f64, Marg)> = vec![]; let mut empty_w = 0.0;
     for (k, w) in &ws {
         if *k == key { parts.push((*w, a.clone())); continue; }
         if k == "{}" { empty_w += w; continue; }
-        let rep = mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![]));
-        match solve(&with_elapsed(&rep, &e)) { Some(m) => parts.push((*w, m)), None => empty_w += w } }
+        match ms.next().flatten() { Some(m) => parts.push((*w, m)), None => empty_w += w } }
     // the empty member: E_t, or A_t itself when the event is time-only (ws[0], pushed first)
     if key != "{}" { parts.push((empty_w, ed.clone())); } else { parts[0].0 += empty_w; }
     let pi: Marg = a.iter().map(|(id, la)| (id.clone(), la.iter().map(|(l, _)| (l.clone(), parts.iter().fold(0.0, |acc, (w, m)|
@@ -4116,6 +4145,104 @@ fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engin
     let w_cur = ws.iter().find(|(k, _)| *k == key).map_or(ws[0].1, |x| x.1);
     let z = (!cold).then(|| ((1.0 + sig5(pred)).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
     Some(Deviation { s_self, pred, input: -w_cur.ln(), cold, member, z, members: ws.len(), terms: a.iter().zip(tp.iter().zip(&ts)).map(|((id, _), (x, y))| (id.clone(), *x, *y)).collect() })
+}
+/// A program's exact marginals the reference way: its text built (`program_json`) and run by the engine (`ExpectCache::marg`);
+/// turn_trace: the build and the solve timed apart (`expect_build_us`, `expect_solve_us`)
+#[inline(never)]
+fn text_marg(p: &Persona, st: &State, ins: &Json, eng: Engine, cache: &mut ExpectCache) -> Option<Marg> {
+    let t = crate::trace::Stopwatch::start(); let prog = program_json(p, st, ins).ok(); let b = t.us();
+    let m = prog.and_then(|prog| cache.marg(p, st, &prog, eng)); crate::trace::expect_split(b, t.us() - b); m
+}
+/// The event's own program's model parts, read once from its text (`run::from_json_parts`), with per variable of the persona
+/// (traits and moods, then the agenda steps) the value index of each of its levels in the program
+struct Skel { parts: crate::run::Parts, idx: Vec<Vec<usize>> }
+/// The expectation's programs -> per program its exact marginals (None: it does not compile or is not solved exactly); None when
+/// A_t or E_t has none (no deviation). With the cache off (`persona::deviation`, the reference) every program's text is built
+/// and run by the engine. With it on, A_t's text is built and read once; every other program is compiled without its text
+/// (`Opts::meta_only`) and, when its rules in force are A_t's, solved as A_t's model with its own `h` by the enumeration
+/// `run_program` would answer with (`run::enumerated`): the same model, the same marginals, bit for bit. Any other program
+/// (other rules, another tier) is built and run as the reference does. The cache's key for these programs: A_t's text without
+/// `comment` and the vars' `h` (its skeleton), then the program's field: equal keys, equal texts.
+#[inline(never)]
+fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, cache: &mut ExpectCache) -> Option<Vec<Option<Marg>>> {
+    let mut out = Vec::with_capacity(ins.len() + 1);
+    if !cache.on { out.push(text_marg(p, st, raw, eng, cache)); if out[0].is_none() { return None; }
+        for (i, x) in ins.iter().enumerate() { let m = text_marg(p, st, x, eng, cache); if i == 0 && m.is_none() { return None; } out.push(m); }
+        return Some(out); }
+    let t = crate::trace::Stopwatch::start();
+    let Ok((prog, meta)) = program_meta(p, st, raw, false) else { crate::trace::expect_split(t.us(), 0); return None };
+    let (b, t) = (t.us(), crate::trace::Stopwatch::start());
+    let skel = cache.live.then(|| skel_key(&prog));
+    let mut sk: Option<Option<Box<Skel>>> = None; // read on the first program the cache does not answer; Some(None): not usable
+    let a = model_marg(p, st, &prog, &meta, skel.as_ref(), &mut sk, true, eng, cache).flatten(); crate::trace::expect_split(b, t.us());
+    a.as_ref()?; out.push(a);
+    for (i, x) in ins.iter().enumerate() {
+        let t = crate::trace::Stopwatch::start();
+        let m = match program_meta(p, st, x, true) {
+            Err(_) => { crate::trace::expect_split(t.us(), 0); None }
+            Ok((_, mm)) if mm.rules == meta.rules => { let (b, t) = (t.us(), crate::trace::Stopwatch::start());
+                let r = model_marg(p, st, &prog, &mm, skel.as_ref(), &mut sk, false, eng, cache);
+                // another tier (or no usable skeleton): its text from its meta, run by the engine
+                let r = match r { Some(r) => r, None => { let prog = emit(p, &mm, &[]); cache.marg(p, st, &prog, eng) } }; crate::trace::expect_split(b, t.us()); r }
+            // other rules in force: its text from its meta (no second build), run by the engine
+            Ok((_, mm)) => { let prog = emit(p, &mm, &[]); let (b, t) = (t.us(), crate::trace::Stopwatch::start()); let m = cache.marg(p, st, &prog, eng); crate::trace::expect_split(b, t.us()); m } };
+        if i == 0 && m.is_none() { return None; }
+        out.push(m); }
+    Some(out)
+}
+/// One program of the event as A_t's model with its own `h` (from its compile meta `mm`; `own`: A_t itself, its parsed `h`):
+/// Some(marginals or None) as the engine would answer; None when the enumeration would not answer it (the caller runs it)
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn model_marg(p: &Persona, st: &State, prog: &Json, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
+    let key = skel.map(|s| field_key(s, &mm.field));
+    if let Some(k) = &key { if let Some(m) = cache.find(k) { return Some(Some(m)); } }
+    if sk.is_none() { *sk = Some(skel_parts(p, prog, mm)); }
+    let Some(Some(s)) = sk.as_ref() else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
+    let h = if own { s.parts.h().to_vec() } else { field_h(s, &mm.field) };
+    let Ok(mut m) = s.parts.model_with(h) else { cache.keep(key, &None); return Some(None) };
+    let Some(r) = crate::run::enumerated(&mut m, p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
+    let r = r.map(|mg| { let k = m.k; s.parts.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")).map(|(i, id)| (id.clone(), {
+        let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.parts.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
+    cache.modeled += 1; cache.keep(key, &r); Some(r)
+}
+/// A_t's text read into its parts, and the value index of every level -> None when the parts do not have the shape the compiler
+/// writes (then every program is run the reference way); checked: A_t's own field mapped to `h` is the `h` its text carries
+#[inline(never)]
+fn skel_parts(p: &Persona, prog: &Json, mm: &Meta) -> Option<Box<Skel>> {
+    let parts = crate::run::from_json_parts(prog).ok()?;
+    let (nv, ns) = (p.vars.len(), p.steps.len());
+    if parts.vars.len() != (nv + ns) * if mm.twin { 2 } else { 1 } { return None; }
+    let q = |name: &str| parts.values.iter().position(|x| x == name);
+    let mut idx = vec![];
+    for v in &p.vars { idx.push(v.levels.iter().enumerate().map(|(j, l)| q(&if p.eng.positional { format!("l{j}") } else { l.clone() })).collect::<Option<Vec<usize>>>()?); }
+    for _ in &p.steps { idx.push(p.slots.iter().map(|l| q(l)).collect::<Option<Vec<usize>>>()?); }
+    let s = Box::new(Skel { parts, idx });
+    (field_h(&s, &mm.field).iter().zip(s.parts.h()).all(|(a, b)| a.to_bits() == b.to_bits())).then_some(s)
+}
+/// A field (per persona variable, per level) as the program's `h` (n x k): the value index each level gets, 0 where the text
+/// omits a weight, the twins' rows copied
+fn field_h(s: &Skel, field: &[Vec<f64>]) -> Vec<f64> {
+    let (n, k, m) = (s.parts.vars.len(), s.parts.values.len(), s.idx.len()); let mut h = vec![0.0; n * k];
+    for r in 0..n { let i = r % m; for (&q, &w) in s.idx[i].iter().zip(&field[i]) { if w != 0.0 { h[r * k + q] = w; } } }
+    h
+}
+/// A_t's text without `comment` and without the vars' `h`, hashed as `prog_key` hashes a program
+#[inline(never)]
+fn skel_key(prog: &Json) -> [u8; 32] {
+    let mut h = Sha256::new(); h.update(b"skeleton");
+    if let Json::Obj(v) = prog { for (k, x) in v.iter().filter(|(k, _)| k != "comment") { hash_str(&mut h, k);
+        match (k.as_str(), x) { ("vars", Json::Arr(vs)) => { h.update(b"["); h.update(&(vs.len() as u64).to_le_bytes());
+            for var in vs { match var { Json::Obj(f) => { let f: Vec<&(String, Json)> = f.iter().filter(|(k, _)| k != "h").collect(); h.update(b"{"); h.update(&(f.len() as u64).to_le_bytes());
+                for (k, x) in f { hash_str(&mut h, k); hash_json(&mut h, x); } } x => hash_json(&mut h, x) } } }
+            _ => hash_json(&mut h, x) } } }
+    h.finish()
+}
+/// A program's key from A_t's skeleton and its field (each number by its bits, -0 as 0)
+fn field_key(skel: &[u8; 32], field: &[Vec<f64>]) -> [u8; 32] {
+    let mut h = Sha256::new(); h.update(skel);
+    for row in field { h.update(&(row.len() as u64).to_le_bytes()); for x in row { h.update(&(if *x == 0.0 { 0 } else { x.to_bits() }).to_le_bytes()); } }
+    h.finish()
 }
 /// The memory after an event: every count decays by 2^(-1/half_life), the event's combo gains one and keeps its inputs as its
 /// member; the learned normal (after the cold start) reads ln(1 + the logged pred) with the same half-life

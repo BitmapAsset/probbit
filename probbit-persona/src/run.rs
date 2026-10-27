@@ -22,7 +22,34 @@ pub struct Prog { pub m: Model, pub vars: Vec<String>, pub values: Vec<String>, 
 
 /// JSON (probbit_ir 1) -> Model. See docs/probbit-ir-json.md; strict: every field type-checked, unknown fields, duplicate ids / value
 /// names and empty domains rejected, with a structured error (its "Input contract").
-pub fn from_json(j: &Json) -> Result<Prog, InErr> {
+pub fn from_json(j: &Json) -> Result<Prog, InErr> { from_json_parts(j)?.into_prog() }
+/// A program read and lowered, before the compile pass (`compile_parts`) and the model: what `from_json` builds the model from.
+/// RFC 0009 (the expectation's members): programs that differ only in their vars' `h` share these, so a host reads the text once
+/// and builds each model with its own `h` (`Parts::model_with`).
+#[derive(Clone)]
+pub struct Parts { pub vars: Vec<String>, pub values: Vec<String>, h: Vec<f64>, allowed: Vec<bool>, clamp: Vec<Option<usize>>, pairs: Vec<Pair>, caps: Vec<Cap>, start: Option<Vec<usize>> }
+impl Parts {
+    /// The program's own `h` (n x k), as its text gives it
+    pub fn h(&self) -> &[f64] { &self.h }
+    /// The program's own model: the compile pass and `Model::new` on its `h`, as `from_json`
+    pub fn into_prog(self) -> Result<Prog, InErr> {
+        let Parts { vars, values, mut h, allowed, clamp, pairs, caps, start } = self; let (n, k) = (vars.len(), values.len());
+        let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
+        let mut m = Model::new(n, k, h, allowed, clamp, pairs, caps).map_err(|e| crate::json::value("", e))?; m.start = start;
+        Ok(Prog { m, vars, values, compiled })
+    }
+    /// The model of the same program with `h` (n x k, by variable then value index) in place of its own: each weight checked as
+    /// `json::weight` checks a weight of the text (a program whose text carries such a weight is refused), then the compile pass
+    /// and `Model::new` as `from_json` runs them
+    pub fn model_with(&self, mut h: Vec<f64>) -> Result<Model, InErr> {
+        if h.len() != self.h.len() || h.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return Err(crate::json::value("vars", "a weight beyond the finite weight limit")); }
+        let (pairs, caps, _) = compile_parts(self.values.len(), &mut h, self.pairs.clone(), self.caps.clone());
+        let mut m = Model::new(self.vars.len(), self.values.len(), h, self.allowed.clone(), self.clamp.clone(), pairs, caps).map_err(|e| crate::json::value("", e))?; m.start = self.start.clone();
+        Ok(m)
+    }
+}
+/// `from_json` up to the compile pass
+pub fn from_json_parts(j: &Json) -> Result<Parts, InErr> {
     use crate::json::{arr, at, count, fields, ix, keyed, limit, names, number, opt, req, schema, text, value, weight};
     fields(j, "", &["probbit_ir", "values", "vars", "pairs", "caps", "all_different", "implies", "tables", "precedes", "linear", "start", "comment"])?;
     if let Some(c) = opt(j, "comment") { text(c, "comment")?; }
@@ -185,10 +212,34 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
         for (c, cp) in caps.iter().enumerate() { let load: u128 = cp.members.iter().enumerate().filter(|&(_, &(i, v))| x[i] == v).map(|(t, _)| cp.w(t) as u128).sum();
             if load > cp.limit as u128 { return Err(value("start", format!("infeasible: lowered cap #{c} holds {load} > limit {}", cp.limit))); } }
         Some(x) } };
-    let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
-    let mut m = Model::new(n, k, h, allowed, clamp, pairs, caps).map_err(|e| value("", e))?; m.start = start;
     drop(vindex); // no_std: hashbrown's map drop is not `may_dangle`, so the borrow of `values` ends here, not at the scope end
-    Ok(Prog { m, vars, values, compiled })
+    Ok(Parts { vars, values, h, allowed, clamp, pairs, caps, start })
+}
+
+/// RFC 0009 (the expectation's members): the marginals `run` would put in a `decide` answer of `persona::run_program` (no
+/// deadline, no --exact-ms, frontier states `FRONTIER_MAX_STATES`, `sweeps` of fixed work) when its first exact tier answers it:
+/// over `exact_limit` raw plans the components tier (`exact_components_until(m, limit, FRONTIER_MAX_STATES, None)`), within it
+/// the whole-program enumeration (`exact_within(m, 5, limit, None, None)`). Some(Some(marginals, n x k)) for an exact verdict
+/// whose numbers are all finite (what `run_program`'s finite check reads: the plan's log weight, log Z, the top plans'
+/// probabilities, the marginals of the allowed values); Some(None) for an answer without an exact verdict (infeasible, or a number
+/// not finite); None when `run` would go on to another tier (that one declining), or would stop its exact tiers on the wall
+/// clock (`sweeps` 0 over the limit): the caller runs the program.
+pub fn enumerated(m: &mut Model, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> {
+    m.collective = true; m.cluster = true; m.cycles = true; // as `persona::run_program` sets them before `run`
+    let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();
+    let fin = |m: &Model, marg: &[f64]| (0..m.n * m.k).all(|q| !m.allowed[q] || marg[q].is_finite());
+    if space > exact_limit as f64 {
+        if sweeps == 0 { return None; }
+        let c = exact_components_until(m, exact_limit, FRONTIER_MAX_STATES, None)?;
+        if c.infeasible { return Some(None); }
+        let ok = c.map_logw.is_finite() && c.logz.is_finite() && (c.map_logw - c.logz).exp().is_finite() && fin(m, &c.marg);
+        return Some(ok.then_some(c.marg));
+    }
+    let e = exact_within(m, 5, exact_limit, None, None).0?;
+    if e.n_feasible == 0 { return Some(None); }
+    let lw = m.logw(&e.top[0].1);
+    let ok = lw.is_finite() && e.logz.is_finite() && e.top.iter().all(|(p, _)| p.is_finite()) && fin(m, &e.marg);
+    Some(ok.then_some(e.marg))
 }
 
 /// R19.6 (P2.1): `phases` on every `probbit run` answer, `[{"phase": name, "ms": wall}]` in order: parse (stdin JSON), compile
