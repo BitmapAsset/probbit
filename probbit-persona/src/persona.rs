@@ -4470,7 +4470,7 @@ mod tests {
     #[test]
     fn the_amplitude_tier_answers_two_valued_programs_and_declines_the_rest() {
         use crate::strand::{self, Clock, Live};
-        let text = include_str!("../../examples/persona/dispatch-policy.yaml").replace("engine:\n", "engine:\n  tier: amplitude\n");
+        let text = include_str!("../../examples/persona/dispatch-policy.yaml").replace("\r\n", "\n").replace("engine:\n", "engine:\n  tier: amplitude\n");
         let doc = crate::yaml::load(&text).ok().unwrap(); let p = build(&doc).unwrap(); let st = init(&p, Some(2), true, &run);
         for raw in [r#"{"blast":0}"#, r#"{"blast":0.9}"#, r#"{"blast":0.3,"error":true}"#] {
             let raw = json::parse(raw).unwrap(); let (a, _) = turn(&p, &st, &raw, false, &run, false).unwrap(); let (b, _) = turn(&p, &st, &raw, false, &run, false).unwrap();
