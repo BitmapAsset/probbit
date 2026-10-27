@@ -42,6 +42,12 @@ pub const NAMES: [&str; PHASES] = ["input", "expect", "prep", "compile", "solve"
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TurnTrace { pub us: [u64; PHASES], pub bytes: [u64; PHASES], pub total_us: u64, pub solves: u32, pub expect_cached: u32, pub expect_solved: u32 }
 
+/// A resume's walk (`strand::resume_from_record`, `strand::resume_boxed_from`): the lines read after its start, the event lines
+/// applied to a record that was behind (each one turn without the expectation's member solves) and their microseconds, and the
+/// whole call's microseconds (with the feature off: the counts, zero microseconds)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ResumeTrace { pub lines: u64, pub applied: u64, pub applied_us: u64, pub total_us: u64 }
+
 #[cfg(feature = "turn_trace")]
 mod on {
     use super::*;
@@ -66,6 +72,13 @@ mod on {
             let mut g = t.borrow_mut(); if let Some(b) = b { let x = &mut g.acc.bytes[prev as usize]; *x = (*x).max(b); }
             g.open = Some((t0, us(t0))); g.cur = ph; prev })
     }
+    thread_local! { static RT: RefCell<ResumeTrace> = RefCell::new(ResumeTrace::default()); }
+    /// The last resume's walk on this thread (zeros before the first)
+    pub fn last_resume() -> ResumeTrace { RT.with(|r| *r.borrow()) }
+    pub(crate) fn resumed(t: ResumeTrace) { RT.with(|r| *r.borrow_mut() = t) }
+    /// A clock read for the resume's counts
+    pub(crate) struct Stopwatch(Instant);
+    impl Stopwatch { pub(crate) fn start() -> Stopwatch { Stopwatch(Instant::now()) } pub(crate) fn us(&self) -> u64 { us(self.0) } }
     pub(crate) fn expect_cache(hits: u32, solves: u32) { T.with(|t| { let mut g = t.borrow_mut(); if g.open.is_some() { g.acc.expect_cached += hits; g.acc.expect_solved += solves; } }) }
     pub(crate) fn end() {
         let cur = T.with(|t| t.borrow().cur); enter(cur);
@@ -73,9 +86,9 @@ mod on {
     }
 }
 #[cfg(feature = "turn_trace")]
-pub use on::{last, set_probe};
+pub use on::{last, last_resume, set_probe};
 #[cfg(feature = "turn_trace")]
-pub(crate) use on::{begin, end, enter, expect_cache};
+pub(crate) use on::{begin, end, enter, expect_cache, resumed, Stopwatch};
 #[cfg(not(feature = "turn_trace"))]
 #[inline(always)]
 pub(crate) fn begin() {}
@@ -88,6 +101,13 @@ pub(crate) fn end() {}
 #[cfg(not(feature = "turn_trace"))]
 #[inline(always)]
 pub(crate) fn expect_cache(_hits: u32, _solves: u32) {}
+#[cfg(not(feature = "turn_trace"))]
+#[inline(always)]
+pub(crate) fn resumed(_t: ResumeTrace) {}
+#[cfg(not(feature = "turn_trace"))]
+pub(crate) struct Stopwatch;
+#[cfg(not(feature = "turn_trace"))]
+impl Stopwatch { #[inline(always)] pub(crate) fn start() -> Stopwatch { Stopwatch } #[inline(always)] pub(crate) fn us(&self) -> u64 { 0 } }
 
 impl TurnTrace {
     /// As JSON: `{"us": {phase: µs}, "bytes": {phase: value}, "total_us": n, "solves": n, "expect_cached": n, "expect_solved": n}`

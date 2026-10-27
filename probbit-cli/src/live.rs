@@ -496,6 +496,63 @@ mod tests {
             assert_eq!(verify(&on.0, &run).unwrap().get("events"), Some(&Json::Num(700.0))); } }
     }
 
+    /// S2 (docs/persona.md §5.7, "Resume from a record"): a life recorded unbroken, and the same life resumed by each path: the
+    /// boxed replay (every stance document and the individual it reaches), a record 1, 5 and 49 lines behind the strand
+    /// (`resume_from_record`: the trailing event lines applied, not solved), and the embedded resume from the header, each
+    /// checkpoint line and the lines after it (`resume_boxed_from`; the record last, and 5 behind). Each reaches the unbroken
+    /// state, chain head and expectation memory, and its next 10 events write the unbroken lines. Refused: a record the strand
+    /// does not log (or one before the checkpoint), a forged line re-chained, another persona. Expectation fixture persona,
+    /// engines 0.13.0 and 0.14.0, a checkpoint every 50; the glyph persona (no expectation block) with k = 1 and 3.
+    #[test]
+    fn every_resume_path_writes_the_unbroken_life() {
+        let y = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap();
+        let d = probbit_persona::yaml::load(&y).unwrap_or_else(|e| panic!("{}", e.msg)); let p = persona::build(&d).unwrap();
+        let mut d2 = d.clone(); put(&mut d2, &["identity", "version"], Json::Str("9".into())); let p2 = persona::build(&d2).unwrap(); assert_ne!(p2.digest, p.digest);
+        let mem = |l: &Live| l.expect.as_ref().map(|m| persona::canon(&m.to_json()));
+        let next10 = |l: &mut Live, from: usize| (from..from + 10).map(|t| l.event(&s1_event(t), &run).unwrap().1).collect::<Vec<_>>();
+        for engine in ["probbit 0.13.0", "probbit 0.14.0"] { for n_end in [499usize, 500] {
+            // the unbroken life: the text, the documents, the state after every event, then 10 more events
+            let (mut lv, head) = Live::start(p.clone(), &d, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
+            let (mut text, mut docs, mut sts) = (format!("{head}\n"), vec![], vec![lv.st.clone()]);
+            for t in 0..n_end { let (s, l) = lv.event(&s1_event(t), &run).unwrap(); text += &l; text.push('\n'); docs.push(persona::canon(&s)); sts.push(lv.st.clone());
+                if lv.n % 50 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+            let (want_st, want_head, want_mem) = (lv.st.digest.clone(), lv.head().to_string(), mem(&lv)); let want_next = next10(&mut lv, n_end);
+            let ctx = format!("{engine}, {n_end} events");
+            let same = |r: &mut Live, how: &str| { assert_eq!((r.n, r.st.digest.as_str(), r.head()), (n_end as u64, want_st.as_str(), want_head.as_str()), "{how} ({ctx})");
+                assert_eq!(mem(&*r), want_mem, "{how}: the expectation's memory ({ctx})"); assert_eq!(next10(r, n_end), want_next, "{how}: the next 10 lines ({ctx})"); };
+            // A: the boxed replay, every stance document
+            let ls = lines(&text); let mut r = Replay::open_boxed(ls[0]).unwrap(); let mut k = 0;
+            for l in &ls[1..] { if let Some(s) = r.step(l, &run).unwrap() { assert_eq!(persona::canon(&s), docs[k], "boxed replay, event {} ({ctx})", k + 1); k += 1; } }
+            assert_eq!(k, n_end); same(&mut *r.live, "the boxed replay");
+            // B: a record k lines behind (k = 0: the last; it equals resume's)
+            for kb in [0usize, 1, 5, 49] {
+                let mut b = resume_from_record(&text, &p, Box::new(sts[n_end - kb].clone()), Clock::Fixed, &run).unwrap_or_else(|e| panic!("k {kb}: {}: {} ({ctx})", e.path, e.msg));
+                same(&mut *b, &format!("a record {kb} behind")); }
+            let mut b = resume(&text, &p, sts[n_end].clone(), Clock::Fixed).unwrap(); same(&mut b, "resume");
+            // refusals: a record from another life; a record before the checkpoint (C); a forged line, re-chained; another persona
+            let other = persona::init(&p, Some(9), true, &run);
+            assert_eq!(resume_from_record(&text, &p, Box::new(other.clone()), Clock::Fixed, &run).err().unwrap().path, "state");
+            let mut f: Vec<String> = ls.iter().map(|l| l.to_string()).collect(); let at = f.len() - 3;
+            let mut j = json::parse(&f[at]).unwrap(); if let Json::Obj(v) = &mut j { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") {
+                if let Some((_, x)) = ins.iter_mut().find(|(k, _)| k == "praise") { *x = Json::Bool(!matches!(x, Json::Bool(true))); } } }
+            f[at] = persona::canon(&j);
+            for i in at + 1..f.len() { let mut j = json::parse(&f[i]).unwrap(); let pd = persona::digest_of(&f[i - 1]);
+                if let Json::Obj(v) = &mut j { if let Some((_, x)) = v.iter_mut().find(|(k, _)| k == "prev") { *x = Json::Str(pd); } } f[i] = persona::canon(&j); }
+            let forged = f.join("\n") + "\n";
+            let e = resume_from_record(&forged, &p, Box::new(sts[n_end - 5].clone()), Clock::Fixed, &run).err().unwrap();
+            assert!(e.msg.contains(&format!("line {}: the ", at + 1)) && e.msg.contains("differs"), "forged: {} ({ctx})", e.msg);
+            assert!(resume_from_record(&text, &p2, Box::new(sts[n_end - 5].clone()), Clock::Fixed, &run).err().unwrap().msg.contains("another persona"));
+        } }
+        // no expectation block, with glyphs: the logged glyph is taken as written and the line checked around it
+        let on = with_display(&json::parse(GDOC).unwrap(), &[("display", GLYPHS)]); let pn = persona::build(&on).unwrap();
+        let (mut lv, head) = Live::start(pn.clone(), &on, persona::init(&pn, Some(1), true, &run), Clock::Fixed, "probbit test");
+        let (mut text, mut sts) = (format!("{head}\n"), vec![lv.st.clone()]);
+        for t in 0..40 { let (_, l) = lv.event(&gev(t), &run).unwrap(); text += &l; text.push('\n'); sts.push(lv.st.clone()); }
+        let want: Vec<String> = (40..50).map(|t| lv.event(&gev(t), &run).unwrap().1).collect();
+        for kb in [1usize, 3] { let mut b = resume_from_record(&text, &pn, Box::new(sts[40 - kb].clone()), Clock::Fixed, &run).unwrap();
+            assert_eq!((40..50).map(|t| b.event(&gev(t), &run).unwrap().1).collect::<Vec<_>>(), want, "glyph persona, k {kb}"); }
+    }
+
     /// S1 measurements (ignored: run with --ignored --nocapture): the expectation fixture persona, 500 events, a checkpoint every
     /// 50: checkpoint line bytes (max_combos 16 and 64), and resume's time at 166 and 500 events, 0.13.0 (fold from the header)
     /// against 0.14.0 (fold from the last checkpoint), with the full replay for scale

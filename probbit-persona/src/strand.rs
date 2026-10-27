@@ -792,14 +792,146 @@ pub fn resume_boxed(text: &str, p: &Persona, st: Box<State>, clock: Clock) -> Re
     Ok(lv)
 }
 
+/// Continue a strand from a state record that may be behind it (docs/persona.md §5.7, "Resume from a record"): `st` is the state
+/// some line logs (an event line's `state`, a checkpoint's, or the header's), not necessarily the last; a reboot between a line
+/// and its record leaves the record k lines behind. The whole strand is chain-checked as by `resume`; then the walk starts at the
+/// last checkpoint at or before the record's line (the header without one), and every event line after the record's line is
+/// **applied** to the record: its turn run on the logged inputs (the main solve; the expectation's member solves are not run: the
+/// line's logged deviation is folded as `resume` folds it), the stance and state digests and the line's bytes checked (its logged
+/// `deviation` and `glyph` taken as written: `verify` recomputes them), rest and control lines applied as the live writer applies
+/// them. -> the individual after the strand's last line, as a header replay reaches it, byte for byte. Refused, with the line,
+/// when the record is no state the strand logs, a line differs from its application, or the persona is another one.
+#[inline(never)]
+pub fn resume_from_record(text: &str, p: &Persona, st: Box<State>, clock: Clock, eng: Engine) -> Result<Box<Live>, InErr> {
+    let bad = |m: String| perr("strand", m);
+    if !text.ends_with('\n') { return Err(bad("its last line is incomplete (no newline at the end)".into())); }
+    let (_, q, h) = check_chain_head(text)?;
+    let ls = lines(text);
+    // the record's line: the last whose logged state is the record (each logs its own: the state carries the turn)
+    let want = format!("\"{}\"", st.digest);
+    let a = (1..ls.len()).rev().find(|&i| ls[i].contains(&want)).unwrap_or(0);
+    let dev_full = engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
+    // the walk starts at the last checkpoint at or before it (a segment's sealed line at the latest), whose memory it reads; the
+    // header otherwise (and for an expectation block before 0.14.0, whose checkpoints do not carry the memory)
+    let c = last_checkpoint(&ls[..=a.max(1).min(ls.len() - 1)], 0).filter(|_| !(dev_full && q.expect.is_some()) || h.get("segment").is_some());
+    let (cp, from) = match c { Some(c) => (Some((ls[c], c + 1)), c + 1), None => (None, 1) };
+    resume_walk(q, &h, ls[0], cp, ls[from..].iter().copied(), p, st, clock, eng)
+}
+/// The walk of a resume: from the header (`cp` None) or a checkpoint line (and its line number), over the lines after it.
+/// Every line is chain-checked; the record `st` anchors at the line that logs its state; the event lines after that line are
+/// applied (`apply_line`); the expectation's memory is the start's, folded over every event line.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn resume_walk<S: AsRef<str>>(q: Box<Persona>, h: &Json, head: &str, cp: Option<(&str, usize)>, trailing: impl IntoIterator<Item = S>, p: &Persona, st: Box<State>, clock: Clock, eng: Engine) -> Result<Box<Live>, InErr> {
+    let sw = crate::trace::Stopwatch::start();
+    let mut tr = crate::trace::ResumeTrace::default();
+    let err = |line: usize, why: String| perr("strand", format!("line {line}: {why}"));
+    if q.digest != p.digest { return Err(perr("strand", format!("it is another persona's ({} != {})", &q.digest[..19], &p.digest[..19]))); }
+    let dev_full = engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
+    let canon = !dev_full;
+    let (mut n, mut prev_line, logged, mut mem, mut at) = match cp {
+        None => (0, head.to_string(), h.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string(), q.expect.as_ref().map(|_| new_mem(dev_full)), 1),
+        Some((c, at)) => { let (cn, _, cst, cmem) = check_checkpoint(&q, canon, None, c, at).map_err(|(i, why)| err(i, why))?;
+            let mem = if q.expect.is_some() { cmem } else { None };
+            (cn, c.to_string(), cst.digest.clone(), mem, at) } };
+    let mut prev = persona::digest_of(&prev_line);
+    // the record: anchored once the walk reaches the line that logs its state; from there on it is the individual's state
+    let mut rec = Some(st);
+    let mut cur: Option<Box<State>> = if rec.as_ref().is_some_and(|s| s.digest == logged) { rec.take() } else { None };
+    let (mut status, mut tail, mut rest) = (Status::Active, 0u64, None::<String>);
+    for l in trailing {
+        let l = l.as_ref(); at += 1; tr.lines += 1;
+        let j = json::parse(l).map_err(|e| err(at, format!("not JSON: {}", e.msg)))?;
+        if persona::canon(&j) != l { return Err(err(at, "not canonical JSON".into())); }
+        if j.get("prev").and_then(Json::as_str) != Some(prev.as_str()) { return Err(err(at, "prev is not the sha256 of the line before".into())); }
+        if let Some(k) = unknown_key(&j) { return Err(err(at, unsupported(k))); }
+        if rest.is_some() && !matches!(kind(&j), Kind::Event) { return Err(err(at - 1, "a rest line must be followed by its event line".into())); }
+        match kind(&j) {
+            Kind::Rest => { if status != Status::Active { return Err(err(at, format!("rest line while {}", status.name()))); } rest = Some(l.to_string()); }
+            Kind::Control => { let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
+                status = status.after(f("control")).map_err(|e| err(at, e.msg))?;
+                let line = control_line(f("prev"), f("control"), f("by"), f("reason"), f("at")).map_err(|e| err(at, e.msg))?;
+                if line != l { return Err(err(at, "the control line differs".into())); }
+                // as the live writer: no credit crosses a control line; `erase` returns the learned weights to zero
+                if let Some(s) = cur.as_mut() { let mut z = Box::new(s.zero_credit(&q)); if f("control") == "erase" { z = Box::new(z.erased(&q)); } *s = z; }
+                tail += 1; }
+            Kind::Checkpoint => {
+                if status != Status::Active { return Err(err(at, format!("checkpoint while {}", status.name()))); }
+                let (cn, _, cst, cmem) = check_checkpoint(&q, canon, Some(&prev_line), l, at).map_err(|(i, why)| err(i, why))?;
+                if cn != n { return Err(err(at, "checkpoint event count differs".into())); }
+                if q.expect.is_some() && cmem.is_some() { mem = cmem; }
+                if cur.is_none() && rec.as_ref().is_some_and(|s| s.digest == cst.digest) { cur = rec.take(); }
+                tail = 0; }
+            Kind::Event => {
+                if status != Status::Active { return Err(err(at, format!("event while {}", status.name()))); }
+                n += 1;
+                if j.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err(err(at, format!("n is not {n}"))); }
+                let Some(Json::Obj(_)) = j.get("inputs") else { return Err(err(at, "no input object".into())) };
+                for k in ["state", "stance"] {
+                    if !j.get(k).and_then(Json::as_str).is_some_and(|s| s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_hexdigit())) {
+                        return Err(err(at, format!("invalid {k} digest")));
+                    }
+                }
+                let logged = j.get("state").and_then(Json::as_str).unwrap_or("");
+                match cur.as_mut() {
+                    Some(s) => { let t0 = crate::trace::Stopwatch::start();
+                        *s = apply_line(&q, s, &j, l, rest.as_deref(), eng).map_err(|why| err(at, why))?;
+                        tr.applied += 1; tr.applied_us += t0.us(); }
+                    None => if rec.as_ref().is_some_and(|s| s.digest == logged) { cur = rec.take(); } }
+                rest = None;
+                if let Some(m) = mem.as_mut() { persona::expect_step(&q, m, j.get("inputs").unwrap_or(&Json::Null), logged_pred(&j)); }
+                tail = 0; } }
+        prev = persona::digest_of(l); prev_line.clear(); prev_line.push_str(l);
+    }
+    if rest.is_some() { return Err(err(at, "a rest line must be followed by its event line".into())); }
+    let Some(st) = cur else {
+        let d = rec.as_ref().map_or("", |s| s.digest.as_str());
+        return Err(perr("state", format!("not a state this strand logs from where the resume starts ({}): neither the start's nor any line's after it", &d[..d.len().min(19)])));
+    };
+    let mut lv = Live::boxed(q, st, clock, prev, n, mem, dev_full);
+    lv.status = status; lv.controls = tail;
+    tr.total_us = sw.us(); crate::trace::resumed(tr);
+    Ok(lv)
+}
+/// One recorded event line applied to the state before it (`resume_from_record`): the line's inputs stamped as the live writer
+/// stamps them on the fixed clock (its logged `elapsed_hours`), a rest line due before it recomputed against the logged one, the
+/// turn run, and the line written again from what the turn gives (n, inputs, stance digest, state digest, prev) with the logged
+/// `deviation` and `glyph` -> the state after it, or what differs. Without the expectation's member solves: the deviation and
+/// the glyph that reads it are the line's.
+#[inline(never)]
+fn apply_line(p: &Persona, st: &State, j: &Json, l: &str, rest: Option<&str>, eng: Engine) -> Result<Box<State>, String> {
+    let ev = j.get("inputs").unwrap_or(&Json::Null);
+    let Json::Obj(kv) = ev else { return Err("no input object".into()) };
+    let mut kv: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect();
+    let e = match ev.get("elapsed_hours") { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err("event.elapsed_hours: a number >= 0".into()) };
+    kv.push(("elapsed_hours".into(), Json::Num(q6(e))));
+    let inputs = Json::Obj(kv);
+    match (persona::rest_line_digest(p, st, &inputs), rest) {
+        (Some((r, rd)), Some(lr)) => { let rp = json::parse(lr).ok().and_then(|x| x.get("prev").and_then(Json::as_str).map(str::to_string)).unwrap_or_default();
+            if rest_line(&rp, r, &rd) != lr { return Err("the rest line differs".into()); } }
+        (Some(_), None) => return Err("a rest line is due before this event and missing".into()),
+        (None, Some(_)) => return Err("a rest line where none is due".into()),
+        (None, None) => {} }
+    let (stance, ns) = persona::turn_boxed(p, st, &inputs, false, eng, false).map_err(|e| read_err(e, ""))?;
+    let sd = persona::stance_sha(&stance);
+    if j.get("stance").and_then(Json::as_str) != Some(sd.as_str()) { return Err("the stance differs".into()); }
+    if j.get("state").and_then(Json::as_str) != Some(ns.digest.as_str()) { return Err("the state differs".into()); }
+    let mut lj = vec![("n".into(), j.get("n").cloned().unwrap_or(Json::Null)), ("inputs".into(), inputs), ("stance".into(), Json::Str(sd)),
+        ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), j.get("prev").cloned().unwrap_or(Json::Null))];
+    for k in ["deviation", "glyph"] { if let Some(x) = j.get(k) { lj.push((k.into(), x.clone())); } }
+    if persona::canon(&Json::Obj(lj)) != l { return Err("the line differs".into()); }
+    Ok(ns)
+}
+/// RFC 0009: an event line's logged prediction (none on a cold start), the value the expectation's memory folds
+fn logged_pred(j: &Json) -> Option<f64> { j.get("deviation").filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64) }
+
 /// The expectation's empty memory: the canonical fold from 0.14.0 (`dev_full` false), the fold before it otherwise
 fn new_mem(dev_full: bool) -> persona::ExpectMem { if dev_full { persona::ExpectMem::new() } else { persona::ExpectMem::canonical() } }
 /// RFC 0009: the expectation's memory `m` with the event lines of `lines` folded in, one line read at a time
 #[inline(never)]
 fn expect_fold(q: &Persona, mut m: persona::ExpectMem, lines: &[&str]) -> persona::ExpectMem {
-    for l in lines.iter() { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
-        let lp = d.filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64);
-        persona::expect_step(q, &mut m, j.get("inputs").unwrap_or(&Json::Null), lp); } } }
+    for l in lines.iter() { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) {
+        persona::expect_step(q, &mut m, j.get("inputs").unwrap_or(&Json::Null), logged_pred(&j)); } } }
     m
 }
 /// The audit of a recorded life (`probbit persona bound PERSONA --audit STRAND`): the strand replayed line by line; after every
