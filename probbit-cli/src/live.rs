@@ -529,9 +529,22 @@ mod tests {
                 let mut b = resume_from_record(&text, &p, Box::new(sts[n_end - kb].clone()), Clock::Fixed, &run).unwrap_or_else(|e| panic!("k {kb}: {}: {} ({ctx})", e.path, e.msg));
                 same(&mut *b, &format!("a record {kb} behind")); }
             let mut b = resume(&text, &p, sts[n_end].clone(), Clock::Fixed).unwrap(); same(&mut b, "resume");
+            // C: from the header (no checkpoint) and from every checkpoint line, the trailing lines one at a time
+            let cps: Vec<usize> = (1..ls.len()).filter(|&i| ls[i].starts_with(r#"{"checkpoint":"#)).collect();
+            if engine == "probbit 0.13.0" { assert!(resume_boxed_from(ls[0], Some(ls[cps[0]]), cps[0] + 1, ls[cps[0] + 1..].iter(), &p, Box::new(sts[n_end].clone()), Clock::Fixed, &run).is_err()); }
+            let starts: Vec<Option<usize>> = if engine == "probbit 0.13.0" { vec![None] } else { std::iter::once(None).chain(cps.iter().copied().map(Some)).collect() };
+            for c in starts { for kb in [0usize, 5] { let (cp, from) = c.map_or((None, 1), |c| (Some(ls[c]), c + 1));
+                // a record older than the checkpoint is refused (below); the walk starts at the checkpoint
+                if cp.and_then(|l| json::parse(l).ok()).and_then(|j| j.get("checkpoint").and_then(Json::as_f64)).is_some_and(|cn| cn as usize > n_end - kb) { continue; }
+                let tr: Vec<String> = ls[from..].iter().map(|l| l.to_string()).collect();
+                let mut x = resume_boxed_from(ls[0], cp, from, tr, &p, Box::new(sts[n_end - kb].clone()), Clock::Fixed, &run)
+                    .unwrap_or_else(|e| panic!("from line {from}, k {kb}: {}: {} ({ctx})", e.path, e.msg));
+                same(&mut *x, &format!("the embedded resume from line {from}, k {kb}")); } }
             // refusals: a record from another life; a record before the checkpoint (C); a forged line, re-chained; another persona
             let other = persona::init(&p, Some(9), true, &run);
             assert_eq!(resume_from_record(&text, &p, Box::new(other.clone()), Clock::Fixed, &run).err().unwrap().path, "state");
+            if let Some(&c) = cps.last() { if engine == "probbit 0.14.0" {
+                assert_eq!(resume_boxed_from(ls[0], Some(ls[c]), c + 1, ls[c + 1..].iter(), &p, Box::new(sts[1].clone()), Clock::Fixed, &run).err().unwrap().path, "state"); } }
             let mut f: Vec<String> = ls.iter().map(|l| l.to_string()).collect(); let at = f.len() - 3;
             let mut j = json::parse(&f[at]).unwrap(); if let Json::Obj(v) = &mut j { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") {
                 if let Some((_, x)) = ins.iter_mut().find(|(k, _)| k == "praise") { *x = Json::Bool(!matches!(x, Json::Bool(true))); } } }

@@ -817,7 +817,27 @@ pub fn resume_from_record(text: &str, p: &Persona, st: Box<State>, clock: Clock,
     let (cp, from) = match c { Some(c) => (Some((ls[c], c + 1)), c + 1), None => (None, 1) };
     resume_walk(q, &h, ls[0], cp, ls[from..].iter().copied(), p, st, clock, eng)
 }
-/// The walk of a resume: from the header (`cp` None) or a checkpoint line (and its line number), over the lines after it.
+/// The embedded resume (docs/embedding.md "Resume on a body"): continue a strand from its header line `head` (the persona
+/// document, the engine and the initial state it carries), its last checkpoint line `cp` (None before the first: the walk starts
+/// at the header) and the lines after that checkpoint, read one at a time from `trailing` (a host reads them from its store at the
+/// checkpoint's offset), never the whole strand. `line` is the checkpoint's 1-based line number in the strand, for messages (0:
+/// lines are counted from the checkpoint). The header is checked as `verify` checks it (built once, written again in pieces); the
+/// checkpoint line by its own fields (canonical, its state and memory read, at an event count): its link to the line before it is
+/// the host's (the offset it stored), as a segment's sealed line is taken on its link. Each trailing line is chain-checked as
+/// `resume` checks it, and the record `st` may be any state logged from the checkpoint on (the event lines after it are applied, as
+/// by `resume_from_record`). Cost: O(trailing lines), plus the header's check and the persona's build.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+pub fn resume_boxed_from<S: AsRef<str>>(head: &str, cp: Option<&str>, line: usize, trailing: impl IntoIterator<Item = S>, p: &Persona, st: Box<State>, clock: Clock, eng: Engine) -> Result<Box<Live>, InErr> {
+    let (q, h, _, _) = open_head(head).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?;
+    let dev_full = engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
+    if cp.is_some() && dev_full && q.expect.is_some() {
+        return Err(perr("strand", "before engine 0.14.0 a checkpoint does not carry the expectation's memory: resume from the whole strand"));
+    }
+    if cp.is_none() && h.get("segment").is_some() { return Err(perr("strand", "a segment resumes from its sealed line (line 2), not from its header")); }
+    resume_walk(q, &h, head, cp.map(|c| (c, line.max(1))), trailing, p, st, clock, eng)
+}
+/// The walk both resumes share: from the header (`cp` None) or a checkpoint line (and its line number), over the lines after it.
 /// Every line is chain-checked; the record `st` anchors at the line that logs its state; the event lines after that line are
 /// applied (`apply_line`); the expectation's memory is the start's, folded over every event line.
 #[inline(never)]
