@@ -4233,9 +4233,10 @@ fn text_marg(p: &Persona, st: &State, ins: &Json, eng: Engine, cache: &mut Expec
     let t = crate::trace::Stopwatch::start(); let prog = program_json(p, st, ins).ok(); let b = t.us();
     let m = prog.and_then(|prog| cache.marg(p, st, &prog, eng)); crate::trace::expect_split(b, t.us() - b); m
 }
-/// The event's own program's model parts, read once from its text (`run::from_json_parts`), with per variable of the persona
-/// (traits and moods, then the agenda steps) the value index of each of its levels in the program
-struct Skel { parts: crate::run::Parts, idx: Vec<Vec<usize>> }
+/// The event's own program read once from its text (`run::from_json_parts`) into the members' one model (`run::Members`: its
+/// parts moved in, no second copy), its variables, values and own `h`, with per variable of the persona (traits and moods, then
+/// the agenda steps) the value index of each of its levels in the program
+struct Skel { vars: Vec<String>, values: Vec<String>, h0: Vec<f64>, mm: crate::run::Members, idx: Vec<Vec<usize>> }
 /// The expectation's programs -> per program its exact marginals (None: it does not compile or is not solved exactly); None when
 /// A_t or E_t has none (no deviation). With the cache off (`persona::deviation`, the reference) every program's text is built
 /// and run by the engine. With it on, A_t's text is built and read once; every other program is compiled without its text
@@ -4256,20 +4257,23 @@ fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, 
         Some(None) => { cache.reused = 1; if cache.check { assert!(program_json(p, st, raw).ok().and_then(|x| exact_marg(p, st, &x, eng)).is_none(), "A_t: not exact either way"); } return None }
         Some(Some(a)) => { let At { marg, meta } = *a; cache.reused = 1; (member_text(p, &meta), meta, Some(marg)) }
         None => { let Ok((prog, meta)) = program_meta(p, st, raw, false) else { crate::trace::expect_split(t.us(), 0); return None }; (prog, meta, None) } };
+    let mut prog = Some(prog);
     let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-    let skel = cache.live.then(|| skel_key(&prog));
+    let skel = cache.live.then(|| skel_key(prog.as_ref().unwrap()));
     let mut sk: Option<Option<Box<Skel>>> = None; // read on the first program the cache does not answer; Some(None): not usable
     let a = match own {
-        Some(m) => { if cache.check { at_check(p, st, raw, &prog, &m, eng); } if let Some(s) = &skel { cache.put(field_key(s, &meta.field), &m); } Some(m) }
-        None => model_marg(p, st, &prog, &meta, skel.as_ref(), &mut sk, &meta, true, eng, cache).flatten() };
+        Some(m) => { if cache.check { at_check(p, st, raw, prog.as_ref().unwrap(), &m, eng); } if let Some(s) = &skel { cache.put(field_key(s, &meta.field), &m); } Some(m) }
+        None => model_marg(p, st, &mut prog, &meta, skel.as_ref(), &mut sk, &meta, true, eng, cache).flatten() };
     crate::trace::expect_split(b, t.us());
     a.as_ref()?; out.push(a);
     for (i, x) in ins.iter().enumerate() {
+        // A_t's text is read no more once its skeleton is (the members' model holds what they need)
+        if sk.is_some() { prog = None; }
         let t = crate::trace::Stopwatch::start();
         let m = match program_meta(p, st, x, true) {
             Err(_) => { crate::trace::expect_split(t.us(), 0); None }
             Ok((_, mm)) if mm.rules == meta.rules => { let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-                let r = model_marg(p, st, &prog, &mm, skel.as_ref(), &mut sk, &meta, false, eng, cache);
+                let r = model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, &meta, false, eng, cache);
                 // another tier (or no usable skeleton): its text from its meta, run by the engine
                 let r = match r { Some(r) => r, None => { let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } }; crate::trace::expect_split(b, t.us()); r }
             // other rules in force: its text from its meta (no second build), run by the engine
@@ -4292,37 +4296,47 @@ fn at_check(p: &Persona, st: &State, raw: &Json, prog: &Json, m: &Marg, eng: Eng
 /// Some(marginals or None) as the engine would answer; None when the enumeration would not answer it (the caller runs it)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn model_marg(p: &Persona, st: &State, prog: &Json, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, am: &Meta, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
+fn model_marg(p: &Persona, st: &State, prog: &mut Option<Json>, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, am: &Meta, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
     let key = skel.map(|s| field_key(s, &mm.field));
     if let Some(k) = &key { if let Some(m) = cache.find(k) { return Some(Some(m)); } }
-    if sk.is_none() { *sk = Some(skel_parts(p, prog, am)); }
-    let Some(Some(s)) = sk.as_ref() else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
-    let h = if own { s.parts.h().to_vec() } else { field_h(s, &mm.field) };
-    let Ok(mut m) = s.parts.model_with(h) else { cache.keep(key, &None); return Some(None) };
-    let Some(r) = crate::run::enumerated(&mut m, p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
-    let r = r.map(|mg| { let k = m.k; s.parts.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")).map(|(i, id)| (id.clone(), {
-        let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.parts.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
+    // A_t's text is read into its parts and dropped before the members' model is built from them (A_t itself, unhanded, keeps
+    // its text: its own fallback runs it)
+    if sk.is_none() { *sk = Some(if own { prog.as_ref().and_then(|x| skel_parts(p, x, am)) } else { prog.take().and_then(|x| skel_parts_owned(p, x, am)) }); }
+    let own_run = |prog: &Option<Json>, cache: &mut ExpectCache| prog.as_ref().and_then(|x| cache.marg(p, st, x, eng));
+    let Some(Some(s)) = sk.as_mut() else { return if own { Some(own_run(prog, cache)) } else { None } };
+    let h = if own { s.h0.clone() } else { field_h(s, &mm.field) };
+    if s.mm.set_h(h).is_err() { cache.keep(key, &None); return Some(None) }
+    let Some(r) = crate::run::enumerated(&mut s.mm.m, p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(own_run(prog, cache)) } else { None } };
+    let r = r.map(|mg| { let m = &s.mm.m; let k = m.k; s.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")).map(|(i, id)| (id.clone(), {
+        let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
     cache.modeled += 1; cache.keep(key, &r); Some(r)
 }
 /// A_t's text read into its parts, and the value index of every level -> None when the parts do not have the shape the compiler
 /// writes (then every program is run the reference way); checked: A_t's own field mapped to `h` is the `h` its text carries
 #[inline(never)]
-fn skel_parts(p: &Persona, prog: &Json, mm: &Meta) -> Option<Box<Skel>> {
-    let parts = crate::run::from_json_parts(prog).ok()?;
+fn skel_parts(p: &Persona, prog: &Json, mm: &Meta) -> Option<Box<Skel>> { skel_of(p, crate::run::from_json_parts(prog).ok()?, mm) }
+/// `skel_parts`, the text dropped once its parts are read
+#[inline(never)]
+fn skel_parts_owned(p: &Persona, prog: Json, mm: &Meta) -> Option<Box<Skel>> { let parts = crate::run::from_json_parts(&prog).ok(); drop(prog); skel_of(p, parts?, mm) }
+/// The skeleton from A_t's parts (`skel_parts`)
+fn skel_of(p: &Persona, parts: crate::run::Parts, mm: &Meta) -> Option<Box<Skel>> {
     let (nv, ns) = (p.vars.len(), p.steps.len());
     if parts.vars.len() != (nv + ns) * if mm.twin { 2 } else { 1 } { return None; }
     let q = |name: &str| parts.values.iter().position(|x| x == name);
     let mut idx = vec![];
     for v in &p.vars { idx.push(v.levels.iter().enumerate().map(|(j, l)| q(&if p.eng.positional { format!("l{j}") } else { l.clone() })).collect::<Option<Vec<usize>>>()?); }
     for _ in &p.steps { idx.push(p.slots.iter().map(|l| q(l)).collect::<Option<Vec<usize>>>()?); }
-    let s = Box::new(Skel { parts, idx });
-    (field_h(&s, &mm.field).iter().zip(s.parts.h()).all(|(a, b)| a.to_bits() == b.to_bits())).then_some(s)
+    let (n, k) = (parts.vars.len(), parts.values.len());
+    if !field_hn(n, k, &idx, &mm.field).iter().zip(parts.h()).all(|(a, b)| a.to_bits() == b.to_bits()) { return None; }
+    let (vars, values, h0, mm) = parts.into_members()?;
+    Some(Box::new(Skel { vars, values, h0, mm, idx }))
 }
 /// A field (per persona variable, per level) as the program's `h` (n x k): the value index each level gets, 0 where the text
 /// omits a weight, the twins' rows copied
-fn field_h(s: &Skel, field: &[Vec<f64>]) -> Vec<f64> {
-    let (n, k, m) = (s.parts.vars.len(), s.parts.values.len(), s.idx.len()); let mut h = vec![0.0; n * k];
-    for r in 0..n { let i = r % m; for (&q, &w) in s.idx[i].iter().zip(&field[i]) { if w != 0.0 { h[r * k + q] = w; } } }
+fn field_h(s: &Skel, field: &[Vec<f64>]) -> Vec<f64> { field_hn(s.vars.len(), s.values.len(), &s.idx, field) }
+fn field_hn(n: usize, k: usize, idx: &[Vec<usize>], field: &[Vec<f64>]) -> Vec<f64> {
+    let m = idx.len(); let mut h = vec![0.0; n * k];
+    for r in 0..n { let i = r % m; for (&q, &w) in idx[i].iter().zip(&field[i]) { if w != 0.0 { h[r * k + q] = w; } } }
     h
 }
 /// A_t's text without `comment` and without the vars' `h`, hashed as `prog_key` hashes a program

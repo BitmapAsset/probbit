@@ -49,6 +49,45 @@ impl Parts {
         Ok(m)
     }
 }
+/// RFC 0009 (the expectation's members, T3-b): one model for every program of an event that differs from A_t only in `h`. The
+/// compile pass's folds (each separable table, in the pass's order: per value the row term into its first variable, then the
+/// column term into its second) are kept apart, so a member's model is this one with the member's `h`, the folds replayed in
+/// the same order: the same floats `compile_parts` makes, with no copy of the pairs and no second model held
+pub struct Members { pub m: Model, folds: Vec<(usize, usize, Vec<f64>, Vec<f64>)> }
+impl Members {
+    /// The model with `h` (n x k) in place of its own, as `Parts::model_with` builds it: each weight checked as the text's, the
+    /// folds added in the pass's order, then `Model::new`'s finite check
+    pub fn set_h(&mut self, mut h: Vec<f64>) -> Result<(), InErr> {
+        let bad = || crate::json::value("vars", "a weight beyond the finite weight limit");
+        if h.len() != self.m.h.len() || h.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return Err(bad()); }
+        let k = self.m.k;
+        for (i, j, row, col) in &self.folds { for a in 0..k { h[i * k + a] += row[a]; h[j * k + a] += col[a]; } }
+        if h.iter().any(|x| !x.is_finite()) { return Err(crate::json::value("", "h must contain only finite weights")); }
+        self.m.h = h; Ok(())
+    }
+}
+impl Parts {
+    /// The members' model (`Members`): this program's model built from its parts (moved, as `into_prog`: no copy of the pairs),
+    /// its folds apart, with its variables, values and own `h` -> None when the folds read here are not the pass's (checked:
+    /// replayed on the program's own `h` they give the model's `h` bit for bit, and the pairs add up)
+    pub fn into_members(self) -> Option<(Vec<String>, Vec<String>, Vec<f64>, Members)> {
+        let k = self.values.len(); let mut folds = vec![]; let mut dropped = 0;
+        for p in &self.pairs { match &p.c {
+            Coupling::Potts(w) if *w == 0.0 => dropped += 1,
+            Coupling::Table(t) if t.iter().all(|&x| x == 0.0) => dropped += 1,
+            Coupling::Table(t) if t.len() == k * k && (0..k).all(|a| (0..k).all(|b| t[a * k + b] == t[a * k] + (t[b] - t[0]))) =>
+                folds.push((p.i, p.j, (0..k).map(|a| t[a * k]).collect(), (0..k).map(|a| t[a] - t[0]).collect())),
+            _ => {} } }
+        let np = self.pairs.len();
+        let Parts { vars, values, h, allowed, clamp, pairs, caps, start } = self; let h0 = h.clone(); let mut h = h;
+        let (pairs, caps, _) = compile_parts(k, &mut h, pairs, caps);
+        let mut m = Model::new(vars.len(), k, h, allowed, clamp, pairs, caps).ok()?; m.start = start;
+        if m.pairs.len() + folds.len() + dropped != np { return None; }
+        let want: Vec<u64> = m.h.iter().map(|x| x.to_bits()).collect(); let mut s = Members { m, folds };
+        s.set_h(h0.clone()).ok()?;
+        (s.m.h.iter().map(|x| x.to_bits()).collect::<Vec<u64>>() == want).then_some((vars, values, h0, s))
+    }
+}
 /// `from_json` up to the compile pass (inlined: `from_json` keeps one frame)
 #[inline(always)]
 pub fn from_json_parts(j: &Json) -> Result<Parts, InErr> {

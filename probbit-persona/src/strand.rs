@@ -147,15 +147,17 @@ impl Live {
             Clock::Fixed => { let e = match given { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err(perr("event.elapsed_hours", "a number >= 0")) }; (q6(e), self.last) } };
         kv.push(("elapsed_hours".into(), Json::Num(elapsed)));
         let inputs = Json::Obj(kv);
-        // the turn first: with the cache on it hands the deviation the event's own program (A_t) and its exact answer
+        enter(Phase::Expect);
+        // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without
+        // them). The trajectory before the turn (nothing of the turn held while it solves), the deviation after it: with the
+        // cache on the turn hands it the event's own program (A_t) and its exact answer
+        let traj = persona::trajectory(&self.p, &self.st, &inputs);
         let want = self.expect.is_some() && self.expect_cache.reuses();
         let (mut stance, ns, at) = persona::turn_at(&self.p, &self.st, &inputs, eng, want)?;
         let sd = persona::stance_sha(&stance);
         enter(Phase::Expect);
-        // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without them)
         let cache = &mut self.expect_cache;
         let dev = self.expect.as_ref().and_then(|m| persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, at));
-        let traj = persona::trajectory(&self.p, &self.st, &inputs);
         if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, |d| d.to_json(self.dev_full)))); } }
         // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
         persona::set_glyph(&self.p, &mut stance);
