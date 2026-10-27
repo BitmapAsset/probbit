@@ -463,3 +463,39 @@ fn one_monitor_serves_many_strands() {
     assert_eq!(get(port, "/s/zeta/doc/1", &host).2, format!("{}\n", db[0]));
     drop(child); let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RFC 0009: a strand with checkpoint lines whose persona has an expectation block replays from its header (no checkpoint
+/// carries the expectation's memory). The fixture is the life of `tutor-expect.yaml` (the tutor with an expectation block) over
+/// `tutor-expect.events.jsonl` (22 events, seed 2, the fixed clock, a checkpoint after every 5th: 4 of them), as `probbit live
+/// tests/fixtures/monitor/tutor-expect.yaml --seed 2 --clock fixed --events ... --checkpoint-every 5 --strand` writes it. `--once` draws event 22 and exits 0, `--serve` streams it, `--dir`
+/// lists it with its n; the same events through the tutor (no expectation block) still start at the last checkpoint
+#[test]
+fn checkpointed_strands_of_an_expectation_persona_open() {
+    const F: &str = "tests/fixtures/monitor/tutor-expect.strand";
+    const EV: &str = "tests/fixtures/monitor/tutor-expect.events.jsonl";
+    assert_eq!(std::fs::read_to_string(F).unwrap().lines().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), 4);
+    let (c, v, err) = probbit(&["live", "verify", F]); assert_eq!(c, 0, "{v}{err}"); assert!(v.contains(r#""checkpoints":4"#) && v.contains(r#""events":22"#), "{v}");
+    let (c, out, err) = probbit(&["monitor", F, "--once", "--plain"]);
+    assert_eq!(c, 0, "{out}{err}"); let top = out.lines().next().unwrap_or("");
+    assert!(top.contains("| event 22 |") && top.ends_with("replay verified [ok]"), "from the header: {top}");
+    // the page: the latest frame on /events is event 22, replayed from the header
+    let (child, port) = served(&[F]); let host = format!("127.0.0.1:{port}");
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
+    assert_eq!(evs[1].0, "frame"); assert!(evs[1].1.contains(r#""from_checkpoint":null"#) && evs[1].1.contains(r#""n":22,"#) && evs[1].1.contains(r#""diverges":null"#), "{}", evs[1].1);
+    drop(s); drop(child);
+    // --dir: listed with its n
+    let dir = std::env::temp_dir().join(format!("probbit-monitor-expect-dir-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(F, dir.join("tutor-expect.strand")).unwrap();
+    let (child, port) = served(&["--dir", &dir.to_string_lossy()]); let host = format!("127.0.0.1:{port}");
+    let t = Instant::now(); let mut list = String::new();
+    while !list.contains(r#""n":22,"#) { assert!(t.elapsed() < Duration::from_secs(10), "listed with n 22: {list}"); std::thread::sleep(Duration::from_millis(100)); list = get(port, "/strands", &host).2; }
+    assert!(list.contains(r#""id":"tutor-expect""#) && list.contains(r#""persona":"Pip""#), "{list}");
+    drop(child); let _ = std::fs::remove_dir_all(&dir);
+    // a persona without an expectation block: the shortcut (the badge names the checkpoint the replay started from)
+    let tutor = tmp("expect-tutor"); lived(&tutor, "2", &["--checkpoint-every", "5"], &std::fs::read_to_string(EV).unwrap());
+    let (c, out, err) = probbit(&["monitor", &tutor, "--once", "--plain"]); let top = out.lines().next().unwrap_or("");
+    assert_eq!(c, 0, "{out}{err}"); assert!(top.contains("| event 22 |") && top.ends_with("replay verified from checkpoint 20 [ok]"), "{top}");
+    let _ = std::fs::remove_file(&tutor);
+}

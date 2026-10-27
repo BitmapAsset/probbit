@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- `probbit monitor` opens a strand with checkpoint lines when its persona has an `expectation` block: it replays such a
+  strand from the header (`--once`, `--follow`, `--serve`, and each strand of `--dir` by its own persona) instead of refusing
+  it at the last checkpoint, which does not carry the expectation's memory. Other personas still start at the last
+  checkpoint; `live verify` is unchanged.
+
+### Documentation
+
 - Documentation, from a dress rehearsal of the published v0.13.0 artifacts (the release page's Mac app zip opened as a
   download, the README and REPRODUCE.md commands with the released binary on Linux and macOS, `probbit-stance` 0.2.0 from
   npm): `docs/monitor-app.md` says to remove the quarantine mark before the first open and how to recover after a refused
