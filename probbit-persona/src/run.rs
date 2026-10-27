@@ -446,3 +446,40 @@ pub fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
 }
 /// Per item, the error bar the gate compares with `tv_tol`: z x max(MCSE short, MCSE long) (`Gate::released_tasks`).
 pub fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&s, &l)| GATE.z * if s.is_nan() || l.is_nan() { f64::NAN } else { s.max(l) }).collect() }
+
+/// RFC 0011 (research): the `amplitude` tier, an exact simulated qubit register run on a CPU (`probbit_decide::amp`). Eligible
+/// when every variable has at most two allowed values (after clamps) and the two-valued ones, one qubit each, number at most
+/// `q_max`; Err(why) otherwise, and the caller runs the existing tiers. The program's log weight over the 2^q basis states is
+/// written exactly as an Ising program by its Walsh transform (unary and pairwise terms; a residual past 1e-9 declines), the
+/// register runs the default transverse-field sweep from |+...+>, and the rules (caps, clamps) are a projection: the Born
+/// probabilities of the plans that break one are set to 0 and the rest renormalised. Plan = the most probable feasible plan
+/// (probabilities at 6 decimals, then the lowest basis index); marginals exact. The receipt: qubits, the digests of the
+/// circuit, the schedule and the final amplitudes (6 decimals), the schedule's name.
+#[cfg(feature = "decide")]
+pub fn amplitude(prog: &Json, q_max: usize) -> Result<Json, String> {
+    use probbit_decide::amp;
+    let p = from_json(prog).map_err(|e| format!("program {}: {}", e.path, e.msg))?; let m = &p.m;
+    let cand: Vec<Vec<usize>> = (0..m.n).map(|i| (0..m.k).filter(|&v| m.ok(i, v)).collect()).collect();
+    if let Some(i) = cand.iter().position(Vec::is_empty) { return Err(format!("{} has no allowed value", p.vars[i])); }
+    if let Some(i) = cand.iter().position(|c| c.len() > 2) { return Err(format!("{} has more than two values", p.vars[i])); }
+    let qv: Vec<usize> = (0..m.n).filter(|&i| cand[i].len() == 2).collect(); let q = qv.len();
+    if q > q_max.min(amp::Q_MAX_HOST) { return Err(format!("{q} two-valued variables, q_max {q_max}")); }
+    let plan_of = |x: usize| -> Vec<usize> { let mut a: Vec<usize> = cand.iter().map(|c| c[0]).collect(); for (b, &i) in qv.iter().enumerate() { a[i] = cand[i][x >> b & 1]; } a };
+    let n = 1usize << q; let lw: Vec<f64> = (0..n).map(|x| m.logw(&plan_of(x))).collect();
+    let z = |x: usize, i: usize| if x >> i & 1 == 0 { 1.0 } else { -1.0 };
+    let a: Vec<f64> = (0..q).map(|i| (0..n).map(|x| lw[x] * z(x, i)).sum::<f64>() / n as f64).collect();
+    let mut b = vec![]; for i in 0..q { for j in i + 1..q { let c = (0..n).map(|x| lw[x] * z(x, i) * z(x, j)).sum::<f64>() / n as f64; if c.abs() > 1e-15 { b.push((i, j, c)); } } }
+    let ising = amp::Ising { q, a, b }; let mean = lw.iter().sum::<f64>() / n as f64;
+    if let Some(x) = (0..n).find(|&x| (lw[x] - mean - ising.logw(x)).abs() > 1e-9) { return Err(format!("not pairwise at basis state {x}")); }
+    let s = amp::DEFAULT_SCHEDULE; let reg = amp::evolve_ising(&ising, &s);
+    let pr: Vec<f64> = reg.probabilities().iter().enumerate().map(|(x, &w)| if m.violations(&plan_of(x)) == 0 { w } else { 0.0 }).collect();
+    let mass: f64 = pr.iter().sum(); if mass <= 0.0 || !mass.is_finite() { return Err("no feasible plan has weight in the register".into()); }
+    let r6 = |x: f64| (x * 1e6).round() / 1e6;
+    let best = (0..n).fold(0, |bx, x| if r6(pr[x] / mass) > r6(pr[bx] / mass) { x } else { bx }); let bp = plan_of(best);
+    let mut mg = vec![0.0; m.n * m.k]; for (x, &w) in pr.iter().enumerate() { if w > 0.0 { for (i, &v) in plan_of(x).iter().enumerate() { mg[i * m.k + v] += w / mass; } } }
+    let d = |t: &[u8]| jstr(&format!("sha256:{}", amp::hex(&amp::sha256(t))));
+    Ok(obj(vec![("verdict", jstr("exact")), ("tier", jstr("amplitude")), ("plan", plan(&p, &bp)), ("plan_logw", num(m.logw(&bp))), ("violations", num(0.0)),
+        ("marginals", marginals(&p, &mg)), ("released", ids(&p, &vec![true; m.n], true)), ("escalated", Json::Arr(vec![])),
+        ("amplitude", obj(vec![("qubits", num(q as f64)), ("circuit", d(reg.circuit_text().as_bytes())), ("schedule", d(s.text().as_bytes())), ("schedule_name", jstr(&s.name())),
+            ("state", jstr(&format!("sha256:{}", amp::hex(&reg.digest())))), ("feasible_mass", num(r6(mass)))]))]))
+}

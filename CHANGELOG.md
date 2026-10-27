@@ -103,6 +103,17 @@ All notable changes to this project are documented here. The format follows
   one (move the app, or Open Anyway), and that the bundled probbit serves several strands with a switcher; the plugin
   README names the second warning an older probbit gives; REPRODUCE.md no longer says only 0.12.0 replays the strand.
 
+### Research
+
+- **RFC 0011, round 1: an amplitude register** (draft; docs/rfc/0011-amplitude-register.md): `probbit-decide::amp`, an exact
+  simulated qubit register on a CPU (q ≤ 16 on the host; 16 · 2^q bytes of amplitudes on the heap; std and no_std + alloc):
+  gates H, X, Z, RX, RZ, CNOT, CZ, RZZ, a Trotterised transverse-field sweep, QAOA layers, exact marginals, Born-rule
+  measurement with the engine's RNG, a sha256 digest of the state at 6 decimals. The persona flag `engine.tier: amplitude`
+  (off by default, `engine.q_max` default 12) solves a turn's program on it when every variable has at most two values;
+  otherwise the default tiers answer and the stance document says why. Receipt fields `engine.qubits`, `circuit`,
+  `schedule`, `schedule_name`, `state`, `feasible_mass`. Without the flag no byte of any stance or strand changes. No quantum
+  hardware, no speedup claim; the comparison with the default tier is the next round.
+
 ## 0.13.0 - 2026-10-26
 
 The monitor face and the Mac app, identity labels and many strands in one monitor, and the OpenClaw plugin 0.2.0. A persona

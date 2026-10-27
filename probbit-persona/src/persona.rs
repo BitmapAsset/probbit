@@ -163,7 +163,9 @@ struct Hist { id: String, of: String, streak: bool, window: usize, cap: usize, s
 struct Habit { id: String, when: Vec<(String, Json)>, then: Vec<(String, Json)>, rules: Vec<(String, Vec<Json>)>, say: String, priority: f64 }
 /// engine settings (docs/persona.md §2.7)
 #[derive(Clone)]
-struct Eng { op: String, sweeps: usize, polish_sweeps: usize, exact_limit: u64, chains: usize, twin: bool, positional: bool, yields: bool }
+struct Eng { op: String, sweeps: usize, polish_sweeps: usize, exact_limit: u64, chains: usize, twin: bool, positional: bool, yields: bool,
+    /// RFC 0011 (research): `tier: amplitude` (off when absent) and its `q_max` (default 12)
+    amp: bool, q_max: usize }
 /// bounded learning (docs/persona.md §2.8): `from` = the reward flag, then (optional) the correction flag; the traits whose learned
 /// deltas move; the step and total caps (natural-log weights); `credit` = action-addressed feedback, when declared
 #[derive(Clone)]
@@ -477,8 +479,8 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
     for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { habits.push(habit_spec(hb, &ix("habits", i), &inputs, &history, &vars, &steps)?); }
     need((1..habits.len()).all(|i| habits[..i].iter().all(|h| h.id != habits[i].id)), "habits", "habit ids must be distinct")?;
     // engine
-    let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false };
-    if let Some(e) = get_t(kv, "engine") { let ekv = keys(e, "engine", &["op", "sweeps", "polish_sweeps", "exact_limit", "chains", "twin", "values", "on_conflict", "comment"], &[])?;
+    let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false, amp: false, q_max: 12 };
+    if let Some(e) = get_t(kv, "engine") { let ekv = keys(e, "engine", &["op", "sweeps", "polish_sweeps", "exact_limit", "chains", "twin", "values", "on_conflict", "tier", "q_max", "comment"], &[])?;
         for (k, x) in ekv { let p = at("engine", k);
             match k.as_str() {
                 "op" => eng.op = x.as_str().filter(|o| ["decide", "sample"].contains(o)).ok_or_else(|| perr(&p, "decide | sample"))?.to_string(),
@@ -486,6 +488,8 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
                 "values" => eng.positional = match x.as_str() { Some("positional") => true, Some("semantic") => false, _ => return Err(perr(&p, "positional | semantic")) },
                 "on_conflict" => eng.yields = match x.as_str() { Some("fallback") => false, Some("yield") => true, _ => return Err(perr(&p, "fallback | yield")) },
                 "comment" => {}
+                "tier" => { need(x.as_str() == Some("amplitude"), &p, "amplitude (the one optional tier; absent = the default tiers)")?; eng.amp = true; }
+                "q_max" => eng.q_max = num(Some(x), &p, Some(1.0), Some(16.0), true)? as usize,
                 "polish_sweeps" => eng.polish_sweeps = num(Some(x), &p, Some(0.0), Some(1e9), true)? as usize,
                 "sweeps" => eng.sweeps = num(Some(x), &p, Some(1.0), Some(1e9), true)? as usize,
                 "exact_limit" => eng.exact_limit = num(Some(x), &p, Some(1.0), Some(1e9), true)? as u64,
@@ -2659,7 +2663,9 @@ struct Entry { level: String, p: f64, odds: Vec<(String, f64)>, released: bool, 
 /// A stance document under construction (docs/persona.md §4)
 struct Out { status: String, verdict: Json, tier: Json, program: String, stance: Vec<(String, Entry)>, mood: Vec<(String, Entry)>, active: Vec<String>, bound: Vec<String>,
     violations: usize, conflict: Vec<String>, yielded: Vec<String>, unsure: Vec<String>, escalate: Option<String>, inputs: Vec<(String, Json)>, ignored: Vec<String>,
-    line: String, why: String, agenda: Option<Vec<String>>, state_digest: String, held: Vec<String>, timing: Option<Json>, lift: Vec<(String, f64)> }
+    line: String, why: String, agenda: Option<Vec<String>>, state_digest: String, held: Vec<String>, timing: Option<Json>, lift: Vec<(String, f64)>,
+    /// RFC 0011: the amplitude tier's receipt (an object) or why it declined (a string); None without the flag
+    amp: Option<Json> }
 impl Out {
     fn to_json(&self, p: &Persona, st: &State) -> Json {
         let e = |m: &[(String, Entry)]| Json::Obj(m.iter().map(|(k, e)| { let odds = |o: &[(String, f64)]| Json::Obj(o.iter().map(|(l, x)| (l.clone(), Json::Num(*x))).collect());
@@ -2668,7 +2674,8 @@ impl Out {
         let s = |x: &str| Json::Str(x.to_string());
         let mut v = vec![("probbit_persona_turn".to_string(), Json::Num(1.0)), ("persona".into(), Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest))])),
             ("seed".into(), Json::Num(st.seed as f64)), ("turn".into(), Json::Num(st.turn as f64)), ("status".into(), s(&self.status)),
-            ("engine".into(), Json::Obj(vec![("verdict".into(), self.verdict.clone()), ("tier".into(), self.tier.clone()), ("program".into(), s(&self.program))])),
+            ("engine".into(), { let mut e = vec![("verdict".into(), self.verdict.clone()), ("tier".into(), self.tier.clone()), ("program".into(), s(&self.program))];
+                match &self.amp { Some(Json::Obj(r)) => e.extend(r.iter().cloned()), Some(w) => e.push(("amplitude".into(), w.clone())), None => {} } Json::Obj(e) }),
             ("stance".into(), e(&self.stance)), ("mood".into(), e(&self.mood)),
             ("habits".into(), Json::Obj(vec![("active".into(), jstrs(&self.active)), ("bound".into(), jstrs(&self.bound)), ("violations".into(), Json::Num(self.violations as f64)),
                 ("conflict".into(), jstrs(&self.conflict)), ("yielded".into(), jstrs(&self.yielded))])),
@@ -2849,13 +2856,23 @@ fn decode(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, confl
     ns.seal(p);
     let out = Out { status, verdict: verdict.clone(), tier: doc.get("tier").cloned().unwrap_or(Json::Null), program: program.to_string(), stance, mood, active: meta.active.clone(), bound,
         violations: viol, conflict: conflict.to_vec(), yielded: yielded.to_vec(), unsure, escalate, inputs: meta.vals.iter().cloned().chain(meta.hist.iter().map(|(k, x)| (k.clone(), Json::Num(*x)))).collect(),
-        ignored: meta.ignored.clone(), line: ln, why: w, agenda: (!p.steps.is_empty()).then_some(order_steps), state_digest: ns.digest.clone(), held: vec![], timing: None, lift: meta.lift.clone() };
+        ignored: meta.ignored.clone(), line: ln, why: w, agenda: (!p.steps.is_empty()).then_some(order_steps), state_digest: ns.digest.clone(), held: vec![], timing: None, lift: meta.lift.clone(), amp: doc.get("amplitude").cloned() };
     (out, ns)
 }
 
 // ------------------------------------------------------------------------------------------------------------ turns
 fn solve(p: &Persona, st: &State, prog: &Json, eng: Engine, calls: &mut usize) -> Json {
-    *calls += 1; let was = crate::trace::enter(crate::trace::Phase::Solve); let r = eng(prog, &flags(p, st)); crate::trace::enter(was); r
+    *calls += 1; let was = crate::trace::enter(crate::trace::Phase::Solve);
+    let r = if p.eng.amp { amplitude_tier(prog, p.eng.q_max).unwrap_or_else(|why| declined(eng(prog, &flags(p, st)), &why)) } else { eng(prog, &flags(p, st)) };
+    crate::trace::enter(was); r
+}
+/// RFC 0011 (research): the amplitude tier on a program (`run::amplitude`); Err(why) when it does not take it
+#[cfg(feature = "decide")]
+fn amplitude_tier(prog: &Json, q_max: usize) -> Result<Json, String> { crate::run::amplitude(prog, q_max) }
+#[cfg(not(feature = "decide"))]
+fn amplitude_tier(_: &Json, _: usize) -> Result<Json, String> { Err("this build has no amplitude tier (feature decide)".into()) }
+/// The existing tiers' answer, with the receipt of why the amplitude tier did not run
+fn declined(mut doc: Json, why: &str) -> Json { if let Json::Obj(v) = &mut doc { v.push(("amplitude".into(), Json::Str(format!("declined: {why}")))); } doc
 }
 fn ms(t: Instant) -> f64 { t.elapsed().as_secs_f64() * 1e3 }
 /// A minimal set of active habits that cannot hold together (deletion filter: drop each habit in turn, keep it only if the rest
@@ -4445,6 +4462,34 @@ mod tests {
         let data: Vec<u8> = (0..300u32).map(|i| (i * 7 + 3) as u8).collect();
         for n in [0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 128, 300] { let one = sha256(&data[..n]);
             for piece in [1, 3, 64, 100] { let mut h = Sha256::new(); for c in data[..n].chunks(piece) { h.update(c); } assert_eq!(h.finish(), one, "{n} bytes in pieces of {piece}"); } }
+    }
+    /// RFC 0011 (research): `engine.tier: amplitude` on a persona of two-valued traits answers from the simulated register (its
+    /// receipt in the stance document, habits held, deterministic, a strand that verifies); on a persona with three-valued traits
+    /// it declines, the existing tiers answer and the receipt says why; absent, nothing changes
+    #[cfg(feature = "decide")]
+    #[test]
+    fn the_amplitude_tier_answers_two_valued_programs_and_declines_the_rest() {
+        use crate::strand::{self, Clock, Live};
+        let text = include_str!("../../examples/persona/dispatch-policy.yaml").replace("engine:\n", "engine:\n  tier: amplitude\n");
+        let doc = crate::yaml::load(&text).ok().unwrap(); let p = build(&doc).unwrap(); let st = init(&p, Some(2), true, &run);
+        for raw in [r#"{"blast":0}"#, r#"{"blast":0.9}"#, r#"{"blast":0.3,"error":true}"#] {
+            let raw = json::parse(raw).unwrap(); let (a, _) = turn(&p, &st, &raw, false, &run, false).unwrap(); let (b, _) = turn(&p, &st, &raw, false, &run, false).unwrap();
+            assert_eq!(canon(&a), canon(&b)); assert_eq!(g(&a, &["engine", "tier"]).as_str(), Some("amplitude"), "{}", canon(&a));
+            let q = g(&a, &["engine", "qubits"]).as_f64().unwrap(); assert!((1.0..=4.0).contains(&q));
+            for k in ["circuit", "schedule", "state"] { assert!(g(&a, &["engine", k]).as_str().is_some_and(is_digest), "{k}"); }
+            assert_eq!(g(&a, &["habits", "violations"]).as_f64(), Some(0.0)); assert_eq!(g(&a, &["status"]).as_str(), Some("ok")); }
+        let (mut live, header) = Live::start(p.clone(), &doc, st.clone(), Clock::Fixed, "probbit test"); let mut lines = vec![header];
+        for (i, raw) in [r#"{"blast":0}"#, r#"{"blast":0.9}"#, r#"{"error":true}"#, r#"{"error":true}"#, r#"{"praise":true,"src":"human"}"#].iter().enumerate() {
+            let (_, l) = live.event(&json::parse(raw).unwrap(), &run).unwrap_or_else(|e| panic!("event {i}: {}", e.msg)); lines.push(l); }
+        let strand_text = lines.join("\n") + "\n"; assert!(strand::verify(&strand_text, &run).is_ok());
+        // three-valued traits: declined, the existing tier answers, the receipt says so
+        let q = build(&json::parse(&DOC.replace("LEARN", r#","engine":{"tier":"amplitude"}"#)).unwrap()).unwrap(); let s0 = init(&q, Some(3), true, &run);
+        let (d, _) = turn(&q, &s0, &inputs(false, false, false), false, &run, false).unwrap();
+        assert!(g(&d, &["engine", "amplitude"]).as_str().is_some_and(|w| w.starts_with("declined: ") && w.contains("more than two values")), "{}", canon(&d));
+        assert_ne!(g(&d, &["engine", "tier"]).as_str(), Some("amplitude"));
+        let plain = build(&json::parse(&DOC.replace("LEARN", "")).unwrap()).unwrap(); let (e, _) = turn(&plain, &init(&plain, Some(3), true, &run), &inputs(false, false, false), false, &run, false).unwrap();
+        assert!(g(&e, &["engine", "amplitude"]).is_null() && g(&e, &["engine", "qubits"]).is_null());
+        assert_eq!(err(build(&json::parse(&DOC.replace("LEARN", r#","engine":{"tier":"pbit"}"#)).unwrap())), "engine.tier: amplitude (the one optional tier; absent = the default tiers)");
     }
     /// The boxed setup API is the by-value one: the same persona, state, header and individual
     #[test]
