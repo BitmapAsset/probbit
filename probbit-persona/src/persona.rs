@@ -2493,6 +2493,11 @@ struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool
     /// RFC 0009 (the expectation's members): the compiler's arithmetic and the rules in force, no program text (Json::Null)
     meta_only: bool }
 
+/// A compile meta with only what the expectation's members read of it (the field, the rules and habits in force, the values,
+/// the twin flag, seed and turn: `member_text` and the rules' comparison), on the heap
+fn slim(m: Meta) -> Box<Meta> {
+    Box::new(Meta { vals: vec![], hist: vec![], ignored: vec![], conditional: vec![], active_inputs: vec![], owners: vec![], new_mood: vec![], new_learned: Default::default(), contrib: vec![], lift: vec![], ..m })
+}
 /// Inputs -> (values per declared input, history features, elapsed hours, ignored ids); a bad value is a persona error
 #[allow(clippy::type_complexity)]
 fn resolve_inputs(p: &Persona, st: &State, raw: &[(String, Json)]) -> R<(Vec<(String, Json)>, Vec<(String, f64)>, f64, Vec<String>)> {
@@ -2881,14 +2886,31 @@ pub fn turn_boxed(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: En
 pub fn turn_any_source(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, false).map(|(j, s)| (j, *s)) }
 /// A turn's inputs and state after the steps before the compiler (`turn_prep`): the stepped state, the compiler's inputs, the
 /// inputs as given, the event's `src`, its payments and what they settled
-struct Prepped { st: Box<State>, raw: Vec<(String, Json)>, given: Vec<(String, Json)>, src: Option<Json>, pay: Option<Pay>, settled: Option<Settled> }
-/// The engine's answer read back (`turn_solve`): the stance under construction and the next state
-struct Solved { out: Box<Out>, ns: Box<State> }
+struct Prepped { st: Box<State>, raw: Vec<(String, Json)>, given: Vec<(String, Json)>, src: Option<Json>, pay: Option<Pay>, settled: Option<Settled>, fresh: bool }
+/// The engine's answer read back (`turn_solve`): the stance under construction, the next state and, when asked for, what the
+/// expectation reads of the turn's first program (`At`; None inside: that answer was not exact)
+struct Solved { out: Box<Out>, ns: Box<State>, at: Option<Option<Box<At>>> }
+/// RFC 0009: the turn's first program as the deviation's A_t (the same program: `turn_at`): its exact marginals read as
+/// `exact_marg` reads them and its compile meta (the fields the members read), so A_t is neither built nor solved again
+pub struct At { marg: Marg, meta: Box<Meta> }
 #[inline(never)]
 fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool) -> R<(Json, Box<State>)> {
+    turn_src_at(p, st, raw, no_inertia, eng, timing, check, false).map(|(j, s, _)| (j, s))
+}
+/// `turn_boxed` (no inertia off, no timing, the provenance check on) that also hands the expectation its A_t when `want`
+/// (`Live::event` with the cache on): Some when the turn's first program is the program the deviation would build for the
+/// event (no rest due before it, `src` taken out alike, the persona's op `decide`), Some(None) inside when its answer is not
+/// exact (then there is no deviation); None: the deviation builds and solves A_t itself
+#[inline(never)]
+pub fn turn_at(p: &Persona, st: &State, raw: &Json, eng: Engine, want: bool) -> R<(Json, Box<State>, Option<Option<Box<At>>>)> { turn_src_at(p, st, raw, false, eng, false, true, want) }
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn turn_src_at(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool, want: bool) -> R<(Json, Box<State>, Option<Option<Box<At>>>)> {
     let pr = turn_prep(p, st, raw, check)?;
-    let sv = turn_solve(p, &pr, no_inertia, eng, timing)?;
-    Ok(turn_doc(p, pr, sv))
+    // the deviation's A_t is `program_meta` of the same state and inputs: no rest, `src` taken out only with these blocks
+    let want = want && check && pr.fresh && !no_inertia && p.eng.op == "decide" && (p.reward.is_none() || p.senses.is_some() || p.credit().is_some() || p.has_needs());
+    let mut sv = turn_solve(p, &pr, no_inertia, eng, timing, want)?; let at = sv.at.take();
+    let (j, s) = turn_doc(p, pr, sv); Ok((j, s, at))
 }
 /// The steps before the compiler: the inputs read, `src` and the payments taken out, a rest due applied, then the sense / needs /
 /// drive / pace steps, the credit step and the surprise gate, each on the heap
@@ -2912,7 +2934,7 @@ fn turn_prep(p: &Persona, st: &State, raw: &Json, check: bool) -> R<Prepped> {
     let (st2, settled) = match &pay { Some(k) => { let (s, d) = credit_boxed(p, &st2, &raw, k, src.as_ref(), check)?; (s, Some(d)) } None => (st2, None) };
     // RFC 0002 Design B: the surprise gate steps v, r̂, g and the counts of each paid learned trait before the learner reads g
     let st2 = gate_boxed(p, st2, &raw)?;
-    Ok(Prepped { st: st2, raw, given, src, pay, settled })
+    Ok(Prepped { st: st2, raw, given, src, pay, settled, fresh: rested.is_none() })
 }
 #[inline(never)]
 fn rest_boxed(p: &Persona, st: &State) -> Box<State> { Box::new(rest_apply(p, st)) }
@@ -2931,7 +2953,7 @@ fn settle_boxed(p: &Persona, j: &mut Json, ns: Box<State>, k: &Pay, s: Settled) 
 /// The compiler, the engine and the decoder: the program for the stepped state, its solve (a yield on a habit conflict, a second,
 /// clamped solve for the persona's vouch rule) and the answer read back
 #[inline(never)]
-fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool) -> R<Solved> {
+fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool, want: bool) -> R<Solved> {
     use crate::trace::{enter, Phase};
     let (st, raw): (&State, &[(String, Json)]) = (&pr.st, &pr.raw);
     enter(Phase::Compile);
@@ -2939,6 +2961,8 @@ fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: 
     let o = Opts { no_inertia, ..Default::default() };
     let (mut prog, mut meta) = compile(p, st, &raw, &o)?; let mut ptext = digest_of(&text(&prog));
     let compile_ms = ms(t0); let t1 = Instant::now(); let mut doc = solve(p, st, &prog, eng, &mut calls);
+    // the expectation's A_t: this answer's exact marginals (an exact answer never yields, so `meta` stays this program's)
+    let first = want.then(|| doc_marg(&doc));
     let (mut conflict, mut yielded): (Option<Vec<String>>, Option<Vec<String>>) = (None, None);
     if doc.get("verdict").and_then(Json::as_str) == Some("infeasible") && !meta.active.is_empty() {
         let c = habit_conflict(p, st, &raw, &meta.active, &o, eng, &mut calls)?; conflict = Some(c.clone());
@@ -2972,17 +2996,18 @@ fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: 
             out2.line = line(p, &levels, &meta2.active, &out.bound, &out.unsure, out2.agenda.as_deref().unwrap_or(&[]), &vouched, &meta2.conditional, &baseline(p, st));
             out = out2; ns = ns2; } }
     out.held = held; out.lift = lift;
+    let at = first.map(|m| m.map(|marg| Box::new(At { marg, meta: slim(meta) })));
     if timing { let r3 = |x: f64| Json::Num((x * 1e3).round() / 1e3);
         out.timing = Some(Json::Obj(vec![("compile_ms".into(), r3(compile_ms)), ("engine_ms".into(), r3(engine_ms)), ("decode_ms".into(), r3((ms(t0) - compile_ms - engine_ms).max(0.0))), ("turn_ms".into(), r3(ms(t0))),
             ("engine_calls".into(), Json::Num(calls as f64)), ("holds".into(), Json::Num(out.held.len() as f64)), ("load_avg_1m".into(), crate::sys::loadavg().map_or(Json::Null, |l| Json::Num((l * 100.0).round() / 100.0)))])); }
-    Ok(Solved { out, ns })
+    Ok(Solved { out, ns, at })
 }
 /// The stance document from the decoded stance: its senses, drives and body blocks, `src` back in its inputs, the credit settled,
 /// the injected block and the glyph
 #[inline(never)]
 fn turn_doc(p: &Persona, pr: Prepped, sv: Solved) -> (Json, Box<State>) {
     crate::trace::enter(crate::trace::Phase::Document);
-    let Prepped { st, given, src, pay, settled, .. } = pr; let st: &State = &st; let Solved { out, mut ns } = sv;
+    let Prepped { st, given, src, pay, settled, .. } = pr; let st: &State = &st; let Solved { out, mut ns, .. } = sv;
     let mut j = out.to_json(p, st);
     if let (Some(sn), Some(ss)) = (&p.senses, &st.senses) { stance_senses(&mut j, sn, ss, &given); }
     if let (Some(d), Some(ds)) = (&p.drives, &st.drives) { stance_drives(&mut j, d, ds, &out.lift, &given); }
@@ -4019,7 +4044,10 @@ type Marg = Vec<(String, Vec<(String, f64)>)>;
 /// The non-twin exact marginals of a program -> None unless the exact tier solved it
 #[inline(never)]
 fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
-    let doc = eng(prog, &Flags { op: "decide".into(), ..flags(p, st) });
+    doc_marg(&eng(prog, &Flags { op: "decide".into(), ..flags(p, st) }))
+}
+/// An answer's non-twin marginals -> None unless its verdict is exact
+fn doc_marg(doc: &Json) -> Option<Marg> {
     if doc.get("verdict").and_then(Json::as_str) != Some("exact") { return None; }
     Some(doc.get("marginals")?.as_obj()?.iter().filter(|(k, _)| !k.starts_with("free.")).map(|(k, v)| (k.clone(), v.as_obj().map_or(vec![], |o| {
         let mut r: Vec<(String, f64)> = o.iter().map(|(l, x)| (l.clone(), x.as_f64().unwrap_or(0.0))).collect(); r.sort_by(|a, b| a.0.cmp(&b.0)); r }))).collect())
@@ -4036,11 +4064,21 @@ fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg>
 /// one the cache is not consulted for the next 1, 2, 4, ... 32 events (a hit resets it; the rows are dropped meanwhile and the event
 /// after the pause fills them for the one after it to compare), so such a life keys two events in 34.
 #[derive(Clone, Debug)]
-pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool, modeled: u32 }
+pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool, modeled: u32,
+    /// T3-b: A_t from the turn (`turn_at`); `check`: also built and solved again, and compared
+    reuse: bool, check: bool, reused: u32 }
 impl Default for ExpectCache { fn default() -> ExpectCache { ExpectCache::new(true) } }
 impl ExpectCache {
     /// An empty cache; `on: false` solves every program (the receipt is the same)
-    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false, modeled: 0 } }
+    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false, modeled: 0, reuse: true, check: false, reused: 0 } }
+    /// The same cache with the turn's own program read as A_t (`reuse`, the default: `Live::event` runs the turn first and hands
+    /// the deviation its first program's meta and exact marginals) or built and solved again by the deviation; `check`: when
+    /// handed, A_t is built and solved again as well and the two compared (a mismatch panics: a test's instrument)
+    pub fn with_reuse(mut self, reuse: bool, check: bool) -> ExpectCache { self.reuse = reuse; self.check = check; self }
+    /// Whether `Live::event` hands the deviation the turn's own program (the cache on, reuse on)
+    pub fn reuses(&self) -> bool { self.on && self.reuse }
+    /// The last event's A_t read from the turn (1) or not (0)
+    pub fn reused(&self) -> u32 { self.reused }
     /// Whether the cache is used
     pub fn is_on(&self) -> bool { self.on }
     /// The last event's programs answered from the cache and solved
@@ -4057,7 +4095,7 @@ impl ExpectCache {
         self.rows.capacity() * size_of::<([u8; 32], Marg)>() + self.used.capacity() + self.rows.iter().map(|(_, m)| m.capacity() * size_of::<(String, Vec<(String, f64)>)>()
             + m.iter().map(|(id, ls)| id.capacity() + ls.capacity() * size_of::<(String, f64)>() + ls.iter().map(|(l, _)| l.capacity()).sum::<usize>()).sum::<usize>()).sum::<usize>()
     }
-    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.modeled = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
+    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.modeled = 0; self.reused = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
         self.live = self.on && self.skip == 0; self.had = !self.rows.is_empty(); if self.skip > 0 { self.skip -= 1; } }
     fn end(&mut self) {
         // an event that had rows to compare and found none backs off; one that started empty only fills (the next one compares)
@@ -4067,6 +4105,11 @@ impl ExpectCache {
     fn find(&mut self, key: &[u8; 32]) -> Option<Marg> {
         if !self.live { return None; }
         let i = self.rows.iter().position(|r| r.0 == *key)?; self.used[i] = true; self.hits += 1; Some(self.rows[i].1.clone())
+    }
+    /// A_t's marginals from the turn, kept under `key` while the cache is live (not a solve of the deviation's)
+    fn put(&mut self, key: [u8; 32], m: &Marg) {
+        if !self.live { return; }
+        match self.rows.iter().position(|r| r.0 == key) { Some(i) => self.used[i] = true, None => { self.rows.push((key, m.clone())); self.used.push(true); } }
     }
     /// A program solved here, not by `marg`: counted, and kept under `key` while the cache is live
     fn keep(&mut self, key: Option<[u8; 32]>, m: &Option<Marg>) {
@@ -4120,11 +4163,14 @@ fn kl_marg(a: &Marg, b: &Marg) -> Option<(f64, Vec<f64>)> {
 pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine) -> Option<Deviation> { deviation_cached(p, st, raw, mem, eng, &mut ExpectCache::new(false)) }
 /// `deviation` with the members' marginals from `cache` (`ExpectCache`): the same value, fewer solves
 #[inline(never)]
-pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
-    cache.begin(); let d = deviation_in(p, st, raw, mem, eng, cache); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
+pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> { deviation_at(p, st, raw, mem, eng, cache, None) }
+/// `deviation_cached` after the turn: `at` is what `turn_at` handed of the event's own program (None: A_t built and solved here)
+#[inline(never)]
+pub fn deviation_at(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, at: Option<Option<Box<At>>>) -> Option<Deviation> {
+    cache.begin(); let d = deviation_in(p, st, raw, mem, eng, cache, at); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
 }
 #[inline(always)]
-fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
+fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, at: Option<Option<Box<At>>>) -> Option<Deviation> {
     let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
     let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
     let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
@@ -4132,7 +4178,7 @@ fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engin
     // with this event's hours), in the mixture's order
     let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
     for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
-    let ms = members_marg(p, st, raw, &ins, eng, cache)?;
+    let ms = members_marg(p, st, raw, &ins, eng, cache, at)?;
     mixture(mem, &ws, &key, member, ms)
 }
 /// The deviation from the programs' marginals (A_t, E_t, then the other members in the mixture's order), out of the frame the
@@ -4179,24 +4225,31 @@ struct Skel { parts: crate::run::Parts, idx: Vec<Vec<usize>> }
 /// `comment` and the vars' `h` (its skeleton), then the program's field: equal keys, equal texts. Inlined in the deviation's frame
 /// (each member's build runs right under it, as before)
 #[inline(always)]
-fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, cache: &mut ExpectCache) -> Option<Vec<Option<Marg>>> {
+fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, cache: &mut ExpectCache, at: Option<Option<Box<At>>>) -> Option<Vec<Option<Marg>>> {
     let mut out = Vec::with_capacity(ins.len() + 1);
     if !cache.on { out.push(text_marg(p, st, raw, eng, cache)); if out[0].is_none() { return None; }
         for (i, x) in ins.iter().enumerate() { let m = text_marg(p, st, x, eng, cache); if i == 0 && m.is_none() { return None; } out.push(m); }
         return Some(out); }
     let t = crate::trace::Stopwatch::start();
-    let Ok((prog, meta)) = program_meta(p, st, raw, false) else { crate::trace::expect_split(t.us(), 0); return None };
+    // A_t: handed by the turn (its first program: the text written again from its meta, its answer's marginals), or built here
+    let (prog, meta, own) = match at {
+        Some(None) => { cache.reused = 1; if cache.check { assert!(program_json(p, st, raw).ok().and_then(|x| exact_marg(p, st, &x, eng)).is_none(), "A_t: not exact either way"); } return None }
+        Some(Some(a)) => { let At { marg, meta } = *a; cache.reused = 1; (member_text(p, &meta), meta, Some(marg)) }
+        None => { let Ok((prog, meta)) = program_meta(p, st, raw, false) else { crate::trace::expect_split(t.us(), 0); return None }; (prog, meta, None) } };
     let (b, t) = (t.us(), crate::trace::Stopwatch::start());
     let skel = cache.live.then(|| skel_key(&prog));
     let mut sk: Option<Option<Box<Skel>>> = None; // read on the first program the cache does not answer; Some(None): not usable
-    let a = model_marg(p, st, &prog, &meta, skel.as_ref(), &mut sk, true, eng, cache).flatten(); crate::trace::expect_split(b, t.us());
+    let a = match own {
+        Some(m) => { if cache.check { at_check(p, st, raw, &prog, &m, eng); } if let Some(s) = &skel { cache.put(field_key(s, &meta.field), &m); } Some(m) }
+        None => model_marg(p, st, &prog, &meta, skel.as_ref(), &mut sk, &meta, true, eng, cache).flatten() };
+    crate::trace::expect_split(b, t.us());
     a.as_ref()?; out.push(a);
     for (i, x) in ins.iter().enumerate() {
         let t = crate::trace::Stopwatch::start();
         let m = match program_meta(p, st, x, true) {
             Err(_) => { crate::trace::expect_split(t.us(), 0); None }
             Ok((_, mm)) if mm.rules == meta.rules => { let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-                let r = model_marg(p, st, &prog, &mm, skel.as_ref(), &mut sk, false, eng, cache);
+                let r = model_marg(p, st, &prog, &mm, skel.as_ref(), &mut sk, &meta, false, eng, cache);
                 // another tier (or no usable skeleton): its text from its meta, run by the engine
                 let r = match r { Some(r) => r, None => { let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } }; crate::trace::expect_split(b, t.us()); r }
             // other rules in force: its text from its meta (no second build), run by the engine
@@ -4205,14 +4258,24 @@ fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, 
         out.push(m); }
     Some(out)
 }
-/// One program of the event as A_t's model with its own `h` (from its compile meta `mm`; `own`: A_t itself, its parsed `h`):
+/// The test instrument (`ExpectCache::with_reuse(_, true)`): the A_t the turn handed is the program the deviation builds for the
+/// event, text for text, and its marginals are that program's run by the engine, bit for bit
+#[inline(never)]
+fn at_check(p: &Persona, st: &State, raw: &Json, prog: &Json, m: &Marg, eng: Engine) {
+    let own = program_json(p, st, raw).expect("A_t builds");
+    assert_eq!(text(&own), text(prog), "A_t: the turn's first program is the deviation's");
+    let r = exact_marg(p, st, &own, eng).expect("A_t exact");
+    assert!(r.len() == m.len() && r.iter().zip(m).all(|(a, b)| a.0 == b.0 && a.1.len() == b.1.len() && a.1.iter().zip(&b.1).all(|(x, y)| x.0 == y.0 && x.1.to_bits() == y.1.to_bits())), "A_t: the turn's marginals are the engine's");
+}
+/// One program of the event as A_t's model with its own `h` (from its compile meta `mm`; A_t's is `am`, its skeleton read with
+/// it; `own`: A_t itself, its parsed `h`):
 /// Some(marginals or None) as the engine would answer; None when the enumeration would not answer it (the caller runs it)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn model_marg(p: &Persona, st: &State, prog: &Json, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
+fn model_marg(p: &Persona, st: &State, prog: &Json, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, am: &Meta, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
     let key = skel.map(|s| field_key(s, &mm.field));
     if let Some(k) = &key { if let Some(m) = cache.find(k) { return Some(Some(m)); } }
-    if sk.is_none() { *sk = Some(skel_parts(p, prog, mm)); }
+    if sk.is_none() { *sk = Some(skel_parts(p, prog, am)); }
     let Some(Some(s)) = sk.as_ref() else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
     let h = if own { s.parts.h().to_vec() } else { field_h(s, &mm.field) };
     let Ok(mut m) = s.parts.model_with(h) else { cache.keep(key, &None); return Some(None) };

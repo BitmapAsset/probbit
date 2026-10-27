@@ -515,7 +515,8 @@ mod tests {
         for (d, n, engine, kind, fallback) in &cases { let p = persona::build(d).unwrap_or_else(|e| panic!("{}: {}", e.path, e.msg));
             let ev = |t: usize| if *kind == 0 { sensed(t) } else { s1_event(t) };
             let life = |on: bool| { let (mut lv, head) = Live::start(p.clone(), d, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
-                lv.expect_cache = persona::ExpectCache::new(on); let (mut text, mut docs, mut modeled, mut texted) = (format!("{head}\n"), vec![], 0u32, 0u32);
+                // A_t built and solved by the deviation (as T3 measured it): the turn's own program is the T3-b test's
+                lv.expect_cache = persona::ExpectCache::new(on).with_reuse(false, false); let (mut text, mut docs, mut modeled, mut texted) = (format!("{head}\n"), vec![], 0u32, 0u32);
                 for t in 0..*n { let (s, l) = lv.event(&ev(t), &run).unwrap_or_else(|e| panic!("event {t}: {}: {}", e.path, e.msg)); text += &l; text.push('\n'); docs.push(persona::canon(&s));
                     let (m, (_, sv)) = (lv.expect_cache.modeled(), lv.expect_cache.last()); modeled += m; texted += sv - m; if lv.n % 10 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
                 (text, docs, lv.st.digest.clone(), modeled, texted) };
@@ -524,6 +525,36 @@ mod tests {
             assert!(on.3 > 0 && off.3 == 0, "programs solved as models: on {} off {} ({ctx})", on.3, off.3);
             if *fallback { assert!(on.4 > 0, "programs built and run with the cache on: {} ({ctx})", on.4); }
             assert_eq!(verify(&on.0, &run).unwrap().get("events"), Some(&Json::Num(*n as f64)), "{ctx}"); }
+    }
+
+    /// T3-b: the deviation's A_t read from the turn moves no byte. The same lives run with the cache on, the turn's first program
+    /// handed to the deviation (`turn_at`: its meta and exact marginals; A_t checked against a second build and solve on every
+    /// event, text for text and bit for bit) and not handed (A_t built and solved by the deviation, as before): every stance
+    /// document, every strand line (a checkpoint every 10) and the final state are the same, and A_t is read from the turn. The
+    /// sensed persona (floats that move every event, two needs, drives, a habit on a flag), 500 events, max_combos 6 and 16,
+    /// engines 0.13.0 and 0.14.0; the expectation fixture persona, 500 varied events, max_combos 16
+    #[test]
+    fn the_turns_own_program_as_a_t_moves_no_byte() {
+        let load = |rel: &str| probbit_persona::yaml::load(&std::fs::read_to_string(format!("{}/../{rel}", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap_or_else(|e| panic!("{}", e.msg));
+        let sensed = |t: usize| { let h = (t as u64).wrapping_mul(2654435761) >> 7; let b = |k: u64| (h >> k) & 1 == 1;
+            let needs = if b(9) && b(10) { r#","needs":{"context":0.2}"# } else { "" };
+            json::parse(&format!(r#"{{"quiet":{},"senses":{{"tokens":{}}},"src":"env:host","elapsed_hours":{}{needs}}}"#, b(2) && b(5), ((h >> 11) % 997) as f64 / 1000.0, [0.1, 0.5, 1.0][((h >> 15) % 3) as usize])).unwrap() };
+        let mut cases: Vec<(Json, &str, usize)> = vec![];
+        for mc in [6usize, 16] { for engine in ["probbit 0.13.0", "probbit 0.14.0"] { let mut d = load("bench/body/fixtures/needs2.yaml");
+            put(&mut d, &["expectation"], json::parse(&format!(r#"{{"max_combos":{mc}}}"#)).unwrap()); cases.push((d, engine, 0)); } }
+        let mut d = load("probbit-cli/tests/fixtures/monitor/tutor-expect.yaml"); put(&mut d, &["expectation"], json::parse(r#"{"max_combos":16}"#).unwrap()); cases.push((d, "probbit 0.14.0", 1));
+        for (d, engine, kind) in &cases { let p = persona::build(d).unwrap_or_else(|e| panic!("{}: {}", e.path, e.msg));
+            let ev = |t: usize| if *kind == 0 { sensed(t) } else { s1_event(t) };
+            let life = |reuse: bool| { let (mut lv, head) = Live::start(p.clone(), d, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
+                lv.expect_cache = persona::ExpectCache::new(true).with_reuse(reuse, reuse); assert_eq!(lv.expect_cache.reuses(), reuse);
+                let (mut text, mut docs, mut reused) = (format!("{head}\n"), vec![], 0u32);
+                for t in 0..500 { let (s, l) = lv.event(&ev(t), &run).unwrap_or_else(|e| panic!("event {t}: {}: {}", e.path, e.msg)); text += &l; text.push('\n'); docs.push(persona::canon(&s));
+                    reused += lv.expect_cache.reused(); if lv.n % 10 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+                (text, docs, lv.st.digest.clone(), reused) };
+            let (on, off) = (life(true), life(false)); let ctx = format!("{engine}, {}", persona::canon(d.get("expectation").unwrap()));
+            assert_eq!(on.1, off.1, "every stance document ({ctx})"); assert_eq!(on.0, off.0, "every strand byte ({ctx})"); assert_eq!(on.2, off.2, "the final state ({ctx})");
+            assert!(on.3 > 0 && off.3 == 0, "A_t read from the turn: on {} off {} ({ctx})", on.3, off.3);
+            assert_eq!(verify(&on.0, &run).unwrap().get("events"), Some(&Json::Num(500.0)), "{ctx}"); }
     }
 
     /// S2 (docs/persona.md §5.7, "Resume from a record"): a life recorded unbroken, and the same life resumed by each path: the
