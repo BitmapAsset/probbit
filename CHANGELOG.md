@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows
   persona. `strand::resume_boxed_from(header, checkpoint, line, trailing, &p, state, clock, &engine)` resumes from the header,
   the last checkpoint line and the lines after it read one at a time, never the whole strand: cost O(lines since the
   checkpoint). `turn_trace`: `trace::last_resume()` (lines walked, lines applied, their µs). No byte of any strand changes.
+- **The expectation's members as models** (docs/embedding.md "The expectation's members: one program text per event"): with
+  the cache on, the event's own program is the only text the deviation builds and reads; every other member is compiled
+  without its text and, when the habits in force are the event's, solved as the event's model with its own `h`
+  (`run::from_json_parts`, `run::Parts::model_with`, `run::enumerated`: the tier `run` answers with, the same calls); another
+  tier or other rules: its text, written from its compile meta, run by the engine. Same marginals, so every stance, strand line
+  and digest is the same as the reference path (`ExpectCache::new(false)`); proxy, the body persona's recorded day: `expect`
+  74.6% → 67.7% of the turn. `turn_trace` gains `expect_build_us` and `expect_solve_us` (the members' builds and solves).
 - **The expectation's cache** (docs/embedding.md "The expectation's cache"): `Live` keeps the exact marginals of the
   programs the deviation solved, keyed by the program without its comment, so an event whose members' programs are the
   previous event's solves none of them again (a life of one repeated event: `expect` 52% → 37% of the turn on the proxy, 95%

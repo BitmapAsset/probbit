@@ -32,6 +32,7 @@ impl Parts {
     /// The program's own `h` (n x k), as its text gives it
     pub fn h(&self) -> &[f64] { &self.h }
     /// The program's own model: the compile pass and `Model::new` on its `h`, as `from_json`
+    #[inline(always)]
     pub fn into_prog(self) -> Result<Prog, InErr> {
         let Parts { vars, values, mut h, allowed, clamp, pairs, caps, start } = self; let (n, k) = (vars.len(), values.len());
         let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
@@ -48,7 +49,8 @@ impl Parts {
         Ok(m)
     }
 }
-/// `from_json` up to the compile pass
+/// `from_json` up to the compile pass (inlined: `from_json` keeps one frame)
+#[inline(always)]
 pub fn from_json_parts(j: &Json) -> Result<Parts, InErr> {
     use crate::json::{arr, at, count, fields, ix, keyed, limit, names, number, opt, req, schema, text, value, weight};
     fields(j, "", &["probbit_ir", "values", "vars", "pairs", "caps", "all_different", "implies", "tables", "precedes", "linear", "start", "comment"])?;

@@ -150,7 +150,7 @@ the stance, its `deviation`, every strand line and digest are the same with the 
 After each event only the rows that event used are kept: at most `max_combos + 1`. Decay never invalidates a row (marginals
 do not read counts); a row stops being used when its program changes, which happens whenever the state the program is built
 from moves (moods, needs, senses: every event of most lives; the state's digest itself carries the turn, so it is never a
-key). The members' programs are still built every event: the cache skips solves, not compiles. A life whose programs move
+key). The cache skips solves, not builds (the next section removes most of the build). A life whose programs move
 every event gets no hit; after an event without one the cache is not consulted for the next 1, 2, 4, ... 32 events (a hit
 resets the pause), so such a life keys two events in 34. `turn_trace` counts `expect_cached` and `expect_solved` per event.
 
@@ -163,6 +163,47 @@ holds about two thirds of that (its `String` and `Vec` headers are 12 bytes, not
 target. A host short of heap at a large `max_combos` turns the cache off; the bytes do not move. With the cache the body
 persona's turn on the proxy takes 13,840 B of stack (13,808 before) and its heap peak is 89,990 B (88,153 before: the rows
 the individual holds between events).
+
+### The expectation's members: one program text per event
+
+Measured before (proxy, the body persona's recorded day, 134 events, max_combos 6; `turn_trace`'s `expect_build_us` and
+`expect_solve_us`): 6.63 programs per event, each about 105 µs to build (prep 40, compile 61) and 110 µs to solve (`from_json`
+47, the tier ladder with its answer document 36.5, the document's finite check 10, the cache key's hash over the text). The
+exact solve itself is the small part; the program as text and back is about half of every member.
+
+A member's program is the event's own program A_t with another `h`: the persona's values, variables, pairs and steps are the
+same, and so are the rules whenever the habits in force are A_t's. So, with the cache on (`Live`'s default):
+
+- A_t is built as before (its text and the compiler's meta) and read once into the model's parts before the compile pass
+  (`run::from_json_parts`), on the first program the cache does not answer.
+- Every other member (the empty program, each remembered combination) runs prep, credit and the gate, then the compiler's
+  arithmetic without writing its text (the field per variable and the rules in force). With A_t's rules, its model is A_t's
+  parts with its own `h` (each level at the value index its name has in the text, zeros where the text omits a weight, the
+  twins copied, each weight checked as the text's is), then the compile pass and `Model::new` as `from_json` runs them
+  (`run::Parts::model_with`): the model the engine would build from its text. A_t's own field mapped this way is checked
+  against the `h` its text carries before any member uses the mapping.
+- The model is solved by the exact tier `run` answers a `decide` with (`run::enumerated`): over `exact_limit` raw plans the
+  components tier, within it the whole-program enumeration, the same calls with the same arguments, the same verdicts, the
+  same finite check; the marginals are read as from the answer document. Another tier (one of those declining, or `sweeps: 0`
+  over the limit, where `run` stops on the wall clock), or other rules in force: the member's text is written from its meta
+  (no second build) and run by the engine, as before.
+- The cache keys these programs by A_t's text without its comment and its vars' `h`, then the program's field: equal keys,
+  equal texts, as the cache's own key.
+
+No member's text, digest or marginals is in a stance or a strand line (only the deviation's numbers, from the marginals), and
+the marginals are the same numbers: every stance, strand line and digest is the same as with the cache off, which is the
+reference path (`ExpectCache::new(false)`, `persona::deviation`: every member's text built and run by the engine). The engine
+argument is not called for these members; the deviation already reads members as the engine's exact tier (the cache returns
+rows without calling it), and every engine in the repository is `persona::run_program`.
+
+On the proxy (median of 3–5 runs, before → after, `expect`'s share of the turn, cache on): the body persona's recorded day
+74.6% → 67.7% (`expect` 1,467 → 1,047 µs per event; per member build 105 → 84 µs, solve 110 → 65 µs); its two recorded events
+50.6% → 41.8%; the fixture persona, one event repeated 500 times, 37.1% → 35.2%; 500 events of many combinations 81.6% →
+81.9% (most of its members have other habits in force than A_t: they keep the engine's path, without a second build). What is
+left per member on the body is its prep (about 40 µs: the senses, needs and drives step on the member's own readings) and the
+compiler's arithmetic, then the components tier; with M members per event this is the floor of any exact path that solves
+every member. The body persona's turn on the proxy takes 13,824 B of stack (13,840 before) and its heap peak is unchanged
+(89,990 B, at the turn's solve; inside `expect` the peak rises from 68,476 to 87,214 B: A_t's parts and one member's model).
 
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
