@@ -2827,7 +2827,9 @@ fn decode(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, confl
 }
 
 // ------------------------------------------------------------------------------------------------------------ turns
-fn solve(p: &Persona, st: &State, prog: &Json, eng: Engine, calls: &mut usize) -> Json { *calls += 1; eng(prog, &flags(p, st)) }
+fn solve(p: &Persona, st: &State, prog: &Json, eng: Engine, calls: &mut usize) -> Json {
+    *calls += 1; let was = crate::trace::enter(crate::trace::Phase::Solve); let r = eng(prog, &flags(p, st)); crate::trace::enter(was); r
+}
 fn ms(t: Instant) -> f64 { t.elapsed().as_secs_f64() * 1e3 }
 /// A minimal set of active habits that cannot hold together (deletion filter: drop each habit in turn, keep it only if the rest
 /// becomes feasible without it); [] when the rules without any habit are already infeasible
@@ -2847,6 +2849,8 @@ pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
 /// carry no `src` and stand for events of an accepted source
 pub fn turn_any_source(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, false) }
 fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool) -> R<(Json, State)> {
+    use crate::trace::{enter, Phase};
+    enter(Phase::Prep);
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     for (n, (k, _)) in raw.iter().enumerate() { if raw[..n].iter().any(|(k2, _)| k2 == k) { return Err(perr(&format!("inputs.{k}"), "duplicate input")); } }
     // reward provenance (§2.10), first: with `reward_from` (or a senses block, §2.11), `src` is read here (not compiled, so not
@@ -2864,6 +2868,7 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
     // RFC 0002 Design B: the surprise gate steps v, r̂, g and the counts of each paid learned trait before the learner reads g
     let st2 = gate_step(p, st2, &raw)?;
     let st = &st2;
+    enter(Phase::Compile);
     let t0 = Instant::now(); let mut calls = 0;
     let o = Opts { no_inertia, ..Default::default() };
     let (mut prog, mut meta) = compile(p, st, &raw, &o)?; let mut ptext = digest_of(&text(&prog));
@@ -2874,19 +2879,20 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
         if p.eng.yields && !c.is_empty() { let mut y: Vec<String> = vec![]; let mut c = c;
             loop { let mut rank = c.clone(); rank.sort_by(|a, b| { let (ha, hb) = (p.habit(a), p.habit(b)); ha.priority.partial_cmp(&hb.priority).unwrap().then(p.habit_index(b).cmp(&p.habit_index(a))) });
                 y.push(rank[0].clone());
-                let oo = Opts { no_inertia, exclude: y.clone(), ..Default::default() }; let (pr, me) = compile(p, st, &raw, &oo)?; prog = pr; meta = me; ptext = digest_of(&text(&prog));
+                enter(Phase::Compile); let oo = Opts { no_inertia, exclude: y.clone(), ..Default::default() }; let (pr, me) = compile(p, st, &raw, &oo)?; prog = pr; meta = me; ptext = digest_of(&text(&prog));
                 doc = solve(p, st, &prog, eng, &mut calls);
                 if doc.get("verdict").and_then(Json::as_str) != Some("infeasible") { conflict = None; break; }
                 c = habit_conflict(p, st, &raw, &meta.active, &oo, eng, &mut calls)?; conflict = Some(c.clone()); if c.is_empty() { break; } }
             yielded = Some(y); } }
     let mut engine_ms = ms(t1);
+    enter(Phase::Decode);
     let (mut out, mut ns) = decode(p, st, &ptext, &meta, &doc, conflict.as_deref(), yielded.as_deref()); let lift = out.lift.clone();
     // the persona's vouch rule: unsure traits with a hold level are held there (a second, clamped solve), consistent with every habit
     let holds: Vec<(String, String)> = out.unsure.iter().filter_map(|t| { let v = p.var(t).unwrap(); let e = &out.stance.iter().find(|(k, _)| k == t).unwrap().1;
         v.hold.as_ref().filter(|h| **h != e.level).map(|h| (t.clone(), h.clone())) }).collect();
     let mut held = vec![];
     if !holds.is_empty() {
-        let o2 = Opts { no_inertia, clamps: holds.clone(), ..Default::default() }; let (prog2, meta2) = compile(p, st, &raw, &o2)?;
+        enter(Phase::Compile); let o2 = Opts { no_inertia, clamps: holds.clone(), ..Default::default() }; let (prog2, meta2) = compile(p, st, &raw, &o2)?; enter(Phase::Decode);
         let te = Instant::now(); let doc2 = solve(p, st, &prog2, eng, &mut calls); engine_ms += ms(te);
         if matches!(doc2.get("verdict").and_then(Json::as_str), Some("exact" | "diagnostics_passed")) {
             let (mut out2, ns2) = decode(p, st, &digest_of(&text(&prog2)), &meta2, &doc2, None, None);
@@ -2898,6 +2904,7 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
             out2.line = line(p, &levels, &meta2.active, &out.bound, &out.unsure, out2.agenda.as_deref().unwrap_or(&[]), &vouched, &meta2.conditional, &baseline(p, st));
             out = out2; ns = ns2; } }
     out.held = held; out.lift = lift;
+    enter(Phase::Document);
     if timing { let r3 = |x: f64| Json::Num((x * 1e3).round() / 1e3);
         out.timing = Some(Json::Obj(vec![("compile_ms".into(), r3(compile_ms)), ("engine_ms".into(), r3(engine_ms)), ("decode_ms".into(), r3((ms(t0) - compile_ms - engine_ms).max(0.0))), ("turn_ms".into(), r3(ms(t0))),
             ("engine_calls".into(), Json::Num(calls as f64)), ("holds".into(), Json::Num(out.held.len() as f64)), ("load_avg_1m".into(), crate::sys::loadavg().map_or(Json::Null, |l| Json::Num((l * 100.0).round() / 100.0)))])); }

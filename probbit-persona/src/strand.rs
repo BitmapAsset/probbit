@@ -132,6 +132,8 @@ impl Live {
     /// One event: stamp its elapsed hours, run the turn, chain the strand line -> (the stance document, the strand line). A bad
     /// event is an error and changes nothing (no turn, no line); so is every event while the individual is paused or retired.
     pub fn event(&mut self, ev: &Json, eng: Engine) -> Result<(Json, String), InErr> {
+        use crate::trace::{enter, Phase};
+        crate::trace::begin();
         if self.status != Status::Active { return Err(refusal(self.status)); }
         let Json::Obj(kv) = ev else { return Err(perr("event", "must be a JSON object of inputs")) };
         let mut kv: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect();
@@ -142,6 +144,7 @@ impl Live {
             Clock::Fixed => { let e = match given { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err(perr("event.elapsed_hours", "a number >= 0")) }; (q6(e), self.last) } };
         kv.push(("elapsed_hours".into(), Json::Num(elapsed)));
         let inputs = Json::Obj(kv);
+        enter(Phase::Expect);
         // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without them)
         let dev = self.expect.as_ref().and_then(|m| persona::deviation(&self.p, &self.st, &inputs, m, eng));
         let traj = persona::trajectory(&self.p, &self.st, &inputs);
@@ -151,6 +154,7 @@ impl Live {
         // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
         persona::set_glyph(&self.p, &mut stance);
         // RFC 0002 part 2: a rest line due before this event is its own line, chained before the event line (the turn applied it)
+        enter(Phase::Line);
         let (rest, prev) = match persona::rest_line(&self.p, &self.st, &inputs) {
             Some((r, rs)) => { let l = rest_line(&self.prev, r, &rs.digest); let d = persona::digest_of(&l); (Some(l), d) }
             None => (None, self.prev.clone()) };
@@ -159,10 +163,13 @@ impl Live {
         if let Some(d) = &dev { lj.push(("deviation".into(), d.receipt())); }
         if let Some(g) = stance.get("glyph") { lj.push(("glyph".into(), g.clone())); }
         let line = persona::canon(&Json::Obj(lj));
+        enter(Phase::Fold);
         if let Some(m) = self.expect.as_mut() { persona::expect_step(&self.p, m, &inputs, dev.as_ref().and_then(persona::Deviation::logged_pred)); }
         self.traj = traj;
+        enter(Phase::Line);
         self.n += 1; self.last = now; self.prev = persona::digest_of(&line); self.st = ns;
-        if let Some(r) = &rest { self.rests += 1; return Ok((stance, format!("{r}\n{line}"))); }
+        let line = match &rest { Some(r) => { self.rests += 1; format!("{r}\n{line}") } None => line };
+        crate::trace::end();
         Ok((stance, line))
     }
     /// A control line (pause, resume or retire) `by` a person or a sensor (`human[:id]`, `env[:id]`) for `reason`, stamped `at`:

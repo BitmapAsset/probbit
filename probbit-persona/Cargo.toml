@@ -17,6 +17,8 @@ std = ["probbit-core/std", "probbit-ir/std", "probbit-decide?/std"]
 nostd = ["dep:probbit-nostd", "probbit-core/nostd", "probbit-ir/nostd", "probbit-decide?/nostd"]
 # `router` (probbit decide) and `evaluate` (the decision-API adapter): probbit-decide
 decide = ["dep:probbit-decide"]
+# `turn_trace` (off by default): per-phase microseconds and a host probe's bytes for the last `Live::event` (`persona::trace`)
+turn_trace = []
 
 [dependencies]
 probbit-nostd = { path = "../probbit-nostd", version = "0.13.0", optional = true }

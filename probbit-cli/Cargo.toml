@@ -14,6 +14,10 @@ categories = ["command-line-utilities", "algorithms", "science"]
 name = "probbit"
 path = "src/main.rs"
 
+[features]
+# `probbit live` with PROBBIT_TURN_TRACE set prints each event's phases to stderr (probbit-persona `turn_trace`)
+turn_trace = ["probbit-persona/turn_trace"]
+
 [dependencies]
 probbit-core = { path = "../probbit-core", version = "0.13.0" }
 probbit-decide = { path = "../probbit-decide", version = "0.13.0" }

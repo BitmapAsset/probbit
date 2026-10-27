@@ -6,10 +6,12 @@
 //!   `evaluate` (feature `decide`): the decision-API adapter.
 //! - `strand`: the strand writer (`Live`: start, event, control, checkpoint and rest lines, the `prev` chain) and its checks over
 //!   a `&str` (`Replay`, `verify*`, `read_actions`, `first_difference`), with no file I/O.
+//! - `trace`: with feature `turn_trace`, one event's time and a host probe's bytes by phase (`Live::event`).
 //! - `sys`: the process's resource usage (getrusage on 64-bit Unix; `None` elsewhere). `hooks`: the host's monitor and config echo.
 //!
 //! Features: `std` (default) builds on std; `nostd` builds `no_std` + `alloc` for a target without an operating system, with
-//! the std subset from probbit-nostd (docs/embedding.md). `decide` (default) adds `router` and `evaluate` (probbit-decide).
+//! the std subset from probbit-nostd (docs/embedding.md). `decide` (default) adds `router` and `evaluate` (probbit-decide). `turn_trace` (off) records the
+//! last event's phases.
 #![cfg_attr(not(feature = "std"), no_std)]
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
@@ -32,4 +34,5 @@ pub mod router;
 pub mod run;
 pub mod strand;
 pub mod sys;
+pub mod trace;
 pub mod yaml;

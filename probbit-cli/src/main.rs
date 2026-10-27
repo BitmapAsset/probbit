@@ -874,8 +874,15 @@ fn live_cmd(args: &[String]) {
         live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
     if let Some(h) = &header { log(&[h]); }
     let (mut bad, mut refused, mut warned, mut warned_credit, mut warned_needs) = (0, 0, false, false, false);
+    // feature `turn_trace`: with PROBBIT_TURN_TRACE set, each event's phases on stderr (the parse and the append are timed here)
+    #[cfg(feature = "turn_trace")]
+    let trace_on = std::env::var_os("PROBBIT_TURN_TRACE").is_some();
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
+        #[cfg(feature = "turn_trace")]
+        let (t_parse, parse_us) = (std::time::Instant::now(), std::cell::Cell::new(0u64));
         let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| {
+            #[cfg(feature = "turn_trace")]
+            parse_us.set(t_parse.elapsed().as_micros() as u64);
             // readings sent to a persona without a senses block are an undeclared input (listed in `ignored`): say so once
             if !warned && !lv.p.has_senses() && ev.get("senses").is_some() { warned = true;
                 err_line(&format!("probbit: live: events[{i}]: this persona has no senses block: `senses` is an undeclared input (listed in ignored), no reading is judged")); }
@@ -888,7 +895,13 @@ fn live_cmd(args: &[String]) {
             lv.event(&ev, eng) });
         match res {
             Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
+                #[cfg(feature = "turn_trace")]
+                let t_append = std::time::Instant::now();
                 match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
+                #[cfg(feature = "turn_trace")]
+                if trace_on { let tr = probbit_persona::trace::last(); let us = |t: std::time::Instant| Json::Num(t.elapsed().as_micros() as f64);
+                    let mut j = tr.to_json(); if let Json::Obj(v) = &mut j { v.push(("n".into(), Json::Num(lv.n as f64))); v.push(("parse_us".into(), Json::Num(parse_us.get() as f64))); v.push(("append_us".into(), us(t_append))); }
+                    err_line(&format!("probbit: live: trace {}", persona::canon(&j))); }
                 if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
             Err(e) => { if ["paused", "retired"].contains(&e.code) { refused += 1 } else { bad += 1 }
                 let e = json::InErr { path: format!("events[{i}].{}", e.path), ..e }; err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); error_object(&e.to_json()); } } };
