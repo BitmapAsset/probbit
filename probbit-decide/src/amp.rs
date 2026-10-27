@@ -1,11 +1,14 @@
-//! RFC 0011 (research, round 1): an amplitude register. A register of q qubits simulated exactly on a CPU as a state vector of
+//! RFC 0011 (research, rounds 1-2): an amplitude register. A register of q qubits simulated exactly on a CPU as a state vector of
 //! 2^q complex amplitudes (f64 pairs, on the heap: 16 * 2^q bytes): unitary gates with phase, interference between basis states,
 //! exact marginals (no sampling), measurement by the Born rule with the engine's deterministic RNG, and a digest of the state at
 //! 6 decimals (the rule for every emitted float). A simulation of a small quantum system and nothing else: no quantum hardware,
 //! no speedup claim, no scaling past what 2^q amplitudes allow.
 //!
-//! Basis index x = sum of bit_i << i: qubit i is bit i. For a program over two-valued variables, bit 0 is the variable's first
-//! value and bit 1 its second; z_i = +1 for bit 0, -1 for bit 1.
+//! Basis index x = sum of bit_i << i: qubit i is bit i. Round 2: a variable with d allowed values takes ceil(log2 d) qubits
+//! (`Encoding`; d = 3: codes 00, 01, 10, code 11 unused), the start is the uniform superposition over the valid codes, the
+//! mixer is block-diagonal per variable (`MIXER`, the identity on unused codes) and the cost is one general diagonal phase
+//! layer exp(-i g E) with E = -log w per basis state, so pair tables between multi-level variables (3- and 4-body terms in
+//! the qubits) need no decomposition. The unused codes keep amplitude 0 (checked after every layer).
 #[allow(unused_imports)]
 use std::prelude::rust_2021::*;
 use probbit_core::Philox4x32;
@@ -72,24 +75,91 @@ pub fn unitarity_error(g: &Gate) -> f64 {
 /// A number at 6 decimals as the canonical text writes it (`-0` written `0`)
 fn f6(x: f64) -> String { let s = format!("{x:.6}"); if s.trim_start_matches('-').bytes().all(|b| b == b'0' || b == b'.') { "0.000000".into() } else { s } }
 
-/// q qubits as 2^q complex amplitudes, and the list of gates applied (the circuit)
+/// One step of a circuit: a gate, a diagonal phase layer exp(-i g E) (`Register::phase`), or a mixer layer on every variable
+/// (`Register::mix`)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Op { Gate(Gate), Phase(f64), Mix(f64) }
+impl Op {
+    /// One canonical text line (angles at 6 decimals)
+    pub fn text(&self) -> String { match self { Op::Gate(g) => g.text(), Op::Phase(g) => format!("phase {}", f6(*g)), Op::Mix(t) => format!("mix {}", f6(*t)) } }
+}
+
+/// The mixer every round-2 layer uses, by name (the receipt's `engine.mixer`)
+pub const MIXER: &str = "complete-graph";
+
+/// Round 2: how variables with d allowed values are packed into qubits. Variable i (d_i >= 1 values) takes b_i = ceil(log2 d_i)
+/// qubits, packed in variable order (its code is bits o_i..o_i + b_i of the basis index); code c < d_i is its c-th value, codes
+/// c >= d_i are unused (d = 3: code 11) and keep amplitude 0 for the whole evolution.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Encoding { pub levels: Vec<usize> }
+impl Encoding {
+    /// Qubits for d values: ceil(log2 d) (0 for d = 1)
+    pub fn bits(d: usize) -> usize { assert!(d >= 1, "a variable needs at least one value"); (usize::BITS - (d - 1).leading_zeros()) as usize }
+    /// Every variable two-valued (round 1's programs)
+    pub fn two_valued(q: usize) -> Encoding { Encoding { levels: vec![2; q] } }
+    /// The encoded qubits, sum of ceil(log2 d_i)
+    pub fn qubits(&self) -> usize { self.levels.iter().map(|&d| Encoding::bits(d)).sum() }
+    /// Per variable its first qubit
+    pub fn offsets(&self) -> Vec<usize> { let mut o = 0; self.levels.iter().map(|&d| { let r = o; o += Encoding::bits(d); r }).collect() }
+    /// Variable i's code in basis index x
+    pub fn code(&self, x: usize, i: usize) -> usize { let o = self.offsets()[i]; (x >> o) & ((1usize << Encoding::bits(self.levels[i])) - 1) }
+    /// The codes of every variable in x, or None when one is unused
+    pub fn decode(&self, x: usize) -> Option<Vec<usize>> {
+        let mut o = 0; let mut v = Vec::with_capacity(self.levels.len());
+        for &d in &self.levels { let b = Encoding::bits(d); let c = (x >> o) & ((1usize << b) - 1); if c >= d { return None; } v.push(c); o += b; }
+        Some(v)
+    }
+    /// The canonical text the encoding digest hashes: one line per variable, `var <i> levels <d> qubits <o>..<o + b>`
+    pub fn text(&self) -> String {
+        let mut s = String::new(); for (i, (&d, o)) in self.levels.iter().zip(self.offsets()).enumerate() { s.push_str(&format!("var {i} levels {d} qubits {o}..{}\n", o + Encoding::bits(d))); } s
+    }
+}
+
+/// The complete-graph mixer on d levels as a d x d matrix (row-major): exp(i t A) with A = J - I the adjacency of the complete
+/// graph K_d. Closed form (J^2 = d J): e^{-it} (I + (e^{itd} - 1)/d J). d = 2 is exp(i t X) = RX(-2t); d = 1 is the identity.
+pub fn mixer_matrix(d: usize, t: f64) -> Vec<C> {
+    let (ph, c) = mixer_coef(d, t); (0..d * d).map(|k| { let off = c.mul(ph); if k / d == k % d { ph.add(off) } else { off } }).collect()
+}
+/// (e^{-it}, (e^{itd} - 1)/d)
+fn mixer_coef(d: usize, t: f64) -> (C, C) { let e = C::cis(t * d as f64); (C::cis(-t), C::new((e.re - 1.0) / d as f64, e.im / d as f64)) }
+/// max |U^dagger U - I| of the mixer on the whole 2^b block of a d-level variable (the mixer on the valid codes, the identity on
+/// the unused ones)
+pub fn mixer_unitarity_error(d: usize, t: f64) -> f64 {
+    let n = 1usize << Encoding::bits(d); let m = mixer_matrix(d, t);
+    let u = |i: usize, j: usize| if i < d && j < d { m[i * d + j] } else if i == j { C::ONE } else { C::ZERO };
+    let mut e: f64 = 0.0;
+    for i in 0..n { for j in 0..n { let mut s = C::ZERO; for k in 0..n { s = s.add(u(k, i).conj().mul(u(k, j))); }
+        e = e.max((s.re - if i == j { 1.0 } else { 0.0 }).abs()).max(s.im.abs()); } }
+    e
+}
+
+/// q qubits as 2^q complex amplitudes, and the ops applied (the circuit)
 #[derive(Clone, Debug)]
-pub struct Register { q: usize, amp: Vec<C>, gates: Vec<Gate> }
+pub struct Register { q: usize, amp: Vec<C>, ops: Vec<Op> }
 impl Register {
     /// |0...0> on q qubits (q <= Q_MAX_HOST); the amplitudes take exactly 16 * 2^q bytes of heap
     pub fn new(q: usize) -> Register {
         assert!(q <= Q_MAX_HOST, "an amplitude register has at most {Q_MAX_HOST} qubits on the host");
         let mut amp = vec![C::ZERO; 1usize << q]; amp[0] = C::ONE;
-        let r = Register { q, amp, gates: vec![] };
+        let r = Register { q, amp, ops: vec![] };
         assert_eq!(r.bytes(), AMP_BYTES << q); r
+    }
+    /// Round 2: the uniform superposition over the valid codes of every variable, 1/sqrt(prod d_i) on each valid basis state and
+    /// 0 on the rest (for an all-two-valued encoding this is H on every qubit)
+    pub fn uniform(enc: &Encoding) -> Register {
+        let mut r = Register::new(enc.qubits()); let a = 1.0 / (enc.levels.iter().map(|&d| d as f64).product::<f64>()).sqrt();
+        for (x, v) in r.amp.iter_mut().enumerate() { *v = if enc.decode(x).is_some() { C::new(a, 0.0) } else { C::ZERO }; }
+        r
     }
     pub fn qubits(&self) -> usize { self.q }
     /// The amplitudes' bytes: 16 * 2^q
     pub fn bytes(&self) -> usize { self.amp.len() * core::mem::size_of::<C>() }
     pub fn amplitudes(&self) -> &[C] { &self.amp }
-    pub fn gates(&self) -> &[Gate] { &self.gates }
-    /// The circuit as text, one gate per line (angles at 6 decimals)
-    pub fn circuit_text(&self) -> String { let mut s = String::new(); for g in &self.gates { s.push_str(&g.text()); s.push('\n'); } s }
+    pub fn ops(&self) -> &[Op] { &self.ops }
+    /// The gates among the ops
+    pub fn gates(&self) -> Vec<Gate> { self.ops.iter().filter_map(|o| if let Op::Gate(g) = o { Some(*g) } else { None }).collect() }
+    /// The circuit as text, one op per line (angles at 6 decimals)
+    pub fn circuit_text(&self) -> String { let mut s = String::new(); for o in &self.ops { s.push_str(&o.text()); s.push('\n'); } s }
 
     fn one(&mut self, a: usize, m: [C; 4]) {
         let bit = 1usize << a;
@@ -108,14 +178,43 @@ impl Register {
             Gate::Rzz(a, b, t) => { ok(a); ok(b); assert_ne!(a, b); let (same, diff) = (C::cis(-t / 2.0), C::cis(t / 2.0));
                 for i in 0..self.amp.len() { let p = if ((i >> a) & 1) == ((i >> b) & 1) { same } else { diff }; self.amp[i] = p.mul(self.amp[i]); } }
         }
-        self.gates.push(g);
+        self.ops.push(Op::Gate(g));
     }
+    /// Round 2: the general diagonal phase layer, a_x <- e^{-i g E(x)} a_x for every basis state with a finite E(x) (E = -log w
+    /// of its plan); E(x) = NaN marks an unused code, left untouched (its amplitude is 0). O(2^q), any order of interaction.
+    pub fn phase(&mut self, e: &[f64], g: f64) {
+        assert_eq!(e.len(), self.amp.len(), "one energy per basis state");
+        for (a, &ex) in self.amp.iter_mut().zip(e) { if !ex.is_nan() { *a = C::cis(-g * ex).mul(*a); } }
+        self.ops.push(Op::Phase(g));
+    }
+    /// Round 2: the mixer layer, the complete-graph mixer exp(i t A_d) on the valid codes of every variable (`mixer_matrix`),
+    /// the identity on its unused codes: block-diagonal, O(d) per block by the closed form.
+    pub fn mix(&mut self, enc: &Encoding, t: f64) {
+        assert_eq!(enc.qubits(), self.q, "the encoding's qubits");
+        let mut buf: Vec<C> = vec![];
+        for (&d, o) in enc.levels.iter().zip(enc.offsets()) {
+            if d < 2 { continue; } let b = Encoding::bits(d); let mask = ((1usize << b) - 1) << o; let (ph, c) = mixer_coef(d, t);
+            for x in 0..self.amp.len() { if x & mask != 0 { continue; }
+                buf.clear(); let mut s = C::ZERO; for k in 0..d { let a = self.amp[x | (k << o)]; buf.push(a); s = s.add(a); } let cs = c.mul(s);
+                for (k, &a) in buf.iter().enumerate() { self.amp[x | (k << o)] = ph.mul(a.add(cs)); } }
+        }
+        self.ops.push(Op::Mix(t));
+    }
+    /// The Born mass on unused codes (the basis states whose E is NaN)
+    pub fn invalid_mass(&self, e: &[f64]) -> f64 { self.amp.iter().zip(e).filter(|(_, x)| x.is_nan()).map(|(a, _)| a.norm2()).sum() }
     /// The Born probabilities |a_x|^2
     pub fn probabilities(&self) -> Vec<f64> { self.amp.iter().map(|a| a.norm2()).collect() }
     /// Exact marginals P(qubit i = 1), one per qubit (no sampling)
     pub fn marginals(&self) -> Vec<f64> {
         let mut m = vec![0.0; self.q];
         for (x, a) in self.amp.iter().enumerate() { let p = a.norm2(); for (i, mi) in m.iter_mut().enumerate() { if x >> i & 1 == 1 { *mi += p; } } }
+        m
+    }
+    /// Round 2: exact marginals per variable and level, P(variable i has code c), concatenated in variable order (sum d_i entries)
+    pub fn level_marginals(&self, enc: &Encoding) -> Vec<f64> {
+        let base: Vec<usize> = enc.levels.iter().scan(0, |s, &d| { let r = *s; *s += d; Some(r) }).collect();
+        let mut m = vec![0.0; enc.levels.iter().sum()];
+        for (x, a) in self.amp.iter().enumerate() { if let Some(v) = enc.decode(x) { let p = a.norm2(); for (i, c) in v.into_iter().enumerate() { m[base[i] + c] += p; } } }
         m
     }
     /// One measurement of every qubit by the Born rule: the basis index, drawn with Philox4x32(seed, stream 0)
@@ -139,10 +238,13 @@ impl Ising {
         let z = |i: usize| if x >> i & 1 == 0 { 1.0 } else { -1.0 };
         self.a.iter().enumerate().map(|(i, a)| a * z(i)).sum::<f64>() + self.b.iter().map(|&(i, j, b)| b * z(i) * z(j)).sum::<f64>()
     }
+    /// E(x) = -log w(x) over the 2^q basis states (the phase layer's input)
+    pub fn energies(&self) -> Vec<f64> { (0..1usize << self.q).map(|x| -self.logw(x)).collect() }
 }
 
 /// A transverse-field sweep: `steps` Trotter steps over total time `time`, s = (k + 1/2) / steps at step k,
-/// H(s) = -(1 - s) sum X_i - s sum (a_i Z_i + b_ij Z_i Z_j), started from |+...+>
+/// H(s) = -(1 - s) sum_i A_i + s E (A_i the complete-graph mixer of variable i; E = -log w), started from the uniform
+/// superposition over the valid codes
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Schedule { pub steps: usize, pub time: f64 }
 impl Schedule {
@@ -150,30 +252,31 @@ impl Schedule {
     pub fn text(&self) -> String { format!("transverse-field linear steps {} time {}\n", self.steps, f6(self.time)) }
     pub fn name(&self) -> String { format!("tf-linear-{}x{}", self.steps, f6(self.time)) }
 }
-/// The tier's fixed default schedule (round 1; schedules are round 2's study)
+/// The tier's fixed default schedule (rounds 1 and 2; schedules are a later round's study)
 pub const DEFAULT_SCHEDULE: Schedule = Schedule { steps: 16, time: 4.0 };
 
-/// The cost layer exp(-i g H_P) with H_P = -(sum a_i Z_i + sum b_ij Z_i Z_j): RZ(-2 g a_i), RZZ(-2 g b_ij)
-fn cost_layer(r: &mut Register, p: &Ising, g: f64) {
-    for (i, &a) in p.a.iter().enumerate() { if a != 0.0 { r.apply(Gate::Rz(i, -2.0 * g * a)); } }
-    for &(i, j, b) in &p.b { if b != 0.0 { r.apply(Gate::Rzz(i, j, -2.0 * g * b)); } }
-}
-/// The mixer layer exp(-i t H_D) with H_D = -sum X_i: RX(-2 t) on every qubit
-fn mixer_layer(r: &mut Register, t: f64) { for i in 0..r.q { r.apply(Gate::Rx(i, -2.0 * t)); } }
+/// The bar on the Born mass of the unused codes, checked after every layer (it is 0 by construction; never renormalised)
+pub const INVALID_MASS_MAX: f64 = 1e-15;
+fn checked(r: &Register, e: &[f64]) { let m = r.invalid_mass(e); assert!(m <= INVALID_MASS_MAX, "unused-code mass {m:e} after a layer"); }
 
-/// The register (q = p.q, fresh) after H on every qubit and the Trotterised sweep of `s`
-pub fn evolve_ising(p: &Ising, s: &Schedule) -> Register {
-    let mut r = Register::new(p.q); for i in 0..p.q { r.apply(Gate::H(i)); }
-    let dt = s.time / s.steps as f64;
-    for k in 0..s.steps { let x = (k as f64 + 0.5) / s.steps as f64; cost_layer(&mut r, p, dt * x); mixer_layer(&mut r, dt * (1.0 - x)); }
+/// Round 2: the sweep `s` on an encoding and its energies (one per basis state, NaN on unused codes): the uniform start over
+/// the valid codes, then per step the phase layer (g = dt s) and the mixer layer (t = dt (1 - s))
+pub fn sweep(enc: &Encoding, e: &[f64], s: &Schedule) -> Register {
+    let mut r = Register::uniform(enc); let dt = s.time / s.steps as f64;
+    for k in 0..s.steps { let x = (k as f64 + 0.5) / s.steps as f64; r.phase(e, dt * x); checked(&r, e); r.mix(enc, dt * (1.0 - x)); checked(&r, e); }
     r
 }
-/// QAOA with p layers: H on every qubit, then per layer (gamma, beta) the cost layer and the mixer layer
-pub fn qaoa(p: &Ising, layers: usize, params: &[(f64, f64)]) -> Register {
-    assert_eq!(params.len(), layers, "one (gamma, beta) per layer");
-    let mut r = Register::new(p.q); for i in 0..p.q { r.apply(Gate::H(i)); }
-    for &(g, b) in params { cost_layer(&mut r, p, g); mixer_layer(&mut r, b); }
+/// Round 2: QAOA on an encoding: the uniform start, then per layer (gamma, beta) the phase layer and the mixer layer
+pub fn qaoa_on(enc: &Encoding, e: &[f64], params: &[(f64, f64)]) -> Register {
+    let mut r = Register::uniform(enc);
+    for &(g, b) in params { r.phase(e, g); checked(&r, e); r.mix(enc, b); checked(&r, e); }
     r
+}
+/// The sweep on an Ising program (every variable two-valued): the same phase and mixer layers as `sweep`
+pub fn evolve_ising(p: &Ising, s: &Schedule) -> Register { sweep(&Encoding::two_valued(p.q), &p.energies(), s) }
+/// QAOA with p layers on an Ising program: the same layers as `qaoa_on`
+pub fn qaoa(p: &Ising, layers: usize, params: &[(f64, f64)]) -> Register {
+    assert_eq!(params.len(), layers, "one (gamma, beta) per layer"); qaoa_on(&Encoding::two_valued(p.q), &p.energies(), params)
 }
 
 /// sha256 (FIPS 180-4), one shot
@@ -223,6 +326,23 @@ mod tests {
         let p = Ising { q: 3, a: vec![0.4, -0.2, 0.1], b: vec![(0, 1, 0.6), (1, 2, -0.3)] };
         let r = evolve_ising(&p, &DEFAULT_SCHEDULE); assert!((r.probabilities().iter().sum::<f64>() - 1.0).abs() < 1e-12);
         let r = qaoa(&p, 2, &[(0.4, 0.7), (0.2, 0.3)]); assert!((r.probabilities().iter().sum::<f64>() - 1.0).abs() < 1e-12);
+    }
+    #[test]
+    fn three_level_codes_stay_empty_and_the_mixer_is_unitary() {
+        for d in 1..=8 { for t in [0.0, 0.3, -1.7, 2.5, 10.0] { assert!(mixer_unitarity_error(d, t) < 1e-12, "d {d} t {t}"); } }
+        assert_eq!((Encoding::bits(1), Encoding::bits(2), Encoding::bits(3), Encoding::bits(4), Encoding::bits(5)), (0, 1, 2, 2, 3));
+        // d = 2: the complete-graph mixer is RX(-2t) exactly
+        let m = mixer_matrix(2, 0.7); let g = Gate::Rx(0, -1.4).matrix(); for k in 0..4 { assert!((m[k].re - g[k].re).abs() < 1e-15 && (m[k].im - g[k].im).abs() < 1e-15); }
+        // a three-level variable, a two-valued flag and a three-level variable with a pair table favouring the diagonal
+        let enc = Encoding { levels: vec![3, 2, 3] }; assert_eq!(enc.qubits(), 5);
+        let lw = |v: &[usize]| [0.4, -0.2, 0.9][v[0]] + if v[1] == 1 { 0.3 } else { 0.0 } + if v[0] == v[2] { 1.1 } else { 0.0 } + if v[1] == 1 && v[2] == 2 { -0.5 } else { 0.0 };
+        let e: Vec<f64> = (0..32).map(|x| enc.decode(x).map_or(f64::NAN, |v| -lw(&v))).collect();
+        let r = sweep(&enc, &e, &DEFAULT_SCHEDULE); assert!(r.invalid_mass(&e) == 0.0);
+        assert!((r.probabilities().iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        let lm = r.level_marginals(&enc); assert_eq!(lm.len(), 8); for (o, d) in [(0, 3), (3, 2), (5, 3)] { assert!((lm[o..o + d].iter().sum::<f64>() - 1.0).abs() < 1e-12); }
+        let r = qaoa_on(&enc, &e, &[(0.4, 0.7), (0.9, 0.2)]); assert!(r.invalid_mass(&e) == 0.0);
+        // the uniform start over the valid codes: 18 of 32 basis states
+        assert_eq!(Register::uniform(&enc).probabilities().iter().filter(|&&p| p > 0.0).count(), 18);
     }
     #[test]
     fn measure_and_digest_are_deterministic() {

@@ -447,39 +447,66 @@ pub fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
 /// Per item, the error bar the gate compares with `tv_tol`: z x max(MCSE short, MCSE long) (`Gate::released_tasks`).
 pub fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&s, &l)| GATE.z * if s.is_nan() || l.is_nan() { f64::NAN } else { s.max(l) }).collect() }
 
-/// RFC 0011 (research): the `amplitude` tier, an exact simulated qubit register run on a CPU (`probbit_decide::amp`). Eligible
-/// when every variable has at most two allowed values (after clamps) and the two-valued ones, one qubit each, number at most
-/// `q_max`; Err(why) otherwise, and the caller runs the existing tiers. The program's log weight over the 2^q basis states is
-/// written exactly as an Ising program by its Walsh transform (unary and pairwise terms; a residual past 1e-9 declines), the
-/// register runs the default transverse-field sweep from |+...+>, and the rules (caps, clamps) are a projection: the Born
-/// probabilities of the plans that break one are set to 0 and the rest renormalised. Plan = the most probable feasible plan
-/// (probabilities at 6 decimals, then the lowest basis index); marginals exact. The receipt: qubits, the digests of the
-/// circuit, the schedule and the final amplitudes (6 decimals), the schedule's name.
+/// RFC 0011 (research): the `amplitude` tier, an exact simulated qubit register run on a CPU (`probbit_decide::amp`). Round 2:
+/// a variable with d candidate values (allowed and clamp) takes ceil(log2 d) qubits (`amp::Encoding`; the unused codes keep
+/// amplitude 0), and the program's log weight enters as one general diagonal phase layer (E = -log w per basis state), so
+/// pair tables between multi-level variables need no decomposition. The program is split into its connected components
+/// (two variables are linked by a pair or by sharing a capacity rule, as the `components` tier splits it) and each component
+/// runs its own register: the phase is a sum over components and the mixer acts per variable, so the joint state is exactly
+/// the product of the components' states. Eligible when every variable has an allowed value and the largest component has at
+/// most `q_max` encoded qubits; Err(why) otherwise, and the caller runs the existing tiers. Each register runs the default
+/// sweep from the uniform superposition over its valid codes; the rules are a projection: the Born probabilities of the
+/// plans that break one are set to 0 and the rest renormalised (per component; the feasible mass is the product). Plan = per
+/// component its most probable feasible plan (probabilities at 6 decimals, then the lowest basis index); marginals exact. The
+/// receipt: qubits (encoded, summed), the components' qubits, the digests of the encoding, the circuit, the schedule and the
+/// final amplitudes (6 decimals; the components' texts joined), the mixer's and the schedule's names, the feasible mass.
 #[cfg(feature = "decide")]
 pub fn amplitude(prog: &Json, q_max: usize) -> Result<Json, String> {
     use probbit_decide::amp;
-    let p = from_json(prog).map_err(|e| format!("program {}: {}", e.path, e.msg))?; let m = &p.m;
-    let cand: Vec<Vec<usize>> = (0..m.n).map(|i| (0..m.k).filter(|&v| m.ok(i, v)).collect()).collect();
+    let p = from_json(prog).map_err(|e| format!("program {}: {}", e.path, e.msg))?; let m = &p.m; let (n, k) = (m.n, m.k);
+    let cand: Vec<Vec<usize>> = (0..n).map(|i| (0..k).filter(|&v| m.ok(i, v)).collect()).collect();
     if let Some(i) = cand.iter().position(Vec::is_empty) { return Err(format!("{} has no allowed value", p.vars[i])); }
-    if let Some(i) = cand.iter().position(|c| c.len() > 2) { return Err(format!("{} has more than two values", p.vars[i])); }
-    let qv: Vec<usize> = (0..m.n).filter(|&i| cand[i].len() == 2).collect(); let q = qv.len();
-    if q > q_max.min(amp::Q_MAX_HOST) { return Err(format!("{q} two-valued variables, q_max {q_max}")); }
-    let plan_of = |x: usize| -> Vec<usize> { let mut a: Vec<usize> = cand.iter().map(|c| c[0]).collect(); for (b, &i) in qv.iter().enumerate() { a[i] = cand[i][x >> b & 1]; } a };
-    let n = 1usize << q; let lw: Vec<f64> = (0..n).map(|x| m.logw(&plan_of(x))).collect();
-    let z = |x: usize, i: usize| if x >> i & 1 == 0 { 1.0 } else { -1.0 };
-    let a: Vec<f64> = (0..q).map(|i| (0..n).map(|x| lw[x] * z(x, i)).sum::<f64>() / n as f64).collect();
-    let mut b = vec![]; for i in 0..q { for j in i + 1..q { let c = (0..n).map(|x| lw[x] * z(x, i) * z(x, j)).sum::<f64>() / n as f64; if c.abs() > 1e-15 { b.push((i, j, c)); } } }
-    let ising = amp::Ising { q, a, b }; let mean = lw.iter().sum::<f64>() / n as f64;
-    if let Some(x) = (0..n).find(|&x| (lw[x] - mean - ising.logw(x)).abs() > 1e-9) { return Err(format!("not pairwise at basis state {x}")); }
-    let s = amp::DEFAULT_SCHEDULE; let reg = amp::evolve_ising(&ising, &s);
-    let pr: Vec<f64> = reg.probabilities().iter().enumerate().map(|(x, &w)| if m.violations(&plan_of(x)) == 0 { w } else { 0.0 }).collect();
-    let mass: f64 = pr.iter().sum(); if mass <= 0.0 || !mass.is_finite() { return Err("no feasible plan has weight in the register".into()); }
-    let r6 = |x: f64| (x * 1e6).round() / 1e6;
-    let best = (0..n).fold(0, |bx, x| if r6(pr[x] / mass) > r6(pr[bx] / mass) { x } else { bx }); let bp = plan_of(best);
-    let mut mg = vec![0.0; m.n * m.k]; for (x, &w) in pr.iter().enumerate() { if w > 0.0 { for (i, &v) in plan_of(x).iter().enumerate() { mg[i * m.k + v] += w / mass; } } }
+    // the components: pairs and capacity rules link variables
+    let mut par: Vec<usize> = (0..n).collect();
+    fn find(par: &mut [usize], mut x: usize) -> usize { while par[x] != x { par[x] = par[par[x]]; x = par[x]; } x }
+    fn join(par: &mut [usize], a: usize, b: usize) { let (a, b) = (find(par, a), find(par, b)); if a != b { par[a.max(b)] = a.min(b); } }
+    for q in &m.pairs { join(&mut par, q.i, q.j); }
+    for c in &m.caps { if let Some(&(i0, _)) = c.members.first() { for &(i, _) in &c.members { join(&mut par, i0, i); } } }
+    let mut slot = vec![usize::MAX; n]; let mut mems: Vec<Vec<usize>> = vec![];
+    for i in 0..n { let r = find(&mut par, i); if slot[r] == usize::MAX { slot[r] = mems.len(); mems.push(vec![]); } mems[slot[r]].push(i); }
+    let comp_of: Vec<usize> = (0..n).map(|i| slot[find(&mut par, i)]).collect();
+    let encs: Vec<amp::Encoding> = mems.iter().map(|mem| amp::Encoding { levels: mem.iter().map(|&i| cand[i].len()).collect() }).collect();
+    let qs: Vec<usize> = encs.iter().map(amp::Encoding::qubits).collect(); let qtop = qs.iter().copied().max().unwrap_or(0);
+    if qtop > q_max.min(amp::Q_MAX_HOST) { return Err(format!("a component of {qtop} encoded qubits, q_max {q_max}")); }
+    let s = amp::DEFAULT_SCHEDULE; let r6 = |x: f64| (x * 1e6).round() / 1e6;
+    let (mut enc_t, mut circ_t, mut state_t) = (String::new(), String::new(), String::new());
+    let mut bp = vec![0usize; n]; let mut mg = vec![0.0; n * k]; let mut mass_all = 1.0;
+    for (c, mem) in mems.iter().enumerate() {
+        // the component's sub-model: its variables, pairs and capacity rules (local indices), as the components tier builds it
+        let mut loc = vec![usize::MAX; n]; for (q, &i) in mem.iter().enumerate() { loc[i] = q; }
+        let nn = mem.len(); let mut h = Vec::with_capacity(nn * k); let mut al = Vec::with_capacity(nn * k);
+        for &i in mem { h.extend_from_slice(&m.h[i * k..i * k + k]); al.extend_from_slice(&m.allowed[i * k..i * k + k]); }
+        let pairs: Vec<Pair> = m.pairs.iter().filter(|q| comp_of[q.i] == c).map(|q| Pair { i: loc[q.i], j: loc[q.j], c: q.c.clone() }).collect();
+        let caps: Vec<Cap> = m.caps.iter().filter(|q| q.members.first().is_some_and(|&(i, _)| comp_of[i] == c))
+            .map(|q| Cap { members: q.members.iter().map(|&(i, v)| (loc[i], v)).collect(), limit: q.limit, weights: q.weights.clone() }).collect();
+        let sub = Model::new(nn, k, h, al, mem.iter().map(|&i| m.clamp[i]).collect(), pairs, caps).map_err(|e| format!("component {c}: {e}"))?;
+        let enc = &encs[c]; let nb = 1usize << qs[c];
+        let plan_of = |codes: &[usize]| -> Vec<usize> { codes.iter().zip(mem).map(|(&cd, &i)| cand[i][cd]).collect() };
+        let e: Vec<f64> = (0..nb).map(|x| enc.decode(x).map_or(f64::NAN, |cd| -sub.logw(&plan_of(&cd)))).collect();
+        let reg = amp::sweep(enc, &e, &s);
+        let pr: Vec<f64> = reg.probabilities().iter().enumerate().map(|(x, &w)| match enc.decode(x) { Some(cd) if sub.violations(&plan_of(&cd)) == 0 => w, _ => 0.0 }).collect();
+        let mass: f64 = pr.iter().sum(); if mass <= 0.0 || !mass.is_finite() { return Err(format!("component {c}: no feasible plan has weight in the register")); }
+        let best = (0..nb).fold(usize::MAX, |bx, x| if pr[x] > 0.0 && (bx == usize::MAX || r6(pr[x] / mass) > r6(pr[bx] / mass)) { x } else { bx });
+        for (&i, v) in mem.iter().zip(plan_of(&enc.decode(best).expect("a feasible plan has valid codes"))) { bp[i] = v; }
+        for (x, &w) in pr.iter().enumerate() { if w > 0.0 { for (&i, v) in mem.iter().zip(plan_of(&enc.decode(x).expect("valid"))) { mg[i * k + v] += w / mass; } } }
+        mass_all *= mass;
+        for t in [&mut enc_t, &mut circ_t, &mut state_t] { t.push_str(&format!("component {c}\n")); }
+        enc_t.push_str(&enc.text()); circ_t.push_str(&reg.circuit_text()); state_t.push_str(&reg.canonical());
+    }
     let d = |t: &[u8]| jstr(&format!("sha256:{}", amp::hex(&amp::sha256(t))));
-    Ok(obj(vec![("verdict", jstr("exact")), ("tier", jstr("amplitude")), ("plan", plan(&p, &bp)), ("plan_logw", num(m.logw(&bp))), ("violations", num(0.0)),
-        ("marginals", marginals(&p, &mg)), ("released", ids(&p, &vec![true; m.n], true)), ("escalated", Json::Arr(vec![])),
-        ("amplitude", obj(vec![("qubits", num(q as f64)), ("circuit", d(reg.circuit_text().as_bytes())), ("schedule", d(s.text().as_bytes())), ("schedule_name", jstr(&s.name())),
-            ("state", jstr(&format!("sha256:{}", amp::hex(&reg.digest())))), ("feasible_mass", num(r6(mass)))]))]))
+    Ok(obj(vec![("verdict", jstr("exact")), ("tier", jstr("amplitude")), ("plan", plan(&p, &bp)), ("plan_logw", num(m.logw(&bp))), ("violations", num(m.violations(&bp) as f64)),
+        ("marginals", marginals(&p, &mg)), ("released", ids(&p, &vec![true; n], true)), ("escalated", Json::Arr(vec![])),
+        ("amplitude", obj(vec![("qubits", num(qs.iter().sum::<usize>() as f64)), ("components", Json::Arr(qs.iter().map(|&q| num(q as f64)).collect())),
+            ("encoding", d(enc_t.as_bytes())), ("mixer", jstr(amp::MIXER)), ("circuit", d(circ_t.as_bytes())), ("schedule", d(s.text().as_bytes())), ("schedule_name", jstr(&s.name())),
+            ("state", d(state_t.as_bytes())), ("feasible_mass", num(r6(mass_all)))]))]))
 }

@@ -105,6 +105,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Research
 
+- **RFC 0011, round 2: multi-level traits on the amplitude register** (draft, research; docs/rfc/0011-amplitude-register.md):
+  a variable with d allowed values takes ⌈log2 d⌉ qubits (`amp::Encoding`; a three-level trait two qubits, its fourth code
+  unused), the start is the uniform superposition over the valid codes, the mixer is the complete-graph mixer per variable
+  (`amp::MIXER`, the identity on unused codes; exp(i t X) for two values, round 1's mixer exactly), and the cost is one general
+  diagonal phase layer exp(−iγE), E = −log w per basis state (`Register::phase`), so pair tables between three-level traits
+  need no decomposition (round 1's Walsh transform and its decline are gone). The unused codes keep amplitude 0, checked after
+  every layer, never renormalised. The tier runs one register per connected component of the program (exact: the state is the
+  product of the components' states); `engine.q_max` bounds the largest component's encoded qubits. New receipt fields
+  `engine.components`, `encoding`, `mixer`; `qubits` counts encoded qubits. Measured against an independent mixed-radix
+  reference: max |Δ marginal| 2.7e-13 on 220 programs. Simulated exactly on a CPU; no quantum hardware, no speedup claim.
 - **RFC 0011, round 1: an amplitude register** (draft; docs/rfc/0011-amplitude-register.md): `probbit-decide::amp`, an exact
   simulated qubit register on a CPU (q ≤ 16 on the host; 16 · 2^q bytes of amplitudes on the heap; std and no_std + alloc):
   gates H, X, Z, RX, RZ, CNOT, CZ, RZZ, a Trotterised transverse-field sweep, QAOA layers, exact marginals, Born-rule

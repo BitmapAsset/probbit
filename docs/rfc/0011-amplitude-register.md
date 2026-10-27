@@ -1,6 +1,6 @@
 # RFC 0011: an amplitude register, an exact simulated qubit register as an optional solver tier for small stance programs
 
-Status: **draft, round 1** (research). Nothing in this RFC changes a release or `main`; the tier is off unless a persona asks
+Status: **draft, round 2** (research). Nothing in this RFC changes a release or `main`; the tier is off unless a persona asks
 for it, and it may be removed by the round that measures it against the default tier (B4 below).
 
 ## 1. What it is, in one paragraph
@@ -39,24 +39,38 @@ RFC is closed with that number. Both outcomes are publishable with receipts.
   sampling), `measure(seed)` (the Born rule with the engine's deterministic RNG), `digest()` (sha256 of the canonical state at
   6 decimals, like every other emitted float). Amplitudes are two f64: 16 · 2^q bytes exactly.
 - A solver tier `amplitude` beside `components` / `knapsack` / `exact`: selected by the persona flag `engine.tier: amplitude`
-  (off when absent) and only when every variable of the program has at most two allowed values and the two-valued ones number
-  at most `engine.q_max` (default 12); otherwise the existing tiers run and the stance document says why
-  (`engine.amplitude: "declined: ..."`).
-- How a program becomes a register (round 1): one qubit per two-valued variable (bit 0 = its first value). The program's log
-  weight over the 2^q basis states is written exactly as an Ising program (`log w = c + Σ a_i z_i + Σ b_ij z_i z_j`, by its
-  Walsh transform; a program with a term past pairwise declines). The register starts in |+…+> and runs the fixed default
-  schedule `tf-linear-16x4` (16 Trotter steps, total time 4, `H(s) = -(1-s) Σ X_i - s (Σ a_i Z_i + Σ b_ij Z_i Z_j)`). The rules
-  (habits, caps, clamps) are a projection: the Born probabilities of the plans that break one are set to 0 and the rest
-  renormalised, so a stance obeys every habit in force exactly as on the other tiers. Plan = the most probable feasible plan.
-- Receipt fields in the stance document: `engine.tier = "amplitude"`, `engine.qubits`, `engine.circuit` (digest of the gate
-  list), `engine.schedule` (digest) and `engine.schedule_name`, `engine.state` (digest of the final amplitudes at 6 decimals),
+  (off when absent) and only when every variable has an allowed value and the largest connected component of the program
+  has at most `engine.q_max` encoded qubits (default 12, 1-16); otherwise the existing tiers run and the stance document says
+  why (`engine.amplitude: "declined: ..."`).
+- How a program becomes registers (round 2). **Encoding:** a variable with d candidate values (allowed, and the clamp)
+  takes ⌈log2 d⌉ qubits; code c < d is its c-th value, the codes ≥ d are unused (d = 3: codes 00, 01, 10; 11 unused). The start
+  is the uniform superposition over the valid codes (for two-valued variables, H on every qubit). **Mixer** (`complete-graph`,
+  fixed): per variable exp(i t A_d) with A_d = J − I, the adjacency of the complete graph on its d codes, and the identity on
+  the unused codes; closed form e^{−it}(I + (e^{itd} − 1)/d · J), O(d) per block; for d = 2 it is exp(i t X), round 1's mixer
+  exactly. **Phase layer:** one general diagonal layer, a_x ← e^{−iγE(x)} a_x with E = −log w of the plan x encodes, on every
+  valid basis state (O(2^q) per layer). Pair tables between multi-level variables give 3- and 4-body terms in any qubit
+  encoding; the diagonal layer takes them as they are, with no Walsh transform, no residual and no decline. Round 1's RZ/RZZ
+  decomposition of the cost is gone: on a 16-variable two-valued chain one general phase layer took 333 µs against 1,938 µs
+  for the RZ/RZZ layer, and the whole sweep 48.4 ms against 51.9 ms (x86_64, median of 20); the gates stay in the module. The unused codes keep amplitude exactly 0: the
+  engine checks their mass (≤ 1e-15) after every layer and never renormalises. **Components:** the program is split into its
+  connected components (two variables are linked by a pair or by sharing a capacity rule, as the `components` tier splits
+  it) and each component runs its own register. This is exact: E is a sum over components and the mixer acts per variable,
+  so the joint state is the product of the components' states (the repository's example personas need 52-70 encoded qubits
+  as one register, 10-15 in their largest component). The sweep is the fixed default `tf-linear-16x4` (16 Trotter steps,
+  total time 4, `H(s) = −(1−s) Σ A_i + s E`). The rules (habits, caps, clamps) are a projection per component: the Born
+  probabilities of the plans that break one are set to 0 and the rest renormalised, so a stance obeys every habit in force
+  exactly as on the other tiers. Plan = per component its most probable feasible plan.
+- Receipt fields in the stance document: `engine.tier = "amplitude"`, `engine.qubits` (encoded qubits, summed over the
+  components), `engine.components` (each component's qubits), `engine.encoding` (digest of the variable → qubits map with each
+  variable's number of valid codes), `engine.mixer` (`complete-graph`), `engine.circuit` (digest of the layer list),
+  `engine.schedule` (digest) and `engine.schedule_name`, `engine.state` (digest of the final amplitudes at 6 decimals),
   `engine.feasible_mass` (the Born mass on plans that obey the rules), and the marginals at 6 decimals (the stance odds).
   `live verify` recomputes all of it from the strand alone (the same rule as every other tier). An engine without the tier
   reads the persona's `engine.tier` as a field it does not know: `unsupported by this engine` (exit 5), never a divergence.
 - No change to habits (hard rules), the bound certificate (it is computed from the persona file, not from the sampler), the
   strand format for other tiers, or any public wording. Public text, if any: "an exact simulated qubit register as an optional
   solver tier for small programs; measured against the default tier; no quantum hardware".
-- Round 1 scope: the tier answers the turn's solves (the stance and its habit checks). The rest position at the start, the
+- Scope (rounds 1-2): the tier answers the turn's solves (the stance and its habit checks). The rest position at the start, the
   expectation's members and the trajectory stay on the existing tiers.
 
 ## 4. Bars (registered before any run; PASS/FAIL per bar, failures printed as failures)
@@ -77,6 +91,23 @@ RFC is closed with that number. Both outcomes are publishable with receipts.
   247-program certificate set).
 - **B6 the language.** Every public sentence uses "simulated", "exact", "on a CPU"; no claim of quantum hardware or of an
   advantage over classical computation; no claim of experience.
+
+## 5. Measurements so far
+
+Round 1 (two-valued programs only) and round 2 (multi-level) results are recorded in the change log's Research entries and
+the pull request; the verdict on B4 and B5 belongs to round 3.
+
+Round 2 (multi-level programs, simulated exactly on a CPU; x86_64 host, median of 20):
+
+| bar | measured |
+|---|---|
+| B1 exactness | 220 programs mixing two- and three-level variables (q ≤ 12 encoded; 20 designed, among them one where the unused code would be favoured if it were allowed) against an independent mixed-radix reference (one tensor axis of size d per variable, mixer from an eigendecomposition): max \|Δ marginal\| per level 2.7e-13 (bar 1e-9); unused-code mass after every layer 0 (bar 1e-15); mixer unitarity 8.9e-16 for d = 1-8 (bar 1e-12); round 1's 220 two-valued programs through the new layers: 5.3e-15 |
+| B2 replay | 100 strands of the tutor example with the tier (three-level traits; 60 encoded qubits in 12 components, the largest 10): recorded twice byte-equal 100/100, verify 100/100 on x86_64 and on the no_std build, re-written byte-equal 100/100, 0 floats past 6 decimals; an engine without the tier: exit 5 on 100/100 |
+| B3 cost | one sweep of 16 steps with level marginals: 42 µs (q 8, four three-level traits), 0.82 ms (q 12, six), 16.3 ms (q 16, eight); all two-valued: 97 µs, 2.1 ms, 43 ms; memory 16 · 2^q bytes of amplitudes plus 8 · 2^q of energies; no_std stack high-water 2,016 B at q 8 and 12 |
+
+The Born mass on plans that obey the rules can be small after the default sweep (as low as 7.3e-05 on the tutor example:
+the product over its 12 components; its four-step order component alone allows 24 of its 256 codes); the projection renormalises it. B4 (agreement with the default
+tiers, its first pass recorded with the pull request) and B5 have their verdict in round 3.
 
 ## 6. What this RFC does not claim
 

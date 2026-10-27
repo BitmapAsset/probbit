@@ -231,7 +231,7 @@ engine:
   values: positional    # positional (level i -> l<i>: small pair tables, fast) | semantic (level names: readable programs)
   on_conflict: fallback # fallback | yield: when habits contradict, the lower-priority one yields (section 5.5)
   # tier: amplitude     # research (RFC 0011, draft): an exact simulated qubit register on a CPU; absent = the default tiers
-  # q_max: 12           # the most two-valued variables the amplitude tier takes (1-16)
+  # q_max: 12           # the most encoded qubits (ceil(log2 d) per variable) in one component the amplitude tier takes (1-16)
 line:
   max_tokens: 40        # estimated tokens (max of chars / 4 and 4/3 per word)
   order: [verbosity, caution, directness, warmth, humour, initiative, formality, curiosity]
@@ -239,11 +239,13 @@ line:
 ```
 
 **`engine.tier: amplitude` (research, off by default; docs/rfc/0011-amplitude-register.md).** The turn's program is solved by
-an exact simulated qubit register on a CPU (one qubit per two-valued variable, 2^q complex amplitudes, a fixed transverse-field
-sweep, the habits as a projection onto the plans that obey them) when every variable has at most two allowed values and the
-two-valued ones number at most `q_max`; otherwise the default tiers answer and `engine.amplitude` says why
-(`"declined: ..."`). With the tier, the stance document's `engine` carries `tier: "amplitude"`, `qubits`, `circuit`,
-`schedule`, `schedule_name`, `state` (sha256 digests of the gate list, the schedule and the final amplitudes at 6 decimals) and
+an exact simulated qubit register on a CPU: a variable with d allowed values takes ⌈log2 d⌉ qubits (a three-level trait two,
+its fourth code unused and kept at amplitude 0), one register per connected component of the program (2^q complex
+amplitudes each), a fixed transverse-field sweep with a general diagonal phase layer, the habits as a projection onto the
+plans that obey them, when the largest component has at most `q_max` encoded qubits; otherwise the default tiers answer and
+`engine.amplitude` says why (`"declined: ..."`). With the tier, the stance document's `engine` carries `tier: "amplitude"`,
+`qubits`, `components`, `encoding`, `mixer`, `circuit`, `schedule`, `schedule_name`, `state` (sha256 digests of the encoding,
+the layer list, the schedule and the final amplitudes at 6 decimals) and
 `feasible_mass`; `live verify` recomputes them from the strand. Without the key nothing changes, byte for byte. An engine
 without the tier reports a strand that uses it as `unsupported by this engine: engine.tier` (exit 5). The register is a
 simulation: no quantum hardware, no speedup claim; whether its stances agree with the default tier is measured, not assumed.

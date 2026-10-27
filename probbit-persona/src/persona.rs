@@ -4464,11 +4464,12 @@ mod tests {
             for piece in [1, 3, 64, 100] { let mut h = Sha256::new(); for c in data[..n].chunks(piece) { h.update(c); } assert_eq!(h.finish(), one, "{n} bytes in pieces of {piece}"); } }
     }
     /// RFC 0011 (research): `engine.tier: amplitude` on a persona of two-valued traits answers from the simulated register (its
-    /// receipt in the stance document, habits held, deterministic, a strand that verifies); on a persona with three-valued traits
-    /// it declines, the existing tiers answer and the receipt says why; absent, nothing changes
+    /// receipt in the stance document, habits held, deterministic, a strand that verifies); round 2: three-valued traits are
+    /// answered too (two qubits each, one register per component), a component over `q_max` declines, the existing tiers answer
+    /// and the receipt says why; absent, nothing changes
     #[cfg(feature = "decide")]
     #[test]
-    fn the_amplitude_tier_answers_two_valued_programs_and_declines_the_rest() {
+    fn the_amplitude_tier_answers_multi_level_programs_and_declines_past_q_max() {
         use crate::strand::{self, Clock, Live};
         let text = include_str!("../../examples/persona/dispatch-policy.yaml").replace("\r\n", "\n").replace("engine:\n", "engine:\n  tier: amplitude\n");
         let doc = crate::yaml::load(&text).ok().unwrap(); let p = build(&doc).unwrap(); let st = init(&p, Some(2), true, &run);
@@ -4482,11 +4483,24 @@ mod tests {
         for (i, raw) in [r#"{"blast":0}"#, r#"{"blast":0.9}"#, r#"{"error":true}"#, r#"{"error":true}"#, r#"{"praise":true,"src":"human"}"#].iter().enumerate() {
             let (_, l) = live.event(&json::parse(raw).unwrap(), &run).unwrap_or_else(|e| panic!("event {i}: {}", e.msg)); lines.push(l); }
         let strand_text = lines.join("\n") + "\n"; assert!(strand::verify(&strand_text, &run).is_ok());
-        // three-valued traits: declined, the existing tier answers, the receipt says so
+        // three-valued traits: answered (encoded qubits, the components, the encoding and the mixer in the receipt)
         let q = build(&json::parse(&DOC.replace("LEARN", r#","engine":{"tier":"amplitude"}"#)).unwrap()).unwrap(); let s0 = init(&q, Some(3), true, &run);
-        let (d, _) = turn(&q, &s0, &inputs(false, false, false), false, &run, false).unwrap();
-        assert!(g(&d, &["engine", "amplitude"]).as_str().is_some_and(|w| w.starts_with("declined: ") && w.contains("more than two values")), "{}", canon(&d));
+        let (d, _) = turn(&q, &s0, &inputs(false, false, false), false, &run, false).unwrap(); let (d2, _) = turn(&q, &s0, &inputs(false, false, false), false, &run, false).unwrap();
+        assert_eq!(canon(&d), canon(&d2)); assert_eq!(g(&d, &["engine", "tier"]).as_str(), Some("amplitude"), "{}", canon(&d));
+        assert_eq!(g(&d, &["engine", "mixer"]).as_str(), Some("complete-graph")); assert!(g(&d, &["engine", "encoding"]).as_str().is_some_and(is_digest));
+        assert!(g(&d, &["engine", "qubits"]).as_f64().unwrap() >= 2.0); assert_eq!(g(&d, &["habits", "violations"]).as_f64(), Some(0.0));
+        // a component past q_max: declined, the existing tier answers, the receipt says so
+        let q1 = build(&json::parse(&DOC.replace("LEARN", r#","engine":{"tier":"amplitude","q_max":1}"#)).unwrap()).unwrap();
+        let (d, _) = turn(&q1, &init(&q1, Some(3), true, &run), &inputs(false, false, false), false, &run, false).unwrap();
+        assert!(g(&d, &["engine", "amplitude"]).as_str().is_some_and(|w| w.starts_with("declined: ") && w.contains("encoded qubits, q_max 1")), "{}", canon(&d));
         assert_ne!(g(&d, &["engine", "tier"]).as_str(), Some("amplitude"));
+        // the tutor example (three-level traits, 60 encoded qubits in components of at most 10): answered, and its strand verifies
+        let text = include_str!("../../examples/persona/tutor.yaml").replace("\r\n", "\n").replace("engine:\n", "engine:\n  tier: amplitude\n");
+        let doc = crate::yaml::load(&text).ok().unwrap(); let p = build(&doc).unwrap(); let st = init(&p, Some(2), true, &run);
+        let (mut live, header) = Live::start(p.clone(), &doc, st, Clock::Fixed, "probbit test"); let mut lines = vec![header];
+        for raw in [r#"{"elapsed_hours":1,"praise":true}"#, r#"{"elapsed_hours":2}"#] { let (o, l) = live.event(&json::parse(raw).unwrap(), &run).unwrap(); lines.push(l);
+            assert_eq!(g(&o, &["engine", "tier"]).as_str(), Some("amplitude"), "{}", canon(&o)); }
+        assert!(strand::verify(&(lines.join("\n") + "\n"), &run).is_ok());
         let plain = build(&json::parse(&DOC.replace("LEARN", "")).unwrap()).unwrap(); let (e, _) = turn(&plain, &init(&plain, Some(3), true, &run), &inputs(false, false, false), false, &run, false).unwrap();
         assert!(g(&e, &["engine", "amplitude"]).is_null() && g(&e, &["engine", "qubits"]).is_null());
         assert_eq!(err(build(&json::parse(&DOC.replace("LEARN", r#","engine":{"tier":"pbit"}"#)).unwrap())), "engine.tier: amplitude (the one optional tier; absent = the default tiers)");
