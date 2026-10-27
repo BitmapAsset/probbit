@@ -653,3 +653,32 @@ fn verify_names_the_writer_and_the_verifier() {
     assert_eq!((s(&v, &["ok"]), s(&v, &["events"])), (&Json::Bool(true), &Json::Num(1.0)), "{out}");
     assert_eq!((s(&v, &["engine"]), s(&v, &["verified_by"])), (&Json::Str("probbit 0.11.0".into()), &Json::Str(THIS.into())), "{out}");
 }
+
+/// A stored strand with checkpoint lines resumes, with and without an expectation block (RFC 0009): the chain check validates
+/// each checkpoint line (its state read, its count, its link to the event before) without opening it as a replay start, which a
+/// persona with the block cannot do. 42 events with a checkpoint after every 10th, then one more event in a second run: exit 0,
+/// `verify` passes, and the strand, the state and the stances are those of the 43 events in one run, byte for byte.
+#[test]
+fn a_strand_with_checkpoints_resumes_with_and_without_an_expectation_block() {
+    let evs: Vec<String> = (0..43).map(|t| match t % 4 { 0 => r#"{"elapsed_hours":1,"praise":true}"#, 1 => r#"{"elapsed_hours":0.5}"#,
+        2 => r#"{"elapsed_hours":2,"error":true}"#, _ => r#"{"elapsed_hours":1,"loss":true}"# }.to_string()).collect();
+    for (persona, tag) in [(TUTOR, "plain"), ("probbit-cli/tests/fixtures/monitor/tutor-expect.yaml", "expect")] {
+        let all = events_file(&format!("cp-{tag}-all.jsonl"), &evs);
+        let (head, last) = (events_file(&format!("cp-{tag}-a.jsonl"), &evs[..42]), events_file(&format!("cp-{tag}-b.jsonl"), &evs[42..]));
+        let st1 = init(persona, 2, &format!("cp-{tag}-one.json")); let one = tmp(&format!("cp-{tag}-one.strand")); clean(&[&one]);
+        let (c, out1, e) = live(persona, &st1, &all, &one, "10"); assert_eq!(c, 0, "{tag}: {e}");
+        let st2 = init(persona, 2, &format!("cp-{tag}-two.json")); let two = tmp(&format!("cp-{tag}-two.strand")); clean(&[&two]);
+        let (c, o1, e) = live(persona, &st2, &head, &two, "10"); assert_eq!(c, 0, "{tag}: {e}");
+        assert_eq!(read(&two).lines().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), 4, "{tag}: 4 checkpoint lines");
+        let (c, o2, e) = live(persona, &st2, &last, &two, "10"); assert_eq!(c, 0, "{tag}: resume after a checkpoint: {e}");
+        assert_eq!(read(&two), read(&one), "{tag}: the strand"); assert_eq!(read(&st2), read(&st1), "{tag}: the state");
+        assert_eq!(format!("{o1}{o2}"), out1, "{tag}: the stances");
+        let (c, v, e) = probbit(&["live", "verify", &two]); assert_eq!(c, 0, "{tag}: {e}"); assert!(v.contains(r#""checkpoints":4"#), "{tag}: {v}");
+        // a checkpoint line that is not valid still stops the resume, at that line: its count edited (the line stays canonical)
+        let text = read(&two); let k = text.lines().position(|l| l.starts_with(r#"{"checkpoint":20,"#)).unwrap();
+        std::fs::write(&two, text.replacen(r#"{"checkpoint":20,"#, r#"{"checkpoint":21,"#, 1)).unwrap();
+        let (c, o, _) = live(persona, &st2, &last, &two, "10"); assert_eq!(c, 2, "{tag}: {o}");
+        assert!(o.contains(&format!("line {}: the line before is not event 21", k + 1)), "{tag}: {o}");
+        clean(&[&all, &head, &last, &st1, &one, &st2, &two]);
+    }
+}

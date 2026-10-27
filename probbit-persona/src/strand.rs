@@ -323,25 +323,8 @@ impl Replay {
         let mut r = Replay::open(head)?;
         // RFC 0009: the expectation's memory is a fold of every event line, so a strand with the block replays from its header
         if r.live.p.expect.is_some() { return Err((at, "the persona's expectation block reads every event before this checkpoint: verify this strand from its header".into())); }
-        let j = json::parse(cp).map_err(|e| (at, format!("not JSON: {}", e.msg)))?;
-        let b = json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?;
-        if persona::canon(&j) != cp { return Err((at, "not canonical JSON".into())); }
-        if let Some(k) = unknown_key(&j) { return Err((at, unsupported(k))); }
-        if !j.as_obj().is_some_and(|kv| kv.len() == 4 && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()))) {
-            return Err((at, "checkpoint fields must be checkpoint, prev, stance and state".into()));
-        }
-        // §2.18: an event line of a persona with glyphs also carries `glyph`
-        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + usize::from(kv.iter().any(|(k, _)| k == "glyph")) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph"].contains(&k.as_str()))) {
-            return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
-        }
-        if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
-        let n = j.get("checkpoint").and_then(Json::as_f64).filter(|x| *x >= 1.0 && x.fract() == 0.0).ok_or((at, "not a checkpoint line".to_string()))? as u64;
-        if b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
-        let stance = j.get("stance").cloned().unwrap_or(Json::Null);
-        if b.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
-        let st = State::read(&r.live.p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, read_err(e, "the checkpoint's state: ")))?;
-        if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
-        r.live.st = st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
+        let (n, stance, st) = check_checkpoint(&r.live.p, before, cp, at)?;
+        r.live.st = *st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
         r.norms = Normals::start(&r.live.p, &r.live.st); r.at_cap = vec![0.0; r.at_cap.len()]; r.seen = (0.0, vec![0.0; r.seen.1.len()]); r.viab = viab_start(&r.live);
         Ok(r)
     }
@@ -601,11 +584,32 @@ fn open_head(head: &str) -> Result<(Box<Persona>, Json), (usize, String)> {
     if !same || at != hb.len() { return Err((1, "the header is not as written".into())); }
     Ok((p, h))
 }
-/// A checkpoint line opened as a replay starts there (`Replay::open_at`) -> its event count and its persona's digest; out of line,
-/// so the chain check's frame does not hold the replay
+/// A checkpoint line's own checks (`cp`, without its line ending, at 1-based line `at`; `before` = the line before it) for persona
+/// `p`, with `open_at`'s messages: canonical JSON, its four fields, right after an event line (prev), at that event's count, with
+/// the stance and the state (read as any state is) that event logs -> the count, the stance and the state. No replay starts here,
+/// so it holds for a persona with an expectation block too: the chain check needs the line valid, not a replay start.
 #[inline(never)]
-fn checkpoint_at(head: &str, before: &str, cp: &str, at: usize) -> Result<(u64, String), (usize, String)> {
-    let r = Replay::open_at(head, before, cp, at)?; Ok((r.live.n, r.live.p.digest.clone()))
+fn check_checkpoint(p: &Persona, before: &str, cp: &str, at: usize) -> Result<(u64, Json, Box<State>), (usize, String)> {
+    let j = json::parse(cp).map_err(|e| (at, format!("not JSON: {}", e.msg)))?;
+    let b = json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?;
+    if persona::canon(&j) != cp { return Err((at, "not canonical JSON".into())); }
+    if let Some(k) = unknown_key(&j) { return Err((at, unsupported(k))); }
+    if !j.as_obj().is_some_and(|kv| kv.len() == 4 && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()))) {
+        return Err((at, "checkpoint fields must be checkpoint, prev, stance and state".into()));
+    }
+    // §2.18: an event line of a persona with glyphs also carries `glyph`; RFC 0009: of a persona with an expectation block, `deviation`
+    let extra = |kv: &[(String, Json)]| kv.iter().filter(|(k, _)| k == "glyph" || k == "deviation").count();
+    if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation"].contains(&k.as_str()))) {
+        return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
+    }
+    if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
+    let n = j.get("checkpoint").and_then(Json::as_f64).filter(|x| *x >= 1.0 && x.fract() == 0.0).ok_or((at, "not a checkpoint line".to_string()))? as u64;
+    if b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
+    let stance = j.get("stance").cloned().unwrap_or(Json::Null);
+    if b.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
+    let st = read_boxed(p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, read_err(e, "the checkpoint's state: ")))?;
+    if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
+    Ok((n, stance, st))
 }
 #[inline(never)]
 fn read_boxed(p: &Persona, j: &Json) -> Result<Box<State>, InErr> { State::read(p, j).map(Box::new) }
@@ -648,11 +652,10 @@ fn check_chain_head(text: &str) -> Result<(Status, Box<Persona>, Json), InErr> {
             }
             Kind::Checkpoint => {
                 if status != Status::Active { return Err(err(i + 1, format!("checkpoint while {}", status.name()))); }
-                // Full state validation plus links to the immediately preceding event; no inference.
-                let (cn, cd) = checkpoint_at(ls[0], ls[i - 1], ls[i], i + 1).map_err(|(at, why)| err(at, why))?;
+                // Full state validation plus links to the immediately preceding event; no inference and no replay start, so a
+                // persona with an expectation block (whose replay cannot start at a checkpoint) resumes after one as well
+                let (cn, _, _) = check_checkpoint(&hp, ls[i - 1], ls[i], i + 1).map_err(|(at, why)| err(at, why))?;
                 if cn != n { return Err(err(i + 1, "checkpoint event count differs".into())); }
-                // Keep the header persona/state check independent of the caller's state.
-                debug_assert_eq!(cd, hp.digest);
             }
         }
     }
