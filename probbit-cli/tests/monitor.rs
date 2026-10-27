@@ -351,7 +351,10 @@ fn drives_demo_draws_goal_state_and_rejects_unknown_scenarios() {
     }
 }
 
-/// The page makes the reset explicit: a completion cue, then loop 2 with a fresh event counter.
+/// The page makes the reset explicit: a completion cue, then loop 2 with a fresh event counter. The loop is paced by sleeps (8 s
+/// of events, then the 5 s hold: loop 2 about 13 s after the stream opens); the budget is 45 s because a host whose sleeps
+/// overshoot (a virtual machine measured 8 x sleep(1) at 8.9 to 19.8 s) stretches that pacing, not the work (the loop's
+/// replay itself is about 30 ms)
 #[test]
 fn served_demo_labels_its_restart() {
     let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", "--demo", "drives", "--serve"])
@@ -362,7 +365,7 @@ fn served_demo_labels_its_restart() {
     write!(s, "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
     let mut buf = String::new(); let mut count = 2; let started = Instant::now();
     loop {
-        assert!(started.elapsed() < Duration::from_secs(20), "the demo did not label its restart");
+        assert!(started.elapsed() < Duration::from_secs(45), "the demo did not label its restart");
         let evs = stream(&mut s, &mut buf, count);
         if evs.iter().any(|(_, d)| d.contains("loop 2")) { break; }
         count = evs.len() + 1;

@@ -178,6 +178,22 @@ digits for the deviation receipt), so the device's strand and the host's replay 
 includes the stance's `deviation` on checkpoint lines (`strand::DEV_R6_SINCE`). A strand whose header names an earlier engine
 keeps its full-precision deviation, and verify accepts it when it equals the replay at 6 decimals.
 
+**The engine string.** A strand's header names the engine that wrote it, and the rules a replay applies follow that name, not
+the replaying engine: from `probbit 0.14.0` on (a `-dev` or other suffix ignored: `probbit 0.14.0-dev` is 0.14.0) a strand gets
+the rounded deviation, the canonical fold of the expectation's memory and `expect` on checkpoints; an earlier name keeps the
+earlier rules, byte for byte. A firmware passes its engine string to `Live::start` (the header's `engine`) and should pass the
+version of the crate it builds with (`strand::engine()` gives `probbit ` + that version; a development build says `probbit 0.14.0-dev`),
+so a strand it writes replays on the host under the same rules. A strand that keeps naming an older engine keeps the older
+fold, and its boot folds the expectation over every line (no checkpoint carries the memory).
+
+An engine older than the strand verifies what it can read: it does not compare engine names. At the first line with a field it
+does not know it stops with `unsupported by this engine: FIELD` (exit 5: a newer engine's strand, not verified, and not a
+divergence), so 0.13.0 answers exit 5 at the first checkpoint that carries `expect`. A 0.14.0 strand without such a line (no
+expectation block, or no checkpoint yet) has nothing 0.13.0 does not know, and 0.13.0 replays it under its own rules (ok while
+those give the same bytes). A segment file after the first (`NAME.0001.strand`, ...) is not readable before 0.14.0: its
+second line chains into the previous file, and 0.13.0 reports a divergence at line 2 (exit 1) before it reaches the header's
+`segment` key. Verify strands of 0.14.0 with 0.14.0 or later.
+
 ### Sizing a strand on flash: checkpoints and segments
 
 A strand grows by one event line per event and one checkpoint line every K events (`live.checkpoint`), and it never shrinks.

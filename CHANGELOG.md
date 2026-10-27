@@ -64,6 +64,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The test of the served demo's restart allows 45 s for its paced loop (about 13 s of sleeps): on a virtual machine whose sleeps
+  overshoot up to 2.5 times it failed at 20 s, on this tree and the one before (the replay itself takes about 30 ms).
 - `probbit monitor` opens a strand with checkpoint lines when its persona has an `expectation` block: it replays such a
   strand from the header (`--once`, `--follow`, `--serve`, and each strand of `--dir` by its own persona) instead of refusing
   it at the last checkpoint, which does not carry the expectation's memory. Other personas still start at the last

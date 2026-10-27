@@ -1571,7 +1571,9 @@ sealed state, and its second line is the sealing line itself, byte for byte. The
 lines of all segments, each segment's header and repeated sealing line set aside, are the strand the same life writes to one
 file with a checkpoint at each seal. The labels sidecar is the first file's (`NAME.labels.json`); a run on `--strand
 NAME.strand` continues the newest segment that exists (a sealed file is never appended to). Before 0.14.0 a persona with an
-expectation block is not segmented (its checkpoint does not carry the memory).
+expectation block is not segmented (its checkpoint does not carry the memory). An engine before 0.14.0 cannot read a segment
+file after the first: its second line chains into the previous file, so such an engine reports a divergence at line 2 (exit
+1) instead of the unknown `segment` key.
 
 A host that decides when to seal runs `probbit live control NAME.strand seal` (under the writer lock, like any control): it
 replays the newest segment (from its last checkpoint), refuses unless that file's last line is an event line (a seal follows
