@@ -920,27 +920,44 @@ fn resume_walk<S: AsRef<str>>(q: Box<Persona>, h: &Json, head: &str, cp: Option<
 /// the glyph that reads it are the line's.
 #[inline(never)]
 fn apply_line(p: &Persona, st: &State, j: &Json, l: &str, rest: Option<&str>, eng: Engine) -> Result<Box<State>, String> {
+    let inputs = stamp_logged(j)?;
+    rest_check(p, st, &inputs, rest)?;
+    // the turn from the smallest frame: its document and state only (the checks are their own frames, before and after)
+    let (stance, ns) = persona::turn_boxed(p, st, &inputs, false, eng, false).map_err(|e| read_err(e, ""))?;
+    line_check(j, l, inputs, &stance, &ns.digest)?;
+    Ok(ns)
+}
+/// A logged event's inputs stamped as the live writer stamps them on the fixed clock (its `elapsed_hours`, quantised, last)
+#[inline(never)]
+fn stamp_logged(j: &Json) -> Result<Json, String> {
     let ev = j.get("inputs").unwrap_or(&Json::Null);
     let Json::Obj(kv) = ev else { return Err("no input object".into()) };
     let mut kv: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect();
     let e = match ev.get("elapsed_hours") { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err("event.elapsed_hours: a number >= 0".into()) };
-    kv.push(("elapsed_hours".into(), Json::Num(q6(e))));
-    let inputs = Json::Obj(kv);
-    match (persona::rest_line_digest(p, st, &inputs), rest) {
+    kv.push(("elapsed_hours".into(), Json::Num(q6(e)))); Ok(Json::Obj(kv))
+}
+/// A rest line due before the event (RFC 0002 part 2) recomputed against the logged one
+#[inline(never)]
+fn rest_check(p: &Persona, st: &State, inputs: &Json, rest: Option<&str>) -> Result<(), String> {
+    match (persona::rest_line_digest(p, st, inputs), rest) {
         (Some((r, rd)), Some(lr)) => { let rp = json::parse(lr).ok().and_then(|x| x.get("prev").and_then(Json::as_str).map(str::to_string)).unwrap_or_default();
-            if rest_line(&rp, r, &rd) != lr { return Err("the rest line differs".into()); } }
-        (Some(_), None) => return Err("a rest line is due before this event and missing".into()),
-        (None, Some(_)) => return Err("a rest line where none is due".into()),
-        (None, None) => {} }
-    let (stance, ns) = persona::turn_boxed(p, st, &inputs, false, eng, false).map_err(|e| read_err(e, ""))?;
-    let sd = persona::stance_sha(&stance);
+            if rest_line(&rp, r, &rd) != lr { return Err("the rest line differs".into()); } Ok(()) }
+        (Some(_), None) => Err("a rest line is due before this event and missing".into()),
+        (None, Some(_)) => Err("a rest line where none is due".into()),
+        (None, None) => Ok(()) }
+}
+/// The applied event's line against the logged one: its stance and state digests, then its bytes (n, inputs, stance, state,
+/// prev as the turn gives them; the logged `deviation` and `glyph` as written)
+#[inline(never)]
+fn line_check(j: &Json, l: &str, inputs: Json, stance: &Json, state: &str) -> Result<(), String> {
+    let sd = persona::stance_sha(stance);
     if j.get("stance").and_then(Json::as_str) != Some(sd.as_str()) { return Err("the stance differs".into()); }
-    if j.get("state").and_then(Json::as_str) != Some(ns.digest.as_str()) { return Err("the state differs".into()); }
+    if j.get("state").and_then(Json::as_str) != Some(state) { return Err("the state differs".into()); }
     let mut lj = vec![("n".into(), j.get("n").cloned().unwrap_or(Json::Null)), ("inputs".into(), inputs), ("stance".into(), Json::Str(sd)),
-        ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), j.get("prev").cloned().unwrap_or(Json::Null))];
+        ("state".into(), Json::Str(state.to_string())), ("prev".into(), j.get("prev").cloned().unwrap_or(Json::Null))];
     for k in ["deviation", "glyph"] { if let Some(x) = j.get(k) { lj.push((k.into(), x.clone())); } }
     if persona::canon(&Json::Obj(lj)) != l { return Err("the line differs".into()); }
-    Ok(ns)
+    Ok(())
 }
 /// RFC 0009: an event line's logged prediction (none on a cold start), the value the expectation's memory folds
 fn logged_pred(j: &Json) -> Option<f64> { j.get("deviation").filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64) }
