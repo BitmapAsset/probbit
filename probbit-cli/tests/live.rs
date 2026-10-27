@@ -709,6 +709,8 @@ fn a_segmented_life_equals_one_file_and_verify_chain_walks_back() {
         assert_eq!(texts[k].lines().nth(1), texts[k - 1].lines().last(), "segment {k} repeats the sealed line"); }
     let (_, vone, _) = probbit(&["live", "verify", &one]); let vone = parse(&vone);
     for k in 0..3 { let (c, v, e) = probbit(&["live", "verify", &seg(k)]); assert_eq!(c, 0, "segment {k}: {e}"); if k > 0 { assert!(v.contains(&format!(r#""segment":{k}"#)) && v.contains("trusted_link"), "{v}"); } }
+    // `monitor --once` draws a segment from its last checkpoint, or from its sealed line when it has no later one
+    for k in 1..3 { let (c, o, e) = probbit(&["monitor", &seg(k), "--once", "--plain"]); assert_eq!(c, 0, "segment {k}: {e}{o}"); assert!(o.contains(if k == 1 { "event 100" } else { "event 120" }), "segment {k}: {o}"); }
     let (c, v, e) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 0, "{e}"); let v = parse(&v);
     assert_eq!(s(&v, &["segments"]), &Json::Num(3.0)); assert_eq!(s(&v, &["final_state"]), s(&vone, &["final_state"])); assert_eq!(s(&v, &["last_line"]), s(&vone, &["last_line"]));
     // the link broken: the first segment's sealed line edited (kept canonical): the chain breaks there, named

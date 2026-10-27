@@ -131,14 +131,17 @@ impl Watch {
     /// before 0.14.0 a persona with an expectation block folds every event line into its memory, which no checkpoint carries, so
     /// its strand replays from the header (every line, slower; `open_at` refuses that shortcut); from 0.14.0 the checkpoint carries
     /// the memory, and every strand starts at the last one
+    /// A segment (§5.7) starts at its sealed line (line 2) when it has no later checkpoint.
     fn start(lines: &[&str]) -> Option<usize> {
-        let k = crate::live::last_checkpoint(lines, 0).filter(|k| *k >= 2)?;
-        (!Replay::open(lines[0]).is_ok_and(|r| r.live.p.expect.is_some() && r.live.dev_full)).then_some(k)
+        let k = crate::live::last_checkpoint(lines, 0)?; let r = Replay::open(lines[0]);
+        if k < 2 && !r.as_ref().is_ok_and(|r| r.header.get("segment").is_some()) { return None; }
+        (!r.is_ok_and(|r| r.live.p.expect.is_some() && r.live.dev_full)).then_some(k)
     }
     /// The replay from a checkpoint line (`live::Replay::open_at`; `before` = the event line before it): the lines before it are
     /// not replayed, and the board starts at the checkpoint's event (its stance, the inputs `before` logs, its learned deltas)
     fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Watch, (usize, String)> {
-        let rep = Replay::open_at(head, before, cp, at)?; let meta = Meta::of(&rep); let n = meta.moods.len();
+        // a segment's sealed line (line 2, after the header) opens on the header's link
+        let rep = if at == 2 { Replay::open_lines(&[head, cp])?.0 } else { Replay::open_at(head, before, cp, at)? }; let meta = Meta::of(&rep); let n = meta.moods.len();
         let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None };
         if let Some(doc) = w.rep.last_stance().cloned() {
             let given = json::parse(before).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
