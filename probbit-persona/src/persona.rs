@@ -4006,6 +4006,63 @@ fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg>
     Some(doc.get("marginals")?.as_obj()?.iter().filter(|(k, _)| !k.starts_with("free.")).map(|(k, v)| (k.clone(), v.as_obj().map_or(vec![], |o| {
         let mut r: Vec<(String, f64)> = o.iter().map(|(l, x)| (l.clone(), x.as_f64().unwrap_or(0.0))).collect(); r.sort_by(|a, b| a.0.cmp(&b.0)); r }))).collect())
 }
+/// The expectation's cache: per program the deviation solved, its non-twin exact marginals, keyed by the sha256 of the program
+/// without its `comment` (the only key that names the turn and the seed). The exact tier's marginals are a function of the
+/// program's model alone (the seed, the sweeps and the chains are the sampler's), so a hit is the value the solve would return,
+/// bit for bit: every `pred`, `self`, `z`, stance and strand byte is the same with the cache on or off. The members' programs
+/// are rebuilt every event (the state moves every event: its digest carries the turn), only the solves are skipped; decay
+/// alone never invalidates a row (marginals do not read counts). After each event only the rows that event used are kept: at
+/// most `max_combos + 1` (the event's own program, the empty program, the other members). The key is the sha256 of the program's
+/// structure (each number by its bits, -0 as 0 as the text writes it, each string with its length): two programs share a row
+/// only when their texts are equal. A life whose programs move every event (a state that moves every event) gets no hit: after an event without
+/// one the cache is not consulted for the next 1, 2, 4, ... 32 events (a hit resets it; the rows are dropped meanwhile and the event
+/// after the pause fills them for the one after it to compare), so such a life keys two events in 34.
+#[derive(Clone, Debug)]
+pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool }
+impl Default for ExpectCache { fn default() -> ExpectCache { ExpectCache::new(true) } }
+impl ExpectCache {
+    /// An empty cache; `on: false` solves every program (the receipt is the same)
+    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false } }
+    /// Whether the cache is used
+    pub fn is_on(&self) -> bool { self.on }
+    /// The last event's programs answered from the cache and solved
+    pub fn last(&self) -> (u32, u32) { (self.hits, self.solves) }
+    /// The rows held (at most the persona's `max_combos + 1`)
+    pub fn len(&self) -> usize { self.rows.len() }
+    /// Whether no row is held
+    pub fn is_empty(&self) -> bool { self.rows.is_empty() }
+    /// The heap bytes the rows hold on this target (each row: its key, per variable its id and per level its name and value)
+    pub fn bytes(&self) -> usize {
+        use core::mem::size_of;
+        self.rows.capacity() * size_of::<([u8; 32], Marg)>() + self.used.capacity() + self.rows.iter().map(|(_, m)| m.capacity() * size_of::<(String, Vec<(String, f64)>)>()
+            + m.iter().map(|(id, ls)| id.capacity() + ls.capacity() * size_of::<(String, f64)>() + ls.iter().map(|(l, _)| l.capacity()).sum::<usize>()).sum::<usize>()).sum::<usize>()
+    }
+    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
+        self.live = self.on && self.skip == 0; self.had = !self.rows.is_empty(); if self.skip > 0 { self.skip -= 1; } }
+    fn end(&mut self) {
+        // an event that had rows to compare and found none backs off; one that started empty only fills (the next one compares)
+        if self.live { if self.hits > 0 { self.back = 0; } else if self.had { self.back = (self.back * 2).clamp(1, 32); self.skip = self.back; } }
+        let mut i = 0; self.rows.retain(|_| { i += 1; self.used[i - 1] }); self.used.clear(); }
+    /// The program's exact marginals: from the cache when the program (without its comment) was solved before, else solved
+    fn marg(&mut self, p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
+        if !self.live { self.solves += 1; return exact_marg(p, st, prog, eng); }
+        let mut h = Sha256::new();
+        match prog { Json::Obj(v) => for (k, x) in v.iter().filter(|(k, _)| k != "comment") { hash_str(&mut h, k); hash_json(&mut h, x); }, x => hash_json(&mut h, x) }
+        let key = h.finish();
+        if let Some(i) = self.rows.iter().position(|r| r.0 == key) { self.used[i] = true; self.hits += 1; return Some(self.rows[i].1.clone()); }
+        self.solves += 1; let m = exact_marg(p, st, prog, eng)?;
+        self.rows.push((key, m.clone())); self.used.push(true); Some(m)
+    }
+}
+fn hash_str(h: &mut Sha256, s: &str) { h.update(&(s.len() as u64).to_le_bytes()); h.update(s.as_bytes()); }
+/// A value's structure into `h`: a tag per kind, numbers by their bits (-0 as 0, as the program's text writes both), strings and
+/// lists with their lengths
+fn hash_json(h: &mut Sha256, j: &Json) {
+    match j { Json::Null => h.update(b"n"), Json::Bool(b) => h.update(if *b { b"t" } else { b"f" }), Json::Num(x) => { h.update(b"#"); h.update(&(if *x == 0.0 { 0 } else { x.to_bits() }).to_le_bytes()) }
+        Json::Str(s) => { h.update(b"s"); hash_str(h, s) }
+        Json::Arr(v) => { h.update(b"["); h.update(&(v.len() as u64).to_le_bytes()); for x in v { hash_json(h, x); } }
+        Json::Obj(v) => { h.update(b"{"); h.update(&(v.len() as u64).to_le_bytes()); for (k, x) in v { hash_str(h, k); hash_json(h, x); } } }
+}
 fn with_elapsed(rep: &Json, e: &Json) -> Json {
     let mut kv: Vec<(String, Json)> = rep.as_obj().map_or(vec![], |o| o.to_vec()); kv.push(("elapsed_hours".into(), e.clone())); Json::Obj(kv)
 }
@@ -4023,10 +4080,16 @@ fn kl_marg(a: &Marg, b: &Marg) -> Option<(f64, Vec<f64>)> {
 /// whenever its combo is). Mixture marginals are linear in the members' exact marginals, so every number is exact from the
 /// M + 1 solves. None without the block, or when a program is not solved exactly or a divergence is not finite.
 #[inline(never)]
-pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine) -> Option<Deviation> {
+pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine) -> Option<Deviation> { deviation_cached(p, st, raw, mem, eng, &mut ExpectCache::new(false)) }
+/// `deviation` with the members' marginals from `cache` (`ExpectCache`): the same value, fewer solves
+#[inline(never)]
+pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
+    cache.begin(); let d = deviation_in(p, st, raw, mem, eng, cache); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
+}
+fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
     let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
     let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
-    let solve = |ins: &Json| program_json(p, st, ins).ok().and_then(|prog| exact_marg(p, st, &prog, eng));
+    let mut solve = |ins: &Json| program_json(p, st, ins).ok().and_then(|prog| cache.marg(p, st, &prog, eng));
     let a = solve(raw)?; let ed = solve(&with_elapsed(&Json::Obj(vec![]), &e))?;
     let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
     let cold = !mem.warm && key == "{}";

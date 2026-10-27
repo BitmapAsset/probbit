@@ -37,9 +37,10 @@ pub const PHASES: usize = 9;
 pub const NAMES: [&str; PHASES] = ["input", "expect", "prep", "compile", "solve", "decode", "document", "line", "fold"];
 
 /// One event's breakdown: per phase (indexed by `Phase as usize`) the microseconds and the largest probe value; the event's
-/// total microseconds and the engine calls of the turn
+/// total microseconds and the engine calls of the turn; RFC 0009: the expectation's programs answered from its cache
+/// (`expect_cached`) and solved (`expect_solved`)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TurnTrace { pub us: [u64; PHASES], pub bytes: [u64; PHASES], pub total_us: u64, pub solves: u32 }
+pub struct TurnTrace { pub us: [u64; PHASES], pub bytes: [u64; PHASES], pub total_us: u64, pub solves: u32, pub expect_cached: u32, pub expect_solved: u32 }
 
 #[cfg(feature = "turn_trace")]
 mod on {
@@ -65,6 +66,7 @@ mod on {
             let mut g = t.borrow_mut(); if let Some(b) = b { let x = &mut g.acc.bytes[prev as usize]; *x = (*x).max(b); }
             g.open = Some((t0, us(t0))); g.cur = ph; prev })
     }
+    pub(crate) fn expect_cache(hits: u32, solves: u32) { T.with(|t| { let mut g = t.borrow_mut(); if g.open.is_some() { g.acc.expect_cached += hits; g.acc.expect_solved += solves; } }) }
     pub(crate) fn end() {
         let cur = T.with(|t| t.borrow().cur); enter(cur);
         T.with(|t| { let mut g = t.borrow_mut(); if let Some((t0, _)) = g.open.take() { g.acc.total_us = us(t0); g.last = g.acc; } })
@@ -73,7 +75,7 @@ mod on {
 #[cfg(feature = "turn_trace")]
 pub use on::{last, set_probe};
 #[cfg(feature = "turn_trace")]
-pub(crate) use on::{begin, end, enter};
+pub(crate) use on::{begin, end, enter, expect_cache};
 #[cfg(not(feature = "turn_trace"))]
 #[inline(always)]
 pub(crate) fn begin() {}
@@ -83,12 +85,17 @@ pub(crate) fn enter(ph: Phase) -> Phase { ph }
 #[cfg(not(feature = "turn_trace"))]
 #[inline(always)]
 pub(crate) fn end() {}
+#[cfg(not(feature = "turn_trace"))]
+#[inline(always)]
+pub(crate) fn expect_cache(_hits: u32, _solves: u32) {}
 
 impl TurnTrace {
-    /// As JSON: `{"us": {phase: µs}, "bytes": {phase: value}, "total_us": n, "solves": n}` (phases in `Phase` order)
+    /// As JSON: `{"us": {phase: µs}, "bytes": {phase: value}, "total_us": n, "solves": n, "expect_cached": n, "expect_solved": n}`
+    /// (phases in `Phase` order)
     pub fn to_json(&self) -> crate::json::Json {
         use crate::json::Json;
         let row = |v: &[u64; PHASES]| Json::Obj(NAMES.iter().zip(v).map(|(k, x)| (k.to_string(), Json::Num(*x as f64))).collect());
-        Json::Obj(vec![("us".into(), row(&self.us)), ("bytes".into(), row(&self.bytes)), ("total_us".into(), Json::Num(self.total_us as f64)), ("solves".into(), Json::Num(self.solves as f64))])
+        Json::Obj(vec![("us".into(), row(&self.us)), ("bytes".into(), row(&self.bytes)), ("total_us".into(), Json::Num(self.total_us as f64)), ("solves".into(), Json::Num(self.solves as f64)),
+            ("expect_cached".into(), Json::Num(self.expect_cached as f64)), ("expect_solved".into(), Json::Num(self.expect_solved as f64))])
     }
 }

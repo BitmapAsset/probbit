@@ -54,7 +54,9 @@ pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: 
     /// RFC 0009: the expectation's memory (a fold of the logged events) and the last event's exact trajectory (derived, never logged)
     pub expect: Option<persona::ExpectMem>, pub traj: Option<Json>,
     /// The strand's engine is before 0.14.0 (DEV_R6_SINCE): the stance's `deviation` keeps full precision, as that engine wrote it
-    pub dev_full: bool }
+    pub dev_full: bool,
+    /// RFC 0009: the members' exact marginals by program (`persona::ExpectCache`, on by default; off gives the same bytes)
+    pub expect_cache: persona::ExpectCache }
 /// The engine from which the stance's `deviation` (on checkpoint lines) is rounded to 6 decimals: a transcendental's last bits
 /// differ between platforms' libm (macOS, glibc, the `libm` crate of a `nostd` build), and 6 decimals make the line's bytes,
 /// and so the chain, the same on all of them
@@ -113,7 +115,7 @@ impl Live {
     fn boxed(p: Box<Persona>, st: Box<State>, clock: Clock, prev: String, n: u64, expect: Option<persona::ExpectMem>, dev_full: bool) -> Box<Live> {
         use core::mem::MaybeUninit; use core::ptr::{addr_of_mut, copy_nonoverlapping};
         // every field is written below: this pattern stops compiling when a field is added and not written
-        let _all = |l: &Live| { let Live { p: _, st: _, clock: _, last: _, prev: _, n: _, status: _, controls: _, checkpoints: _, rests: _, expect: _, traj: _, dev_full: _ } = l; };
+        let _all = |l: &Live| { let Live { p: _, st: _, clock: _, last: _, prev: _, n: _, status: _, controls: _, checkpoints: _, rests: _, expect: _, traj: _, dev_full: _, expect_cache: _ } = l; };
         let mut b: Box<MaybeUninit<Live>> = Box::new(MaybeUninit::uninit());
         let l = b.as_mut_ptr();
         // SAFETY: `l` points to an allocation for one `Live`; each field is written once, through raw field pointers (no reference
@@ -126,6 +128,7 @@ impl Live {
             addr_of_mut!((*l).clock).write(clock); addr_of_mut!((*l).last).write(0.0); addr_of_mut!((*l).prev).write(prev); addr_of_mut!((*l).n).write(n);
             addr_of_mut!((*l).status).write(Status::Active); addr_of_mut!((*l).controls).write(0); addr_of_mut!((*l).checkpoints).write(0); addr_of_mut!((*l).rests).write(0);
             addr_of_mut!((*l).expect).write(expect); addr_of_mut!((*l).traj).write(None); addr_of_mut!((*l).dev_full).write(dev_full);
+            addr_of_mut!((*l).expect_cache).write(persona::ExpectCache::new(true));
             Box::from_raw(Box::into_raw(b) as *mut Live)
         }
     }
@@ -146,7 +149,8 @@ impl Live {
         let inputs = Json::Obj(kv);
         enter(Phase::Expect);
         // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without them)
-        let dev = self.expect.as_ref().and_then(|m| persona::deviation(&self.p, &self.st, &inputs, m, eng));
+        let cache = &mut self.expect_cache;
+        let dev = self.expect.as_ref().and_then(|m| persona::deviation_cached(&self.p, &self.st, &inputs, m, eng, cache));
         let traj = persona::trajectory(&self.p, &self.st, &inputs);
         let (mut stance, ns) = persona::turn_boxed(&self.p, &self.st, &inputs, false, eng, false)?;
         let sd = persona::stance_sha(&stance);

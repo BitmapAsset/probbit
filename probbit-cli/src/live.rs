@@ -473,6 +473,29 @@ mod tests {
         assert_eq!(verify(&(l3.join("\n") + "\n"), &run).unwrap_err(), (2, SEALED.to_string()));
     }
 
+    /// The expectation's cache moves no byte: lives of the expectation fixture persona (max_combos 16 and 64, engines 0.13.0 and
+    /// 0.14.0; 500 events of many combos, then one event 200 times, a checkpoint every 50) run with the cache on and off:
+    /// every stance document, every strand line and the final state are the same, the cache answers programs (hits > 0) and
+    /// never holds more than max_combos + 1 rows; the life verifies
+    #[test]
+    fn the_expectation_cache_moves_no_byte() {
+        let y = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap();
+        let doc0 = probbit_persona::yaml::load(&y).unwrap_or_else(|e| panic!("{}", e.msg));
+        let ev = |t: usize| s1_event(if t < 500 { t } else { 1 });
+        for mc in [16usize, 64] { for engine in ["probbit 0.13.0", "probbit 0.14.0"] {
+            let mut d = doc0.clone(); put(&mut d, &["expectation"], json::parse(&format!(r#"{{"max_combos":{mc}}}"#)).unwrap()); let p = persona::build(&d).unwrap();
+            let life = |on: bool| { let (mut lv, head) = Live::start(p.clone(), &d, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
+                lv.expect_cache = persona::ExpectCache::new(on); assert_eq!(lv.expect_cache.is_on(), on);
+                let (mut text, mut docs, mut hits, mut rows) = (format!("{head}\n"), vec![], 0u32, 0usize);
+                for t in 0..700 { let (s, l) = lv.event(&ev(t), &run).unwrap(); text += &l; text.push('\n'); docs.push(persona::canon(&s));
+                    hits += lv.expect_cache.last().0; rows = rows.max(lv.expect_cache.len()); if lv.n % 50 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+                (text, docs, lv.st.digest.clone(), hits, rows) };
+            let (on, off) = (life(true), life(false));
+            assert_eq!(on.1, off.1, "every stance document ({mc}, {engine})"); assert_eq!(on.0, off.0, "every strand byte ({mc}, {engine})"); assert_eq!(on.2, off.2);
+            assert!(on.3 > 0 && off.3 == 0, "hits on {} off {}", on.3, off.3); assert!(on.4 <= mc + 1, "rows {}", on.4);
+            assert_eq!(verify(&on.0, &run).unwrap().get("events"), Some(&Json::Num(700.0))); } }
+    }
+
     /// S1 measurements (ignored: run with --ignored --nocapture): the expectation fixture persona, 500 events, a checkpoint every
     /// 50: checkpoint line bytes (max_combos 16 and 64), and resume's time at 166 and 500 events, 0.13.0 (fold from the header)
     /// against 0.14.0 (fold from the last checkpoint), with the full replay for scale
