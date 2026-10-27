@@ -1573,7 +1573,11 @@ check that inference. Hashes alone do not authenticate a writer or detect a whol
 anchor. Historical measurement before this hardening, on an Apple M4: a 10,000-event strand of a drives persona (4 goals, a floor, learning; 3,126,444
 bytes, 10 checkpoint lines) opens in `monitor --once` from its last checkpoint in 0.005 s (load 3.3), where a full `verify`
 takes 192 s. A replay from a checkpoint costs what the events after it cost: 500 events past the last one took 26 s to draw
-(load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
+(load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. A persona with an `expectation` block (RFC 0009)
+is the exception: its expectation memory is a fold of every event line, and no checkpoint line carries it, so `monitor`
+(`--once`, `--follow`, `--serve`, each strand of `--dir` by its own persona) replays such a strand from its header, every
+line, and `verify --from-checkpoint` still refuses it. The cost is a full replay when the strand is opened: on a 16-vCPU Linux VM, a 5,000-event life of the tutor with the block (10 checkpoint lines) opens in `monitor --once` in 7.4 to 7.8 s, about 650 events a second, where the same life without the block opens from its last checkpoint in under 0.05 s; after
+that, appended lines replay one by one from the state in memory, as for any strand. A strand without checkpoint or control lines (shorter than K events, or `--checkpoint-every 0`) is the
 same format as in 0.8.0. New strand headers record the current engine version, so their chain hashes differ; existing
 0.8.0 strands remain replayable. Binaries before 0.8.0 do not read checkpoint or control lines.
 
