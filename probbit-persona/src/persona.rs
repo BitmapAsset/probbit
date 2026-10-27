@@ -49,48 +49,65 @@ pub fn py_repr(x: f64) -> String {
 }
 /// The canonical number (docs/persona.md §5.2): a whole number of magnitude <= 2^53 prints as an integer (`1`, `-2`, `0`),
 /// any other number as Python's repr (`0.43543`, `1e-05`). So `1`, `1.0` and `1e0` are one number in every digest.
-fn canon_num(x: f64, s: &mut String) {
+/// Where the canonical writer puts its text: a `String`, or a header streamed in pieces (`strand::write_header`)
+pub trait Sink { fn push(&mut self, c: char); fn push_str(&mut self, t: &str); }
+impl Sink for String { fn push(&mut self, c: char) { String::push(self, c) } fn push_str(&mut self, t: &str) { String::push_str(self, t) } }
+fn canon_num(x: f64, s: &mut impl Sink) {
     if !x.is_finite() { s.push_str("null"); } else if x.fract() == 0.0 && x.abs() <= 9_007_199_254_740_992.0 { s.push_str(&format!("{}", x as i64)); } else { s.push_str(&py_repr(x)); }
 }
 /// Python's `json.dumps(..., ensure_ascii=False)` string escapes
-fn esc(t: &str, s: &mut String) {
+fn esc(t: &str, s: &mut impl Sink) {
     s.push('"');
     for c in t.chars() { match c { '"' => s.push_str("\\\""), '\\' => s.push_str("\\\\"), '\n' => s.push_str("\\n"), '\r' => s.push_str("\\r"), '\t' => s.push_str("\\t"),
         '\u{8}' => s.push_str("\\b"), '\u{c}' => s.push_str("\\f"), c if (c as u32) < 0x20 => s.push_str(&format!("\\u{:04x}", c as u32)), c => s.push(c) } }
     s.push('"');
 }
-fn write(j: &Json, sort: bool, s: &mut String) {
+/// Compact JSON of `j` into `s` (`sort`: keys sorted at every level, as `canon`; else insertion order, as `text`)
+pub fn write_to(j: &Json, sort: bool, s: &mut impl Sink) {
     match j {
         Json::Null => s.push_str("null"), Json::Bool(b) => s.push_str(if *b { "true" } else { "false" }), Json::Num(x) => canon_num(*x, s), Json::Str(t) => esc(t, s),
-        Json::Arr(v) => { s.push('['); for (k, x) in v.iter().enumerate() { if k > 0 { s.push(','); } write(x, sort, s); } s.push(']'); }
+        Json::Arr(v) => { s.push('['); for (k, x) in v.iter().enumerate() { if k > 0 { s.push(','); } write_to(x, sort, s); } s.push(']'); }
         Json::Obj(v) => { let mut o: Vec<&(String, Json)> = v.iter().collect(); if sort { o.sort_by(|a, b| a.0.cmp(&b.0)); }
-            s.push('{'); for (k, (key, x)) in o.into_iter().enumerate() { if k > 0 { s.push(','); } esc(key, s); s.push(':'); write(x, sort, s); } s.push('}'); }
+            s.push('{'); for (k, (key, x)) in o.into_iter().enumerate() { if k > 0 { s.push(','); } esc(key, s); s.push(':'); write_to(x, sort, s); } s.push('}'); }
     }
 }
 /// Canonical JSON: keys sorted (by code point), no whitespace, UTF-8, canonical numbers. Every persona document is printed so.
-pub fn canon(j: &Json) -> String { let mut s = String::new(); write(j, true, &mut s); s }
+pub fn canon(j: &Json) -> String { let mut s = String::new(); write_to(j, true, &mut s); s }
 /// A program's text: insertion order (the compiler's fixed order), compact, canonical numbers. `engine.program` is its sha256.
-pub fn text(j: &Json) -> String { let mut s = String::new(); write(j, false, &mut s); s }
-pub fn sha256(data: &[u8]) -> [u8; 32] {
-    const K: [u32; 64] = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d,
-        0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
-        0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
-    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
-    let mut m = data.to_vec(); let bits = (data.len() as u64).wrapping_mul(8); m.push(0x80); while m.len() % 64 != 56 { m.push(0); } m.extend_from_slice(&bits.to_be_bytes());
-    for c in m.chunks(64) {
+pub fn text(j: &Json) -> String { let mut s = String::new(); write_to(j, false, &mut s); s }
+/// sha256 of `data` (no copy of it: the streamed `Sha256`)
+pub fn sha256(data: &[u8]) -> [u8; 32] { let mut h = Sha256::new(); h.update(data); h.finish() }
+const K: [u32; 64] = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d,
+    0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+/// sha256 fed in pieces: `update` any number of times, then `finish` (= `sha256` of the pieces concatenated)
+pub struct Sha256 { h: [u32; 8], buf: [u8; 64], fill: usize, len: u64 }
+impl Default for Sha256 { fn default() -> Self { Self::new() } }
+impl Sha256 {
+    pub fn new() -> Sha256 { Sha256 { h: [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19], buf: [0; 64], fill: 0, len: 0 } }
+    pub fn update(&mut self, mut d: &[u8]) {
+        self.len = self.len.wrapping_add(d.len() as u64);
+        while !d.is_empty() { let k = (64 - self.fill).min(d.len()); self.buf[self.fill..self.fill + k].copy_from_slice(&d[..k]); self.fill += k; d = &d[k..];
+            if self.fill == 64 { let b = self.buf; self.block(&b); self.fill = 0; } }
+    }
+    pub fn finish(mut self) -> [u8; 32] {
+        let bits = self.len.wrapping_mul(8); let mut pad = [0u8; 72]; pad[0] = 0x80; let z = (119 - self.fill) % 64; // 0x80, zeros, then 8 length bytes: to a 64-byte boundary
+        pad[1 + z..9 + z].copy_from_slice(&bits.to_be_bytes()); let len = self.len; self.update(&pad[..9 + z]); self.len = len;
+        let mut out = [0u8; 32]; for (i, x) in self.h.iter().enumerate() { out[4 * i..4 * i + 4].copy_from_slice(&x.to_be_bytes()); } out
+    }
+    fn block(&mut self, c: &[u8; 64]) {
         let mut w = [0u32; 64]; for t in 0..16 { w[t] = u32::from_be_bytes([c[4 * t], c[4 * t + 1], c[4 * t + 2], c[4 * t + 3]]); }
         for t in 16..64 { let s0 = w[t - 15].rotate_right(7) ^ w[t - 15].rotate_right(18) ^ (w[t - 15] >> 3); let s1 = w[t - 2].rotate_right(17) ^ w[t - 2].rotate_right(19) ^ (w[t - 2] >> 10);
             w[t] = w[t - 16].wrapping_add(s0).wrapping_add(w[t - 7]).wrapping_add(s1); }
-        let mut v = h;
+        let mut v = self.h;
         for t in 0..64 { let (a, b, cc, d, e, f, g, hh) = (v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]);
             let t1 = hh.wrapping_add(e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25)).wrapping_add((e & f) ^ (!e & g)).wrapping_add(K[t]).wrapping_add(w[t]);
             let t2 = (a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22)).wrapping_add((a & b) ^ (a & cc) ^ (b & cc));
             v = [t1.wrapping_add(t2), a, b, cc, d.wrapping_add(t1), e, f, g]; }
-        for (x, y) in h.iter_mut().zip(v) { *x = x.wrapping_add(y); }
+        for (x, y) in self.h.iter_mut().zip(v) { *x = x.wrapping_add(y); }
     }
-    let mut out = [0u8; 32]; for (i, x) in h.iter().enumerate() { out[4 * i..4 * i + 4].copy_from_slice(&x.to_be_bytes()); } out
 }
 pub fn hex(b: &[u8]) -> String { b.iter().map(|x| format!("{x:02x}")).collect() }
 /// "sha256:<hex>" of a text
@@ -313,15 +330,20 @@ pub fn parse_doc(t: &str, is_json: bool) -> Result<Json, String> {
 }
 
 /// The strict validator: document -> persona (every field type-checked, unknown fields refused at their path).
-pub fn build(doc: &Json) -> R<Persona> {
+pub fn build(doc: &Json) -> R<Persona> { build_boxed(doc).map(|p| *p) }
+/// `build` on the heap: the persona is returned boxed and every layer below (`display`, `bound`, `expectation`, the lowered
+/// blocks) passes it on boxed, so no frame on the way holds a `Persona` by value; the heavy readers are out of line, so the
+/// recursion through the layers holds only this dispatcher's frame (docs/embedding.md "Stack budget").
+#[inline(never)]
+pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
     // §2.18: `display` moves nothing (effects {}): it is read against the persona built without it and stays out of the digest,
     // so adding it to a persona with a recorded life leaves every state and stance digest as it was
     if let Some(dj) = doc.get("display") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "display"); }
-        let mut p = build(&d)?; p.glyphs = display_spec(dj, &p)?; return Ok(p); }
+        let mut p = build_boxed(&d)?; p.glyphs = display_spec(dj, &p)?; return Ok(p); }
     // RFC 0004: a `bound` block is read against the persona built without it, and it stays out of the digest, so adding it to a
     // persona with a recorded life leaves every state, strand and turn byte for byte the same (amendment A1)
     if let Some(b) = doc.get("bound") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "bound"); }
-        let p = build(&d)?; bound::spec(b, &p)?; return Ok(p); }
+        let p = build_boxed(&d)?; bound::spec(b, &p)?; return Ok(p); }
     // RFC 0009: `expectation` and `engine.trajectory` move nothing (effects {}): they are read against the persona built without
     // them and stay out of the digest, so adding either to a persona with a recorded life leaves every state and stance digest as
     // it was (an `engine` mapping left empty is dropped with them)
@@ -332,10 +354,15 @@ pub fn build(doc: &Json) -> R<Persona> {
             if let Some(i) = v.iter().position(|(k, _)| k == "engine") {
                 if let Json::Obj(e) = &mut v[i].1 { if let Some(j) = e.iter().position(|(k, _)| k == "trajectory") { tj = Some(e.remove(j).1); } }
                 if v[i].1.as_obj().is_some_and(|e| e.is_empty()) { v.remove(i); } } }
-        let mut p = build(&d)?;
+        let mut p = build_boxed(&d)?;
         p.expect = match ex { None | Some(Json::Null) => None, Some(x) => Some(expect_spec(&x)?) };
         p.traj = match tj { None | Some(Json::Null) => None, Some(x) => Some(traj_spec(&x)?) };
         return Ok(p); }
+    build_base(doc)
+}
+/// The persona without the layers `build_boxed` peels off: the top-level keys, then the lowered blocks or the base reader
+#[inline(never)]
+fn build_base(doc: &Json) -> R<Box<Persona>> {
     const TOP: [&str; 22] = ["probbit_persona", "identity", "traits", "moods", "couplings", "inputs", "history", "habits", "agenda", "engine", "line", "learning", "drives", "reward_from", "senses", "needs",
         "surprise", "pace", "dispositions", "rest", "load", "comment"];
     let kv = keys(doc, "", &TOP, &["probbit_persona", "identity", "traits"])?;
@@ -468,7 +495,7 @@ pub fn build(doc: &Json) -> R<Persona> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None };
+    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None });
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -486,7 +513,8 @@ const BODY: [&str; 5] = ["surprise", "pace", "dispositions", "rest", "load"];
 /// field's path): `pace` lowers to the number inputs `pace_up` (box [0, cap − r0]) and `pace_down` (box [0, r0]) carrying its
 /// effects, after the declared inputs; `surprise` and `dispositions` lower to nothing (they act in the credit and drive steps). The
 /// rest of the document is read as it is without them.
-fn build_body(doc: &Json) -> R<Persona> {
+#[inline(never)]
+fn build_body(doc: &Json) -> R<Box<Persona>> {
     let kv = doc.as_obj().unwrap(); let block = |k: &str| get(kv, k).filter(|x| !x.is_null()); let has = |k: &str| block(k).is_some();
     // Design B: the surprise gate (V-R1, V-R2); the defaults are the values the stand-in passed with
     let surprise = match block("surprise") { None => None, Some(sj) => {
@@ -598,7 +626,7 @@ fn build_body(doc: &Json) -> R<Persona> {
         if !ld.effects.is_empty() { x.push(("effects".into(), Json::Obj(ld.effects.iter().map(|(k, w)| (k.clone(), Json::Num(*w))).collect()))); }
         ins.push(Json::Obj(x));
         match d2.iter_mut().find(|(k, _)| k == "inputs") { Some(x) => x.1 = Json::Arr(ins), None => d2.push(("inputs".into(), Json::Arr(ins))) } }
-    let mut p = build(&Json::Obj(d2))?;
+    let mut p = build_boxed(&Json::Obj(d2))?;
     p.digest = sha(doc); p.surprise = surprise; p.pace = pace; p.disp = disp; p.rest_b = rest_b; p.load = load;
     Ok(p)
 }
@@ -1072,7 +1100,8 @@ fn needs_spec(nj: &Json, goals: &[Goal], senses: &[Sense], win_max: f64, moods: 
 }
 /// A persona with a `drives` block: the block read strictly, then lowered (see `Drives`) and read as a 0.7.0 persona; the digest is
 /// the whole document's, the block included. A goal floor needs `pursue` free of multi-variable rules (the lift's soundness, §2.9).
-fn build_drives(doc: &Json, senses: &[Sense]) -> R<Persona> {
+#[inline(never)]
+fn build_drives(doc: &Json, senses: &[Sense]) -> R<Box<Persona>> {
     let kv = doc.as_obj().unwrap(); let drv = get(kv, "drives").unwrap();
     let dkv = keys(drv, "drives", &["goals", "wanting", "afterglow", "expectation", "pursue", "effects", "learn_from_surprise", "valence", "comment"], &[])?;
     let gl = match get(dkv, "goals") { Some(Json::Arr(a)) if (2..=7).contains(&a.len()) => a, _ => return Err(perr("drives.goals", "2 to 7 goals (pursue is one variable, 2-7 levels)")) };
@@ -1185,7 +1214,7 @@ fn build_drives(doc: &Json, senses: &[Sense]) -> R<Persona> {
     let synthetic: Vec<String> = ins[n_decl..].iter().map(|x| x.get("id").and_then(Json::as_str).unwrap_or("").to_string()).collect();
     let ii = slot(&mut d2, "inputs"); d2[ii].1 = Json::Arr(ins);
     // an error in a synthetic input is reported at the drives path it comes from
-    let mut p = build(&Json::Obj(d2)).map_err(|e| { for (j, o) in origins.iter().enumerate() { let pre = format!("inputs[{}]", n_decl + j);
+    let mut p = build_boxed(&Json::Obj(d2)).map_err(|e| { for (j, o) in origins.iter().enumerate() { let pre = format!("inputs[{}]", n_decl + j);
         if let Some(rest) = e.path.strip_prefix(&pre).filter(|r| r.is_empty() || r.starts_with('.') || r.starts_with('[')) { return perr(&format!("{o}{}", rest.strip_prefix(".effects").unwrap_or("")), e.msg); } } e })?;
     p.digest = sha(doc);
     if goals.iter().any(|g| g.floor > 0.0) { for h in &p.habits { for (k, lst) in &h.rules { for r in lst { let vs = rule_vars(k, r);
@@ -1886,7 +1915,8 @@ fn sense_cond_text(sn: &Senses, c: &SenseCond) -> String {
 }
 /// A persona with a `senses` block: the block read strictly, then lowered (see `Senses`) and read as a persona without it (a drives
 /// block, if any, lowers next); the digest is the whole document's, the block included
-fn build_senses(doc: &Json) -> R<Persona> {
+#[inline(never)]
+fn build_senses(doc: &Json) -> R<Box<Persona>> {
     let kv = doc.as_obj().unwrap();
     let sl = match get(kv, "senses") { Some(Json::Arr(a)) if (1..=24).contains(&a.len()) => a, _ => return Err(perr("senses", "a list of 1 to 24 senses")) };
     let mut senses: Vec<Sense> = vec![];
@@ -1932,7 +1962,7 @@ fn build_senses(doc: &Json) -> R<Persona> {
     let ii = slot(&mut d2, "inputs"); d2[ii].1 = Json::Arr(ins);
     // an error in a synthetic input is reported at the senses path it comes from
     // a drives block lowers next, with the senses at hand (a need may grow per reading of a number sense, RFC 0002 A.1)
-    let lowered = if get(&d2, "drives").is_some() { build_drives(&Json::Obj(d2), &senses) } else { build(&Json::Obj(d2)) };
+    let lowered = if get(&d2, "drives").is_some() { build_drives(&Json::Obj(d2), &senses) } else { build_boxed(&Json::Obj(d2)) };
     let mut p = lowered.map_err(|e| { for (j, o) in origins.iter().enumerate() { let pre = format!("inputs[{}]", n_decl + j);
         if let Some(rest) = e.path.strip_prefix(&pre).filter(|r| r.is_empty() || r.starts_with('.') || r.starts_with('[')) { return perr(&format!("{o}{}", rest.strip_prefix(".effects").unwrap_or("")), e.msg); } } e })?;
     p.digest = sha(doc);
@@ -2915,6 +2945,9 @@ pub fn deficits(p: &Persona, st: &State) -> Vec<(String, f64, f64)> {
 }
 /// A new individual: genes from the seed, an empty mood and history, the fallback levels as `prev`, and (with `rest`) the
 /// resting stance: this individual's joint plan with no live evidence and a neutral mood (one engine call).
+/// `init` on the heap (the setup path of a small-stack target: docs/embedding.md "Stack budget")
+#[inline(never)]
+pub fn init_boxed(p: &Persona, seed: Option<u64>, rest: bool, eng: Engine) -> Box<State> { Box::new(init(p, seed, rest, eng)) }
 pub fn init(p: &Persona, seed: Option<u64>, rest: bool, eng: Engine) -> State {
     let seed = seed.unwrap_or(p.seed);
     let mut st = State { seed, turn: 0, persona: [p.name.clone(), p.version.clone(), p.digest.clone()], genes: genes(p, seed),
@@ -4058,6 +4091,46 @@ mod tests {
     fn persona(learning: &str) -> R<Persona> { build(&json::parse(&DOC.replace("LEARN", learning)).unwrap()) }
     fn inputs(pr: bool, cr: bool, loss: bool) -> Json { json::parse(&format!(r#"{{"praise":{pr},"criticism":{cr},"loss":{loss}}}"#)).unwrap() }
     fn err<T>(r: R<T>) -> String { r.err().map(|e| format!("{}: {}", e.path, e.msg)).unwrap_or_default() }
+
+    /// The streamed sha256 is the one-shot one at every length around the 64-byte block and padding edges, fed in any pieces
+    #[test]
+    fn sha256_fed_in_pieces_is_the_one_shot_digest() {
+        assert_eq!(hex(&sha256(b"")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(hex(&sha256(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        let data: Vec<u8> = (0..300u32).map(|i| (i * 7 + 3) as u8).collect();
+        for n in [0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 128, 300] { let one = sha256(&data[..n]);
+            for piece in [1, 3, 64, 100] { let mut h = Sha256::new(); for c in data[..n].chunks(piece) { h.update(c); } assert_eq!(h.finish(), one, "{n} bytes in pieces of {piece}"); } }
+    }
+    /// The boxed setup API is the by-value one: the same persona, state, header and individual
+    #[test]
+    fn the_boxed_setup_is_the_by_value_setup() {
+        use crate::strand::{self, Clock, Live};
+        let doc = json::parse(&DOC.replace("LEARN", LEARN)).unwrap();
+        let (p, b) = (build(&doc).unwrap(), build_boxed(&doc).unwrap()); assert_eq!(p.digest, b.digest);
+        let (st, sb) = (init(&p, Some(4), true, &run), init_boxed(&b, Some(4), true, &run)); assert_eq!(st.digest, sb.digest);
+        let (mut a, ha) = Live::start(p.clone(), &doc, st.clone(), Clock::Fixed, "probbit 0.14.0");
+        let (mut c, hc) = Live::start_boxed(b, &doc, sb, Clock::Fixed, "probbit 0.14.0"); assert_eq!(ha, hc); assert_eq!(a.head(), c.head());
+        let (_, la) = a.event(&inputs(true, false, false), &run).unwrap(); let (_, lc) = c.event(&inputs(true, false, false), &run).unwrap(); assert_eq!(la, lc);
+        let text = format!("{ha}\n{la}\n");
+        let r1 = strand::resume(&text, &p, a.st.clone(), Clock::Fixed).unwrap(); let r2 = strand::resume_boxed(&text, &p, Box::new(c.st.clone()), Clock::Fixed).unwrap();
+        assert_eq!((r1.n, r1.head(), &r1.st.digest), (r2.n, r2.head(), &r2.st.digest));
+    }
+    /// The header written in pieces is `Live::start`'s header byte for byte, and its returned digest is the chain's first `prev`,
+    /// at every piece size (1 byte, a size that cuts inside UTF-8 characters, the default, one piece for the whole line)
+    #[test]
+    fn the_streamed_header_is_the_header_byte_for_byte() {
+        use crate::strand::{self, Clock, Live};
+        // a document with non-ASCII text and escapes, and a display block (the header keeps the document as given)
+        let src = DOC.replace("LEARN", LEARN).replace(r#""name":"L""#, r#""name":"L","summary":"caf\u00e9 \u263a tab\t \"q\"""#);
+        let doc = json::parse(&src).unwrap(); let p = build(&doc).unwrap(); let st = init(&p, None, true, &run);
+        let (lv, header) = Live::start(p.clone(), &doc, st.clone(), Clock::Fixed, "probbit 0.14.0");
+        for chunk in [0, 1, 7, 64, strand::HEADER_CHUNK, header.len(), header.len() + 9] {
+            let mut pieces: Vec<Vec<u8>> = vec![]; let d = strand::write_header(&p, &doc, &st, "probbit 0.14.0", chunk, &mut |c: &[u8]| pieces.push(c.to_vec()));
+            assert!(pieces.iter().all(|c| !c.is_empty() && c.len() <= chunk.max(1)), "piece size {chunk}");
+            assert_eq!(pieces.concat(), header.as_bytes(), "piece size {chunk}"); assert_eq!(d, lv.head()); assert_eq!(d, digest_of(&header)); }
+        let mut out = vec![]; let lv2 = Live::start_to(Box::new(p), &doc, Box::new(st), Clock::Fixed, "probbit 0.14.0", 100, &mut |c: &[u8]| out.extend_from_slice(c));
+        assert_eq!(out, header.as_bytes()); assert_eq!(lv2.head(), lv.head());
+    }
 
     /// Check both signs at the rounded cap and refusal beyond half a unit of the sixth decimal.
     #[test]

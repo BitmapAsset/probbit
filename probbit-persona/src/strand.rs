@@ -76,11 +76,6 @@ fn dev_r6(l: &str) -> Option<String> {
         for k in ["self", "pred", "input"] { if let Some(Json::Num(x)) = field(d, k) { *x = persona::r6(*x); } } }
     Some(persona::canon(&j))
 }
-/// A document with its keys sorted at every level (`persona::text` of it is its canonical JSON)
-fn sorted(j: &Json) -> Json {
-    match j { Json::Obj(v) => { let mut o: Vec<(String, Json)> = v.iter().map(|(k, x)| (k.clone(), sorted(x))).collect(); o.sort_by(|a, b| a.0.cmp(&b.0)); Json::Obj(o) }
-        Json::Arr(v) => Json::Arr(v.iter().map(sorted).collect()), x => x.clone() }
-}
 /// One line of a strand without its line ending: strands are written with `\n`; a `\r\n` copy (Windows text mode, an editor)
 /// reads the same, since a canonical JSON line never ends in `\r` itself
 fn bare(l: &str) -> &str { l.strip_suffix('\r').unwrap_or(l) }
@@ -90,14 +85,31 @@ impl Live {
     /// state as canonical JSON (keys sorted), so a state read from a file and the same state from `init` give one header; the
     /// header is compact JSON, not key-sorted.
     pub fn start(p: Persona, doc: &Json, st: State, clock: Clock, engine: &str) -> (Live, String) {
-        let s = |x: &str| Json::Str(x.to_string());
-        let header = persona::text(&Json::Obj(vec![("probbit_strand".into(), Json::Num(FORMAT)), ("engine".into(), s(engine)),
-            ("persona".into(), Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest))])),
-            ("seed".into(), Json::Num(st.seed as f64)), ("state".into(), sorted(&st.to_json(&p))), ("document".into(), doc.clone())]));
-        let prev = persona::digest_of(&header);
+        let (lv, header) = Live::start_boxed(Box::new(p), doc, Box::new(st), clock, engine); (*lv, header)
+    }
+    /// `start` on the heap: the persona and the state come in boxed and the individual goes out boxed, so the setup path of a
+    /// small-stack target holds none of them by value (docs/embedding.md "Stack budget"). The header is `start`'s, byte for byte.
+    #[inline(never)]
+    pub fn start_boxed(p: Box<Persona>, doc: &Json, st: Box<State>, clock: Clock, engine: &str) -> (Box<Live>, String) {
+        let mut b = Vec::new();
+        let lv = Live::start_to(p, doc, st, clock, engine, HEADER_CHUNK, &mut |c: &[u8]| b.extend_from_slice(c));
+        // the pieces are the bytes of one UTF-8 text cut at fixed offsets: whole again, it is that text
+        (lv, String::from_utf8(b).unwrap_or_default())
+    }
+    /// `start_boxed` with the header handed to `out` in pieces of at most `chunk` bytes (the last one shorter) instead of returned
+    /// whole: a host writes each piece to its store and may yield between pieces (a flash write of the whole line can outlast a
+    /// watchdog). The pieces end to end are `start`'s header (without its `\n`); a piece may end inside a UTF-8 character.
+    #[inline(never)]
+    pub fn start_to(p: Box<Persona>, doc: &Json, st: Box<State>, clock: Clock, engine: &str, chunk: usize, out: &mut dyn FnMut(&[u8])) -> Box<Live> {
+        let prev = write_header(&p, doc, &st, engine, chunk, out);
         let expect = p.expect.as_ref().map(|_| persona::ExpectMem::new());
         let dev_full = engine_version(engine).is_some_and(|v| v < DEV_R6_SINCE);
-        (Live { p, st, clock, last: 0.0, prev, n: 0, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None, dev_full }, header)
+        Live::boxed(p, st, clock, prev, 0, expect, dev_full)
+    }
+    /// The individual on the heap from its parts (one place builds a `Live`: `start_to` and `resume_boxed`)
+    #[inline(never)]
+    fn boxed(p: Box<Persona>, st: Box<State>, clock: Clock, prev: String, n: u64, expect: Option<persona::ExpectMem>, dev_full: bool) -> Box<Live> {
+        Box::new(Live { p: *p, st: *st, clock, last: 0.0, prev, n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None, dev_full })
     }
     /// One event: stamp its elapsed hours, run the turn, chain the strand line -> (the stance document, the strand line). A bad
     /// event is an error and changes nothing (no turn, no line); so is every event while the individual is paused or retired.
@@ -153,6 +165,40 @@ impl Live {
     }
     /// The sha256 of the strand's last line (the header's before any event)
     pub fn head(&self) -> &str { &self.prev }
+}
+/// The header piece size `start_boxed` collects with (any size gives the same bytes)
+pub const HEADER_CHUNK: usize = 1024;
+/// A sink that cuts the text into pieces of `cap` bytes for `out` and hashes it on the way
+struct Pieces<'a> { buf: Vec<u8>, cap: usize, out: &'a mut dyn FnMut(&[u8]), h: persona::Sha256 }
+impl Pieces<'_> {
+    fn put(&mut self, mut b: &[u8]) {
+        self.h.update(b);
+        while !b.is_empty() { let k = (self.cap - self.buf.len()).min(b.len()); self.buf.extend_from_slice(&b[..k]); b = &b[k..];
+            if self.buf.len() == self.cap { (self.out)(&self.buf); self.buf.clear(); } }
+    }
+}
+impl persona::Sink for Pieces<'_> {
+    fn push(&mut self, c: char) { let mut t = [0u8; 4]; self.put(c.encode_utf8(&mut t).as_bytes()) }
+    fn push_str(&mut self, t: &str) { self.put(t.as_bytes()) }
+}
+/// The strand's header line for `p`, `doc`, `st` and `engine` (`Live::start`'s, without its `\n`), handed to `out` in pieces of
+/// at most `chunk` bytes (a 0 is taken as 1) -> its sha256 (`sha256:` + hex), the first line's `prev`. Neither the line nor a
+/// copy of the document is held whole: the buffer is one piece.
+pub fn write_header(p: &Persona, doc: &Json, st: &State, engine: &str, chunk: usize, out: &mut dyn FnMut(&[u8])) -> String {
+    use persona::Sink;
+    let cap = chunk.max(1);
+    let mut w = Pieces { buf: Vec::with_capacity(cap), cap, out, h: persona::Sha256::new() };
+    let s = |x: &str| Json::Str(x.to_string());
+    // the keys in `Live::start`'s order; values through the canonical writer (the state with its keys sorted, the rest as given)
+    w.push_str("{\"probbit_strand\":"); persona::write_to(&Json::Num(FORMAT), false, &mut w);
+    w.push_str(",\"engine\":"); persona::write_to(&s(engine), false, &mut w);
+    w.push_str(",\"persona\":"); persona::write_to(&Json::Obj(vec![("name".into(), s(&p.name)), ("version".into(), s(&p.version)), ("digest".into(), s(&p.digest))]), false, &mut w);
+    w.push_str(",\"seed\":"); persona::write_to(&Json::Num(st.seed as f64), false, &mut w);
+    w.push_str(",\"state\":"); persona::write_to(&st.to_json(p), true, &mut w);
+    w.push_str(",\"document\":"); persona::write_to(doc, false, &mut w);
+    w.push('}');
+    if !w.buf.is_empty() { (w.out)(&w.buf); }
+    format!("sha256:{}", persona::hex(&w.h.finish()))
 }
 /// A control line after the line whose sha256 is `prev` (canonical JSON: at, by, control, prev, reason). `by` names who: a
 /// person or a sensor, never the individual or the clock; the reason is 1-500 characters.
@@ -563,14 +609,17 @@ pub fn check_chain(text: &str) -> Result<Status, InErr> {
 /// Continue a strand: `text` is the strand so far and `st` the individual after its last line -> the individual, ready for the
 /// next event (no header to write). The header's persona must be `p` (the same digest); the run uses the header's document, the
 /// key order the strand replays with. The lines before are not replayed here (`verify` does that).
-pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, InErr> {
+pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, InErr> { resume_boxed(text, p, Box::new(st), clock).map(|lv| *lv) }
+/// `resume` on the heap: the state comes in boxed and the individual goes out boxed (docs/embedding.md "Stack budget")
+#[inline(never)]
+pub fn resume_boxed(text: &str, p: &Persona, st: Box<State>, clock: Clock) -> Result<Box<Live>, InErr> {
     let bad = |m: String| perr("strand", m);
     if !text.ends_with('\n') { return Err(bad("its last line is incomplete (no newline at the end)".into())); }
     check_chain(text)?;
     let lines = lines(text);
     let h = json::parse(lines.first().copied().unwrap_or("")).map_err(|e| bad(format!("the header is not JSON: {}", e.msg)))?;
     if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err(bad("not a probbit strand (format 1)".into())); }
-    let q = persona::build(h.get("document").unwrap_or(&Json::Null)).map_err(|e| bad(format!("the header's persona: {}: {}", e.path, e.msg)))?;
+    let q = persona::build_boxed(h.get("document").unwrap_or(&Json::Null)).map_err(|e| bad(format!("the header's persona: {}: {}", e.path, e.msg)))?;
     if q.digest != p.digest { return Err(bad(format!("it is another persona's ({} != {})", &q.digest[..19], &p.digest[..19]))); }
     let last = lines[lines.len() - 1];
     // the control lines after the last event or checkpoint line (the anchor; the header without either) set the status: an
@@ -588,8 +637,8 @@ pub fn resume(text: &str, p: &Persona, st: State, clock: Clock) -> Result<Live, 
         for l in lines.iter().skip(1) { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
             let lp = d.filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64);
             persona::expect_step(&q, &mut m, j.get("inputs").unwrap_or(&Json::Null), lp); } } } m });
-    let mut lv = Live { p: q, st, clock, last: 0.0, prev: persona::digest_of(last), n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None,
-        dev_full: engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE) };
+    let dev_full = engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
+    let mut lv = Live::boxed(q, st, clock, persona::digest_of(last), n, expect, dev_full);
     for c in tail.iter().rev() { let what = c.get("control").and_then(Json::as_str).unwrap_or("");
         lv.status = lv.status.after(what).unwrap_or(Status::Retired); lv.st = lv.st.zero_credit(&lv.p); lv.controls += 1; }
     Ok(lv)
