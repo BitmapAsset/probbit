@@ -1,7 +1,10 @@
 # RFC 0011: an amplitude register, an exact simulated qubit register as an optional solver tier for small stance programs
 
-Status: **draft, round 2** (research). Nothing in this RFC changes a release or `main`; the tier is off unless a persona asks
-for it, and it may be removed by the round that measures it against the default tier (B4 below).
+Status: **accepted as optional tier (research; off by default)**, round 3. Verdict by the registered rule (B4 ≥ 90 %): 96.29 %
+of 2,176,371 trait decisions on the recorded corpus agree with the exact default tier; B5 passes (three designed programs differ
+from the thermal odds by 0.25-0.27 at the node; 0 of 4,100 bound cases exceed a certificate computed with the tier). Nothing in
+this RFC changes a release or `main`; the tier stays off unless a persona asks for it. Turning it on changes the bound
+certificate: compute it again with the tier (section 5).
 
 ## 1. What it is, in one paragraph
 
@@ -67,8 +70,9 @@ RFC is closed with that number. Both outcomes are publishable with receipts.
   `engine.feasible_mass` (the Born mass on plans that obey the rules), and the marginals at 6 decimals (the stance odds).
   `live verify` recomputes all of it from the strand alone (the same rule as every other tier). An engine without the tier
   reads the persona's `engine.tier` as a field it does not know: `unsupported by this engine` (exit 5), never a divergence.
-- No change to habits (hard rules), the bound certificate (it is computed from the persona file, not from the sampler), the
-  strand format for other tiers, or any public wording. Public text, if any: "an exact simulated qubit register as an optional
+- No change to habits (hard rules), the strand format for other tiers, or any public wording. The bound certificate is
+  computed from the persona file, so with `engine.tier: amplitude` in the file `persona bound` probes through the tier and
+  its epsilon changes; a certificate computed without the flag does not cover the tier (measured in round 3, section 5). Public text, if any: "an exact simulated qubit register as an optional
   solver tier for small programs; measured against the default tier; no quantum hardware".
 - Scope (rounds 1-2): the tier answers the turn's solves (the stance and its habit checks). The rest position at the start, the
   expectation's members and the trajectory stay on the existing tiers.
@@ -108,6 +112,20 @@ Round 2 (multi-level programs, simulated exactly on a CPU; x86_64 host, median o
 The Born mass on plans that obey the rules can be small after the default sweep (as low as 7.3e-05 on the tutor example:
 the product over its 12 components; its four-step order component alone allows 24 of its 256 codes); the projection renormalises it. B4 (agreement with the default
 tiers, its first pass recorded with the pull request) and B5 have their verdict in round 3.
+
+Round 3 (the verdict round; simulated exactly on a CPU, x86_64 host):
+
+| bar | measured | result |
+|---|---|---|
+| B4 agreement | every program the recorded corpus's 653 outputs solve on the default tiers (replay, live, init, lint, prove, fuzz, the continuation; strand verification left out), solved again by the tier at q_max 16: 338,567 exact solves (4,304 not exact on the default tiers, excluded), 0 declined; the level per trait agrees in **2,095,627 of 2,176,371 decisions = 96.29 %** (the stance path alone, replay and live, 96.52 %; distinct programs 95.94 %; worst traits valence 81.8 %, emoji 86.6 %, arousal 89.7 %). The corpus itself stays byte-identical with the comparison running beside it (653 outputs, 0 differ) | **PASS (≥ 90 %)** |
+| B4 where they differ | 80,744 differing decisions, each listed with both odds. By the default tier's odds on its own level: ≥ 0.60 → 99.97 % agree, 0.50-0.60 → 98.3 %, 0.40-0.50 → 93.6 %, < 0.40 → 90.9 %; in 91 % of the differing cases the default level holds less than half the mass (median 0.385): the two disagree where the thermal answer is a plurality, not a majority. By the trait's component's feasible mass: 99.1 % of the differing cases sit in components with mass ≥ 0.1, so they are not an artefact of the projection | stated |
+| feasible mass | the receipt's product over components is < 1e-2 on 36.7 % of the solves (min 2e-06), but per component on 0.04 % (min 2.6e-04, median 1): the product multiplies up to 12 components. A rule-penalty term (E' = E + 4 · violations, the projection kept) measured in the lab lifts every component above 7e-03 and drops B4 to 83.44 % (the order rules' step variables move most): not adopted; the projection stays | measured, not changed |
+| B5 interference | three designed programs where two paths into a node differ in energy by D (the default sweep turns the difference into a relative phase), designed and predicted by the reference before the engine ran: register vs thermal odds at the node 0.748 vs 1.000, 0.744 vs 0.990, 0.697 vs 0.969 (gaps 0.252, 0.246, 0.272; the same programs at D = 0: 0.001, 0.000, 0.037); engine vs reference within 1.4e-14 | **PASS** |
+| B5 bound | the bound harness (7 personas, seeds 0-9, greedy, mixed and self-sourced campaigns) with the tier on: certificate computed from the persona file with the flag, **0 of 4,100 (campaign, trait) cases above epsilon + r** (largest ratio 1.000), self-sourced events refused 10/10; with the certificate computed without the flag, 1,598 of 4,100 above (largest ratio 1.46): the tier moves resting odds further than the thermal tier, so a certificate must be computed with it. Tightness (≥ 0.9 of epsilon reached) fails on one fixture with the tier (0.85) | **PASS** (with that caveat) |
+
+Verdict: **KEEP as an optional tier** (research; off by default). It reproduces the stance semantics in 96 % of decisions and
+differs where the thermal answer is nearly indifferent; it adds interference where designed programs have two paths. Not
+verified: silicon cost and replay on a chip.
 
 ## 6. What this RFC does not claim
 

@@ -105,6 +105,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Research
 
+- **RFC 0011, round 3: the verdict, KEEP as an optional tier** (research, off by default; docs/rfc/0011-amplitude-register.md,
+  status "accepted as optional tier"). Measured on every program the recorded corpus's 653 outputs solve (338,567 exact solves,
+  0 declined, the corpus byte-identical with the comparison beside it): the exact simulated register picks the same level as the
+  exact default tier in 2,095,627 of 2,176,371 trait decisions (96.29 %, bar 90 %); the differing cases sit where the default
+  tier's own level holds less than half the mass (91 % of them), not where the rules' projection does the work. Three designed
+  two-path programs differ from the thermal odds by 0.25-0.27 at the node (engine vs reference 1.4e-14). The bound harness with
+  the tier: 0 of 4,100 cases above a certificate computed with the tier, 1,598 above one computed without it, so `persona bound`
+  must run with the tier on (docs/persona.md says so). A rule-penalty term was measured and not adopted (it lifts the Born mass
+  on rule-abiding plans and drops agreement to 83 %). No code change in this round. Simulated exactly on a CPU; no quantum
+  hardware, no speedup claim.
 - **RFC 0011, round 2: multi-level traits on the amplitude register** (draft, research; docs/rfc/0011-amplitude-register.md):
   a variable with d allowed values takes ⌈log2 d⌉ qubits (`amp::Encoding`; a three-level trait two qubits, its fourth code
   unused), the start is the uniform superposition over the valid codes, the mixer is the complete-graph mixer per variable

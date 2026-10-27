@@ -248,7 +248,9 @@ plans that obey them, when the largest component has at most `q_max` encoded qub
 the layer list, the schedule and the final amplitudes at 6 decimals) and
 `feasible_mass`; `live verify` recomputes them from the strand. Without the key nothing changes, byte for byte. An engine
 without the tier reports a strand that uses it as `unsupported by this engine: engine.tier` (exit 5). The register is a
-simulation: no quantum hardware, no speedup claim; whether its stances agree with the default tier is measured, not assumed.
+simulation: no quantum hardware, no speedup claim; its stances agree with the default tier in 96 % of trait decisions on the
+recorded corpus (RFC 0011, round 3). With the key, `persona bound` probes through the tier: compute the certificate again with
+it, since one computed without the key does not cover the tier.
 
 ### 2.8 Learning (optional)
 
