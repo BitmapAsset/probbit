@@ -87,9 +87,6 @@ Details:
   <version>`), `lane`, `agent` (new `agentName` key, else the session key's agent id) and a non-secret `session` label
   (`telegram group #3fa9c2d1`). The new `labels` config key adds free keys and overrides the computed ones; invalid
   entries are dropped with one warning. A binary whose `probbit live --help` lists `--label` gets the labels when it
-<<<<<<< HEAD
-  creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand). (#75)
-=======
   creates the strand; otherwise the plugin writes the sidecar itself (merged, atomic, never touching the strand).
 - Python: `probbit.write_labels` / `labels_path` / `check_labels`, and a `labels=` argument on `probbit.live_event` and
   `StanceHost` that merges the labels into the strand's sidecar after every event (ValueError on bad labels, before the
@@ -116,7 +113,6 @@ Details:
   rejects it, and marks the senses log and the `after_tool_call` hook unreleased.
 
 - `probbit monitor` page: the settle strip hides on stored documents and held views; a race made CI flaky.
->>>>>>> origin/main
 - OpenClaw plugin (`plugins/openclaw`): it now measures the readings a persona's senses declare, shadow first.
   `sensesMode` (`off` by default, so existing installs are unchanged; the example entry shows `shadow`): `shadow` writes
   one JSON line per event to `strands/<lane>.senses.jsonl` (`tempo`, `time_pressure`, `tool_fail`, the source of each,
