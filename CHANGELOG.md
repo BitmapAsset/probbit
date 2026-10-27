@@ -25,6 +25,15 @@ All notable changes to this project are documented here. The format follows
   calls are unchanged wrappers; every header, line and digest is byte for byte as before. `persona::sha256` hashes without
   copying its input (`persona::Sha256`, fed in pieces). The YAML reader refuses collections nested deeper than 256 (a `limit`
   error, as the JSON reader does) instead of recursing without a bound.
+- **The turn and `resume` fit a small stack too** (docs/embedding.md "Stack budget"): the turn's steps run out of line and pass
+  the state boxed (`persona::turn_boxed`, which `Live::event` runs; `turn` is its wrapper), the expectation's programs compile
+  the same way, and `resume` opens the strand's header once (the chain check builds the persona on the heap and compares the
+  header in pieces, without a replay). On the host proxy one event's stack high-water fell from 31,824 to 13,808 bytes and
+  `resume`'s from 30,560 to 15,792; every stance document, strand line and digest is byte for byte as before.
+- **`turn_trace`** (feature of probbit-persona and probbit-cli, off by default): `persona::trace` records the last event's
+  microseconds and a host probe's value per phase (input, expect, prep, compile, solve, decode, document, line, fold), so a
+  firmware measures the same breakdown on its hardware; `probbit live` in such a build prints it on stderr when
+  `PROBBIT_TURN_TRACE` is set.
 
 ### Fixed
 

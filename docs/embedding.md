@@ -68,6 +68,7 @@ let st = persona::init_boxed(&p, None, true, &eng);                      // Box<
 let live = Live::start_to(p, &doc, st, Clock::Real(probbit_core::rt::Instant::now()), &strand::engine(), 1024, &mut out);
 // or: let (live, header) = Live::start_boxed(p, &doc, st, clock, &engine);  // Box<Live> and the header whole
 // a stored strand: let live = strand::resume_boxed(&text, &p, st, clock)?;  // Box<Live>
+// each event: live.event(&ev, &eng)?  -> (stance, line); the turn inside passes its state boxed (persona::turn_boxed)
 ```
 
 `build`, `init`, `Live::start` and `resume` stay as they were (thin wrappers over the boxed calls) for hosts with a large stack.
@@ -88,14 +89,53 @@ persona (traits, moods, senses, drives, needs, expectation, display; its header 
 | `init` → `init_boxed` | 1,184 → 624 (+ `init` 1,184) | 9,240 → 9,240 | 69,365 → 69,365 |
 | `Live::start` → `Live::start_to` / `start_boxed` | 1,888 → 160 / 96 (`write_header` 448) | 9,872 → 4,560 | 87,482 → 19,181 |
 | **setup: parse + build + init + start** | | **39,056 → 12,112** | 332,669 → 334,165 |
-| `resume` → `resume_boxed` | 4,880 → 960 | 55,328 → 29,264 | 397,428 → 398,924 |
-| one event (`Live::event`) | 2,688 → 2,672 (`turn_src` 6,160) | 31,904 → 31,824 | 112,990 → 112,990 |
+| `resume` → `resume_boxed` | 4,880 → 960 → 896 (`check_chain` 6,320 → 96 + `check_chain_head` 384) | 55,328 → 29,264 (30,560 measured again with the phase rows added) → **15,792** | 397,428 → 398,924 → 356,129 |
+| one event (`Live::event`) | 2,688 → 2,672 → 960 (`turn_src` 6,160 → 528; its steps `turn_prep` 448, `turn_solve` 1,312, `turn_doc` 704) | 31,904 → 31,824 → **13,808** | 112,990 → 112,990 → 88,149 |
 | the solve alone (in the event) | | 6,856 | 29,009 |
-| a checkpoint line | 160 | 5,408 | 42,594 |
+| a checkpoint line | 160 | 5,408 → **3,264** (the key sort in place) | 42,594 |
 
-The setup now needs less stack than one event: the engine thread's stack is sized by the turn (about 32 KB on the proxy;
-`turn_src` holds several `State` values by value), the next thing to cut. The heap peak of setup is the reader's (the
-document tree and the lowered documents); `start` no longer holds a copy of the document and the whole line.
+Three columns where a row has them: before the boxed setup, after it, and after the boxed turn and resume. The turn's steps
+(`turn_prep`, `turn_solve`, `turn_doc`, the state steps, the decoder) are out of line and pass the state boxed, so the deepest
+frame is one step's; the expectation's programs (`program_json`) compile the same way. `resume` opens the header once: the chain
+check builds its persona on the heap, writes the header again in pieces against the stored line (no `Live`, no whole line) and
+`resume` continues with that persona instead of building it a second time; the expectation's fold reads one line at a time out
+of line. The heap peak of setup and of `resume` is the reader's (the document tree and the lowered documents); the event's
+(88,149 B) is the live set of a turn: the expectation's exact solves, then the program as a document, the engine's answer and
+the stance under construction (per phase, the peak above the event's start: the expectation's solves 66,879, prep 20,221,
+compile 73,957, the solve 88,149, decode 76,529, document 60,295; the program tree is held from the compiler to the engine and
+the engine's answer to the decoder).
+
+**Size the engine stack from the turn** (and from `resume` for a host that boots on a stored strand), not from setup: setup, one
+event and `resume` now need about the same (12,112, 13,808 and 15,792 B on the proxy), so the largest of the three plus the
+host's own frames is the thread's stack.
+
+### The turn's phases (`turn_trace`)
+
+With the feature `turn_trace` (off by default; without it the hooks are empty inline functions) `Live::event` records per
+phase the microseconds spent and the largest value of a probe the host installs, so a firmware reads the same breakdown on
+its own clock and counters:
+
+```rust
+use probbit_persona::trace::{self, Phase};
+fn probe(_: Phase) -> u64 { /* e.g. the allocator's peak since the last call, reset; or the task's stack high-water */ 0 }
+trace::set_probe(Some(probe));          // optional: called at the end of each phase's segment
+let (stance, line) = live.event(&ev, &eng)?;
+let t = trace::last();                  // t.us[Phase::Solve as usize], t.bytes[..], t.total_us, t.solves
+```
+
+The phases: `input` (the event stamped), `expect` (the deviation and the trajectory: exact solves on the state before the
+event), `prep` (provenance, payments, rest, senses / needs / drives / pace, credit, the surprise gate), `compile`, `solve`
+(the engine's calls), `decode`, `document` (the stance's blocks, credit, glyph, digest), `line` (the strand line and a rest
+line due before it) and `fold` (the expectation's memory). The parse of the event line and the store of the strand line are
+the host's, before and after the call. `probbit live` built with `--features turn_trace` prints one `trace` line per event
+on stderr when `PROBBIT_TURN_TRACE` is set (with the parse and the append it timed); stdout and the strand are unchanged.
+
+On the proxy (the body persona's last recorded event, x86_64, median of 21 runs) the turn takes 1,249 µs: expect 727, compile
+130, solve 117, decode 102, document 97, prep 49, line 13, fold 4 (the host's parse of the event line and its append to a buffer
+are about 1 µs each). The solve is 9.4% of it; the expectation's exact solves are 58%. Stack high-water and heap peak per phase
+on the proxy: expect 15,520 / 66,879, prep 14,880 / 20,221, decode 12,464 / 76,529, solve 11,544 / 88,149, compile 8,816 /
+73,957, document 6,192 / 60,295, fold 4,592 / 35,154, line 4,088 / 35,745, input 3,424 / 1,005 (with the feature compiled in,
+which adds about 1.7 KB to the event's stack: 15,520 against 13,808 without it).
 
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
