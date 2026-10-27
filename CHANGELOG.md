@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **Resume robustness** (docs/embedding.md "Resume on a body", docs/persona.md section 5.7 "Resume from a record"):
+  `strand::Replay::open_boxed` checks the header as the chain check does (the persona built on the heap, the header written
+  again in pieces) and keeps its `Live` boxed, so a replay from the header fits a small stack (proxy: 24,752 → 16,192 B);
+  `Replay::open` is the same call. `strand::resume_from_record(text, &p, state, clock, &engine)` resumes from a state record
+  that is behind the strand (a reboot between a line and its record): the event lines after the record's line are applied
+  (their turn on the logged inputs, digests and bytes checked; not the expectation's member solves) and the individual equals
+  the unbroken one, byte for byte; refused with the line for a record the strand does not log, a line that differs, another
+  persona. `strand::resume_boxed_from(header, checkpoint, line, trailing, &p, state, clock, &engine)` resumes from the header,
+  the last checkpoint line and the lines after it read one at a time, never the whole strand: cost O(lines since the
+  checkpoint). `turn_trace`: `trace::last_resume()` (lines walked, lines applied, their µs). No byte of any strand changes.
 - **The expectation's cache** (docs/embedding.md "The expectation's cache"): `Live` keeps the exact marginals of the
   programs the deviation solved, keyed by the program without its comment, so an event whose members' programs are the
   previous event's solves none of them again (a life of one repeated event: `expect` 52% → 37% of the turn on the proxy, 95%

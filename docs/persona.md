@@ -1563,6 +1563,31 @@ most about 64 + (max_combos - 1) x (I + 24) bytes for events whose inputs are at
 engine before 0.14.0 keeps the four-key checkpoint and the fold before it, byte for byte; such a strand with the block still
 replays from its header. An engine before 0.14.0 reads `expect` as `unsupported by this engine: expect` (exit 5).
 
+**Resume from a record.** A host that keeps the individual's state in its own record (a state log beside the strand) can
+reboot between a strand line and its record, so the record is one or more lines behind the strand. `strand::resume` refuses a
+state that is not the strand's last; `strand::resume_from_record(text, &p, state, clock, &engine)` takes any state the strand
+logs (an event line's `state`, a checkpoint's, the header's) and brings it to the strand's last line. What it promises: the
+individual it returns is the one a header replay reaches at the last line (state, chain head, the expectation's memory, the
+status after control lines), byte for byte and digest for digest, and the next event writes the line the unbroken life writes.
+How: the whole strand is chain-checked as by `resume`; the walk starts at the last checkpoint at or before the record's line
+(the header without one, and for a persona with an expectation block before 0.14.0, whose checkpoints do not carry its
+memory); every event line after the record's line is applied: its turn run on the logged inputs (stamped as the live writer
+stamped them), its stance and state digests compared, the line written again from the turn's values and compared byte for
+byte. An event line logs its stance's digest, not the stance, and the next state is decoded from the solve (the levels and
+odds the moods' inertia and the credit read), so an applied line costs its turn's main solve; it does not run the
+expectation's member solves: the line's logged `deviation` (and the `glyph` that reads it) is taken as written and folded into
+the memory as `resume` folds it. Rest lines are recomputed against the logged ones, control lines applied as the live writer
+applies them (the credit zeroed, `erase` returning the learned weights to zero). Refused, with the line: a record that is no
+state the strand logs (`state`), a line whose application differs (the stance, the state, the rest line or the line's bytes:
+a forged line, re-chained or not), a chain that does not hold, another persona. What it does not check: the logged deviation
+and glyph of the applied lines (only `verify` recomputes the expectation); the lines before the walk's start beyond the chain
+check `resume` makes.
+
+`strand::resume_boxed_from(header, Some(checkpoint), line, trailing, &p, state, clock, &engine)` is the same walk without the
+whole text (docs/embedding.md "Resume on a body"): the header line, the last checkpoint line (taken on the link the host kept,
+like a segment's sealed line) and the lines after it one at a time. The record may be any state logged from that checkpoint on;
+an older one is refused (`state`: resume from the whole strand).
+
 **Segments.** `probbit live ... --strand NAME.strand --segment-every N` seals the strand after every N-th event and goes on in
 a new file: the sealing line is a checkpoint line (the last line of the segment); the next file, `NAME.0001.strand`, then
 `NAME.0002.strand` and so on (four digits at least), starts with a header that has one more key at its end,

@@ -68,6 +68,8 @@ let st = persona::init_boxed(&p, None, true, &eng);                      // Box<
 let live = Live::start_to(p, &doc, st, Clock::Real(probbit_core::rt::Instant::now()), &strand::engine(), 1024, &mut out);
 // or: let (live, header) = Live::start_boxed(p, &doc, st, clock, &engine);  // Box<Live> and the header whole
 // a stored strand: let live = strand::resume_boxed(&text, &p, st, clock)?;  // Box<Live>
+// or from the last checkpoint without the whole text: strand::resume_boxed_from(&header, Some(&cp), line, trailing, &p, st, clock, &eng)?
+// a replay from the header: let r = strand::Replay::open_boxed(&header)?;  // Box<Replay>, its Live boxed in it
 // each event: live.event(&ev, &eng)?  -> (stance, line); the turn inside passes its state boxed (persona::turn_boxed)
 ```
 
@@ -239,6 +241,52 @@ deletes the older ones holds a life of any length in about twice that; `verify -
 `strand::resume` reads its header, its sealed line (the state and, from 0.14.0, the expectation's memory) and the lines after
 it: a boot parses and hashes the lines of that one segment, folds the expectation's memory over the lines after its last
 checkpoint only, and never solves a stored event again.
+
+### Resume on a body: the call and the three recoveries
+
+A body keeps three things between boots: the persona document (it rides in the strand's header line, which also names the
+engine and the initial state), **the byte offset of the last checkpoint line** it wrote, and **its last state record** (the
+state after the event it last answered, in its own small log). On boot it reads the header line, the checkpoint line at the
+stored offset and then the lines after it one at a time, and calls
+
+```rust
+// trailing: an iterator over the lines after the checkpoint (each without its line ending), read from flash as it goes
+let live = strand::resume_boxed_from(&header, Some(&checkpoint), checkpoint_line_number, trailing, &p, record, clock, &eng)?;
+// before the first checkpoint: resume_boxed_from(&header, None, 1, lines_after_the_header, ...)
+```
+
+The header is checked as `verify` checks it (the persona built once on the heap, the header written again in pieces against
+the stored line); the checkpoint line by its own fields (canonical JSON, its state and the expectation's memory read, an event
+count), its link to the line before taken on the host's offset, as a segment's sealed line is taken on its link; every line
+after it is chain-checked as `resume` checks it. The whole strand is never loaded, and nothing before the checkpoint is read
+again. The three recoveries:
+
+1. **The record is the strand's last state** (the normal boot): the walk reads the trailing lines, finds the record at the last
+   event line and returns the individual; no turn runs.
+2. **The record is k lines behind** (a reboot between a line and its record): the record is found at the line that logs it and
+   the k event lines after it are applied (each its turn's main solve, not the expectation's member solves; docs/persona.md
+   §5.7 "Resume from a record"). The result is the individual the unbroken life has, byte for byte; nothing needs the host to
+   resync. A record older than the checkpoint is refused (`state`): resume from the whole strand with
+   `strand::resume_from_record(text, ...)`, which starts at the last checkpoint before the record.
+3. **No record** (a first boot on a copied strand, a lost state log): replay from the header with `strand::Replay::open_boxed`
+   (every event solved again, the cost of `verify`), or start at the checkpoint's state: a checkpoint line carries the whole
+   state, so a record taken from it (`State::read` of its `state`) resumes at once and applies the lines after it.
+
+The cost on the host proxy (probbit-persona `nostd` on x86_64, the 12 KB body persona; the strand: 50 events, one checkpoint,
+then T event lines; record last; median of 7): `resume_boxed_from` = **1.46 ms fixed + 13.4 µs per trailing line** (T = 0, 58,
+200, 449: 1,459, 2,328, 4,284, 7,456 µs), against the whole-text `resume_boxed` at 2.3 ms + about 15 µs for every line of the
+strand. The fixed part is the header's check and the persona's build plus the checkpoint's state and memory read. An applied
+line (recovery 2) costs about 612 µs where the turn costs 2,580 µs on that life (0.24 of a turn: the expectation's member
+solves, most of this persona's turn, are not run). A body measured the whole-text resume at about 488 ms fixed + 8 ms per
+line, so its boot cost now follows the lines since its last checkpoint, not the length of its life (silicon numbers for the
+new call are the body's to measure, with `turn_trace`: `trace::last_resume()` gives the lines walked, the lines applied and
+their µs).
+
+Stack on the proxy (the same harness as the table above, 20 KB thread run too): `Replay::open_boxed` and its steps over a
+500-event strand **16,192 B** (the by-value `Replay::open` was 24,752 B: it built the persona and the `Live` by value and held
+the `Live` in the replay; `open` is now `open_boxed` moved out of its box, 16,736 B with the replay in the caller's frame);
+`resume_from_record` with a record 1, 5 or 49 lines behind **16,080 B** (13,648 with the record last); `resume_boxed_from` a
+checkpoint + 58 lines **12,656 B** (the whole-text `resume_boxed` of the same strand 15,072 B). All three ran on a 20 KB thread.
 
 ### Measured on one board (ESP32-S3)
 
