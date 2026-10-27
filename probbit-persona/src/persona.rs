@@ -1433,10 +1433,13 @@ fn host_inputs(d: &Drives, ds: &DState, c: &DriveCtx, raw: &[(String, Json)]) ->
 /// against the normals, `src` the event's source, `check` the provenance check), then with a drives block the stepped drives and
 /// the host inputs plus the drive aggregates; then with a pace block (RFC 0002 Design C) the pace step and its two inputs; else the
 /// state and inputs as given
-fn prep(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(State, Vec<(String, Json)>)> {
+fn prep(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(State, Vec<(String, Json)>)> { prep_n(p, st, raw, src, check, false) }
+/// `prep`; `narrow`: an expectation member's (`State::prep_clone`)
+#[inline(always)]
+fn prep_n(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(State, Vec<(String, Json)>)> {
     // RFC 0002 part 2: the engine sets load_level from L (the host never sends it)
     if p.load.is_some() { need(get(raw, LOAD_ID).is_none(), "inputs.load_level", "reserved for the load block (the engine sets it from the load)")?; }
-    let (mut s2, mut host) = prep_body(p, st, raw, src, check)?;
+    let (mut s2, mut host) = prep_body(p, st, raw, src, check, narrow)?;
     pressure_step(p, &mut s2, raw)?;
     load_step(p, st, &mut s2, raw, &mut host)?;
     Ok((s2, host))
@@ -1511,8 +1514,8 @@ pub fn load_level(p: &Persona, st: &State) -> Option<(f64, f64)> { p.load.as_ref
 /// The rest pressure of a state with a rest block (RFC 0002 part 2): (S, pending); none without one
 pub fn rest_pressure(st: &State) -> Option<(f64, bool)> { st.pressure }
 /// prep without part 2: the sense, needs, drive and pace steps
-fn prep_body(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(State, Vec<(String, Json)>)> {
-    let mut s2 = st.clone(); let mut x = raw.to_vec();
+fn prep_body(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(State, Vec<(String, Json)>)> {
+    let mut s2 = st.prep_clone((p.senses.is_some() && st.senses.is_some(), p.drives.is_some() && st.drives.is_some()), narrow); let mut x = raw.to_vec();
     // RFC 0002 Design C: the engine sets pace_up and pace_down from R̄ (the host never sends them)
     if p.pace.is_some() { for k in PACE_IDS { need(get(&x, k).is_none(), &format!("inputs.{k}"), "reserved for the pace block (the engine sets it from the average reward)")?; } }
     if let (Some(sn), Some(ss)) = (&p.senses, &st.senses) { let (ns, host) = sense_step(sn, ss, &x, src, check)?; s2.senses = Some(ns); x = host; }
@@ -2300,6 +2303,18 @@ impl State {
     fn disp_of(&self, k: &str) -> Option<f64> { self.disp.iter().find(|(x, _)| x == k).map(|(_, v)| *v) }
     /// The surprise gain per learned trait in `learning.traits` order (RFC 0002 Design B); empty without a surprise block (gain 1)
     fn gains(&self) -> Vec<f64> { self.gate.as_ref().map_or(vec![], |gs| gs.iter().map(|(_, g)| g.g).collect()) }
+    /// The prep step's copy of the state (`prep_body`): the senses and drive states it steps are not copied (`stepped`: the
+    /// senses' then the drives' are replaced before anything reads them); `narrow` (an expectation member: its state is read
+    /// by the steps and the compiler only) also leaves out what neither reads: the persona's name, the agenda, the resting
+    /// stance, the learned-from counts and the digest
+    fn prep_clone(&self, stepped: (bool, bool), narrow: bool) -> State {
+        let w = |b: bool| !(narrow && b);
+        State { seed: self.seed, turn: self.turn, persona: if w(true) { self.persona.clone() } else { Default::default() }, genes: self.genes.clone(), mood: self.mood.clone(),
+            history: self.history.clone(), prev: self.prev.clone(), agenda: self.agenda.as_ref().filter(|_| w(true)).cloned(), rest: self.rest.as_ref().filter(|_| w(true)).cloned(),
+            learned: self.learned.clone(), credit: self.credit.clone(), drives: if stepped.1 { None } else { self.drives.clone() }, senses: if stepped.0 { None } else { self.senses.clone() },
+            learned_from: self.learned_from.as_ref().filter(|_| w(true)).cloned(), open: self.open.clone(), prev_stance: self.prev_stance.clone(), control_closed: self.control_closed.clone(),
+            elig: self.elig, digest: if w(true) { self.digest.clone() } else { String::new() }, gate: self.gate.clone(), rbar: self.rbar, disp: self.disp.clone(), pressure: self.pressure, load_l: self.load_l }
+    }
     fn history_of(&self, of: &str) -> &[bool] { self.history.iter().find(|(k, _)| k == of).map_or(&[], |(_, v)| v) }
     /// The state document without its digest
     fn body(&self, p: &Persona) -> Json {
@@ -2940,6 +2955,9 @@ fn turn_prep(p: &Persona, st: &State, raw: &Json, check: bool) -> R<Prepped> {
 fn rest_boxed(p: &Persona, st: &State) -> Box<State> { Box::new(rest_apply(p, st)) }
 #[inline(never)]
 fn prep_boxed(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(Box<State>, Vec<(String, Json)>)> { let (s, x) = prep(p, st, raw, src, check)?; Ok((Box::new(s), x)) }
+/// `prep_boxed` for an expectation member (`narrow`)
+#[inline(never)]
+fn prep_boxed_n(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(Box<State>, Vec<(String, Json)>)> { let (s, x) = prep_n(p, st, raw, src, check, narrow)?; Ok((Box::new(s), x)) }
 #[inline(never)]
 fn credit_boxed(p: &Persona, st: &State, host: &[(String, Json)], k: &Pay, src: Option<&Json>, check: bool) -> R<(Box<State>, Settled)> { let (s, d) = credit_step(p, st, host, k, src, check)?; Ok((Box::new(s), d)) }
 #[inline(never)]
@@ -3151,7 +3169,7 @@ fn program_meta(p: &Persona, st: &State, raw: &Json, meta_only: bool) -> R<(Json
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     let (src, raw) = if p.senses.is_some() || p.credit().is_some() || p.has_needs() { take_src(p, raw, true)? } else { (None, raw) };
     let (pay, raw) = take_pay(p, raw)?;
-    let (st, raw) = prep_boxed(p, st, &raw, src.as_ref(), true)?;
+    let (st, raw) = prep_boxed_n(p, st, &raw, src.as_ref(), true, meta_only)?;
     let st = match &pay { Some(k) => credit_boxed(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
     let st = gate_boxed(p, st, &raw)?;
     let (j, m) = compile(p, &st, &raw, &Opts { meta_only, ..Default::default() })?; Ok((j, Box::new(m)))
