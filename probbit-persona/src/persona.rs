@@ -1461,6 +1461,9 @@ fn rest_apply(p: &Persona, st: &State) -> State {
 /// The rest line due before an event (RFC 0002 part 2), for the strand: its `rest` object (downscale, prune, the pressure, the
 /// learned weights after it, and with a surprise block each learned trait's gate as kept) and the state after it; None when no
 /// line is due. `ev` = the stamped event as the turn reads it.
+/// `rest_line` as `Live::event` reads it: the `rest` object and the digest of the state after it (the turn applies the rest itself)
+#[inline(never)]
+pub(crate) fn rest_line_digest(p: &Persona, st: &State, ev: &Json) -> Option<(Json, String)> { rest_line(p, st, ev).map(|(r, s)| (r, s.digest)) }
 pub fn rest_line(p: &Persona, st: &State, ev: &Json) -> Option<(Json, State)> {
     let Json::Obj(raw) = ev else { return None };
     if !rest_due(p, st, raw) { return None; }
@@ -2510,6 +2513,7 @@ fn cond_true(p: &Persona, k: &str, c: &Json, vals: &[(String, Json)], hist: &[(S
 fn jstrs(v: &[String]) -> Json { Json::Arr(v.iter().map(|s| Json::Str(s.clone())).collect()) }
 
 /// persona + state + inputs -> (the turn's probbit-ir program, meta). A pure function; every weight rounded to 6 decimals.
+#[inline(never)]
 fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json, Meta)> {
     let (vals, mut hist, elapsed, ignored) = resolve_inputs(p, st, raw)?;
     if let Some(h) = &o.hist { hist = h.clone(); } // `prove`: history feature values given, not derived from the state
@@ -2753,6 +2757,7 @@ fn back(p: &Persona, var: &str, val: &str) -> String {
 fn printed(x: f64) -> f64 { r6(if x.fract() == 0.0 { x } else { (x * 1e6).round() / 1e6 }) }
 
 /// The engine's answer -> (stance document, new state)
+#[inline(never)]
 fn decode(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, conflict: Option<&[String]>, yielded: Option<&[String]>) -> (Out, State) {
     let verdict = doc.get("verdict").cloned().unwrap_or(Json::Null); let vs = verdict.as_str().unwrap_or("");
     let plan: HashMap<String, String> = doc.get("plan").and_then(Json::as_obj).map_or_else(HashMap::new, |o| o.iter().map(|(k, v)| (k.clone(), back(p, k, v.as_str().unwrap_or("")))).collect());
@@ -2833,6 +2838,7 @@ fn solve(p: &Persona, st: &State, prog: &Json, eng: Engine, calls: &mut usize) -
 fn ms(t: Instant) -> f64 { t.elapsed().as_secs_f64() * 1e3 }
 /// A minimal set of active habits that cannot hold together (deletion filter: drop each habit in turn, keep it only if the rest
 /// becomes feasible without it); [] when the rules without any habit are already infeasible
+#[inline(never)]
 fn habit_conflict(p: &Persona, st: &State, raw: &[(String, Json)], active: &[String], o: &Opts, eng: Engine, calls: &mut usize) -> R<Vec<String>> {
     let mut feasible = |ex: &[String]| -> R<bool> { let mut oo = Opts { no_inertia: o.no_inertia, twin: Some(false), hist: o.hist.clone(), ..Default::default() }; oo.exclude = o.exclude.iter().chain(ex).cloned().collect();
         let (prog, _) = compile(p, st, raw, &oo)?; Ok(solve(p, st, &prog, eng, calls).get("verdict").and_then(Json::as_str) != Some("infeasible")) };
@@ -2844,13 +2850,29 @@ fn habit_conflict(p: &Persona, st: &State, raw: &[(String, Json)], active: &[Str
 }
 /// One persona turn: (stance document, new state). A pure function of (persona, state, inputs, engine version). `timing` adds a
 /// non-canonical `timing` object (compile / engine / decode ms, engine calls, the 1-minute load average).
-pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, true) }
+pub fn turn(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, true).map(|(j, s)| (j, *s)) }
+/// `turn` with the next state on the heap (`Live::event` runs it): the turn's steps are out of line and pass the state boxed, so
+/// no frame of the turn holds a `State` by value and the deepest frame is one step's (docs/embedding.md "Stack budget")
+pub fn turn_boxed(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, Box<State>)> { turn_src(p, st, raw, no_inertia, eng, timing, true) }
 /// `turn` without the provenance check (§2.10), for `fuzz` and `prove`: they search over stances, not over sources, so their events
 /// carry no `src` and stand for events of an accepted source
-pub fn turn_any_source(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, false) }
-fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool) -> R<(Json, State)> {
-    use crate::trace::{enter, Phase};
-    enter(Phase::Prep);
+pub fn turn_any_source(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, false).map(|(j, s)| (j, *s)) }
+/// A turn's inputs and state after the steps before the compiler (`turn_prep`): the stepped state, the compiler's inputs, the
+/// inputs as given, the event's `src`, its payments and what they settled
+struct Prepped { st: Box<State>, raw: Vec<(String, Json)>, given: Vec<(String, Json)>, src: Option<Json>, pay: Option<Pay>, settled: Option<Settled> }
+/// The engine's answer read back (`turn_solve`): the stance under construction and the next state
+struct Solved { out: Box<Out>, ns: Box<State> }
+#[inline(never)]
+fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool) -> R<(Json, Box<State>)> {
+    let pr = turn_prep(p, st, raw, check)?;
+    let sv = turn_solve(p, &pr, no_inertia, eng, timing)?;
+    Ok(turn_doc(p, pr, sv))
+}
+/// The steps before the compiler: the inputs read, `src` and the payments taken out, a rest due applied, then the sense / needs /
+/// drive / pace steps, the credit step and the surprise gate, each on the heap
+#[inline(never)]
+fn turn_prep(p: &Persona, st: &State, raw: &Json, check: bool) -> R<Prepped> {
+    crate::trace::enter(crate::trace::Phase::Prep);
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     for (n, (k, _)) in raw.iter().enumerate() { if raw[..n].iter().any(|(k2, _)| k2 == k) { return Err(perr(&format!("inputs.{k}"), "duplicate input")); } }
     // reward provenance (§2.10), first: with `reward_from` (or a senses block, §2.11), `src` is read here (not compiled, so not
@@ -2862,12 +2884,34 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
     // a senses block steps the normals and a drives block the drives before the turn, which runs on the stepped state with the
     // lowering's inputs; then the credit step settles what this turn's feedback pays
     // RFC 0002 part 2: a rest line due before this event scales the learned weights first (the strand logs it as its own line)
-    let rested; let st = if rest_due(p, st, &raw) { rested = rest_apply(p, st); &rested } else { st };
-    let given = raw; let (st2, raw) = prep(p, st, &given, src.as_ref(), check)?;
-    let (st2, settled) = match &pay { Some(k) => { let (s, d) = credit_step(p, &st2, &raw, k, src.as_ref(), check)?; (s, Some(d)) } None => (st2, None) };
+    let rested = if rest_due(p, st, &raw) { Some(rest_boxed(p, st)) } else { None };
+    let st = rested.as_deref().unwrap_or(st);
+    let given = raw; let (st2, raw) = prep_boxed(p, st, &given, src.as_ref(), check)?;
+    let (st2, settled) = match &pay { Some(k) => { let (s, d) = credit_boxed(p, &st2, &raw, k, src.as_ref(), check)?; (s, Some(d)) } None => (st2, None) };
     // RFC 0002 Design B: the surprise gate steps v, r̂, g and the counts of each paid learned trait before the learner reads g
-    let st2 = gate_step(p, st2, &raw)?;
-    let st = &st2;
+    let st2 = gate_boxed(p, st2, &raw)?;
+    Ok(Prepped { st: st2, raw, given, src, pay, settled })
+}
+#[inline(never)]
+fn rest_boxed(p: &Persona, st: &State) -> Box<State> { Box::new(rest_apply(p, st)) }
+#[inline(never)]
+fn prep_boxed(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(Box<State>, Vec<(String, Json)>)> { let (s, x) = prep(p, st, raw, src, check)?; Ok((Box::new(s), x)) }
+#[inline(never)]
+fn credit_boxed(p: &Persona, st: &State, host: &[(String, Json)], k: &Pay, src: Option<&Json>, check: bool) -> R<(Box<State>, Settled)> { let (s, d) = credit_step(p, st, host, k, src, check)?; Ok((Box::new(s), d)) }
+#[inline(never)]
+fn gate_boxed(p: &Persona, st: Box<State>, raw: &[(String, Json)]) -> R<Box<State>> { Ok(Box::new(gate_step(p, *st, raw)?)) }
+#[inline(never)]
+fn decode_boxed(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, conflict: Option<&[String]>, yielded: Option<&[String]>) -> (Box<Out>, Box<State>) {
+    let (o, s) = decode(p, st, program, meta, doc, conflict, yielded); (Box::new(o), Box::new(s))
+}
+#[inline(never)]
+fn settle_boxed(p: &Persona, j: &mut Json, ns: Box<State>, k: &Pay, s: Settled) -> Box<State> { Box::new(settle(p, j, *ns, k, s)) }
+/// The compiler, the engine and the decoder: the program for the stepped state, its solve (a yield on a habit conflict, a second,
+/// clamped solve for the persona's vouch rule) and the answer read back
+#[inline(never)]
+fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool) -> R<Solved> {
+    use crate::trace::{enter, Phase};
+    let (st, raw): (&State, &[(String, Json)]) = (&pr.st, &pr.raw);
     enter(Phase::Compile);
     let t0 = Instant::now(); let mut calls = 0;
     let o = Opts { no_inertia, ..Default::default() };
@@ -2885,8 +2929,10 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
                 c = habit_conflict(p, st, &raw, &meta.active, &oo, eng, &mut calls)?; conflict = Some(c.clone()); if c.is_empty() { break; } }
             yielded = Some(y); } }
     let mut engine_ms = ms(t1);
+    // the program is read no more (its digest is kept): not held through the decode and a hold's solve
+    drop(prog);
     enter(Phase::Decode);
-    let (mut out, mut ns) = decode(p, st, &ptext, &meta, &doc, conflict.as_deref(), yielded.as_deref()); let lift = out.lift.clone();
+    let (mut out, mut ns) = decode_boxed(p, st, &ptext, &meta, &doc, conflict.as_deref(), yielded.as_deref()); let lift = out.lift.clone();
     // the persona's vouch rule: unsure traits with a hold level are held there (a second, clamped solve), consistent with every habit
     let holds: Vec<(String, String)> = out.unsure.iter().filter_map(|t| { let v = p.var(t).unwrap(); let e = &out.stance.iter().find(|(k, _)| k == t).unwrap().1;
         v.hold.as_ref().filter(|h| **h != e.level).map(|h| (t.clone(), h.clone())) }).collect();
@@ -2895,7 +2941,7 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
         enter(Phase::Compile); let o2 = Opts { no_inertia, clamps: holds.clone(), ..Default::default() }; let (prog2, meta2) = compile(p, st, &raw, &o2)?; enter(Phase::Decode);
         let te = Instant::now(); let doc2 = solve(p, st, &prog2, eng, &mut calls); engine_ms += ms(te);
         if matches!(doc2.get("verdict").and_then(Json::as_str), Some("exact" | "diagnostics_passed")) {
-            let (mut out2, ns2) = decode(p, st, &digest_of(&text(&prog2)), &meta2, &doc2, None, None);
+            let (mut out2, ns2) = decode_boxed(p, st, &digest_of(&text(&prog2)), &meta2, &doc2, None, None);
             out2.unsure = out.unsure.clone();
             for (t, _) in &holds { let u = out.stance.iter().find(|(k, _)| k == t).map(|(_, e)| e.odds.clone()); if let Some(e) = out2.stance.iter_mut().find(|(k, _)| k == t) { e.1.unheld = u; } }
             out2.bound = out.bound.clone(); held = holds.iter().map(|(t, _)| t.clone()).collect(); held.sort();
@@ -2904,20 +2950,27 @@ fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, 
             out2.line = line(p, &levels, &meta2.active, &out.bound, &out.unsure, out2.agenda.as_deref().unwrap_or(&[]), &vouched, &meta2.conditional, &baseline(p, st));
             out = out2; ns = ns2; } }
     out.held = held; out.lift = lift;
-    enter(Phase::Document);
     if timing { let r3 = |x: f64| Json::Num((x * 1e3).round() / 1e3);
         out.timing = Some(Json::Obj(vec![("compile_ms".into(), r3(compile_ms)), ("engine_ms".into(), r3(engine_ms)), ("decode_ms".into(), r3((ms(t0) - compile_ms - engine_ms).max(0.0))), ("turn_ms".into(), r3(ms(t0))),
             ("engine_calls".into(), Json::Num(calls as f64)), ("holds".into(), Json::Num(out.held.len() as f64)), ("load_avg_1m".into(), crate::sys::loadavg().map_or(Json::Null, |l| Json::Num((l * 100.0).round() / 100.0)))])); }
+    Ok(Solved { out, ns })
+}
+/// The stance document from the decoded stance: its senses, drives and body blocks, `src` back in its inputs, the credit settled,
+/// the injected block and the glyph
+#[inline(never)]
+fn turn_doc(p: &Persona, pr: Prepped, sv: Solved) -> (Json, Box<State>) {
+    crate::trace::enter(crate::trace::Phase::Document);
+    let Prepped { st, given, src, pay, settled, .. } = pr; let st: &State = &st; let Solved { out, mut ns } = sv;
     let mut j = out.to_json(p, st);
     if let (Some(sn), Some(ss)) = (&p.senses, &st.senses) { stance_senses(&mut j, sn, ss, &given); }
     if let (Some(d), Some(ds)) = (&p.drives, &st.drives) { stance_drives(&mut j, d, ds, &out.lift, &given); }
     stance_body(&mut j, p, st);
     if let (Some(s), Json::Obj(v)) = (src, &mut j) { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.push(("src".into(), s)); } }
-    if let (Some(k), Some(d)) = (&pay, settled) { ns = settle(p, &mut j, ns, k, d); }
+    if let (Some(k), Some(d)) = (&pay, settled) { ns = settle_boxed(p, &mut j, ns, k, d); }
     if p.has_block() { let b = block(p, &j); if let Json::Obj(v) = &mut j { v.push(("block".into(), Json::Str(b))); } }
     // §2.18: the glyph last, from the finished document (`probbit live` sets it again once `deviation` is in)
     set_glyph(p, &mut j);
-    Ok((j, ns))
+    (j, ns)
 }
 
 /// RFC 0008 E: the block a host injects verbatim, rendered from a stance document: every declared trait, then every mood, once
@@ -3041,14 +3094,16 @@ pub fn replay(p: &Persona, seed: Option<u64>, turns: &[Json], no_inertia: bool, 
 }
 /// `compile`: the turn's program (insertion order; its sha256 is the stance's `engine.program`)
 pub fn program(p: &Persona, st: &State, raw: &Json) -> R<String> { Ok(text(&program_json(p, st, raw)?)) }
-/// `program` as a document (RFC 0009: the expectation's members and the trajectory compile through it)
+/// `program` as a document (RFC 0009: the expectation's members and the trajectory compile through it); the steps before the
+/// compiler pass the state boxed, as in the turn
+#[inline(never)]
 pub fn program_json(p: &Persona, st: &State, raw: &Json) -> R<Json> {
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     let (src, raw) = if p.senses.is_some() || p.credit().is_some() || p.has_needs() { take_src(p, raw, true)? } else { (None, raw) };
     let (pay, raw) = take_pay(p, raw)?;
-    let (st, raw) = prep(p, st, &raw, src.as_ref(), true)?;
-    let st = match &pay { Some(k) => credit_step(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
-    let st = gate_step(p, st, &raw)?;
+    let (st, raw) = prep_boxed(p, st, &raw, src.as_ref(), true)?;
+    let st = match &pay { Some(k) => credit_boxed(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
+    let st = gate_boxed(p, st, &raw)?;
     Ok(compile(p, &st, &raw, &Opts::default())?.0)
 }
 
@@ -3895,6 +3950,7 @@ pub fn expect_weights(ex: &Expect, mem: &ExpectMem) -> Vec<(String, f64)> {
 /// Per non-twin variable its exact marginal, levels sorted
 type Marg = Vec<(String, Vec<(String, f64)>)>;
 /// The non-twin exact marginals of a program -> None unless the exact tier solved it
+#[inline(never)]
 fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
     let doc = eng(prog, &Flags { op: "decide".into(), ..flags(p, st) });
     if doc.get("verdict").and_then(Json::as_str) != Some("exact") { return None; }
@@ -3917,6 +3973,7 @@ fn kl_marg(a: &Marg, b: &Marg) -> Option<(f64, Vec<f64>)> {
 /// programs (each combo's latest inputs with this event's hours; the event's own combo with its own inputs, so A_t is a member
 /// whenever its combo is). Mixture marginals are linear in the members' exact marginals, so every number is exact from the
 /// M + 1 solves. None without the block, or when a program is not solved exactly or a divergence is not finite.
+#[inline(never)]
 pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine) -> Option<Deviation> {
     let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
     let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
@@ -3987,6 +4044,7 @@ pub fn trajectory_program(prog: &Json, k: usize, beta0: f64, limit: u64) -> Opti
     Some(Json::Obj(vec![("k".into(), Json::Num(k as f64)), ("beta0".into(), Json::Num(beta0)), ("steps".into(), Json::Arr(steps))]))
 }
 /// The event's trajectory with the persona's `engine.trajectory` (the program `persona compile` gives for the event)
+#[inline(never)]
 pub fn trajectory(p: &Persona, st: &State, raw: &Json) -> Option<Json> {
     let t = p.traj.as_ref()?; trajectory_program(&program_json(p, st, raw).ok()?, t.k, t.beta0, p.eng.exact_limit)
 }
@@ -4121,6 +4179,46 @@ mod tests {
         let text = format!("{ha}\n{la}\n");
         let r1 = strand::resume(&text, &p, a.st.clone(), Clock::Fixed).unwrap(); let r2 = strand::resume_boxed(&text, &p, Box::new(c.st.clone()), Clock::Fixed).unwrap();
         assert_eq!((r1.n, r1.head(), &r1.st.digest), (r2.n, r2.head(), &r2.st.digest));
+    }
+    /// The boxed turn is the turn: the same stance documents and states over a few events (a habit firing, feedback, none), and
+    /// `Live::event` (which runs it) chains the same lines as before
+    #[test]
+    fn the_boxed_turn_is_the_turn() {
+        let p = persona(LEARN).unwrap(); let mut st = init(&p, Some(5), true, &run);
+        for (pr, cr, loss) in [(false, false, false), (true, false, false), (false, true, true), (true, false, true), (false, false, false)] {
+            let ins = inputs(pr, cr, loss);
+            let (d1, s1) = turn(&p, &st, &ins, false, &run, false).unwrap(); let (d2, s2) = turn_boxed(&p, &st, &ins, false, &run, false).unwrap();
+            assert_eq!(canon(&d1), canon(&d2)); assert_eq!(canon(&s1.to_json(&p)), canon(&s2.to_json(&p))); st = s1; }
+        assert_eq!(err(turn_boxed(&p, &st, &json::parse("[1]").unwrap(), false, &run, false)), "inputs: must be a JSON object");
+    }
+    /// The chain check opens the header without a replay and compares it in pieces: a header that reads the same but is not as
+    /// written (one space more) is refused as before, and a strand with checkpoints still checks
+    #[test]
+    fn the_chain_check_compares_the_header_in_pieces() {
+        use crate::strand::{self, Clock, Live};
+        let doc = json::parse(&DOC.replace("LEARN", LEARN)).unwrap(); let p = build(&doc).unwrap();
+        let (mut lv, header) = Live::start(p.clone(), &doc, init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.14.0");
+        let mut text = format!("{header}\n");
+        for k in 0..4 { let (s, l) = lv.event(&inputs(k % 2 == 0, false, k == 3), &run).unwrap(); text += &l; text.push('\n'); if k == 1 { text += &lv.checkpoint(&s); text.push('\n'); } }
+        assert_eq!(strand::check_chain(&text).unwrap(), strand::Status::Active);
+        let r = strand::resume(&text, &p, lv.st.clone(), Clock::Fixed).unwrap(); assert_eq!((r.n, r.head()), (4, lv.head()));
+        let spaced = text.replacen(r#""seed":"#, r#""seed": "#, 1);
+        let e = strand::check_chain(&spaced).unwrap_err(); assert_eq!(e.msg, "line 1: the header is not as written");
+        let e = strand::resume(&spaced, &p, lv.st.clone(), Clock::Fixed).err().unwrap(); assert_eq!(e.msg, "line 1: the header is not as written");
+    }
+    /// With `turn_trace`, an event's breakdown: every phase entered once at least (a probe returning the phase's number + 1 is
+    /// kept per phase), an engine call counted, and the phases' microseconds within the event's
+    #[cfg(feature = "turn_trace")]
+    #[test]
+    fn turn_trace_reports_every_phase_of_an_event() {
+        use crate::{strand::{Clock, Live}, trace};
+        let doc = json::parse(&DOC.replace("LEARN", LEARN)).unwrap(); let p = build(&doc).unwrap();
+        let (mut lv, _) = Live::start(p.clone(), &doc, init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.14.0");
+        fn probe(ph: trace::Phase) -> u64 { ph as u64 + 1 }
+        trace::set_probe(Some(probe)); lv.event(&inputs(true, false, false), &run).unwrap(); trace::set_probe(None);
+        let t = trace::last(); assert_eq!(t.bytes, [1, 2, 3, 4, 5, 6, 7, 8, 9]); assert!(t.solves >= 1);
+        assert!(t.us.iter().sum::<u64>() <= t.total_us + trace::PHASES as u64, "{t:?}");
+        assert_eq!(g(&t.to_json(), &["us"]).as_obj().map(|o| o.len()), Some(trace::PHASES));
     }
     /// The header written in pieces is `Live::start`'s header byte for byte, and its returned digest is the chain's first `prev`,
     /// at every piece size (1 byte, a size that cuts inside UTF-8 characters, the default, one piece for the whole line)
