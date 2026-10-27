@@ -106,10 +106,28 @@ impl Live {
         let dev_full = engine_version(engine).is_some_and(|v| v < DEV_R6_SINCE);
         Live::boxed(p, st, clock, prev, 0, expect, dev_full)
     }
-    /// The individual on the heap from its parts (one place builds a `Live`: `start_to` and `resume_boxed`)
+    /// The individual on the heap from its parts (one place builds a `Live`: `start_to` and `resume_boxed`), written in place:
+    /// the persona and the state are copied from their boxes into the new one, so no frame holds a `Live` (`Box::new` of the
+    /// value built it on the stack first: a 1.7 KB frame on Xtensa)
     #[inline(never)]
     fn boxed(p: Box<Persona>, st: Box<State>, clock: Clock, prev: String, n: u64, expect: Option<persona::ExpectMem>, dev_full: bool) -> Box<Live> {
-        Box::new(Live { p: *p, st: *st, clock, last: 0.0, prev, n, status: Status::Active, controls: 0, checkpoints: 0, rests: 0, expect, traj: None, dev_full })
+        use core::mem::MaybeUninit; use core::ptr::{addr_of_mut, copy_nonoverlapping};
+        // every field is written below: this pattern stops compiling when a field is added and not written
+        let _all = |l: &Live| { let Live { p: _, st: _, clock: _, last: _, prev: _, n: _, status: _, controls: _, checkpoints: _, rests: _, expect: _, traj: _, dev_full: _ } = l; };
+        let mut b: Box<MaybeUninit<Live>> = Box::new(MaybeUninit::uninit());
+        let l = b.as_mut_ptr();
+        // SAFETY: `l` points to an allocation for one `Live`; each field is written once, through raw field pointers (no reference
+        // to the uninitialised value); the persona and the state are moved by a bitwise copy out of their boxes, which are then
+        // freed as `MaybeUninit` (their contents are not dropped: they live on in the new box)
+        unsafe {
+            copy_nonoverlapping(&*p as *const Persona, addr_of_mut!((*l).p), 1);
+            copy_nonoverlapping(&*st as *const State, addr_of_mut!((*l).st), 1);
+            drop(Box::from_raw(Box::into_raw(p) as *mut MaybeUninit<Persona>)); drop(Box::from_raw(Box::into_raw(st) as *mut MaybeUninit<State>));
+            addr_of_mut!((*l).clock).write(clock); addr_of_mut!((*l).last).write(0.0); addr_of_mut!((*l).prev).write(prev); addr_of_mut!((*l).n).write(n);
+            addr_of_mut!((*l).status).write(Status::Active); addr_of_mut!((*l).controls).write(0); addr_of_mut!((*l).checkpoints).write(0); addr_of_mut!((*l).rests).write(0);
+            addr_of_mut!((*l).expect).write(expect); addr_of_mut!((*l).traj).write(None); addr_of_mut!((*l).dev_full).write(dev_full);
+            Box::from_raw(Box::into_raw(b) as *mut Live)
+        }
     }
     /// One event: stamp its elapsed hours, run the turn, chain the strand line -> (the stance document, the strand line). A bad
     /// event is an error and changes nothing (no turn, no line); so is every event while the individual is paused or retired.

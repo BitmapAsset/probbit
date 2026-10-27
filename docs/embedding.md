@@ -48,9 +48,57 @@ What changes without an operating system:
   thread, as probbit-wasm runs. At fixed work the documents are the ones the CLI writes at any `--threads` (timings and
   `telemetry.threads` aside). Set `probbit_ir::GATE_THREADS` to 1 as probbit-wasm does. One core calls the engine.
 - **Documents arrive as strings.** There is no file system: `persona::load(path)` returns an error. Read the document with
-  `persona::parse_doc(text, is_json)` and build it with `persona::build(&doc)`.
+  `persona::parse_doc(text, is_json)` and build it with `persona::build(&doc)` (or `build_boxed`, below).
 - **No usage telemetry.** `sys::usage()` and `sys::nice()` return `None`, so `process_cpu_ms`, `peak_rss_mb` and `nice` are
   `null` in telemetry.
+
+## Stack budget: the boxed setup path
+
+A small target runs the engine on a thread with a fixed stack (tens of KB). The by-value setup calls move `Persona` (about
+1.5 KB), `State` (about 1 KB) and `Live` through their frames, and the persona reader recursed through itself once per layer of
+the document (`display`, `bound`, `expectation`, the lowered blocks) with all of its readers inlined into that frame. The
+heap-returning calls keep each of them on the heap from the moment it is built:
+
+```rust
+use probbit_persona::{persona, strand::{self, Clock, Live}};
+let doc = persona::parse_doc(TEXT, false)?;                              // Json: a 32-byte value; the tree is on the heap
+let p = persona::build_boxed(&doc)?;                                     // Box<Persona>
+let st = persona::init_boxed(&p, None, true, &eng);                      // Box<State>
+// a fresh strand: the header goes to `out` in pieces of at most 1 KB (write each, yield between them), not as one String
+let live = Live::start_to(p, &doc, st, Clock::Real(probbit_core::rt::Instant::now()), &strand::engine(), 1024, &mut out);
+// or: let (live, header) = Live::start_boxed(p, &doc, st, clock, &engine);  // Box<Live> and the header whole
+// a stored strand: let live = strand::resume_boxed(&text, &p, st, clock)?;  // Box<Live>
+```
+
+`build`, `init`, `Live::start` and `resume` stay as they were (thin wrappers over the boxed calls) for hosts with a large stack.
+The header the pieces make is `Live::start`'s header byte for byte, and `strand::write_header` returns its sha256 (the first
+line's `prev`), so the chain is the same however the host cuts it; neither the line nor a copy of the document is held whole.
+The YAML reader is bounded like the JSON one: block and flow collections nested deeper than 256 are a `limit` error (the JSON
+reader already refused them); on a stack of tens of KB keep documents a few levels deep, as every example is.
+
+The stack each call needs, measured by a host proxy: probbit-persona `nostd` on x86_64 (release, `lto = "fat"`), each call
+run from one frame on a thread whose free stack is painted with a pattern first and scanned after (the high-water below the
+calling frame), and a counting allocator for the heap peak above what was live before the call. The persona is a 12 KB body
+persona (traits, moods, senses, drives, needs, expectation, display; its header line is 11,985 bytes), read from YAML.
+
+| call (before → after) | Xtensa frame, B | stack high-water, B | heap peak, B |
+|---|---:|---:|---:|
+| `parse_doc` (YAML) | 128 → 128 | 4,760 → 5,048 | 93,411 → 93,411 |
+| `build` → `build_boxed` | 3,312 → 400 (its reader `build_base` 1,280) | **39,024 → 12,080** | 267,736 → 269,232 |
+| `init` → `init_boxed` | 1,184 → 624 (+ `init` 1,184) | 9,240 → 9,240 | 69,365 → 69,365 |
+| `Live::start` → `Live::start_to` / `start_boxed` | 1,888 → 160 / 96 (`write_header` 448) | 9,872 → 4,560 | 87,482 → 19,181 |
+| **setup: parse + build + init + start** | | **39,056 → 12,112** | 332,669 → 334,165 |
+| `resume` → `resume_boxed` | 4,880 → 960 | 55,328 → 29,264 | 397,428 → 398,924 |
+| one event (`Live::event`) | 2,688 → 2,672 (`turn_src` 6,160) | 31,904 → 31,824 | 112,990 → 112,990 |
+| the solve alone (in the event) | | 6,856 | 29,009 |
+| a checkpoint line | 160 | 5,408 | 42,594 |
+
+The setup now needs less stack than one event: the engine thread's stack is sized by the turn (about 32 KB on the proxy;
+`turn_src` holds several `State` values by value), the next thing to cut. The heap peak of setup is the reader's (the
+document tree and the lowered documents); `start` no longer holds a copy of the document and the whole line.
+
+Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
+and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
 
 ## The strand writer, and how the host checks it
 

@@ -17,6 +17,14 @@ All notable changes to this project are documented here. The format follows
   checkpoint). Gated on the strand header's engine: a strand written before 0.14.0 keeps its full-precision deviation, and
   `live verify` accepts its checkpoint when it equals the replay's at 6 decimals; strands without an expectation block are
   unchanged.
+- **The setup path fits a small stack** (docs/embedding.md "Stack budget"): heap-returning setup calls
+  `persona::build_boxed` (`Box<Persona>`), `persona::init_boxed` (`Box<State>`), `Live::start_boxed` (`Box<Live>` and the header),
+  `Live::start_to` (the header handed to the host in fixed-size pieces, so a firmware can write it to flash piece by piece with
+  yields) and `strand::resume_boxed`; `strand::write_header` writes the header line in pieces and returns its sha256. The persona
+  reader no longer holds a `Persona` by value at each of its layers, and its readers are out of line. On a host proxy of a firmware's setup (a 12 KB persona, `nostd`, x86_64) the stack high-water of parse + build + init + start fell from 39,056 to 12,112 bytes; on Xtensa the reader's frame went from 3,312 to 400 bytes and `Live::start`'s from 1,888 to 160. The by-value
+  calls are unchanged wrappers; every header, line and digest is byte for byte as before. `persona::sha256` hashes without
+  copying its input (`persona::Sha256`, fed in pieces). The YAML reader refuses collections nested deeper than 256 (a `limit`
+  error, as the JSON reader does) instead of recursing without a bound.
 
 ### Fixed
 
