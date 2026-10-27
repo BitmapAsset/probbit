@@ -364,15 +364,15 @@ the host's action log, one {"turn": T, "action": {trait: level}} per line: compa
 write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {"block", "n"} per line; replays from the header
 .RE
 .TP
-\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME]
-pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status
+\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME] | STRAND seal
+pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status. `seal` (section 5.7) seals the newest segment of STRAND: refused unless its last line is an event line, it appends the sealing checkpoint and writes the next segment file (its header links the sealed line, then the sealed line itself), and prints that file in `file`
 .RS 4
 .TP
 \fB\-\-by\fR \fIWHO\fR
-who decided it: human:ID or env:ID (required)
+who decided it: human:ID or env:ID (required, except for seal)
 .TP
 \fB\-\-reason\fR \fITEXT\fR
-why (required)
+why (required, except for seal)
 .TP
 \fB\-\-at\fR \fITIME\fR
 when (default: now, UTC)

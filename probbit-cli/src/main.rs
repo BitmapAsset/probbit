@@ -319,10 +319,10 @@ pub(crate) static COMMANDS: &[Command] = &[
                     Flag { name: "--chain", arg: "", help: "a segment (section 5.7): verify it and walk back through the previous segment files to the first, each verified and its last line the sealed line the next one links; exit 1 at the first break (the segment file named), 6 when a previous segment file is missing" },
                     Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" },
                     Flag { name: "--blocks", arg: "FILE", help: "write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {\"block\", \"n\"} per line; replays from the header" }] },
-            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]",
-                help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status",
-                flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required)" },
-                    Flag { name: "--reason", arg: "TEXT", help: "why (required)" },
+            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME] | STRAND seal",
+                help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status. `seal` (section 5.7) seals the newest segment of STRAND: refused unless its last line is an event line, it appends the sealing checkpoint and writes the next segment file (its header links the sealed line, then the sealed line itself), and prints that file in `file`",
+                flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required, except for seal)" },
+                    Flag { name: "--reason", arg: "TEXT", help: "why (required, except for seal)" },
                     Flag { name: "--at", arg: "TIME", help: "when (default: now, UTC)" }] },
         ],
         list_subs: true, shared: false,
@@ -863,8 +863,14 @@ fn live_cmd(args: &[String]) {
     }
     if args.get(1).map(String::as_str) == Some("control") {
         let mut a = vec!["live control".to_string()]; a.extend(args.iter().skip(4).cloned()); let (v, w) = sub_flags("live", "control").unwrap(); check_flags(&a, &v, &w);
-        let usage = "live control: probbit live control STRAND pause|resume|retire|erase --by human:ID --reason TEXT";
+        let usage = "live control: probbit live control STRAND pause|resume|retire|erase --by human:ID --reason TEXT (or STRAND seal)";
         let (Some(path), Some(what)) = (args.get(2).filter(|a| !a.starts_with("--")), args.get(3).filter(|a| !a.starts_with("--"))) else { fail(usage) };
+        // seal (§5.7): no control line, so no --by, --reason or --at; the sealing checkpoint and the next segment file
+        if what == "seal" {
+            if let Some(f) = ["--by", "--reason", "--at"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND seal: {f} does not apply (a seal writes a checkpoint line, not a control line)")) }
+            match live::seal_cmd(path, eng) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+            return;
+        }
         let (Some(by), Some(reason)) = (opt("--by"), opt("--reason")) else { fail(&format!("{usage} (--by and --reason are required)")) };
         match live::control_cmd(path, what, &by, &reason, &opt("--at").unwrap_or_else(live::utc_now)) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
         return;
@@ -901,8 +907,9 @@ fn live_cmd(args: &[String]) {
     let strand = opt("--strand");
     let lock = strand.as_ref().map(|f| live::Lock::take(f).unwrap_or_else(|e| refuse("live: ", e)));
     if let Some(f) = &strand { if std::path::Path::new(f).exists() && state_file.is_none() { fail(&format!("live: {f} exists: continue it with --state FILE (the state after its last line), or log to a new file")) } }
-    // --segment-every: the run continues the newest segment of the strand (NAME.strand, then NAME.0001.strand, ...)
-    let mut seg = 0u64; if seg_every > 0 { if let Some(f) = &strand { while std::path::Path::new(&live::segment_name(f, seg + 1)).exists() { seg += 1; } } }
+    // the run continues the newest segment of the strand (NAME.strand, then NAME.0001.strand, ...), sealed by --segment-every
+    // or by `live control STRAND seal`: a sealed file is never appended to
+    let mut seg = 0u64; if let Some(f) = &strand { while std::path::Path::new(&live::segment_name(f, seg + 1)).exists() { seg += 1; } }
     let cur = std::cell::RefCell::new(strand.as_ref().map(|f| live::segment_name(f, seg)));
     // the strand's engine (its header's; a new strand: this one's): the next segment's header names it
     let strand_engine = cur.borrow().as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| json::parse(live::lines(&t).first().copied().unwrap_or("")).ok())

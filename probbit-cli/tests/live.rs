@@ -730,3 +730,30 @@ fn a_segmented_life_equals_one_file_and_verify_chain_walks_back() {
     let (c, v, e) = probbit(&["live", "verify", &format!("{dir}/x.0002.strand"), "--chain"]); assert_eq!(c, 0, "{e}{v}"); assert_eq!(s(&parse(&v), &["segments"]), &Json::Num(3.0));
     let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2, &st3, &xa]);
 }
+
+/// `live control STRAND seal` (§5.7): a host seals when it decides. A life of 10 events sealed, 5 more (the run continues the
+/// newest segment), sealed again: three files whose chain verifies to the one-file life's final state; a seal right after a seal
+/// (the last line a checkpoint) is refused and writes nothing; a seal takes no --by
+#[test]
+fn a_host_seals_a_strand_and_the_chain_verifies() {
+    let evs: Vec<String> = (0..15).map(|t| format!(r#"{{"elapsed_hours":1,"praise":{}}}"#, t % 2 == 0)).collect();
+    let (all, a, b) = (events_file("seal-all.jsonl", &evs), events_file("seal-a.jsonl", &evs[..10]), events_file("seal-b.jsonl", &evs[10..]));
+    let (st1, one) = (init(TUTOR, 4, "seal-one.json"), tmp("seal-one.strand")); clean(&[&one]);
+    let (c, out1, e) = live(TUTOR, &st1, &all, &one, "4"); assert_eq!(c, 0, "{e}");
+    let dir = tmp("seal-dir"); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let base = format!("{dir}/life.strand"); let st2 = init(TUTOR, 4, "seal-two.json");
+    let (c, o1, e) = live(TUTOR, &st2, &a, &base, "4"); assert_eq!(c, 0, "{e}");
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 0, "{e}{o}"); let v = parse(&o);
+    assert_eq!((s(&v, &["segment"]), s(&v, &["file"]).as_str()), (&Json::Num(1.0), Some(format!("{dir}/life.0001.strand").as_str())));
+    assert_eq!(read(&base).lines().last(), read(&format!("{dir}/life.0001.strand")).lines().nth(1), "the sealed line ends one file and follows the next header");
+    let before = read(&format!("{dir}/life.0001.strand"));
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 2, "{o}"); assert!(e.contains("not an event line"), "{e}");
+    assert_eq!(read(&format!("{dir}/life.0001.strand")), before, "nothing written"); assert!(!std::path::Path::new(&format!("{dir}/life.0002.strand")).exists());
+    let (c, _, e) = probbit(&["live", "control", &base, "seal", "--by", "human:owner"]); assert_eq!(c, 2, "{e}");
+    let (c, o2, e) = live(TUTOR, &st2, &b, &base, "4"); assert_eq!(c, 0, "{e}"); assert_eq!(format!("{o1}{o2}"), out1, "the stances");
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 0, "{e}{o}"); assert_eq!(s(&parse(&o), &["segment"]), &Json::Num(2.0));
+    let (c, v, e) = probbit(&["live", "verify", &format!("{dir}/life.0002.strand"), "--chain"]); assert_eq!(c, 0, "{e}{v}"); let v = parse(&v);
+    let (_, vone, _) = probbit(&["live", "verify", &one]);
+    assert_eq!((s(&v, &["segments"]), s(&v, &["events"]), s(&v, &["final_state"])), (&Json::Num(3.0), &Json::Num(15.0), s(&parse(&vone), &["final_state"])));
+    let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2]);
+}

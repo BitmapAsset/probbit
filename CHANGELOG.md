@@ -50,6 +50,13 @@ All notable changes to this project are documented here. The format follows
   checks one segment on its link (summary `segment`, `trusted_link`); `live verify SEGMENT --chain` walks back to the first file
   (exit 1 at a break, naming the file; exit 6 when a previous file is missing). `strand::segment_header`,
   `strand::segment_name`, `strand::write_header_seg`, `strand::Replay::open_lines`.
+- **`probbit live control STRAND seal`** (docs/persona.md section 5.7): a host seals when it decides. Under the writer lock it
+  replays the newest segment, refuses unless its last line is an event line (exit 2, nothing written), appends the sealing
+  checkpoint, writes the next segment file and prints it (`file`). `probbit live ... --strand NAME.strand` now always continues
+  the newest segment that exists, with or without `--segment-every`, so a sealed file is never appended to.
+- **`probbit monitor --dir` serves a life in segments as one strand**: `NAME.strand` and `NAME.0001.strand`, ... (without a gap)
+  are listed once, id `NAME`, with the life's event count, the newest file's `segment` index and the base name's sidecar; the
+  page follows the newest file and goes on in the next one within the 1 s scan after a seal, its event count carrying on.
 - **`turn_trace`** (feature of probbit-persona and probbit-cli, off by default): `persona::trace` records the last event's
   microseconds and a host probe's value per phase (input, expect, prep, compile, solve, decode, document, line, fold), so a
   firmware measures the same breakdown on its hardware; `probbit live` in such a build prints it on stderr when

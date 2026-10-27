@@ -882,7 +882,8 @@ fn publish(hub: &Hub, meta: &Json, frame: &Json, docs: Vec<(u64, String)>, over:
     let (meta, frame) = (persona::canon(meta), persona::canon(frame));
     let mut b = board(hub); b.name = name; b.glyph = glyph;
     if over { b.docs.clear(); b.last = 0; }
-    for (n, d) in docs { b.docs.push_back(d); b.last = n; if b.docs.len() > KEEP { b.docs.pop_front(); } }
+    // an event already kept (a segment opens at its sealed line, the last event of the file before) is not kept twice
+    for (n, d) in docs { if n <= b.last { continue; } b.docs.push_back(d); b.last = n; if b.docs.len() > KEEP { b.docs.pop_front(); } }
     if b.meta != meta || b.layout == 0 { b.meta = meta; b.layout += 1; }
     b.frame = frame; b.seq += 1;
     hub.1.notify_all();
@@ -912,11 +913,22 @@ fn add(site: &Site, path: String, over: Labels) {
     { let mut l = entries(site); if l.iter().any(|e| e.path == path) { return; } let id = id_of(&path, &l); l.push(Arc::new(Entry { id, path: path.clone(), over, hub: hub.clone() })); }
     std::thread::spawn(move || { let engine = crate::persona_engine(); feed_strand(&path, &hub, &engine); });
 }
-/// The `*.strand` files in `dir`, by name
+/// The `*.strand` files in `dir`, by name; a life's segments (§5.7: `NAME.0001.strand`, `NAME.0002.strand`, ... after
+/// `NAME.strand`, without a gap) are one strand, `NAME.strand`
 fn scan(dir: &str) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "strand") && p.is_file()).map(|p| p.to_string_lossy().into_owned()).collect();
-    v.sort(); v
+    v.sort();
+    let segs: Vec<String> = v.iter().flat_map(|f| (1..).map(|k| crate::live::segment_name(f, k)).take_while(|s| v.contains(s)).collect::<Vec<_>>()).collect();
+    v.retain(|f| !segs.contains(f)); v
+}
+/// The newest segment of the strand `base` from index `k` on (§5.7): the next one counts once its header and sealed line are
+/// both in (a seal writes them together; a reader can see the header first)
+fn newest(base: &str, mut k: u64) -> u64 {
+    let ready = |f: &str| { let Ok(mut h) = std::fs::File::open(f) else { return false }; let (mut n, mut b) = (0, [0u8; 8192]);
+        loop { match h.read(&mut b) { Ok(0) | Err(_) => return false, Ok(m) => { n += b[..m].iter().filter(|&&c| c == b'\n').count(); if n >= 2 { return true } } } } };
+    while ready(&crate::live::segment_name(base, k + 1)) { k += 1; }
+    k
 }
 /// With --dir, every second: the strands added to it since are served too (a strand removed stays listed, as gone); without, nothing
 fn watch_dir(site: &Site) -> ! {
@@ -931,10 +943,13 @@ fn strands_json(site: &Site) -> String {
     let rows: Vec<Json> = entries(site).iter().map(|e| {
         let (mut l, mut err) = match labels::read(&e.path) { Ok(l) => (l, None), Err(x) => (Labels::new(), Some(x.replace(&labels::sidecar(&e.path), &name(&labels::sidecar(&e.path))))) };
         for (k, v) in &e.over { if let Err(x) = labels::set(&mut l, k.clone(), v.clone()) { err = Some(format!("{k}: {x}")); } }
-        let age = std::fs::metadata(&e.path).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).map_or(Json::Null, |d| json::num(d.as_secs() as f64));
+        // a life in segments: its newest file (the one written to)
+        let k = newest(&e.path, 0);
+        let age = std::fs::metadata(crate::live::segment_name(&e.path, k)).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).map_or(Json::Null, |d| json::num(d.as_secs() as f64));
         let b = board(&e.hub); let opt = |x: &str| if x.is_empty() { Json::Null } else { json::str(x) };
         let mut kv = vec![("id", json::str(&e.id)), ("strand", json::str(&name(&e.path))), ("labels", labels::to_json(&l)), ("persona", opt(&b.name)), ("n", json::num(b.last as f64)), ("glyph", opt(&b.glyph)), ("age_s", age)];
         if let Some(x) = err { kv.push(("labels_error", json::str(&x))); }
+        if k > 0 { kv.push(("segment", json::num(k as f64))); }
         json::obj(kv) }).collect();
     persona::canon(&json::obj(vec![("demo", Json::Bool(site.demo.is_some())), ("dir", site.dir.as_deref().map_or(Json::Null, |d| json::str(&name(d)))), ("strands", Json::Arr(rows))])) + "\n"
 }
@@ -964,11 +979,17 @@ fn serve(port: u16, open: bool, site: &Arc<Site>, feed: &mut dyn FnMut()) -> ! {
     feed();
     loop { std::thread::park(); }
 }
-/// The strand followed for the page: every 100 ms, what was appended is replayed and published
+/// The strand followed for the page: every 100 ms, what was appended is replayed and published. A life in segments (§5.7) is
+/// followed in its newest file: when a seal writes the next one, the rest of the sealed file is replayed, then the page goes
+/// on in the new file (it opens at its sealed line, the event already shown); the layout and the event count carry on
 fn feed_strand(path: &str, hub: &Hub, eng: Engine) -> ! {
-    let mut fl = Followed::new(path);
+    let mut k = newest(path, 0);
+    let mut fl = Followed::new(&crate::live::segment_name(path, k));
     let mut fresh = true;
-    loop { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP); std::thread::sleep(Duration::from_millis(100)); }
+    loop { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP);
+        let n = newest(path, k);
+        if n != k { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP); k = n; fl = Followed::new(&crate::live::segment_name(path, k)); continue; }
+        std::thread::sleep(Duration::from_millis(100)); }
 }
 /// One poll of the strand for the page: what was appended is replayed and published. A long replay (a large strand read from
 /// its header) is also published every `every` on the way, with a note, so the page draws while it catches up.

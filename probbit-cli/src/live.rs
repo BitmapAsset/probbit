@@ -127,6 +127,37 @@ pub fn control_cmd(path: &str, what: &str, by: &str, reason: &str, at: &str) -> 
         ("head".into(), s(&persona::digest_of(&line)))]))
 }
 
+/// `probbit live control STRAND seal` (§5.7, "Segments"): a host decides when to seal. Under the writer lock, the newest segment
+/// of STRAND (`NAME.strand`, `NAME.0001.strand`, ...) is replayed (from its last checkpoint, else from its start); refused unless
+/// its last line is an event line (a seal follows an event); then the sealing checkpoint is appended to it and the next segment
+/// written: its header (`segment` {index, previous, sealed}) and the sealing line -> {ok, control: seal, segment, file, line, head}
+pub fn seal_cmd(path: &str, eng: Engine) -> Result<Json, InErr> {
+    let lock = Lock::take(path)?;
+    let mut k = 0u64; while std::path::Path::new(&segment_name(path, k + 1)).exists() { k += 1; }
+    let cur = segment_name(path, k);
+    let text = std::fs::read_to_string(&cur).map_err(|e| perr("strand", format!("cannot read {cur}: {e}")))?;
+    if !text.ends_with('\n') { return Err(perr("strand", format!("{cur}: its last line is incomplete (no newline at the end)"))); }
+    let ls = lines(&text);
+    let last = ls.last().and_then(|l| json::parse(l).ok()).filter(|_| ls.len() > 1);
+    if !last.as_ref().is_some_and(|j| matches!(kind(j), Kind::Event)) { return Err(perr("strand", format!("{cur}: its last line is not an event line (a seal follows an event)"))); }
+    let at = |(i, why): (usize, String)| perr("strand", format!("{cur}: line {i}: {why}"));
+    let (mut r, from) = match last_checkpoint(&ls, 0).filter(|&c| c >= 2).and_then(|c| Replay::open_at(ls[0], ls[c - 1], ls[c], c + 1).ok().map(|r| (r, c + 1))) {
+        Some(x) => x, None => Replay::open_lines(&ls).map_err(at)? };
+    for l in &ls[from..] { r.step(l, eng).map_err(at)?; }
+    if r.live.expect.as_ref().is_some_and(|m| !m.is_canonical()) { return Err(perr("strand", "before engine 0.14.0 a checkpoint does not carry the expectation's memory, so a segment of a persona with an expectation block could not start from its sealed line")); }
+    let stance = r.last_stance().cloned().ok_or_else(|| perr("strand", "no event replayed"))?;
+    let cp = r.live.checkpoint(&stance);
+    let next = segment_name(path, k + 1);
+    let pname = std::path::Path::new(&cur).file_name().map_or_else(|| cur.clone(), |f| f.to_string_lossy().into_owned());
+    let engine = r.header.get("engine").and_then(Json::as_str).unwrap_or("").to_string();
+    let h = segment_header(&r.live, &r.doc, &engine, k + 1, &pname, &persona::digest_of(&cp));
+    if !lock.held() { return Err(locked(None, &format!("{path}.lock"))); }
+    append(&cur, &[&cp])?; append(&next, &[&h, &cp])?;
+    let s = |x: &str| Json::Str(x.to_string());
+    Ok(Json::Obj(vec![("ok".into(), Json::Bool(true)), ("control".into(), s("seal")), ("segment".into(), Json::Num((k + 1) as f64)), ("file".into(), s(&next)),
+        ("line".into(), Json::Num((ls.len() + 1) as f64)), ("head".into(), s(&persona::digest_of(&cp)))]))
+}
+
 /// The tools `probbit_live_event` and `probbit_live_verify` (`probbit mcp`), stateless as the persona tools. event: the persona
 /// (a document or a path), the state (or a seed: a new individual), one event (its inputs; `elapsed_hours` comes from the host's
 /// clock and is quantised here) and optionally a strand file on the server's disk (a new one gets the header; an existing one is

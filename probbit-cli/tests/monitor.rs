@@ -499,3 +499,35 @@ fn checkpointed_strands_of_an_expectation_persona_open() {
     assert_eq!(c, 0, "{out}{err}"); assert!(top.contains("| event 22 |") && top.ends_with("replay verified from checkpoint 20 [ok]"), "{top}");
     let _ = std::fs::remove_file(&tutor);
 }
+
+/// §5.7 segments on the page: with `--dir`, a life's `NAME.strand` and `NAME.000k.strand` are one strand, id `NAME`, listed with
+/// the life's event count and the base name's sidecar; its stream follows the newest segment and carries on across a seal (the
+/// next file is picked up within the 1 s scan)
+#[test]
+fn a_served_life_in_segments_is_one_strand_that_follows_its_seals() {
+    let dir = std::env::temp_dir().join(format!("probbit-monitor-segments-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let at = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    let (base, st, ev) = (at("life.strand"), at("st.json"), at("ev.jsonl"));
+    let (c, _, e) = probbit(&["persona", "init", "../examples/persona/tutor.yaml", "--seed", "2", "--out", &st]); assert_eq!(c, 0, "{e}");
+    let run = |n: usize, extra: &[&str]| { std::fs::write(&ev, (0..n).map(|t| format!("{{\"praise\":{},\"elapsed_hours\":1}}\n", t % 2 == 0)).collect::<String>()).unwrap();
+        let (c, o, e) = probbit(&[&["live", "../examples/persona/tutor.yaml", "--state", &st, "--clock", "fixed", "--events", &ev, "--strand", &base][..], extra].concat()); assert_eq!(c, 0, "{e}"); o };
+    run(5, &["--segment-every", "3", "--label", "agent=Nova"]);
+    assert!(std::path::Path::new(&at("life.0001.strand")).exists());
+    let (child, port) = served(&["--dir", &dir.to_string_lossy()]); let host = format!("127.0.0.1:{port}");
+    let t = Instant::now(); let mut list = String::new();
+    while !list.contains(r#""n":5,"#) { assert!(t.elapsed() < Duration::from_secs(10), "listed with n 5: {list}"); std::thread::sleep(Duration::from_millis(100)); list = get(port, "/strands", &host).2; }
+    assert!(list.contains(r#""id":"life","labels":{"agent":"Nova"}"#) && list.contains(r#""segment":1"#) && !list.contains("life.0001") && list.matches(r#""id":"#).count() == 1, "one strand: {list}");
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /s/life/events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2); assert!(evs[1].1.contains(r#""n":5,"#), "{}", evs[1].1);
+    // a host seals; the life goes on in the next file
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 0, "{e}{o}"); assert!(o.contains("life.0002.strand"), "{o}");
+    let docs = run(2, &[]); let six = docs.lines().next().unwrap().to_string();
+    let (t, mut count) = (Instant::now(), 3);
+    loop { let evs = stream(&mut s, &mut buf, count); if evs.iter().any(|(_, d)| d.contains(r#""n":7,"#)) { break; }
+        assert!(t.elapsed() < Duration::from_secs(5), "event 7 streamed after the seal: {buf}"); count = evs.len() + 1; }
+    assert!(!buf.contains(r#""diverges":{"#), "{buf}");
+    assert_eq!(get(port, "/s/life/doc/6", &host).2, format!("{six}\n"));
+    let list = get(port, "/strands", &host).2; assert!(list.contains(r#""n":7,"#) && list.contains(r#""segment":2"#) && list.matches(r#""id":"#).count() == 1, "{list}");
+    drop(s); drop(child); let _ = std::fs::remove_dir_all(&dir);
+}

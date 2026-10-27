@@ -1569,9 +1569,20 @@ a new file: the sealing line is a checkpoint line (the last line of the segment)
 `"segment": {"index": k, "previous": "<the previous file's name>", "sealed": "sha256:<the sealing line's>"}`, its state the
 sealed state, and its second line is the sealing line itself, byte for byte. The chain goes on across the files unchanged: the
 lines of all segments, each segment's header and repeated sealing line set aside, are the strand the same life writes to one
-file with a checkpoint at each seal. The labels sidecar is the first file's (`NAME.labels.json`); a run with `--segment-every`
-continues the newest segment that exists. Before 0.14.0 a persona with an expectation block is not segmented (its checkpoint
-does not carry the memory).
+file with a checkpoint at each seal. The labels sidecar is the first file's (`NAME.labels.json`); a run on `--strand
+NAME.strand` continues the newest segment that exists (a sealed file is never appended to). Before 0.14.0 a persona with an
+expectation block is not segmented (its checkpoint does not carry the memory).
+
+A host that decides when to seal runs `probbit live control NAME.strand seal` (under the writer lock, like any control): it
+replays the newest segment (from its last checkpoint), refuses unless that file's last line is an event line (a seal follows
+an event: a seal right after a seal or a checkpoint exits 2 and writes nothing), appends the sealing checkpoint, writes the
+next segment file (its header, then the sealing line) and prints `{"ok": true, "control": "seal", "segment": k, "file":
+"<the new file>", "line", "head"}`. It writes no control line, so it takes no `--by` or `--reason`.
+
+`probbit monitor --dir DIR --serve` lists a life's files (`NAME.strand`, then `NAME.0001.strand`, ... without a gap) as one
+strand, id `NAME`, with the life's event count, `"segment": k` (the newest file's index) and the base name's sidecar; its page
+follows the newest file and goes on in the next one within the 1 s scan after a seal (the new file opens at its sealing line,
+the event already shown). A segment file given on its own still opens at its sealing line.
 
 - `live verify SEGMENT` checks one segment on its link: the header is as written, the second line's sha256 is the header's
   `sealed`, that line is a valid checkpoint (its state is the header's, its memory reads), and every line after it replays.
@@ -1702,7 +1713,7 @@ cannot read the documents:
 | `/` | the page: one file embedded in the binary (under 72 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
 | `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order, and `face`, the two moods the face's meters show), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}` (with `engine.trajectory` also `trajectory` and `settle`, below), that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
 | `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
-| `/strands` | the strands served, canonical JSON: `{demo, dir, strands: [{id, strand, labels, persona, n, glyph, age_s, labels_error?}]}` (the file name, never its directory; `age_s`: seconds since the strand file was last written); the demo lists none |
+| `/strands` | the strands served, canonical JSON: `{demo, dir, strands: [{id, strand, labels, persona, n, glyph, age_s, labels_error?, segment?}]}` (the file name, never its directory; `age_s`: seconds since the strand file was last written, a life in segments: its newest file; `segment`: that file's index, when it is not the first); the demo lists none |
 | `/s/ID/events`, `/s/ID/doc/N` | as `/events` and `/doc/N`, for strand ID; `/events` and `/doc/N` are the first strand's, so a single-strand page is as before |
 
 **Who and where: labels, many strands.** A strand says which persona and engine; it does not say which agent, on which
