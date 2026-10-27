@@ -67,9 +67,16 @@ pub fn write_to(j: &Json, sort: bool, s: &mut impl Sink) {
     match j {
         Json::Null => s.push_str("null"), Json::Bool(b) => s.push_str(if *b { "true" } else { "false" }), Json::Num(x) => canon_num(*x, s), Json::Str(t) => esc(t, s),
         Json::Arr(v) => { s.push('['); for (k, x) in v.iter().enumerate() { if k > 0 { s.push(','); } write_to(x, sort, s); } s.push(']'); }
-        Json::Obj(v) => { let mut o: Vec<&(String, Json)> = v.iter().collect(); if sort { o.sort_by(|a, b| a.0.cmp(&b.0)); }
+        Json::Obj(v) => { let mut o: Vec<&(String, Json)> = v.iter().collect(); if sort { sort_keys(&mut o); }
             s.push('{'); for (k, (key, x)) in o.into_iter().enumerate() { if k > 0 { s.push(','); } esc(key, s); s.push(':'); write_to(x, sort, s); } s.push('}'); }
     }
+}
+/// An object's entries sorted by key (by code point), stably: a binary insertion sort in place up to 512 entries (the library's
+/// stable sort keeps a 4 KB scratch buffer in its frame, the largest frame of a canonical write on a small stack), the library's
+/// above. Both are stable, so both give the one stable order: the bytes are the same.
+fn sort_keys(o: &mut [&(String, Json)]) {
+    if o.len() > 512 { o.sort_by(|a, b| a.0.cmp(&b.0)); return; }
+    for i in 1..o.len() { let at = o[..i].partition_point(|x| x.0 <= o[i].0); o[at..=i].rotate_right(1); }
 }
 /// Canonical JSON: keys sorted (by code point), no whitespace, UTF-8, canonical numbers. Every persona document is printed so.
 pub fn canon(j: &Json) -> String { let mut s = String::new(); write_to(j, true, &mut s); s }
