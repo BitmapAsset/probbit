@@ -128,11 +128,12 @@ impl Watch {
         Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None })
     }
     /// Where the replay of `lines` (the header first) starts: the last checkpoint line (index), or None for the header. RFC 0009:
-    /// a persona with an expectation block folds every event line into its memory, which no checkpoint carries, so its strand
-    /// replays from the header (every line, slower; `open_at` refuses that shortcut); any other persona starts at the last one
+    /// before 0.14.0 a persona with an expectation block folds every event line into its memory, which no checkpoint carries, so
+    /// its strand replays from the header (every line, slower; `open_at` refuses that shortcut); from 0.14.0 the checkpoint carries
+    /// the memory, and every strand starts at the last one
     fn start(lines: &[&str]) -> Option<usize> {
         let k = crate::live::last_checkpoint(lines, 0).filter(|k| *k >= 2)?;
-        (!Replay::open(lines[0]).is_ok_and(|r| r.live.p.expect.is_some())).then_some(k)
+        (!Replay::open(lines[0]).is_ok_and(|r| r.live.p.expect.is_some() && r.live.dev_full)).then_some(k)
     }
     /// The replay from a checkpoint line (`live::Replay::open_at`; `before` = the event line before it): the lines before it are
     /// not replayed, and the board starts at the checkpoint's event (its stance, the inputs `before` logs, its learned deltas)
@@ -1167,14 +1168,22 @@ mod tests {
         let _ = std::fs::remove_file(&f);
     }
 
-    /// RFC 0009: a persona with an expectation block replays a strand with checkpoint lines from its header (the checkpoint does
-    /// not carry the expectation's memory): `--once` and the first poll of `--follow` / `--serve` draw the latest event with no
-    /// checkpoint start, and lines appended after it replay from the state in memory, one by one
+    /// RFC 0009: before 0.14.0 a persona with an expectation block replays a strand with checkpoint lines from its header (the
+    /// checkpoint does not carry the expectation's memory): `--once` and the first poll of `--follow` / `--serve` draw the latest
+    /// event with no checkpoint start, and lines appended after it replay from the state in memory, one by one. From 0.14.0 the
+    /// checkpoint carries the memory and the same life starts at its last checkpoint.
     #[test]
     fn an_expectation_persona_replays_from_the_header() {
         let (p, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap();
         assert!(p.expect.is_some(), "the fixture has an expectation block");
-        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit test");
+        {   let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.14.0"); let mut text = format!("{header}\n");
+            for t in 0..17u32 { let (s, line) = lv.event(&json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 3 == 0)).unwrap(), &run).unwrap();
+                text += &line; text.push('\n'); if lv.n % 5 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+            let lines = live::lines(&text); let k = live::last_checkpoint(&lines, 0).unwrap(); assert_eq!(Watch::start(&lines), Some(k), "0.14.0: the checkpoint start");
+            let mut w = Watch::open_at(lines[0], lines[k - 1], lines[k], k + 1).unwrap(); for l in &lines[k + 1..] { w.feed(l, &run); }
+            let mut full = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { full.feed(l, &run); }
+            assert!(w.bad.is_none(), "{:?}", w.bad); assert_eq!(persona::canon(&w.last.as_ref().unwrap().doc), persona::canon(&full.last.as_ref().unwrap().doc)); }
+        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.13.0");
         let mut text = format!("{header}\n");
         let add = |lv: &mut Live, text: &mut String, t: u32| { let ev = json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 3 == 0)).unwrap();
             let (s, line) = lv.event(&ev, &run).unwrap(); *text += &line; text.push('\n'); if lv.n % 5 == 0 { *text += &lv.checkpoint(&s); text.push('\n'); } };

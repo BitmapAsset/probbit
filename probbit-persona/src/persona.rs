@@ -3917,13 +3917,53 @@ fn traj_spec(x: &Json) -> R<Traj> {
 /// latest event that had it (that combo's member), whether a non-time combo has been seen, and the learned normal of
 /// ln(1 + pred). A fold over the logged events (their inputs and deviation receipts), so it lives with a strand's replay and
 /// never in the state: the state digest is the same with the block on or off.
+///
+/// The canonical fold (`canonical`, strands of engine 0.14.0 on): after every step each count, the mean and the variance are at
+/// 6 decimals (a count at 0 is dropped) and at most `max_combos - 1` named combos are kept, the one last in the mixture's order
+/// moving its count to `rest` (added to the empty member's weight, where the mixture puts every combo past the kept ones). The
+/// memory is then a small exact object a checkpoint line carries (`to_json`, `read`), the same bytes on every libm, and a fold
+/// restarted from it equals the fold from the strand's header.
 #[derive(Clone, Debug, Default)]
-pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64 }
+pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64, rest: f64, canon: bool }
 const DEV_PRIOR_VAR: f64 = 0.04;
 const DEV_VAR_FLOOR: f64 = 1e-4;
 /// z at or above this registers the deviation (the RFC 0001 sense threshold)
 pub const DEV_Z: f64 = 1.5;
-impl ExpectMem { pub fn new() -> ExpectMem { ExpectMem { var: DEV_PRIOR_VAR, ..Default::default() } } }
+impl ExpectMem {
+    pub fn new() -> ExpectMem { ExpectMem { var: DEV_PRIOR_VAR, ..Default::default() } }
+    /// The empty memory of the canonical fold (strands of engine 0.14.0 on)
+    pub fn canonical() -> ExpectMem { ExpectMem { canon: true, ..ExpectMem::new() } }
+    /// Whether this is the canonical fold (its memory goes on checkpoint lines)
+    pub fn is_canonical(&self) -> bool { self.canon }
+    /// The memory as a checkpoint line's `expect`: {combos: [[count, inputs], ...] in key order, mean, n, rest, var, warm}; the key of
+    /// a combo is a function of its inputs (`combo_key`), so it is not written
+    pub fn to_json(&self) -> Json {
+        let mut c: Vec<&(String, f64, Json)> = self.combos.iter().collect(); c.sort_by(|a, b| a.0.cmp(&b.0));
+        Json::Obj(vec![("combos".into(), Json::Arr(c.iter().map(|x| Json::Arr(vec![Json::Num(x.1), x.2.clone()])).collect())), ("mean".into(), Json::Num(self.mean)),
+            ("n".into(), Json::Num(self.n as f64)), ("rest".into(), Json::Num(self.rest)), ("var".into(), Json::Num(self.var)), ("warm".into(), Json::Bool(self.warm))])
+    }
+    /// A checkpoint line's `expect` for persona `p` -> the canonical memory; Err(what is wrong). It must be what the canonical fold
+    /// can hold: combos in key order, each count > 0 at 6 decimals, distinct keys, at most `max_combos - 1` named ones
+    pub fn read(p: &Persona, j: &Json) -> Result<ExpectMem, String> {
+        let ex = p.expect.as_ref().ok_or("the persona has no expectation block")?;
+        let kv = j.as_obj().filter(|kv| kv.len() == 6).ok_or("an object {combos, mean, n, rest, var, warm}")?;
+        let f = |k: &str| kv.iter().find(|(x, _)| x == k).map(|(_, v)| v).ok_or(format!("no {k}"));
+        let r6n = |k: &str| -> Result<f64, String> { f(k)?.as_f64().filter(|x| x.is_finite() && *x >= 0.0 && r6(*x) == *x).ok_or(format!("{k}: a number >= 0 at 6 decimals")) };
+        let mean = f("mean")?.as_f64().filter(|x| x.is_finite() && r6(*x) == *x).ok_or("mean: a number at 6 decimals")?;
+        let (var, rest) = (r6n("var")?, r6n("rest")?);
+        let n = f("n")?.as_f64().filter(|x| *x >= 0.0 && x.fract() == 0.0 && *x <= 9_007_199_254_740_992.0).ok_or("n: a whole number >= 0")? as u64;
+        let Json::Bool(warm) = f("warm")? else { return Err("warm: true or false".into()) };
+        let mut combos: Vec<(String, f64, Json)> = vec![];
+        for c in f("combos")?.as_arr().ok_or("combos: a list of [count, inputs]")? {
+            let (cnt, rep) = match c.as_arr() { Some([Json::Num(x), r @ Json::Obj(_)]) => (*x, r), _ => return Err("combos: each [count, inputs]".into()) };
+            if !(cnt.is_finite() && cnt > 0.0 && r6(cnt) == cnt) { return Err("combos: each count > 0 at 6 decimals".into()); }
+            let key = combo_key(p, rep.as_obj().unwrap_or(&[]));
+            if combos.last().is_some_and(|l| l.0 >= key) { return Err("combos: in key order, each key once".into()); }
+            combos.push((key, cnt, rep.clone())); }
+        if combos.iter().filter(|c| c.0 != "{}").count() > ex.max_combos - 1 { return Err(format!("combos: at most {} named", ex.max_combos - 1)); }
+        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true })
+    }
+}
 /// One event's deviation from the engine's own expectation (nats): `s_self` = sum over the non-twin variables of KL(A_i || E_i),
 /// `pred` = the same against the mixture Pi_i, `input` = -ln of the mixture weight of the event's combo (its own member's,
 /// else the empty member's), `cold` until the first non-time combo; `member`: the combo has its own member; `z` against the
@@ -3950,6 +3990,8 @@ pub fn expect_weights(ex: &Expect, mem: &ExpectMem) -> Vec<(String, f64)> {
     let keep = ex.max_combos - 1;
     let mut empty = 1.0 + mem.combos.iter().find(|x| x.0 == "{}").map_or(0.0, |x| x.1);
     for x in c.iter().skip(keep) { empty += x.1; }
+    // the canonical fold's evicted counts (0 in the fold before 0.14.0: the sum is unchanged)
+    if mem.canon { empty += mem.rest; }
     c.truncate(keep);
     let tot = c.iter().fold(empty, |a, x| a + x.1);
     let mut out = vec![("{}".to_string(), empty / tot)]; out.extend(c.into_iter().map(|(k, n)| (k, n / tot))); out
@@ -4010,11 +4052,29 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
     let Some(ex) = p.expect.as_ref() else { return }; let Some(kv) = raw.as_obj() else { return };
     let d = 0.5f64.powf(1.0 / ex.half_life); let key = combo_key(p, kv);
     let rep = Json::Obj(kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect());
+    // the canonical fold keeps a member's inputs with their keys sorted at every level, as a checkpoint line carries them
+    let rep = if mem.canon { key_sorted(&rep) } else { rep };
     for c in &mut mem.combos { c.1 *= d; }
     match mem.combos.iter_mut().find(|c| c.0 == key) { Some(c) => { c.1 += 1.0; c.2 = rep; } None => mem.combos.push((key.clone(), 1.0, rep)) }
     if key != "{}" { mem.warm = true; }
     if let Some(x) = logged_pred { let (x, a) = ((1.0 + x).ln(), 1.0 - d); let dx = x - mem.mean;
         mem.mean += a * dx; mem.var = (1.0 - a) * (mem.var + a * dx * dx); mem.n += 1; }
+    if mem.canon {
+        mem.rest = r6(mem.rest * d);
+        for c in &mut mem.combos { c.1 = r6(c.1); }
+        mem.combos.retain(|c| c.1 > 0.0);
+        // past max_combos - 1 named combos: the last in the mixture's order (count desc, key asc) moves its count to `rest`
+        while mem.combos.iter().filter(|c| c.0 != "{}").count() > ex.max_combos - 1 {
+            let Some(i) = (0..mem.combos.len()).filter(|&i| mem.combos[i].0 != "{}").min_by(|&a, &b| { let (x, y) = (&mem.combos[a], &mem.combos[b]);
+                x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal).then(y.0.cmp(&x.0)) }) else { break };
+            let c = mem.combos.remove(i); mem.rest = r6(mem.rest + c.1); }
+        mem.mean = r6(mem.mean); mem.var = r6(mem.var);
+    }
+}
+/// `j` with every object's keys sorted (by code point) at every level: the value canonical JSON writes, as a value
+fn key_sorted(j: &Json) -> Json {
+    match j { Json::Obj(v) => { let mut o: Vec<(String, Json)> = v.iter().map(|(k, x)| (k.clone(), key_sorted(x))).collect(); o.sort_by(|a, b| a.0.cmp(&b.0)); Json::Obj(o) }
+        Json::Arr(v) => Json::Arr(v.iter().map(key_sorted).collect()), x => x.clone() }
 }
 impl Deviation {
     /// The stance's `deviation`: every number at 6 decimals (the canonical number rule), so a checkpoint line carries the same

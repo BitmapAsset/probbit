@@ -364,6 +364,112 @@ mod tests {
             persona::expect_step(&pn, &mut mem, e, d.logged_pred()); st = persona::turn(&pn, &st, e, false, &run, false).unwrap().1; }
     }
 
+    /// 0.14.0, the canonical fold (docs/persona.md §5.7): a checkpoint of a persona with an expectation block carries the memory
+    /// (`expect`), so `verify --from-checkpoint` and `resume` start there: the life with a checkpoint after every 7th event gives
+    /// the stances, the state and the memory of the life without them, verifies from its header and from its last checkpoint to
+    /// one summary, and a resume writes the continuous life's next line; the memory never holds more than max_combos - 1 named
+    /// combos; an edited memory diverges at its checkpoint; a 0.13.0 strand keeps the four-key checkpoint and the refusal
+    #[test]
+    fn a_checkpoint_carries_the_expectation_memory() {
+        let mut on = json::parse(DOC).unwrap();
+        if let Json::Obj(v) = &mut on { v.push(("expectation".into(), json::parse(r#"{"max_combos":3}"#).unwrap())); }
+        let p = persona::build(&on).unwrap();
+        let evs: Vec<Json> = (0..60).map(|t| json::parse(&format!(r#"{{"praise":{},"criticism":{},"loss":{},"elapsed_hours":0.5}}"#, t % 2 == 1, t % 3 == 1, t % 5 == 4)).unwrap()).collect();
+        let life = |engine: &str, every: u64| { let (mut lv, head) = Live::start(p.clone(), &on, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
+            let (mut text, mut out) = (format!("{head}\n"), vec![]);
+            for e in &evs { let (s, l) = lv.event(e, &run).unwrap(); text += &l; text.push('\n'); if every > 0 && lv.n % every == 0 { text += &lv.checkpoint(&s); text.push('\n'); } out.push(s); }
+            (text, out, lv) };
+        let ((_, s0, l0), (cp, s1, l1)) = (life("probbit 0.14.0", 0), life("probbit 0.14.0", 7));
+        assert_eq!(s0, s1, "checkpoints move no stance"); let mem = |l: &Live| l.expect.as_ref().map(persona::ExpectMem::to_json);
+        assert_eq!(l0.st.digest, l1.st.digest); assert_eq!(mem(&l0), mem(&l1));
+        let ls: Vec<&str> = cp.lines().collect(); let cps: Vec<usize> = (0..ls.len()).filter(|&i| ls[i].starts_with(r#"{"checkpoint":"#)).collect(); assert_eq!(cps.len(), 8);
+        for &i in &cps { let j = json::parse(ls[i]).unwrap(); let m = persona::ExpectMem::read(&p, j.get("expect").expect("expect on a 0.14.0 checkpoint")).unwrap();
+            assert!(m.to_json().get("combos").and_then(Json::as_arr).unwrap().len() <= 3, "{}", ls[i]); }
+        let (full, fast) = (verify(&cp, &run).unwrap(), verify_from_checkpoint(&cp, &run).unwrap());
+        assert_eq!(fast.get("from_checkpoint"), Some(&Json::Num(56.0)));
+        for k in ["events", "final_state", "last_line"] { assert_eq!(full.get(k), fast.get(k), "{k}"); }
+        // resume from the text before the last event (the last checkpoint in it) and the state there: the continuous life's line
+        let cut: String = ls[..ls.len() - 1].iter().map(|l| format!("{l}\n")).collect();
+        let st = { let mut r = Replay::open(ls[0]).unwrap(); for l in &ls[1..ls.len() - 1] { r.step(l, &run).unwrap(); } r.live.st.clone() };
+        let mut lv = resume(&cut, &p, st, Clock::Fixed).unwrap(); let (_, last) = lv.event(&evs[59], &run).unwrap();
+        assert_eq!(last, ls[ls.len() - 1]); assert_eq!(mem(&lv), mem(&l1));
+        // an edited memory (the chain re-made after it) diverges at its checkpoint in a full verify
+        let at = cps[3]; let mut j = json::parse(ls[at]).unwrap(); let n = j.get("expect").and_then(|e| e.get("n")).and_then(Json::as_f64).unwrap();
+        put(&mut j, &["expect", "n"], Json::Num(n + 1.0)); let mut tt: Vec<String> = ls.iter().map(|l| l.to_string()).collect(); tt[at] = persona::canon(&j);
+        assert_eq!(verify(&rechain(tt, at), &run).unwrap_err(), (at + 1, "the checkpoint's state or stance differs from the replay".to_string()));
+        // before 0.14.0: four keys, and a replay from a checkpoint refuses
+        let (old, _, _) = life("probbit 0.13.0", 7);
+        assert!(old.lines().filter(|l| l.starts_with(r#"{"checkpoint":"#)).all(|l| !l.contains(r#""expect":"#)));
+        assert!(verify_from_checkpoint(&old, &run).unwrap_err().1.contains("expectation block reads every event"));
+        assert_eq!(verify(&old, &run).map(|d| d.get("checkpoints").cloned()), Ok(Some(Json::Num(8.0))));
+    }
+
+    /// Event t of the S1 lives on the expectation fixture persona (tests/fixtures/monitor/tutor-expect.yaml): a hash of t picks the
+    /// sentiment, six flags and two numbers' thirds, so the lives see many input combos
+    fn s1_event(t: usize) -> Json {
+        let h = (t as u64).wrapping_mul(2654435761) >> 7; let b = |k: u64| (h >> k) & 1 == 1;
+        json::parse(&format!(r#"{{"sentiment":"{}","confused":{},"error":{},"loss":{},"praise":{},"criticism":{},"claim_done":{},"stakes":{},"time_pressure":{},"elapsed_hours":{}}}"#,
+            ["negative", "neutral", "positive"][(h % 3) as usize], b(2), b(3), b(4) && b(5), b(6), b(7) && b(8), b(9) && b(10), [0.1, 0.5, 0.9][((h >> 11) % 3) as usize],
+            [0.0, 0.5, 0.9][((h >> 13) % 3) as usize], [0.1, 0.5, 2.0][((h >> 15) % 3) as usize])).unwrap()
+    }
+    /// Segments with an expectation block (0.14.0, docs/persona.md §5.7): 500 events of the expectation fixture persona logged as one
+    /// file with a checkpoint after every 50th, and as segments of 50 events (each file: a header linking the previous one, the
+    /// sealed line, the events, its own sealed line): every stance document and the final state are the same, the lines joined
+    /// (each segment's header and repeated sealed line set aside) are the one file's, each segment verifies from its link to the
+    /// final state of the one file, a resume in the newest segment writes the one file's next line, and a segment whose second
+    /// line is not its header's sealed line diverges at line 2
+    #[test]
+    fn segments_of_an_expectation_life_equal_one_file() {
+        let (p, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap(); assert!(p.expect.is_some());
+        let start = || Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.14.0");
+        let ((mut a, ha), (mut b, hb)) = (start(), start());
+        let (mut one, mut segs, mut sa, mut sb) = (format!("{ha}\n"), vec![format!("{hb}\n")], vec![], vec![]);
+        for t in 0..500 {
+            let (s, l) = a.event(&s1_event(t), &run).unwrap(); one += &l; one.push('\n'); if a.n % 50 == 0 { one += &a.checkpoint(&s); one.push('\n'); } sa.push(persona::canon(&s));
+            let (s, l) = b.event(&s1_event(t), &run).unwrap(); let cur = segs.last_mut().unwrap(); *cur += &l; cur.push('\n');
+            if b.n % 50 == 0 { let c = b.checkpoint(&s); *cur += &c; cur.push('\n'); let k = segs.len() as u64;
+                let h = segment_header(&b, &doc, "probbit 0.14.0", k, &segment_name("life.strand", k - 1), &persona::digest_of(&c)); segs.push(format!("{h}\n{c}\n")); }
+            sb.push(persona::canon(&s)); }
+        assert_eq!(sa, sb, "every stance document"); assert_eq!(a.st.digest, b.st.digest); assert_eq!(segs.len(), 11);
+        let mut joined: Vec<&str> = segs[0].lines().collect(); for t in &segs[1..] { joined.extend(t.lines().skip(2)); }
+        assert_eq!(joined, one.lines().collect::<Vec<_>>(), "the segments are the one file");
+        let fin = verify(&one, &run).unwrap(); assert_eq!(fin.get("events"), Some(&Json::Num(500.0)));
+        for (k, t) in segs.iter().enumerate() { let v = verify(t, &run).unwrap_or_else(|e| panic!("segment {k}: {e:?}"));
+            if k > 0 { assert_eq!(v.get("segment"), Some(&Json::Num(k as f64))); } if k == 10 { assert_eq!(v.get("final_state"), fin.get("final_state")); } }
+        let mut r = resume(&segs[10], &p, b.st.clone(), Clock::Fixed).unwrap(); let e = s1_event(500);
+        assert_eq!(r.event(&e, &run).unwrap().1, a.event(&e, &run).unwrap().1, "a resume in the newest segment");
+        let mut l3: Vec<&str> = segs[3].lines().collect(); let other = segs[4].lines().nth(1).unwrap(); l3[1] = other;
+        assert_eq!(verify(&(l3.join("\n") + "\n"), &run).unwrap_err(), (2, SEALED.to_string()));
+    }
+
+    /// S1 measurements (ignored: run with --ignored --nocapture): the expectation fixture persona, 500 events, a checkpoint every
+    /// 50: checkpoint line bytes (max_combos 16 and 64), and resume's time at 166 and 500 events, 0.13.0 (fold from the header)
+    /// against 0.14.0 (fold from the last checkpoint), with the full replay for scale
+    #[test]
+    #[ignore]
+    fn s1_measure() {
+        let y = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap();
+        let doc0 = probbit_persona::yaml::load(&y).unwrap_or_else(|e| panic!("{}", e.msg));
+        let ev = s1_event;
+        for mc in [16usize, 64] {
+            let mut d = doc0.clone(); put(&mut d, &["expectation"], json::parse(&format!(r#"{{"max_combos":{mc}}}"#)).unwrap()); let p = persona::build(&d).unwrap();
+            for engine in ["probbit 0.13.0", "probbit 0.14.0"] {
+                let (mut lv, head) = Live::start(p.clone(), &d, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
+                let (mut text, mut ev_b, mut cp_max, mut sts) = (format!("{head}\n"), 0usize, 0usize, vec![]);
+                for t in 0..500 { let (s, l) = lv.event(&ev(t), &run).unwrap(); ev_b = ev_b.max(l.len()); text += &l; text.push('\n');
+                    if lv.n % 50 == 0 { let c = lv.checkpoint(&s); cp_max = cp_max.max(c.len()); text += &c; text.push('\n'); } if lv.n == 166 || lv.n == 500 { sts.push((text.clone(), lv.st.clone())); } }
+                let named = lv.expect.as_ref().map(|m| m.to_json().get("combos").and_then(Json::as_arr).map_or(0, |a| a.len())).unwrap_or(0);
+                println!("S1 max_combos={mc} engine={engine}: header {} B, event line max {ev_b} B, checkpoint line max {cp_max} B, memory entries at 500: {named}", head.len());
+                for (n, (t, st)) in [166usize, 500].into_iter().zip(&sts) {
+                    let t0 = std::time::Instant::now(); let r = resume(t, &p, st.clone(), Clock::Fixed).unwrap(); let dt = t0.elapsed(); drop(r);
+                    let t1 = std::time::Instant::now(); let v = verify(t, &run).unwrap(); let dv = t1.elapsed(); assert_eq!(v.get("events"), Some(&Json::Num(n as f64)));
+                    let t2 = std::time::Instant::now(); let f = verify_from_checkpoint(t, &run); let df = t2.elapsed();
+                    println!("S1   n={n}: resume {:.1} ms, verify from header {:.1} ms, verify --from-checkpoint {} ({:.1} ms)", dt.as_secs_f64() * 1e3, dv.as_secs_f64() * 1e3,
+                        if f.is_ok() { "ok" } else { "refused" }, df.as_secs_f64() * 1e3); }
+            }
+        }
+    }
+
     /// §2.18: a persona with two moods and a habit that binds on a loss
     const GDOC: &str = r#"{"probbit_persona":1,"identity":{"name":"G","version":"1","seed":5},
         "traits":[{"id":"humour","levels":["none","light","playful"],"logw":[0,1.0,0.8]},{"id":"caution","levels":["bold","measured","careful"],"logw":[0.3,0.4,0]}],

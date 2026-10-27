@@ -30,6 +30,22 @@ All notable changes to this project are documented here. The format follows
   the same way, and `resume` opens the strand's header once (the chain check builds the persona on the heap and compares the
   header in pieces, without a replay). On the host proxy one event's stack high-water fell from 31,824 to 13,808 bytes and
   `resume`'s from 30,560 to 15,792; every stance document, strand line and digest is byte for byte as before.
+- **Resume after a checkpoint with an expectation block**: the chain check that `resume` (and `probbit live ... --strand`) runs
+  validates each checkpoint line (its state read, its event count, its link to the event before) without opening it as a replay
+  start, which a persona with an `expectation` block cannot do; such a strand resumes after its first checkpoint (it exited 2
+  before). Every line and digest as before.
+- **Checkpoints carry the expectation's memory** (docs/persona.md section 5.7, engine 0.14.0 on): the canonical fold (every count,
+  the mean and the variance at 6 decimals; at most `max_combos - 1` named combos, the one moved out adding its count to `rest`,
+  the empty member's) and one more checkpoint key, `expect`, so `verify --from-checkpoint`, `resume` and `monitor` start at the
+  last checkpoint of a strand with the block and fold only the events after it. The line is O(max_combos) (6,369 B for the
+  test fixture at `max_combos` 16; 14,121 B at 64). Strands whose header names an engine before 0.14.0 keep the four-key
+  checkpoint and the earlier fold, byte for byte; an earlier engine reads `expect` as unsupported (exit 5).
+- **Sealed segments** (docs/persona.md section 5.7, docs/embedding.md "Sizing a strand on flash"): `probbit live ...
+  --segment-every N` seals the strand with a checkpoint line every N events and goes on in `NAME.0001.strand`, ...: a header with
+  `segment` {index, previous, sealed} and the sealed line itself, so the chain continues across files. `live verify SEGMENT`
+  checks one segment on its link (summary `segment`, `trusted_link`); `live verify SEGMENT --chain` walks back to the first file
+  (exit 1 at a break, naming the file; exit 6 when a previous file is missing). `strand::segment_header`,
+  `strand::segment_name`, `strand::write_header_seg`, `strand::Replay::open_lines`.
 - **`turn_trace`** (feature of probbit-persona and probbit-cli, off by default): `persona::trace` records the last event's
   microseconds and a host probe's value per phase (input, expect, prep, compile, solve, decode, document, line, fold), so a
   firmware measures the same breakdown on its hardware; `probbit live` in such a build prints it on stderr when

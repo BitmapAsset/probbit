@@ -682,3 +682,44 @@ fn a_strand_with_checkpoints_resumes_with_and_without_an_expectation_block() {
         clean(&[&all, &head, &last, &st1, &one, &st2, &two]);
     }
 }
+
+/// Segments (docs/persona.md §5.7): a life logged with `--segment-every 50` over two runs (70 events, then 50) is three files whose
+/// lines, each segment's header and repeated sealed line set aside, are the life logged to one file with a checkpoint after every
+/// 50th event; the stances and the state are the same; each segment verifies on its own (from its header's link) and
+/// `verify --chain` walks back through all three; a previous segment whose last line is not the sealed line exits 1 naming that
+/// file, a missing one exits 6 naming it; before 0.14.0 a persona with an expectation block cannot be segmented
+#[test]
+fn a_segmented_life_equals_one_file_and_verify_chain_walks_back() {
+    let evs: Vec<String> = (0..120).map(|t| match t % 3 { 0 => r#"{"elapsed_hours":1,"praise":true}"#, 1 => r#"{"elapsed_hours":0.5,"error":true}"#, _ => r#"{"elapsed_hours":2}"# }.to_string()).collect();
+    let all = events_file("seg-all.jsonl", &evs); let (a, b) = (events_file("seg-a.jsonl", &evs[..70]), events_file("seg-b.jsonl", &evs[70..]));
+    let st1 = init(TUTOR, 3, "seg-one.json"); let one = tmp("seg-one.strand"); clean(&[&one]);
+    let (c, out1, e) = live(TUTOR, &st1, &all, &one, "50"); assert_eq!(c, 0, "{e}");
+    let dir = tmp("seg-dir"); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let base = format!("{dir}/life.strand"); let seg = |k: usize| if k == 0 { base.clone() } else { format!("{dir}/life.{k:04}.strand") };
+    let st2 = init(TUTOR, 3, "seg-two.json");
+    let run = |ev: &str| probbit(&["live", TUTOR, "--state", &st2, "--clock", "fixed", "--events", ev, "--strand", &base, "--checkpoint-every", "50", "--segment-every", "50"]);
+    let (c, o1, e) = run(&a); assert_eq!(c, 0, "{e}"); let (c, o2, e) = run(&b); assert_eq!(c, 0, "{e}");
+    assert_eq!(format!("{o1}{o2}"), out1, "the stances"); assert_eq!(read(&st2), read(&st1), "the state");
+    assert!(std::path::Path::new(&seg(2)).exists() && !std::path::Path::new(&seg(3)).exists(), "three segments");
+    let texts: Vec<String> = (0..3).map(|k| read(&seg(k))).collect();
+    let mut joined: Vec<&str> = texts[0].lines().collect(); for t in &texts[1..] { joined.extend(t.lines().skip(2)); }
+    assert_eq!(joined, read(&one).lines().collect::<Vec<_>>(), "the segments are the one-file strand");
+    for k in 1..3 { let h = parse(texts[k].lines().next().unwrap()); let sg = s(&h, &["segment"]);
+        assert_eq!(s(sg, &["index"]), &Json::Num(k as f64)); assert_eq!(s(sg, &["previous"]).as_str(), Some(if k == 1 { "life.strand".to_string() } else { format!("life.{:04}.strand", k - 1) }.as_str()));
+        assert_eq!(texts[k].lines().nth(1), texts[k - 1].lines().last(), "segment {k} repeats the sealed line"); }
+    let (_, vone, _) = probbit(&["live", "verify", &one]); let vone = parse(&vone);
+    for k in 0..3 { let (c, v, e) = probbit(&["live", "verify", &seg(k)]); assert_eq!(c, 0, "segment {k}: {e}"); if k > 0 { assert!(v.contains(&format!(r#""segment":{k}"#)) && v.contains("trusted_link"), "{v}"); } }
+    let (c, v, e) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 0, "{e}"); let v = parse(&v);
+    assert_eq!(s(&v, &["segments"]), &Json::Num(3.0)); assert_eq!(s(&v, &["final_state"]), s(&vone, &["final_state"])); assert_eq!(s(&v, &["last_line"]), s(&vone, &["last_line"]));
+    // the link broken: the first segment's sealed line edited (kept canonical): the chain breaks there, named
+    std::fs::write(seg(1), texts[1].replacen(r#"{"checkpoint":100,"#, r#"{"checkpoint":100,"x":1,"#, 1)).unwrap();
+    let (c, v, _) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 1, "{v}"); assert!(v.contains(r#""segment_file":"life.0001.strand""#), "{v}");
+    std::fs::remove_file(seg(1)).unwrap();
+    let (c, v, _) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 6, "{v}");
+    assert!(v.contains(r#""missing":"life.0001.strand""#) && v.contains(r#""segment_file":"life.0002.strand""#), "{v}");
+    // before 0.14.0 (this engine's strands) an expectation persona is not segmented
+    let (st3, f3) = (init("probbit-cli/tests/fixtures/monitor/tutor-expect.yaml", 2, "seg-x.json"), format!("{dir}/x.strand"));
+    let (c, _, e) = probbit(&["live", "probbit-cli/tests/fixtures/monitor/tutor-expect.yaml", "--state", &st3, "--clock", "fixed", "--events", &a, "--strand", &f3, "--segment-every", "50"]);
+    assert_eq!(c, 2, "{e}"); assert!(e.contains("--segment-every"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2, &st3]);
+}

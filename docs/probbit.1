@@ -7,11 +7,11 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         (SUB: init turn replay explain diff lint fuzz prove check compile describe)
 \fBprobbit\fR live PERSONA [\-\-seed N | \-\-state FILE]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-events FILE [\-\-watch]]
-        [\-\-clock real|fixed] [\-\-checkpoint\-every K]
+        [\-\-clock real|fixed] [\-\-checkpoint\-every K] [\-\-segment\-every N]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-plain]
-\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-        [\-\-blocks FILE]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-chain]
+        [\-\-actions FILE] [\-\-blocks FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
         TEXT [\-\-at TIME]
 \fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
@@ -294,11 +294,11 @@ a resident individual: JSONL events in, one stance per event out
 .nf
 \fBprobbit\fR live PERSONA [\-\-seed N | \-\-state FILE]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-events FILE [\-\-watch]]
-        [\-\-clock real|fixed] [\-\-checkpoint\-every K]
+        [\-\-clock real|fixed] [\-\-checkpoint\-every K] [\-\-segment\-every N]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-plain]
-\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-        [\-\-blocks FILE]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-chain]
+        [\-\-actions FILE] [\-\-blocks FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
         TEXT [\-\-at TIME]
 .fi
@@ -337,6 +337,9 @@ no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise
 \fB\-\-checkpoint\-every\fR \fIK\fR
 with \-\-strand: a checkpoint line (the whole state) after every K\-th event (default 1000; 0: none); `verify \-\-from\-checkpoint` and `monitor` start at the last one
 .TP
+\fB\-\-segment\-every\fR \fIN\fR
+with \-\-strand NAME.strand: seal the strand after every N\-th event (a sealing checkpoint line) and go on in the next segment file NAME.0001.strand, NAME.0002.strand, ...: its header links the previous file (its name, the sealed line's sha256, the index) and its second line is the sealed line, so the chain continues across files; a run continues the newest segment (default 0: one file)
+.TP
 \fB\-\-label\fR \fIKEY=VALUE\fR
 with \-\-strand, repeatable: a presentation label for the monitor (agent, host, lane, session, or a free key; at most 8 keys, values of 1 to 64 printable characters) merged into the strand's sidecar FILE.labels.json (FILE without its extension); the strand itself, its chain and its digests are not touched
 .RE
@@ -344,12 +347,15 @@ with \-\-strand, repeatable: a presentation label for the monitor (agent, host, 
 Subcommands:
 .RS 4
 .TP
-\fBverify\fR STRAND [\-\-from\-checkpoint] [\-\-actions FILE] [\-\-blocks FILE]
+\fBverify\fR STRAND [\-\-from\-checkpoint] [\-\-chain] [\-\-actions FILE] [\-\-blocks FILE]
 replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with \-\-actions, also the earliest turn whose host action differs from the level its stance released
 .RS 4
 .TP
 \fB\-\-from\-checkpoint\fR
 start at the last checkpoint instead of the header
+.TP
+\fB\-\-chain\fR
+a segment (section 5.7): verify it and walk back through the previous segment files to the first, each verified and its last line the sealed line the next one links; exit 1 at the first break (the segment file named), 6 when a previous segment file is missing
 .TP
 \fB\-\-actions\fR \fIFILE\fR
 the host's action log, one {"turn": T, "action": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs
@@ -375,7 +381,7 @@ when (default: now, UTC)
 .PP
 \fIthe safety kit\fR: (docs/persona.md \[u00A7]5.7) one writer per strand: `\-\-strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (\[u00A7]2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event.
 .PP
-\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {"ok": false, "line", "unsupported": the field, "engine", "strand_engine"}; not verified, and not a divergence).
+\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {"ok": false, "line", "unsupported": the field, "engine", "strand_engine"}; not verified, and not a divergence), 6 verify \-\-chain: a previous segment file is missing ({"ok": false, "missing": its file name, "segment_file": the segment that links it}).
 .PP
 Examples:
 .RS 4

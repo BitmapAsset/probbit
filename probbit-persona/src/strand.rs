@@ -102,8 +102,8 @@ impl Live {
     #[inline(never)]
     pub fn start_to(p: Box<Persona>, doc: &Json, st: Box<State>, clock: Clock, engine: &str, chunk: usize, out: &mut dyn FnMut(&[u8])) -> Box<Live> {
         let prev = write_header(&p, doc, &st, engine, chunk, out);
-        let expect = p.expect.as_ref().map(|_| persona::ExpectMem::new());
         let dev_full = engine_version(engine).is_some_and(|v| v < DEV_R6_SINCE);
+        let expect = p.expect.as_ref().map(|_| new_mem(dev_full));
         Live::boxed(p, st, clock, prev, 0, expect, dev_full)
     }
     /// The individual on the heap from its parts (one place builds a `Live`: `start_to` and `resume_boxed`), written in place:
@@ -181,11 +181,15 @@ impl Live {
         self.st = self.st.zero_credit(&self.p); if what == "erase" { self.st = self.st.erased(&self.p); } self.status = to; self.controls += 1; self.prev = persona::digest_of(&line);
         Ok(line)
     }
-    /// A checkpoint line after event n: the event count, the whole state after it and that event's stance document, chained ->
-    /// the line. A replay can start there (the state) and a board can be drawn there (the stance) without the events before.
+    /// A checkpoint line after event n: the event count, the whole state after it and that event's stance document (from 0.14.0,
+    /// with an expectation block, also the expectation's memory: `expect`), chained -> the line. A replay can start there (the
+    /// state) and a board can be drawn there (the stance) without the events before.
     pub fn checkpoint(&mut self, stance: &Json) -> String {
-        let line = persona::canon(&Json::Obj(vec![("checkpoint".into(), Json::Num(self.n as f64)), ("prev".into(), Json::Str(self.prev.clone())), ("stance".into(), stance.clone()),
-            ("state".into(), self.st.to_json(&self.p))]));
+        let mut kv = vec![("checkpoint".into(), Json::Num(self.n as f64)), ("prev".into(), Json::Str(self.prev.clone())), ("stance".into(), stance.clone()),
+            ("state".into(), self.st.to_json(&self.p))];
+        // from 0.14.0 the expectation's memory (the canonical fold) rides on the line, so a replay and a resume can start here
+        if let Some(m) = self.expect.as_ref().filter(|m| m.is_canonical()) { kv.push(("expect".into(), m.to_json())); }
+        let line = persona::canon(&Json::Obj(kv));
         self.checkpoints += 1; self.prev = persona::digest_of(&line); line
     }
     /// The sha256 of the strand's last line (the header's before any event)
@@ -210,6 +214,11 @@ impl persona::Sink for Pieces<'_> {
 /// at most `chunk` bytes (a 0 is taken as 1) -> its sha256 (`sha256:` + hex), the first line's `prev`. Neither the line nor a
 /// copy of the document is held whole: the buffer is one piece.
 pub fn write_header(p: &Persona, doc: &Json, st: &State, engine: &str, chunk: usize, out: &mut dyn FnMut(&[u8])) -> String {
+    write_header_seg(p, doc, st, engine, None, chunk, out)
+}
+/// `write_header` of a segment (docs/persona.md §5.7, "Segments"): the header with one more key at its end, `segment` = {index,
+/// previous, sealed} (canonical JSON); None writes `write_header`'s bytes
+pub fn write_header_seg(p: &Persona, doc: &Json, st: &State, engine: &str, segment: Option<&Json>, chunk: usize, out: &mut dyn FnMut(&[u8])) -> String {
     use persona::Sink;
     let cap = chunk.max(1);
     let mut w = Pieces { buf: Vec::with_capacity(cap), cap, out, h: persona::Sha256::new() };
@@ -221,6 +230,7 @@ pub fn write_header(p: &Persona, doc: &Json, st: &State, engine: &str, chunk: us
     w.push_str(",\"seed\":"); persona::write_to(&Json::Num(st.seed as f64), false, &mut w);
     w.push_str(",\"state\":"); persona::write_to(&st.to_json(p), true, &mut w);
     w.push_str(",\"document\":"); persona::write_to(doc, false, &mut w);
+    if let Some(sg) = segment { w.push_str(",\"segment\":"); persona::write_to(sg, true, &mut w); }
     w.push('}');
     if !w.buf.is_empty() { (w.out)(&w.buf); }
     format!("sha256:{}", persona::hex(&w.h.finish()))
@@ -244,14 +254,40 @@ fn rest_line(prev: &str, rest: Json, state: &str) -> String {
 /// What kind of strand line `j` is
 pub enum Kind { Event, Control, Checkpoint, Rest }
 pub fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else if j.get("rest").is_some() { Kind::Rest } else { Kind::Event } }
-/// The header's keys, as this engine writes them
+/// The header's keys, as this engine writes them (a segment's header has one more at its end: `segment`)
 const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state", "document"];
+/// The divergence of a segment whose second line is not the line its header links
+pub const SEALED: &str = "the line after a segment's header is not its sealed line (its sha256 is not the header's `sealed`)";
+/// A header's `segment`: exactly {index: a whole number >= 1, previous: a file name (1-255 characters, no `/` or `\\`), sealed: a
+/// sha256}
+fn check_segment(sg: &Json) -> Result<(), String> {
+    let kv = sg.as_obj().filter(|kv| kv.len() == 3).ok_or("an object {index, previous, sealed}")?;
+    let f = |k: &str| kv.iter().find(|(x, _)| x == k).map(|(_, v)| v);
+    f("index").and_then(Json::as_f64).filter(|x| *x >= 1.0 && x.fract() == 0.0 && *x <= 9_007_199_254_740_992.0).ok_or("index: a whole number >= 1")?;
+    f("previous").and_then(Json::as_str).filter(|s| !s.is_empty() && s.len() <= 255 && !s.contains(['/', '\\'])).ok_or("previous: the previous segment's file name")?;
+    f("sealed").and_then(Json::as_str).filter(|s| s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_hexdigit())).ok_or("sealed: a sha256")?;
+    Ok(())
+}
+/// The file name of segment `k` of the strand `base` (§5.7): `NAME.strand` for 0, `NAME.000k.strand` after it (four digits at least);
+/// a base without `.strand` gets `.000k` appended
+pub fn segment_name(base: &str, k: u64) -> String {
+    if k == 0 { return base.to_string(); }
+    match base.strip_suffix(".strand") { Some(stem) => format!("{stem}.{k:04}.strand"), None => format!("{base}.{k:04}") }
+}
+/// The header of segment `index` that continues `lv` after its sealed line (whose sha256 is `sealed`; `previous` is the file name
+/// of the segment it seals), for the persona document `doc` and the strand's `engine` -> the header line. The new file is this
+/// header, then the sealed line itself (byte for byte), then the events: the chain goes on across the files unchanged.
+pub fn segment_header(lv: &Live, doc: &Json, engine: &str, index: u64, previous: &str, sealed: &str) -> String {
+    let sg = Json::Obj(vec![("index".into(), Json::Num(index as f64)), ("previous".into(), Json::Str(previous.into())), ("sealed".into(), Json::Str(sealed.into()))]);
+    let mut b = Vec::new(); write_header_seg(&lv.p, doc, &lv.st, engine, Some(&sg), HEADER_CHUNK, &mut |c: &[u8]| b.extend_from_slice(c));
+    String::from_utf8(b).unwrap_or_default()
+}
 /// The earliest key of a line after the header that its kind does not have (the line's keys in canonical order): a line kind
 /// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "nap": ...}`
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
     let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
-        Kind::Checkpoint => &["checkpoint", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"] };
+        Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
 /// The start of a replay's `why` that is not a divergence: the line has a field or a line kind this engine does not know (a
@@ -304,12 +340,16 @@ impl Replay {
     pub fn open(head: &str) -> Result<Replay, (usize, String)> {
         let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
         if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
-        if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()))) { return Err((1, unsupported(k))); }
+        if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()) && k != "segment")) { return Err((1, unsupported(k))); }
+    if let Some(sg) = h.get("segment") { check_segment(sg).map_err(|e| (1, format!("the header's segment: {e}")))?; }
         let doc = h.get("document").cloned().ok_or((1, "the header has no persona document".to_string()))?;
         let p = persona::build(&doc).map_err(|e| (1, read_err(e, "the persona document: ")))?;
         if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
         let st0 = State::read(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, read_err(e, "the initial state: ")))?;
         let (live, header) = Live::start(p, &doc, st0, Clock::Fixed, h.get("engine").and_then(Json::as_str).unwrap_or(""));
+        let header = match h.get("segment") { None => header, Some(sg) => { let mut b = Vec::new();
+            write_header_seg(&live.p, &doc, &live.st, h.get("engine").and_then(Json::as_str).unwrap_or(""), Some(sg), HEADER_CHUNK, &mut |c: &[u8]| b.extend_from_slice(c));
+            String::from_utf8(b).unwrap_or_default() } };
         if header != head { return Err((1, "the header is not as written".into())); }
         let norms = Normals::start(&live.p, &live.st); let at_cap = vec![0.0; persona::deficits(&live.p, &live.st).len()]; let seen = (0.0, vec![0.0; persona::gate_gains(&live.p, &live.st).len()]);
         let viab = viab_start(&live);
@@ -322,11 +362,34 @@ impl Replay {
     pub fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Replay, (usize, String)> {
         let mut r = Replay::open(head)?;
         // RFC 0009: the expectation's memory is a fold of every event line, so a strand with the block replays from its header
-        if r.live.p.expect.is_some() { return Err((at, "the persona's expectation block reads every event before this checkpoint: verify this strand from its header".into())); }
-        let (n, stance, st) = check_checkpoint(&r.live.p, before, cp, at)?;
-        r.live.st = *st; r.live.n = n; r.live.prev = persona::digest_of(cp); r.live.checkpoints = 1; r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
-        r.norms = Normals::start(&r.live.p, &r.live.st); r.at_cap = vec![0.0; r.at_cap.len()]; r.seen = (0.0, vec![0.0; r.seen.1.len()]); r.viab = viab_start(&r.live);
+        // RFC 0009: before 0.14.0 the expectation's memory is a fold of every event line and no checkpoint carries it, so such a
+        // strand replays from its header; from 0.14.0 the checkpoint carries it
+        let canon = !r.live.dev_full;
+        if r.live.p.expect.is_some() && !canon { return Err((at, "the persona's expectation block reads every event before this checkpoint: verify this strand from its header".into())); }
+        let (n, stance, st, mem) = check_checkpoint(&r.live.p, canon, Some(before), cp, at)?;
+        r.start_at(n, stance, st, mem, cp, at); r.live.checkpoints = 1;
         Ok(r)
+    }
+    /// The replay restarted at the checkpoint line `cp` (1-based line `at`): its count, stance, state and memory
+    fn start_at(&mut self, n: u64, stance: Json, st: Box<State>, mem: Option<persona::ExpectMem>, cp: &str, at: usize) {
+        let r = self;
+        r.live.st = *st; r.live.n = n; if mem.is_some() { r.live.expect = mem; } r.live.prev = persona::digest_of(cp); r.line = at; r.from = Some(n); r.last = Some(stance); r.checkpoint_ready = false;
+        r.norms = Normals::start(&r.live.p, &r.live.st); r.at_cap = vec![0.0; r.at_cap.len()]; r.seen = (0.0, vec![0.0; r.seen.1.len()]); r.viab = viab_start(&r.live);
+    }
+    /// The replay of a strand's `lines` from their start -> (the replay, the index of the first line still to step): the header, or
+    /// for a segment (a header with `segment`) the header and its sealed line (line 2), taken on the header's link: its sha256 is
+    /// the header's `sealed`, it is a valid checkpoint line and its state is the header's; the replay goes on from it
+    pub fn open_lines(lines: &[&str]) -> Result<(Replay, usize), (usize, String)> {
+        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+        let Some(sg) = r.header.get("segment").cloned() else { return Ok((r, 1)) };
+        let canon = !r.live.dev_full;
+        if r.live.p.expect.is_some() && !canon { return Err((1, "a segment of a persona with an expectation block needs a strand of engine 0.14.0 or later".into())); }
+        let cp = lines.get(1).copied().unwrap_or("");
+        if Some(persona::digest_of(cp).as_str()) != sg.get("sealed").and_then(Json::as_str) { return Err((2, SEALED.into())); }
+        let (n, stance, st, mem) = check_checkpoint(&r.live.p, canon, None, cp, 2)?;
+        if st.digest != r.live.st.digest { return Err((2, "the sealed line's state is not the segment header's".into())); }
+        r.start_at(n, stance, st, mem, cp, 2);
+        Ok((r, 2))
     }
     /// The stance document of the last event replayed (or of the checkpoint the replay started from)
     pub fn last_stance(&self) -> Option<&Json> { self.last.as_ref() }
@@ -416,6 +479,8 @@ impl Replay {
         if let Some((sp, pend)) = persona::rest_pressure(&live.st) { v.push(("pressure".into(), Json::Obj(vec![("s".into(), Json::Num(sp)), ("pending".into(), Json::Bool(pend))]))); }
         if let Some((l, _)) = persona::load_level(&live.p, &live.st) { v.push(("load".into(), Json::Obj(vec![("l".into(), Json::Num(l))]))); }
         if let Some(n) = self.from { v.push(("from_checkpoint".into(), Json::Num(n as f64))); }
+        // a segment (§5.7): its index and the digest of the sealed line its replay started from, taken on the link
+        if let Some(sg) = self.header.get("segment") { v.push(("segment".into(), sg.get("index").cloned().unwrap_or(Json::Null))); v.push(("trusted_link".into(), sg.get("sealed").cloned().unwrap_or(Json::Null))); }
         // a senses block (§2.11): per sense the normal now and the largest move of its mean within 50 events
         let nm = persona::normals(&live.p, &live.st);
         if !nm.is_empty() { v.push(("normals".into(), Json::Obj(nm.iter().enumerate().map(|(k, (id, m, n, _))| (id.clone(), Json::Obj(vec![("mean".into(), Json::Num(*m)),
@@ -445,8 +510,8 @@ pub type Blocks = Vec<(u64, String)>;
 pub fn verify_blocks(text: &str, eng: Engine) -> Result<(Json, Blocks), (usize, String)> {
     let lines = lines(text);
     let replay = || -> Result<(Json, Blocks), (usize, String)> {
-        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut out = vec![];
-        for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? { out.push((r.live.n, persona::block(&r.live.p, &doc))); } }
+        let (mut r, k) = Replay::open_lines(&lines)?; let mut out = vec![];
+        for l in lines.iter().skip(k) { if let Some(doc) = r.step(l, eng)? { out.push((r.live.n, persona::block(&r.live.p, &doc))); } }
         Ok((r.summary(), out)) };
     replay().map_err(|e| chain_first(&lines, e))
 }
@@ -465,8 +530,8 @@ pub fn lines(text: &str) -> Vec<&str> {
 pub fn verify(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
     let lines = lines(text);
     let replay = || -> Result<Json, (usize, String)> {
-        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
-        for l in lines.iter().skip(1) { r.step(l, eng)?; }
+        let (mut r, k) = Replay::open_lines(&lines)?;
+        for l in lines.iter().skip(k) { r.step(l, eng)?; }
         r.end()?; Ok(r.summary()) };
     replay().map_err(|e| chain_first(&lines, e))
 }
@@ -493,7 +558,8 @@ pub fn last_checkpoint(lines: &[&str], after: usize) -> Option<usize> {
 /// `verify --from-checkpoint`: replay from the last checkpoint line (the header read as always), not from the header
 pub fn verify_from_checkpoint(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
     let lines = lines(text);
-    let Some(k) = last_checkpoint(&lines, 0) else { return verify(text, eng) };
+    // a segment's sealed line (line 2) is where its own replay starts anyway
+    let Some(k) = last_checkpoint(&lines, 0).filter(|&k| k >= 2) else { return verify(text, eng) };
     let replay = || -> Result<Json, (usize, String)> {
         let mut r = Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1)?;
         for l in lines.iter().skip(k + 1) { r.step(l, eng)?; }
@@ -504,8 +570,8 @@ pub fn verify_from_checkpoint(text: &str, eng: Engine) -> Result<Json, (usize, S
 pub fn verify_keep(text: &str, eng: Engine, keep: &[u64]) -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
     let lines = lines(text);
     let replay = || -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
-        let mut r = Replay::open(lines.first().copied().unwrap_or(""))?; let mut kept = vec![];
-        for l in lines.iter().skip(1) { if let Some(doc) = r.step(l, eng)? {
+        let (mut r, k) = Replay::open_lines(&lines)?; let mut kept = vec![];
+        for l in lines.iter().skip(k) { if let Some(doc) = r.step(l, eng)? {
             if let Some(t) = doc.get("turn").and_then(Json::as_f64).map(|x| x as u64).filter(|t| keep.contains(t)) { kept.push((t, doc)); } } }
         r.end()?; Ok((r.summary(), kept, r.live.p.clone())) };
     replay().map_err(|e| chain_first(&lines, e))
@@ -574,13 +640,14 @@ pub fn check_chain(text: &str) -> Result<Status, InErr> { check_chain_head(text)
 fn open_head(head: &str) -> Result<(Box<Persona>, Json), (usize, String)> {
     let h = json::parse(head).map_err(|e| (1, format!("the header is not JSON: {}", e.msg)))?;
     if h.get("probbit_strand").and_then(Json::as_f64) != Some(FORMAT) { return Err((1, "not a probbit strand (format 1)".into())); }
-    if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()))) { return Err((1, unsupported(k))); }
+    if let Some((k, _)) = h.as_obj().and_then(|kv| kv.iter().find(|(k, _)| !HEADER.contains(&k.as_str()) && k != "segment")) { return Err((1, unsupported(k))); }
+    if let Some(sg) = h.get("segment") { check_segment(sg).map_err(|e| (1, format!("the header's segment: {e}")))?; }
     let doc = h.get("document").ok_or((1, "the header has no persona document".to_string()))?;
     let p = persona::build_boxed(doc).map_err(|e| (1, read_err(e, "the persona document: ")))?;
     if h.get("persona").and_then(|x| x.get("digest")).and_then(Json::as_str) != Some(p.digest.as_str()) { return Err((1, "the persona digest does not match the document".into())); }
     let st0 = read_boxed(&p, h.get("state").unwrap_or(&Json::Null)).map_err(|e| (1, read_err(e, "the initial state: ")))?;
     let (hb, mut at, mut same) = (head.as_bytes(), 0usize, true);
-    write_header(&p, doc, &st0, h.get("engine").and_then(Json::as_str).unwrap_or(""), HEADER_CHUNK, &mut |c: &[u8]| { same = same && hb.get(at..at + c.len()) == Some(c); at += c.len(); });
+    write_header_seg(&p, doc, &st0, h.get("engine").and_then(Json::as_str).unwrap_or(""), h.get("segment"), HEADER_CHUNK, &mut |c: &[u8]| { same = same && hb.get(at..at + c.len()) == Some(c); at += c.len(); });
     if !same || at != hb.len() { return Err((1, "the header is not as written".into())); }
     Ok((p, h))
 }
@@ -589,27 +656,33 @@ fn open_head(head: &str) -> Result<(Box<Persona>, Json), (usize, String)> {
 /// the stance and the state (read as any state is) that event logs -> the count, the stance and the state. No replay starts here,
 /// so it holds for a persona with an expectation block too: the chain check needs the line valid, not a replay start.
 #[inline(never)]
-fn check_checkpoint(p: &Persona, before: &str, cp: &str, at: usize) -> Result<(u64, Json, Box<State>), (usize, String)> {
+fn check_checkpoint(p: &Persona, canon: bool, before: Option<&str>, cp: &str, at: usize) -> Result<(u64, Json, Box<State>, Option<persona::ExpectMem>), (usize, String)> {
     let j = json::parse(cp).map_err(|e| (at, format!("not JSON: {}", e.msg)))?;
-    let b = json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?;
+    // a segment's sealed line (no `before`: the event before it is in the previous segment) is taken on its link
+    let b = match before { Some(before) => json::parse(before).map_err(|e| (at - 1, format!("not JSON: {}", e.msg)))?, None => Json::Null };
     if persona::canon(&j) != cp { return Err((at, "not canonical JSON".into())); }
     if let Some(k) = unknown_key(&j) { return Err((at, unsupported(k))); }
-    if !j.as_obj().is_some_and(|kv| kv.len() == 4 && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()))) {
-        return Err((at, "checkpoint fields must be checkpoint, prev, stance and state".into()));
+    // from 0.14.0 a persona with an expectation block also carries `expect` (the canonical fold's memory)
+    let with = canon && p.expect.is_some();
+    if !j.as_obj().is_some_and(|kv| kv.len() == 4 + usize::from(with) && kv.iter().all(|(k, _)| ["checkpoint", "prev", "stance", "state"].contains(&k.as_str()) || (with && k == "expect"))) {
+        return Err((at, if with { "checkpoint fields must be checkpoint, expect, prev, stance and state" } else { "checkpoint fields must be checkpoint, prev, stance and state" }.into()));
     }
     // §2.18: an event line of a persona with glyphs also carries `glyph`; RFC 0009: of a persona with an expectation block, `deviation`
     let extra = |kv: &[(String, Json)]| kv.iter().filter(|(k, _)| k == "glyph" || k == "deviation").count();
-    if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation"].contains(&k.as_str()))) {
-        return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
+    if let Some(before) = before {
+        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation"].contains(&k.as_str()))) {
+            return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
+        }
+        if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
     }
-    if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
     let n = j.get("checkpoint").and_then(Json::as_f64).filter(|x| *x >= 1.0 && x.fract() == 0.0).ok_or((at, "not a checkpoint line".to_string()))? as u64;
-    if b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
+    if before.is_some() && b.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err((at, format!("the line before is not event {n}"))); }
     let stance = j.get("stance").cloned().unwrap_or(Json::Null);
-    if b.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
+    if before.is_some() && b.get("stance").and_then(Json::as_str) != Some(persona::stance_sha(&stance).as_str()) { return Err((at, "the checkpoint's stance is not the one event {n} logs".replace("{n}", &n.to_string()))); }
     let st = read_boxed(p, j.get("state").unwrap_or(&Json::Null)).map_err(|e| (at, read_err(e, "the checkpoint's state: ")))?;
-    if b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
-    Ok((n, stance, st))
+    if before.is_some() && b.get("state").and_then(Json::as_str) != Some(st.digest.as_str()) { return Err((at, format!("the checkpoint's state is not the one event {n} logs"))); }
+    let mem = if with { Some(persona::ExpectMem::read(p, j.get("expect").unwrap_or(&Json::Null)).map_err(|e| (at, format!("the checkpoint's expect: {e}")))?) } else { None };
+    Ok((n, stance, st, mem))
 }
 #[inline(never)]
 fn read_boxed(p: &Persona, j: &Json) -> Result<Box<State>, InErr> { State::read(p, j).map(Box::new) }
@@ -619,9 +692,20 @@ fn check_chain_head(text: &str) -> Result<(Status, Box<Persona>, Json), InErr> {
     let ls = lines(text);
     let err = |line: usize, why: String| perr("strand", format!("line {line}: {why}"));
     let (hp, h) = open_head(ls.first().copied().unwrap_or("")).map_err(|(i, why)| err(i, why))?;
+    let canon = !engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
     let mut status = Status::Active;
     let mut n = 0u64;
-    for i in 1..ls.len() {
+    let mut from = 1;
+    // a segment: its second line is the sealed line, taken on its link (the header's `sealed`); the chain goes on from it
+    if let Some(sg) = h.get("segment") {
+        if hp.expect.is_some() && !canon { return Err(err(1, "a segment of a persona with an expectation block needs a strand of engine 0.14.0 or later".into())); }
+        let cp = ls.get(1).copied().unwrap_or("");
+        if Some(persona::digest_of(cp).as_str()) != sg.get("sealed").and_then(Json::as_str) { return Err(err(2, SEALED.into())); }
+        let (cn, _, st, _) = check_checkpoint(&hp, canon, None, cp, 2).map_err(|(at, why)| err(at, why))?;
+        if Some(st.digest.as_str()) != h.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str) { return Err(err(2, "the sealed line's state is not the segment header's".into())); }
+        n = cn; from = 2;
+    }
+    for i in from..ls.len() {
         let j = json::parse(ls[i]).map_err(|e| err(i + 1, e.msg))?;
         if persona::canon(&j) != ls[i] { return Err(err(i + 1, "not canonical JSON".into())); }
         if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(ls[i - 1]).as_str()) {
@@ -654,7 +738,7 @@ fn check_chain_head(text: &str) -> Result<(Status, Box<Persona>, Json), InErr> {
                 if status != Status::Active { return Err(err(i + 1, format!("checkpoint while {}", status.name()))); }
                 // Full state validation plus links to the immediately preceding event; no inference and no replay start, so a
                 // persona with an expectation block (whose replay cannot start at a checkpoint) resumes after one as well
-                let (cn, _, _) = check_checkpoint(&hp, ls[i - 1], ls[i], i + 1).map_err(|(at, why)| err(at, why))?;
+                let (cn, _, _, _) = check_checkpoint(&hp, canon, Some(ls[i - 1]), ls[i], i + 1).map_err(|(at, why)| err(at, why))?;
                 if cn != n { return Err(err(i + 1, "checkpoint event count differs".into())); }
             }
         }
@@ -686,20 +770,26 @@ pub fn resume_boxed(text: &str, p: &Persona, st: Box<State>, clock: Clock) -> Re
         match kind(&j) { Kind::Checkpoint => (j.get("checkpoint").and_then(Json::as_f64).unwrap_or(0.0) as u64, j.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string()),
             _ => (j.get("n").and_then(Json::as_f64).unwrap_or(0.0) as u64, j.get("state").and_then(Json::as_str).unwrap_or("").to_string()) } };
     if st.digest != want { return Err(perr("state", format!("not the strand's last state ({} != {})", &st.digest[..st.digest.len().min(19)], &want[..want.len().min(19)]))); }
-    // RFC 0009: the expectation's memory, folded from every event line's inputs and logged deviation
-    let expect = q.expect.as_ref().map(|_| expect_fold(&q, &lines));
+    // RFC 0009: the expectation's memory, folded from every event line's inputs and logged deviation; from 0.14.0 from the last
+    // checkpoint's (the chain check read it), folding only the event lines after it
     let dev_full = engine_version(h.get("engine").and_then(Json::as_str).unwrap_or("")).is_some_and(|v| v < DEV_R6_SINCE);
+    let expect = if q.expect.is_none() { None } else { Some(match last_checkpoint(&lines, 0).filter(|_| !dev_full) {
+        Some(k) => { let j = json::parse(lines[k]).map_err(|e| bad(format!("line {} is not JSON: {}", k + 1, e.msg)))?;
+            let m = persona::ExpectMem::read(&q, j.get("expect").unwrap_or(&Json::Null)).map_err(|e| bad(format!("line {}: the checkpoint's expect: {e}", k + 1)))?;
+            expect_fold(&q, m, &lines[k + 1..]) }
+        None => expect_fold(&q, new_mem(dev_full), &lines[1..]) }) };
     let mut lv = Live::boxed(q, st, clock, persona::digest_of(last), n, expect, dev_full);
     for c in tail.iter().rev() { let what = c.get("control").and_then(Json::as_str).unwrap_or("");
         lv.status = lv.status.after(what).unwrap_or(Status::Retired); lv.st = lv.st.zero_credit(&lv.p); lv.controls += 1; }
     Ok(lv)
 }
 
-/// RFC 0009: the expectation's memory folded from the event lines after the header, one line read at a time
+/// The expectation's empty memory: the canonical fold from 0.14.0 (`dev_full` false), the fold before it otherwise
+fn new_mem(dev_full: bool) -> persona::ExpectMem { if dev_full { persona::ExpectMem::new() } else { persona::ExpectMem::canonical() } }
+/// RFC 0009: the expectation's memory `m` with the event lines of `lines` folded in, one line read at a time
 #[inline(never)]
-fn expect_fold(q: &Persona, lines: &[&str]) -> persona::ExpectMem {
-    let mut m = persona::ExpectMem::new();
-    for l in lines.iter().skip(1) { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
+fn expect_fold(q: &Persona, mut m: persona::ExpectMem, lines: &[&str]) -> persona::ExpectMem {
+    for l in lines.iter() { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) { let d = j.get("deviation");
         let lp = d.filter(|d| d.get("cold").is_none()).and_then(|d| d.get("pred")).and_then(Json::as_f64);
         persona::expect_step(q, &mut m, j.get("inputs").unwrap_or(&Json::Null), lp); } } }
     m
@@ -710,7 +800,7 @@ fn expect_fold(q: &Persona, lines: &[&str]) -> persona::ExpectMem {
 /// on the recorded life.
 pub fn bound_audit(text: &str, b: &persona::bound::Bound, eng: Engine) -> Result<(Json, bool), (usize, String)> {
     let lines = lines(text);
-    let mut r = Replay::open(lines.first().copied().unwrap_or(""))?;
+    let (mut r, k0) = Replay::open_lines(&lines)?;
     let p = r.live.p.clone(); let (traits, cap) = persona::bound::learned_traits(&p).ok_or((1, "the strand's persona has no learning block: nothing to audit".to_string()))?;
     let rest = b.rest_hours.unwrap_or_else(|| persona::bound::default_rest(&p)); let seed = r.live.st.seed;
     let e = |x: InErr| (0usize, format!("{}: {}", x.path, x.msg));
@@ -724,7 +814,7 @@ pub fn bound_audit(text: &str, b: &persona::bound::Bound, eng: Engine) -> Result
     let measure = |st: &persona::State| -> Result<Vec<f64>, (usize, String)> { let a = persona::bound::rest_odds(&p, st, rest, eng).map_err(e)?;
         let z = persona::bound::rest_odds(&p, &persona::bound::with_learned(&p, st, &persona::bound::learned_of(st).iter().map(|d| vec![0.0; d.len()]).collect::<Vec<_>>()), rest, eng).map_err(e)?;
         Ok(a.iter().zip(&z).map(|(x, y)| persona::bound::tv(x, y)).collect()) };
-    for l in lines.iter().skip(1) { if l.trim().is_empty() { continue; }
+    for l in lines.iter().skip(k0) { if l.trim().is_empty() { continue; }
         let was_event = r.step(l, eng)?.is_some(); if was_event { events += 1; } else if l.contains(r#""control":"erase""#) { erasures += 1; }
         let now = persona::bound::learned_of(&r.live.st); if now != last { if was_event { feedback += 1; } last = now; }
         let tvs = measure(&r.live.st)?;

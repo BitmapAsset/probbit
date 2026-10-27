@@ -178,6 +178,35 @@ digits for the deviation receipt), so the device's strand and the host's replay 
 includes the stance's `deviation` on checkpoint lines (`strand::DEV_R6_SINCE`). A strand whose header names an earlier engine
 keeps its full-precision deviation, and verify accepts it when it equals the replay at 6 decimals.
 
+### Sizing a strand on flash: checkpoints and segments
+
+A strand grows by one event line per event and one checkpoint line every K events (`live.checkpoint`), and it never shrinks.
+With E bytes per event line, C per checkpoint line and H for the header, n events take about H + n x (E + C / K) bytes. The
+expectation fixture persona of the CLI's tests (a 6,312-byte header, a 10-input tutor with an `expectation` block, 500 events
+over many input combos) measures E <= 498 B and, from engine 0.14.0 (the checkpoint carries the expectation's memory),
+C = 6,369 B with `max_combos` 16 and C = 14,121 B with `max_combos` 64, the memory's largest window (63 named combos); before
+0.14.0 the same checkpoint was 3,888 B and the memory it did not carry had grown to 387 combos. At K = 50 and one event a
+minute that is about 37 KB an hour: 1 MB lasts about 27 hours. A larger persona scales both: one measured at about 0.85 KB per
+event and 8.2 KB per checkpoint fills 1 MB in 3.5 to 4 hours at K = 50 and its event rate.
+
+Segments bound the file a life is stored in: `--segment-every S` (or a host's own seal: a checkpoint line, then
+`strand::segment_header(&live, &doc, engine, k, previous_name, &sha256_of_that_line)` as the first line of a new file and the
+checkpoint line as its second) costs one header and one repeated checkpoint per segment, so a segment file is about
+H + C + S x (E + C / K) bytes (for the fixture at S = 500, K = 50: about 325 KB). A host that keeps the newest two segments and
+deletes the older ones holds a life of any length in about twice that; `verify --chain` then reports the first missing file
+(exit 6) instead of a divergence, and each kept segment still verifies on its link. Resume works on the newest segment alone:
+`strand::resume` reads its header, its sealed line (the state and, from 0.14.0, the expectation's memory) and the lines after
+it: a boot parses and hashes the lines of that one segment, folds the expectation's memory over the lines after its last
+checkpoint only, and never solves a stored event again.
+
+### Measured on one board (ESP32-S3)
+
+First numbers from one ESP32-S3 at 240 MHz, the engine on one core shared with a 16 fps renderer, with the boxed setup path
+above: the engine task's stack high-water for the setup plus one to three turns was 17,612 to 18,096 bytes (28,304 bytes for
+the setup alone before the boxed constructors); the strand header was 11,985 bytes, byte for byte the host's; one stance turn
+took 0.60 to 0.93 s with 17 to 23 KB of transient heap per event; the engine's PSRAM use was 50 to 112 KB during setup and run;
+the internal heap's floor was 30,216 bytes through the header write. These are one board's measurements, not bounds.
+
 ## The host hooks
 
 `probbit_persona::hooks` lets a host see the decision pipeline: `set_monitor(tier, gate_seen)` (the CLI's `--top` view) and

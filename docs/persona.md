@@ -951,8 +951,10 @@ half-life; read after the cold start, from the logged value); `registers` = z >=
 `"deviation": {"input", "pred", "self"}` at 5 significant digits (with `"cold": true` while cold); `live verify` recomputes
 it ("the deviation differs" on an edit), `resume` folds the same memory from the logged lines, and the stance digest the
 line logs excludes `deviation`. Bound (by construction): per variable, `pred_i <= input` for a member combo and
-`pred_i <= self_i + input` otherwise. `persona turn` and `persona replay` carry no memory and add nothing. A strand with
-the block verifies from its header (`--from-checkpoint` refuses: the memory reads every event). The deviation is absent
+`pred_i <= self_i + input` otherwise. `persona turn` and `persona replay` carry no memory and add nothing. Before engine 0.14.0 a
+strand with the block verifies from its header (`--from-checkpoint` refuses: the memory reads every event); from 0.14.0 the
+memory is the canonical fold and every checkpoint line carries it (section 5.7, "Checkpoints"), so a replay and a resume start
+at the last checkpoint. The deviation is absent
 (`null`) when a program is not solved by the exact tier.
 
 Every number of the stance's `deviation` is rounded to 6 decimals (the rule every other number of a stance and a state
@@ -1547,6 +1549,42 @@ replays only what follows (`"from_checkpoint": n`); the lines before it are trus
 number a checkpoint line carries is rounded (6 decimals; genes 4), so the line is the same on every platform's libm; for the
 stance's `deviation` this holds from engine 0.14.0 on (section 2.17).
 
+**Checkpoints with the expectation's memory (engine 0.14.0 on).** A persona with an `expectation` block (RFC 0009) folds every
+event into a memory: per input combo its decayed count and the inputs of its latest event, whether a non-time combo was seen,
+and the learned normal of the deviation. From 0.14.0 the fold is canonical: after every event each count, the mean and the
+variance are at 6 decimals (a count at 0 is dropped), and at most `max_combos - 1` named combos are kept: when one more enters,
+the last in the mixture's order (count descending, then key) moves its count to `rest`, which decays like a count and is added to
+the empty member's weight, where the mixture already put every combo past the kept ones (the one change: a combo that comes
+back after it was moved out starts at count 1). The checkpoint line then carries the memory as one more key:
+`"expect": {"combos": [[count, inputs], ...], "mean", "n", "rest", "var", "warm"}` (combos in key order; the key is computed from
+the inputs). A full `verify` checks it byte for byte against the replay's; `verify --from-checkpoint`, `resume` and `monitor`
+start at the last checkpoint and fold only the events after it. The line's size is O(max_combos): the `expect` object is at
+most about 64 + (max_combos - 1) x (I + 24) bytes for events whose inputs are at most I bytes. A strand whose header names an
+engine before 0.14.0 keeps the four-key checkpoint and the fold before it, byte for byte; such a strand with the block still
+replays from its header. An engine before 0.14.0 reads `expect` as `unsupported by this engine: expect` (exit 5).
+
+**Segments.** `probbit live ... --strand NAME.strand --segment-every N` seals the strand after every N-th event and goes on in
+a new file: the sealing line is a checkpoint line (the last line of the segment); the next file, `NAME.0001.strand`, then
+`NAME.0002.strand` and so on (four digits at least), starts with a header that has one more key at its end,
+`"segment": {"index": k, "previous": "<the previous file's name>", "sealed": "sha256:<the sealing line's>"}`, its state the
+sealed state, and its second line is the sealing line itself, byte for byte. The chain goes on across the files unchanged: the
+lines of all segments, each segment's header and repeated sealing line set aside, are the strand the same life writes to one
+file with a checkpoint at each seal. The labels sidecar is the first file's (`NAME.labels.json`); a run with `--segment-every`
+continues the newest segment that exists. Before 0.14.0 a persona with an expectation block is not segmented (its checkpoint
+does not carry the memory).
+
+- `live verify SEGMENT` checks one segment on its link: the header is as written, the second line's sha256 is the header's
+  `sealed`, that line is a valid checkpoint (its state is the header's, its memory reads), and every line after it replays.
+  Exit 0 says: this file continues, faithfully, whatever line has that sha256. The summary adds `"segment": k` and
+  `"trusted_link": "sha256:..."`.
+- `live verify SEGMENT --chain` also walks back through `previous` to the first file: each one verifies, its last line's
+  sha256 is the `sealed` the next one links and its index is one less. Exit 1 at the first break, with `"segment_file"`
+  naming the file; exit 6 when a previous file does not exist (`{"ok": false, "missing": "<file>", "segment_file": "<the file
+  that links it>"}`): a segment rotated away is a known state, not a divergence. The summary adds `"segments": N`.
+
+Compaction (replacing old segments by one synthetic start) is not part of the format: it would drop the history a verify
+checks, and the decision to trust a dropped history belongs to the host.
+
 **Senses in live** (section 2.11). An event carries `senses` as `persona turn` does; the strand logs each reading as used, with
 its source, and `verify` recomputes the normals from the logged readings: its summary adds `"normals": {"<id>": {"mean", "n",
 "max_move_50"}}`, the normal now and the largest move of its mean within 50 events (the monitor alerts above drift_cap / 2). A
@@ -1583,7 +1621,7 @@ check that inference. Hashes alone do not authenticate a writer or detect a whol
 anchor. Historical measurement before this hardening, on an Apple M4: a 10,000-event strand of a drives persona (4 goals, a floor, learning; 3,126,444
 bytes, 10 checkpoint lines) opens in `monitor --once` from its last checkpoint in 0.005 s (load 3.3), where a full `verify`
 takes 192 s. A replay from a checkpoint costs what the events after it cost: 500 events past the last one took 26 s to draw
-(load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. A persona with an `expectation` block (RFC 0009)
+(load 6-13, about 50 ms an event for this persona), so K bounds the wait; a smaller K costs a few KB per checkpoint line. Before engine 0.14.0 a persona with an `expectation` block (RFC 0009)
 is the exception: its expectation memory is a fold of every event line, and no checkpoint line carries it, so `monitor`
 (`--once`, `--follow`, `--serve`, each strand of `--dir` by its own persona) replays such a strand from its header, every
 line, and `verify --from-checkpoint` still refuses it. The cost is a full replay when the strand is opened: on a 16-vCPU Linux VM, a 5,000-event life of the tutor with the block (10 checkpoint lines) opens in `monitor --once` in 7.4 to 7.8 s, about 650 events a second, where the same life without the block opens from its last checkpoint in under 0.05 s; after
@@ -1830,7 +1868,7 @@ previous event, the restart included). `probbit_live_event` (MCP) and Python's `
 | `probbit persona compile PERSONA --state STATE [--inputs ...]` | the turn's probbit-ir program; its sha256 is the stance's `engine.program` |
 | `probbit live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE [--watch]] [--clock real\|fixed]` | a resident individual: JSONL events in, one stance per event out, `elapsed_hours` stamped by the clock, the life logged to a strand (section 5.7); `--state` is rewritten after every event |
 | `probbit live PERSONA --demo week [--seed N] [--strand FILE] [--plain]` | one individual's scripted week on the fixed clock: learning to its cap, a quiet night, habits that hold (section 5.7) |
-| `probbit live verify STRAND [--from-checkpoint] [--actions FILE]` | replay a strand from its header alone: ok, the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported`, exit 5: a newer engine's strand, not a divergence); with `--actions`, also the earliest turn whose host action differs from the level its stance released (section 5.7) |
+| `probbit live verify STRAND [--from-checkpoint] [--chain] [--actions FILE]` | replay a strand from its header alone: ok, the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported`, exit 5: a newer engine's strand, not a divergence); with `--actions`, also the earliest turn whose host action differs from the level its stance released; with `--chain`, a segment and every previous segment file (exit 6: one is missing) (section 5.7) |
 | `probbit monitor STRAND [--follow] [--once] [--plain] [--fps N] [--serve] [--open] [--port N]`, `probbit monitor --demo [...]` | watch an individual's inner state: the strand replayed as live bars in the terminal, or as a page on 127.0.0.1 (section 5.8) |
 
 A script is a JSON list of per-turn input objects (or `{"turns": [...]}`; a turn may be `{"inputs": {...}, ...}`). Exit codes
