@@ -2549,6 +2549,8 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let (nv, ns) = (p.vars.len(), p.steps.len());
     let tix = |t: &str| -> usize { match t.strip_prefix("step.") { Some(s) => nv + p.steps.iter().position(|x| x == s).unwrap(), None => p.vars.iter().position(|v| v.id == t).unwrap() } };
     let mut contrib: Vec<Vec<(String, Vec<f64>)>> = vec![vec![]; nv + ns];
+    // a contribution's source names the turn's `why` (and `explain`); a member's meta (`meta_only`) is never read for it: unnamed
+    let nm = |s: &str| if o.meta_only { String::new() } else { s.to_string() };
     let mut mood_ev: Vec<Option<Vec<f64>>> = p.vars.iter().map(|v| v.mood.then(|| vec![0.0; v.levels.len()])).collect();
     // the learned deltas after this turn's feedback (the reward flag +1, the correction flag -1) on the previous stance's credit
     // with a drives block (§2.9): the turn's drive context, read from the (stepped) drive state; its surprise joins the learning sign
@@ -2558,11 +2560,11 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
         let sign = l.from.iter().enumerate().fold(0.0, |s, (i, id)| if matches!(get(&vals, id), Some(Json::Bool(true))) { s + if i == 0 { 1.0 } else { -1.0 } } else { s });
         let sign = match &dctx { Some(c) => (sign + c.learn_sign).clamp(-1.0, 1.0), None => sign }; learn_sign = sign;
         learn(l, &st.credit, sign, st.elig, &st.learned, &st.gains(), st.disp_of("optimism")) } };
-    for (i, v) in p.vars.iter().enumerate() { contrib[i].push(("prior".into(), v.base.clone()));
-        if let Some(g) = st.shift(&v.id) { contrib[i].push(("genes".into(), centered(v.levels.len()).iter().map(|c| g * c).collect())); }
-        if let Some((_, d)) = new_learned.iter().find(|(t, d)| *t == v.id && d.iter().any(|x| *x != 0.0)) { contrib[i].push(("learned".into(), d.clone())); } }
-    for (j, s) in p.steps.iter().enumerate() { contrib[nv + j].push(("prior".into(), vec![0.0; ns]));
-        if let Some((_, pf)) = p.prefer.iter().find(|(t, _)| *t == format!("step.{s}")) { contrib[nv + j].push(("prefer".into(), pf.clone())); } }
+    for (i, v) in p.vars.iter().enumerate() { contrib[i].push((nm("prior"), v.base.clone()));
+        if let Some(g) = st.shift(&v.id) { contrib[i].push((nm("genes"), centered(v.levels.len()).iter().map(|c| g * c).collect())); }
+        if let Some((_, d)) = new_learned.iter().find(|(t, d)| *t == v.id && d.iter().any(|x| *x != 0.0)) { contrib[i].push((nm("learned"), d.clone())); } }
+    for (j, s) in p.steps.iter().enumerate() { contrib[nv + j].push((nm("prior"), vec![0.0; ns]));
+        if let Some((_, pf)) = p.prefer.iter().find(|(t, _)| *t == format!("step.{s}")) { contrib[nv + j].push((nm("prefer"), pf.clone())); } }
     let mut active_inputs = vec![];
     let mut push = |t: &str, src: String, w: Vec<f64>, contrib: &mut Vec<Vec<(String, Vec<f64>)>>| { let i = tix(t);
         match mood_ev.get_mut(i).and_then(Option::as_mut) { Some(ev) => for (a, b) in ev.iter_mut().zip(&w) { *a += b; }, None => contrib[i].push((src, w)) } };
@@ -2572,17 +2574,17 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
             Kind::Number => (&x.effects, v.as_f64().unwrap()),
             Kind::Level => (x.by_level.iter().find(|(l, _)| Some(l.as_str()) == v.as_str()).map_or(&[][..], |(_, e)| &e[..]), 1.0) };
         if !eff.is_empty() && scale != 0.0 { active_inputs.push(x.id.clone()); }
-        for (t, vec) in eff { push(t, format!("input:{}", x.id), vec.iter().map(|y| g * scale * y).collect(), &mut contrib); } }
+        for (t, vec) in eff { push(t, if o.meta_only { String::new() } else { format!("input:{}", x.id) }, vec.iter().map(|y| g * scale * y).collect(), &mut contrib); } }
     for h in &p.history { let n = hist.iter().find(|(k, _)| *k == h.id).unwrap().1.min(h.cap as f64);
         if n != 0.0 && !h.effects.is_empty() { active_inputs.push(h.id.clone()); }
-        for (t, vec) in &h.effects { push(t, format!("history:{}", h.id), vec.iter().map(|y| n * y).collect(), &mut contrib); } }
+        for (t, vec) in &h.effects { push(t, if o.meta_only { String::new() } else { format!("history:{}", h.id) }, vec.iter().map(|y| n * y).collect(), &mut contrib); } }
     let mut new_mood = vec![];
     for (i, v) in p.vars.iter().enumerate().filter(|(_, v)| v.mood) {
         let k = if o.no_inertia { 0.0 } else { v.inertia };
         let decay = match v.half_life { Some(hl) if elapsed > 0.0 => 0.5f64.powf(elapsed / hl), _ => 1.0 };
         let prev = &st.mood.iter().find(|(id, _)| *id == v.id).unwrap().1;
         let m: Vec<f64> = prev.iter().zip(mood_ev[i].as_ref().unwrap()).map(|(a, e)| r6(k * decay * a + (1.0 - k) * e)).collect();
-        if m.iter().any(|&x| x != 0.0) { contrib[i].push(("mood_accumulator".into(), m.clone())); }
+        if m.iter().any(|&x| x != 0.0) { contrib[i].push((nm("mood_accumulator"), m.clone())); }
         new_mood.push((v.id.clone(), m)); }
     // habits in force and their rules
     let active: Vec<&Habit> = p.habits.iter().filter(|h| !o.exclude.contains(&h.id) && h.when.iter().all(|(k, c)| cond_true(p, k, c, &vals, &hist))).collect();
@@ -2593,7 +2595,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let sem = values_of(p);
     // `pursue`'s drive terms after its prior, learned, input and history contributions: genes, wanting, afterglow, deadline (§3 step 2b)
     let pix = dctx.as_ref().and_then(|_| p.vars.iter().position(|v| v.id == "pursue"));
-    if let (Some(c), Some(i)) = (&dctx, pix) { for (src, vec) in &c.terms { if vec.iter().any(|x| *x != 0.0) { contrib[i].push((src.to_string(), vec.clone())); } } }
+    if let (Some(c), Some(i)) = (&dctx, pix) { for (src, vec) in &c.terms { if vec.iter().any(|x| *x != 0.0) { contrib[i].push((nm(*src), vec.clone())); } } }
     let total = |c: &[(String, Vec<f64>)], n: usize| -> Vec<f64> { let mut tot = vec![0.0; n]; for (_, vec) in c { for (a, b) in tot.iter_mut().zip(vec) { *a += b; } } tot.into_iter().map(r6).collect() };
     let mut field: Vec<Vec<f64>> = (0..nv + ns).map(|i| total(&contrib[i], if i < nv { p.vars[i].levels.len() } else { ns })).collect();
     // the floor lift (§2.9): on the rounded field, over the levels the habits in force allow; then the field is summed again
@@ -2601,7 +2603,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     if let (Some(d), Some(i)) = (&p.drives, pix) { if d.goals.iter().any(|g| g.floor > 0.0) {
         let ti = RULE_KEYS.iter().position(|k| *k == "tables").unwrap();
         let l = floor_lifts(p, d, &field[i], &pursue_allowed(&p.vars[i].levels, &rules[ti]));
-        if l.iter().any(|x| *x != 0.0) { contrib[i].push(("floor".into(), l.clone())); field[i] = total(&contrib[i], l.len()); }
+        if l.iter().any(|x| *x != 0.0) { contrib[i].push((nm("floor"), l.clone())); field[i] = total(&contrib[i], l.len()); }
         lift = d.goals.iter().zip(&l).filter(|(_, x)| **x != 0.0).map(|(g, x)| (g.id.clone(), *x)).collect(); } }
     let use_twin = o.twin.unwrap_or(p.eng.twin);
     let ids: Vec<String> = active.iter().map(|h| h.id.clone()).collect();
