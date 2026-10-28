@@ -965,6 +965,25 @@ keeps that formatting when it is replayed or continued, and `live verify` accept
 replay's at 6 decimals (the chain goes on from the logged bytes), so a strand written on one platform verifies on another.
 The event line's receipt (5 significant digits) is checked exactly, as before.
 
+**Rest pass (RFC 0015).** An optional `rest` key of the block declares the rest pass (memory consolidation) a host may run at
+rest (standby, night, idle) with `Live::consolidate(at)` or `probbit live control STRAND rest [--at TIME]`:
+
+```yaml
+expectation:
+  rest:                 # optional; every key optional; {} = the pass with nothing moving
+    half_life: 64       # the window since the last pass re-folded with this half-life in events (default half_life_events)
+    bucket: 2           # bins of a declared number input in the merge key, 1-3 (default 3 = the thirds: nothing merges)
+    surprise_gain: 1    # weight gain of a context's mean z+ in the window, 0-4 (default 0)
+    decay: 0.5          # factor on the learned deltas, 0-1 (default 1)
+```
+
+With the key, the canonical memory (0.14.0 on) carries a `window` (per remembered context [a, b, k, zs] in key order and
+`since`; checkpoint lines carry it). The pass re-folds each count as count − a + b, weighs counts by 1 + g · min(zs/k, 1.5)/1.5
+(total kept), merges contexts with the same key under B bins, multiplies the learned deltas by `decay`, and appends one
+`consolidation` line: `{at, consolidation {after, before, decay, events, merged {count, keys}, moved}, n, prev, state}`.
+`live verify` re-runs the pass and names the first field of a forged line; an engine before 0.14.0 refuses the line. Without
+the key the pass is refused and every document is byte for byte as before. Full definition: docs/rfcs/0015-consolidation.md.
+
 **Trajectory.** p_beta, proportional to p^beta, of the event's program at the k betas, each solved by the exact tier on
 `Model::scaled(beta)`: no sampler, a pure function of the program. It is derived and never logged: `probbit monitor`
 shows a `TRAJECTORY` row (mean marginal entropy per step) and its JSON frame a `trajectory` key; `probbit persona

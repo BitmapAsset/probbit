@@ -479,6 +479,27 @@ events) with a curiosity block added, against the same individual with the drive
 The drive's cost is within the run-to-run noise of a turn; polling once a minute through a night adds about 60 calls an hour.
 Not measured on silicon.
 
+### The rest pass on a body (RFC 0015)
+
+With an `expectation.rest` key (docs/persona.md §2.17), `Live::event` folds each event into the pass's window (one row of four
+numbers per remembered context, at most `max_combos`), and a body in standby calls `Live::consolidate_boxed(&mut live, at)`
+with its own time stamp: the pass works on the boxed individual in place (no `State` or `Live` by value on a frame), solves
+nothing, and returns the one `consolidation` line the body appends to its strand (the line logs the memory's digests before and
+after, the contexts merged, the weights moved, the decay and the state digest after). The expectation's cache is emptied (its
+rows are rebuilt by the next events). Measured on the x86_64 host and on the `nostd` build (painted as above), on a body's
+recorded day (134 events, one pass at its end over a window of 134 events; `half_life` 64, `bucket` 2, `surprise_gain` 1,
+`decay` 0.5), against the same persona without the key (best of 3):
+
+| What | std | `nostd` |
+| --- | ---: | ---: |
+| the day, with / without the key | 218.383 / 224.205 ms | 193.365 / 190.726 ms |
+| the window fold, per event | within noise (-43.449 µs) | +19.694 µs (+1.4 %) |
+| one pass over the day's window | 121.492 µs | 120.649 µs (0.900 µs per event of the window) |
+| `consolidate_boxed` stack high-water / heap peak | | 3,760 B / 17,345 B |
+
+The pass is O(contexts) per event of the window plus O(contexts²) for the merge (at most 64 contexts); its heap peak is the
+memory written twice for its digests. Not measured on silicon.
+
 ### Measured on one board (ESP32-S3)
 
 First numbers from one ESP32-S3 at 240 MHz, the engine on one core shared with a 16 fps renderer, with the boxed setup path

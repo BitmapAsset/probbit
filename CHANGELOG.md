@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **Rest pass** (RFC 0015, docs/rfcs/0015-consolidation.md, docs/persona.md §2.17): an optional `rest` key of the
+  `expectation` block (`half_life`, `bucket`, `surprise_gain`, `decay`; every default moves nothing) declares a memory
+  consolidation a host runs at rest with `Live::consolidate(at)` (`consolidate_boxed` on a body) or `probbit live control
+  STRAND rest [--at TIME]`: the window since the last pass (folded in the canonical memory, carried by checkpoints) re-folded
+  with the rest half-life, counts weighed by the contexts' mean z+, near-duplicate contexts merged, the learned deltas
+  decayed; one engine-gated `consolidation` line logs the memory's digests before and after, the contexts merged, the weights
+  moved and the state after. `live verify`, the chain check and both resumes re-run the pass and name the first field of a
+  forged line; the reflection document gains `consolidation` and one sentence when its window holds such a line. Off by
+  default: without the key the pass is refused and every document is unchanged.
 - **Curiosity** (RFC 0016, docs/rfcs/0016-curiosity.md, docs/persona.md §2.20): an optional `curiosity` block (needs an
   expectation block; in the digest) declares a drive fed by the measured surprise: `surprise_recent` (an average of z+ = max(z, 0) with a
   half-life in events) and `failed_contexts` (remembered input contexts whose last K visits all missed). Its level, clipped
