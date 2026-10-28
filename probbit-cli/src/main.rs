@@ -298,7 +298,8 @@ pub(crate) static COMMANDS: &[Command] = &[
             "live PERSONA --demo week [--seed N] [--strand FILE [--label KEY=VALUE]...] [--plain]",
             "live verify STRAND [--from-checkpoint] [--chain] [--actions FILE] [--blocks FILE]",
             "live control STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]",
-            "live control STRAND reflect [--last N | --since-checkpoint]"],
+            "live control STRAND reflect [--last N | --since-checkpoint]",
+            "live control STRAND stir? [--idle-hours H]"],
         about: "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n--strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.",
         before: &[],
         flags: &[&[
@@ -320,13 +321,14 @@ pub(crate) static COMMANDS: &[Command] = &[
                     Flag { name: "--chain", arg: "", help: "a segment (section 5.7): verify it and walk back through the previous segment files to the first, each verified and its last line the sealed line the next one links; exit 1 at the first break (the segment file named), 6 when a previous segment file is missing" },
                     Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" },
                     Flag { name: "--blocks", arg: "FILE", help: "write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {\"block\", \"n\"} per line; replays from the header" }] },
-            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME] | STRAND seal | STRAND reflect [--last N | --since-checkpoint]",
+            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME] | STRAND seal | STRAND reflect [--last N | --since-checkpoint] | STRAND stir? [--idle-hours H]",
                 help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status. `seal` (section 5.7) seals the newest segment of STRAND: refused unless its last line is an event line, it appends the sealing checkpoint and writes the next segment file (its header links the sealed line, then the sealed line itself), and prints that file in `file`",
                 flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required, except for seal)" },
                     Flag { name: "--reason", arg: "TEXT", help: "why (required, except for seal)" },
                     Flag { name: "--at", arg: "TIME", help: "when (default: now, UTC)" },
                     Flag { name: "--last", arg: "N", help: "reflect: the last N events (default: every event)" },
-                    Flag { name: "--since-checkpoint", arg: "", help: "reflect: the events after the last checkpoint line" }] },
+                    Flag { name: "--since-checkpoint", arg: "", help: "reflect: the events after the last checkpoint line" },
+                    Flag { name: "--idle-hours", arg: "H", help: "stir? (RFC 0016): the hours since the strand's last event (default 0); the answer is {due, stir}, nothing is written" }] },
         ],
         list_subs: true, shared: false,
         after: &[("the safety kit", "(docs/persona.md §5.7) one writer per strand: `--strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (§2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event."),
@@ -889,6 +891,14 @@ fn live_cmd(args: &[String]) {
             return;
         }
         if args.iter().any(|a| a == "--last" || a == "--since-checkpoint") { fail("live control: --last and --since-checkpoint go with reflect") }
+        // stir? (RFC 0016): is a self-started idle event due, exactly from the replayed strand and the idle hours; writes nothing
+        if what == "stir?" {
+            if let Some(f) = ["--by", "--reason", "--at"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND stir?: {f} does not apply (a query writes nothing)")) }
+            let idle = match opt("--idle-hours") { None => 0.0, Some(x) => x.parse::<f64>().ok().filter(|h| h.is_finite() && *h >= 0.0).unwrap_or_else(|| fail("live control STRAND stir?: --idle-hours H, a number >= 0")) };
+            match live::stir_cmd(path, idle, eng) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+            return;
+        }
+        if args.iter().any(|a| a == "--idle-hours") { fail("live control: --idle-hours goes with stir?") }
         // seal (§5.7): no control line, so no --by, --reason or --at; the sealing checkpoint and the next segment file
         if what == "seal" {
             if let Some(f) = ["--by", "--reason", "--at"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND seal: {f} does not apply (a seal writes a checkpoint line, not a control line)")) }

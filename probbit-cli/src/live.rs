@@ -150,6 +150,17 @@ pub fn reflect_cmd(path: &str, w: probbit_persona::reflect::Window) -> Result<Js
         ("head".into(), s(&persona::digest_of(&line)))]))
 }
 
+/// `probbit live control STRAND stir? [--idle-hours H]` (RFC 0016): the strand replayed from its header (every line checked), then
+/// the individual's `stir_due(H)` -> {due, stir (its class, speaks, asleep, level, since_minutes; null when none is due), events}.
+/// Writes nothing: a host that acts on a due stir feeds `{"stir": class}` with its own readings as an event.
+pub fn stir_cmd(path: &str, idle_hours: f64, eng: Engine) -> Result<Json, InErr> {
+    let text = std::fs::read_to_string(path).map_err(|e| perr("strand", format!("cannot read {path}: {e}")))?;
+    let ls = lines(&text);
+    let (mut r, start) = probbit_persona::strand::Replay::open_lines(&ls).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?;
+    for i in start..ls.len() { r.step_at(&ls, i, eng).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?; }
+    let st = r.live.stir_due(idle_hours);
+    Ok(Json::Obj(vec![("due".into(), Json::Bool(st.is_some())), ("events".into(), Json::Num(r.live.n as f64)), ("stir".into(), st.map_or(Json::Null, |s| s.to_json()))]))
+}
 /// `probbit live control STRAND seal` (§5.7, "Segments"): a host decides when to seal. Under the writer lock, the newest segment
 /// of STRAND (`NAME.strand`, `NAME.0001.strand`, ...) is replayed (from its last checkpoint, else from its start); refused unless
 /// its last line is an event line (a seal follows an event); then the sealing checkpoint is appended to it and the next segment
