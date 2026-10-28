@@ -4430,7 +4430,7 @@ fn model_marg(p: &Persona, st: &State, prog: &mut Option<Json>, mm: &Meta, skel:
     let Some(Some(s)) = sk.as_mut() else { return if own { Some(own_run(prog, cache)) } else { None } };
     let h = if own { s.h0.clone() } else { field_h(s, &mm.field) };
     if s.mm.set_h(h).is_err() { cache.keep(key, &None); return Some(None) }
-    let Some(r) = crate::run::enumerated(&mut s.mm.m, p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(own_run(prog, cache)) } else { None } };
+    let Some(r) = s.mm.enumerated(p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(own_run(prog, cache)) } else { None } };
     let r = r.map(|mg| { let m = &s.mm.m; let k = m.k; s.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")).map(|(i, id)| (id.clone(), {
         let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
     cache.modeled += 1; cache.keep(key, &r); Some(r)

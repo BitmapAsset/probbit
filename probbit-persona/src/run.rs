@@ -58,7 +58,9 @@ impl Parts {
 /// compile pass's folds (each separable table, in the pass's order: per value the row term into its first variable, then the
 /// column term into its second) are kept apart, so a member's model is this one with the member's `h`, the folds replayed in
 /// the same order: the same floats `compile_parts` makes, with no copy of the pairs and no second model held
-pub struct Members { pub m: Model, folds: Vec<(usize, usize, Vec<f64>, Vec<f64>)> }
+pub struct Members { pub m: Model, folds: Vec<(usize, usize, Vec<f64>, Vec<f64>)>,
+    /// T3-c: the components tier's split of the model (built on the first member it answers; dropped when the caps change)
+    split: Split }
 impl Members {
     /// The model with `h` (n x k) in place of its own, as `Parts::model_with` builds it: each weight checked as the text's, the
     /// folds added in the pass's order, then `Model::new`'s finite check
@@ -80,8 +82,11 @@ impl Members {
         let m = &mut self.m; let (start, collective, cluster, cycles) = (m.start.take(), m.collective, m.cluster, m.cycles);
         use core::mem::take;
         let mut nm = Model::new(m.n, m.k, take(&mut m.h), take(&mut m.allowed), take(&mut m.clamp), take(&mut m.pairs), caps).map_err(|e| crate::json::value("", e))?;
-        nm.start = start; nm.collective = collective; nm.cluster = cluster; nm.cycles = cycles; self.m = nm; Ok(())
+        nm.start = start; nm.collective = collective; nm.cluster = cluster; nm.cycles = cycles; self.m = nm; self.split = Split::default(); Ok(())
     }
+    /// `enumerated` on the model, the components tier with the members' one split (`probbit_ir::exact_components_split`: the
+    /// members differ only in `h` while the caps stay)
+    pub fn enumerated(&mut self, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> { enumerated_in(&mut self.m, Some(&mut self.split), exact_limit, sweeps) }
 }
 impl Parts {
     /// The members' model (`Members`): this program's model built from its parts (moved, as `into_prog`: no copy of the pairs),
@@ -100,7 +105,7 @@ impl Parts {
         let (pairs, caps, _) = compile_parts(k, &mut h, pairs, caps);
         let mut m = Model::new(vars.len(), k, h, allowed, clamp, pairs, caps).ok()?; m.start = start;
         if m.pairs.len() + folds.len() + dropped != np { return None; }
-        let want: Vec<u64> = m.h.iter().map(|x| x.to_bits()).collect(); let mut s = Members { m, folds };
+        let want: Vec<u64> = m.h.iter().map(|x| x.to_bits()).collect(); let mut s = Members { m, folds, split: Split::default() };
         s.set_h(h0.clone()).ok()?;
         (s.m.h.iter().map(|x| x.to_bits()).collect::<Vec<u64>>() == want).then_some((vars, values, h0, s))
     }
@@ -282,13 +287,14 @@ pub fn from_json_parts(j: &Json) -> Result<Parts, InErr> {
 /// probabilities, the marginals of the allowed values); Some(None) for an answer without an exact verdict (infeasible, or a number
 /// not finite); None when `run` would go on to another tier (that one declining), or would stop its exact tiers on the wall
 /// clock (`sweeps` 0 over the limit): the caller runs the program.
-pub fn enumerated(m: &mut Model, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> {
+pub fn enumerated(m: &mut Model, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> { enumerated_in(m, None, exact_limit, sweeps) }
+fn enumerated_in(m: &mut Model, split: Option<&mut Split>, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> {
     m.collective = true; m.cluster = true; m.cycles = true; // as `persona::run_program` sets them before `run`
     let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();
     let fin = |m: &Model, marg: &[f64]| (0..m.n * m.k).all(|q| !m.allowed[q] || marg[q].is_finite());
     if space > exact_limit as f64 {
         if sweeps == 0 { return None; }
-        let c = exact_components_until(m, exact_limit, FRONTIER_MAX_STATES, None)?;
+        let c = match split { Some(s) => exact_components_split(m, s, exact_limit, FRONTIER_MAX_STATES, None)?, None => exact_components_until(m, exact_limit, FRONTIER_MAX_STATES, None)? };
         if c.infeasible { return Some(None); }
         let ok = c.map_logw.is_finite() && c.logz.is_finite() && (c.map_logw - c.logz).exp().is_finite() && fin(m, &c.marg);
         return Some(ok.then_some(c.marg));
