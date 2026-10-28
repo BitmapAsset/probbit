@@ -4685,7 +4685,11 @@ pub fn trajectory(p: &Persona, st: &State, raw: &Json) -> Option<Json> {
 /// without `integrity` (RFC 0014); all have effects {}: the blocks on or off, one digest
 pub fn stance_sha(doc: &Json) -> String {
     const OUT: [&str; 4] = ["deviation", "glyph", "glyph_why", "integrity"];
-    match doc { Json::Obj(v) if v.iter().any(|(k, _)| OUT.contains(&k.as_str())) => sha(&Json::Obj(v.iter().filter(|(k, _)| !OUT.contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
+    // RFC 0016: `drives.curiosity` is the live writer's (from the expectation's memory), outside the digest as `deviation` is
+    let cur = |x: &Json| x.get("curiosity").is_some();
+    match doc { Json::Obj(v) if v.iter().any(|(k, x)| OUT.contains(&k.as_str()) || (k == "drives" && cur(x))) => sha(&Json::Obj(v.iter().filter(|(k, _)| !OUT.contains(&k.as_str()))
+            .filter_map(|(k, x)| match x { Json::Obj(d) if k == "drives" && cur(x) => { let r: Vec<(String, Json)> = d.iter().filter(|(j, _)| j != "curiosity").cloned().collect();
+                (!r.is_empty()).then(|| (k.clone(), Json::Obj(r))) } _ => Some((k.clone(), x.clone())) }).collect())), _ => sha(doc) }
 }
 
 /// §2.18 `display.glyphs`: one glyph per stance, computed from the stance document. `moods`: the two mood ids (rows, then

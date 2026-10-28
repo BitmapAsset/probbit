@@ -26,7 +26,7 @@ sample), or every event. It reads what each line logs and nothing else:
 | `credit` | event and control lines | feedback that settled the credit (reward, correction, both on: cancelled) and the control lines that zeroed it; `null` without a learning block |
 | `learned` | checkpoint lines | the learned weights' net change between the first and the last sample, and the sum of its absolute values |
 | `controls` | control, rest, reflection lines, the header | pause, resume, retire, erase; `zero_credit` (every control line zeroes the credit); rest lines; earlier reflection lines; the segment index |
-| `summary` | the document's numbers | 6 to 12 sentences from fixed templates, part of the canonical document |
+| `summary` | the document's numbers | 6 to 12 sentences from fixed templates (13 at most with a declared stir, RFC 0016), part of the canonical document |
 
 A section the window has no line for is `null`: an event line logs digests, not the stance, so a window without a checkpoint
 line reports no levels, moods, drives or habits (absent, never invented). A strand of an older engine is read the same way;

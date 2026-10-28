@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **Curiosity** (RFC 0016, docs/rfcs/0016-curiosity.md, docs/persona.md §2.20): an optional `curiosity` block (needs an
+  expectation block; in the digest) declares a drive fed by the measured surprise: `surprise_recent` (an average of z+ = max(z, 0) with a
+  half-life in events) and `failed_contexts` (remembered input contexts whose last K visits all missed). Its level, clipped
+  to a cap at 6 decimals, moves the stance through the engine-owned number input `cur_level`; the stance carries
+  `drives.curiosity` and the event line a `curiosity` receipt that `live verify` recomputes; the fold rides in the
+  expectation's checkpoint memory. The optional `stir` gates a self-started idle event: `Live::stir_due(idle_hours)` and
+  `probbit live control STRAND stir? [--idle-hours H]` (threshold, a rate cap, a slower quiet class while a declared flag
+  is on); a stir is an ordinary event with `"stir": "<class>"`. The monitor's drives rows show the drive; with a declared stir
+  the reflection document gains `stirs` and one sentence. Off by default: every document without the block is unchanged.
 - **Integrity** (RFC 0014, docs/rfcs/0014-integrity.md, docs/persona.md §2.19 and §5.9): four optional self keys in the
   `identity` block (`keep`, `warn`, `cue`, `traits`; outside the persona digest) turn on, per live event, an exact account of
   the drift from the declared self: per trait the total variation between the rest-probe odds of the individual rested (the

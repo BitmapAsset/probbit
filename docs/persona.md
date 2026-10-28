@@ -1053,6 +1053,41 @@ Refusals: a `keep` entry that is not a habit id of the persona, a `traits` entry
 entry listed twice, `warn` outside (0, 1], an empty or multi-line `cue`. The allowance per trait comes from the persona's
 `bound` block (section 2.16); without one every allowance is null and `bound_used` reads 0.
 
+### 2.20 Curiosity and the stir (optional; RFC 0016)
+
+Engine 0.14.0 and later (an engine before it refuses the block, `curiosity: unknown field`; `live verify` of such a strand
+exits 5, `unsupported`). A drive named `curiosity`, fed by the surprise the expectation block (section 2.17) measures, and
+an optional self-started idle event, the **stir**, that it gates. It needs an expectation block and is in the persona digest
+(its level moves the stance). Full definition, refusals and bars: docs/rfcs/0016-curiosity.md.
+
+```yaml
+curiosity:
+  half_life_events: 8        # surprise_recent: the average of z+ = max(z, 0), its half-life in events (starts at quiet_z)
+  quiet_z: 0.5               # below it nothing is new
+  miss_z: 1.5                # a context's visit misses when z+ > miss_z
+  last_k: 3                  # failed_contexts: the contexts whose last K visits all missed
+  weights: {quiet: 1.0, failed: 0.5}
+  cap: 2
+  effects: {initiative: 0.6} # per unit of the level, on traits or moods (never pursue)
+  stir: {threshold: 1.0, every_minutes: 30, class: check, when_asleep: {flag: night, every_minutes: 120, class: glance}}
+```
+
+**The level** = clip(quiet x max(0, 1 - surprise_recent / quiet_z) + failed x failed_contexts, 0, cap), 6 decimals. Event t's
+turn reads the level after event t-1 as the engine-owned number input `cur_level` (box [0, cap], carrying `effects`; a host
+that sends it is refused at `inputs.cur_level`; the stance's `inputs` leave it out). The stance gains
+`drives.curiosity: {failed_contexts, level, surprise_recent}` and the event line the same object under `curiosity`
+(`live verify` recomputes it). The drive's state is folded from the logged lines inside the expectation's memory, so a
+checkpoint carries it (`expect.curiosity`) and resume and replay from a checkpoint read it back. `persona turn` and
+`persona replay` carry no memory: the level is 0 there.
+
+**The stir.** `Live::stir_due(idle_hours)` (and `probbit live control STRAND stir? [--idle-hours H]`) answers whether a
+self-started event is due: the level at least `threshold`, at most one per `every_minutes` since the last stir; while the
+last event had the `when_asleep.flag` on, only with `when_asleep`, at its slower rate and with its class, which never
+speaks. A host that acts on it feeds an ordinary event with `"stir": "<class>"` and its own current readings; a habit in
+force on those readings binds the stir's stance as any other (a persona that sleeps on a flag names that flag in
+`when_asleep`). A stir the host ignores leaves no line. Without the block nothing changes: no `cur_level`, no `drives`
+key, no line field, every document as before.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -1887,7 +1922,7 @@ and the odds at the first and last sample, the moods' path (each mood's position
 value) with its turning points, the drives' peaks, the habits that bound, the learned weights' net change. Feedback that settled
 the credit, control, rest and reflection lines are counted. A window without a checkpoint line reports no levels, moods,
 drives or habits: those sections are `null` (an event line logs digests, not the stance), never invented. Every number is at
-6 decimals, `digest` is the sha256 of the canonical text without it, and `summary` holds 6 to 12 sentences from fixed
+6 decimals, `digest` is the sha256 of the canonical text without it, and `summary` holds 6 to 12 sentences (13 at most with a declared stir, RFC 0016) from fixed
 templates, part of the document. `--text` prints the sentences only. The library call is `probbit_persona::reflect::{reflect,
 reflect_since_checkpoint, reflect_window}` (std and `nostd`). The format is docs/rfcs/0013-self-report.md; section 5.7,
 "Reflection lines", appends it to the strand.

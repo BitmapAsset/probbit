@@ -455,6 +455,30 @@ a turn, so it reaches the same 13,656 B; a hit by state (a life where nothing th
 20,952 B per miss. This is still over RFC 0014's budget (2 % of a turn, 8 KB per miss): a hit still builds the probe's
 program, and a miss is a turn. Integrity is off by default and costs nothing without the self keys. Not measured on silicon.
 
+### Curiosity and the stir on a body (RFC 0016)
+
+With a `curiosity` block (docs/persona.md §2.20), `Live::event` reads the drive's level from the expectation's memory before
+the turn and folds the event into it after the turn: an average, one short miss list per remembered context (at most
+`max_combos`), the hours since the last stir. A body's idle loop polls `Live::stir_due(idle_hours)` (the hours since its last
+event, from its own clock): the call reads that fold and returns `None` or a `Stir` (class, speaks, asleep, level, minutes
+since the last stir). It solves nothing and writes nothing (its one allocation is the class name it returns), so a body may poll it every
+minute; it logs nothing either. When the body acts on a stir it feeds an ordinary event with `"stir": "<class>"` and its current readings, so
+the stir is one strand line like any event, and a habit in force on those readings (a night flag) binds it.
+Measured on the x86_64 host and on the `nostd` build (the chip's proxy, painted as above), on a body's recorded day (134
+events) with a curiosity block added, against the same individual with the drive cleared (best of 3):
+
+| What | std | `nostd` |
+| --- | ---: | ---: |
+| the day, drive on / off | 174.023 / 174.688 ms | 178.970 / 178.274 ms |
+| the drive's share of a turn (fold + level + receipt) | -0.38 % (noise) | +0.39 % |
+| `stir_due`, one call | 0.000060 ms | 0.000060 ms |
+| `stir_due`'s share, one poll per event | 0.0046 % | 0.0045 % |
+| `stir_due` stack high-water / heap peak | | 2,768 B / 8 B |
+| `expect_step` with the drive, stack / heap | | 3,040 B / 2,184 B |
+
+The drive's cost is within the run-to-run noise of a turn; polling once a minute through a night adds about 60 calls an hour.
+Not measured on silicon.
+
 ### Measured on one board (ESP32-S3)
 
 First numbers from one ESP32-S3 at 240 MHz, the engine on one core shared with a 16 fps renderer, with the boxed setup path

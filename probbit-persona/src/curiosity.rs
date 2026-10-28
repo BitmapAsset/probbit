@@ -3,10 +3,11 @@
 //! already measures, and it moves the stance through one engine-owned number input, `cur_level`, as `pace` moves it through its
 //! two. Off by default: a persona without the `curiosity` block gives every document, state and strand as before.
 //!
-//! - `surprise_recent` s: an exponentially weighted average of |z| (the deviation's z, read from the logged prediction as the
-//!   expectation's normal reads it) with a half-life in events; it starts at `quiet_z`.
+//! - `surprise_recent` s: an exponentially weighted average of z+ = max(z, 0) (the deviation's z, read from the logged
+//!   prediction as the expectation's normal reads it; one-sided as its `registers`: a prediction error below the learned
+//!   normal is no surprise) with a half-life in events; it starts at `quiet_z`.
 //! - `failed_contexts` F: of the contexts the expectation remembers (its input combos), those whose last K visits all missed
-//!   (|z| > `miss_z` on each).
+//!   (z+ > `miss_z` on each).
 //! - level = clip(quiet x max(0, 1 - s / quiet_z) + failed x F, 0, cap), at 6 decimals: it rises while nothing new arrives (s
 //!   low for long) and while contexts keep failing, and falls when a surprising event raises s.
 //!
@@ -93,8 +94,9 @@ impl CurMem {
     /// One event folded in: `key` its combo, `z` its z (None while cold), `kv` its logged inputs. Before the expectation's normal
     /// reads the event (z is the deviation's z). Every number at 6 decimals.
     pub fn step(&mut self, c: &Curio, key: &str, z: Option<f64>, kv: &[(String, Json)]) {
-        if let Some(z) = z { let lam = 0.5f64.powf(1.0 / c.hl); self.s = r6(lam * self.s + (1.0 - lam) * r6(z.abs()));
-            let miss = r6(z.abs()) > c.miss_z;
+        // one-sided, as the deviation's `registers`: a prediction error below the learned normal (z < 0) is no surprise
+        if let Some(z) = z { let zp = r6(z.max(0.0)); let lam = 0.5f64.powf(1.0 / c.hl); self.s = r6(lam * self.s + (1.0 - lam) * zp);
+            let miss = zp > c.miss_z;
             match self.ctx.binary_search_by(|x| x.0.as_str().cmp(key)) {
                 Ok(i) => { let v = &mut self.ctx[i].1; v.push(miss); if v.len() > c.last_k { v.remove(0); } }
                 Err(i) => self.ctx.insert(i, (key.to_string(), vec![miss])) } }
@@ -192,7 +194,7 @@ mod tests {
     fn the_block_is_read_strictly() {
         assert_eq!(refused(""), "ok");
         assert_eq!(refused(CUR), "ok");
-        assert_eq!(match build(&json::parse(&DOC.replace("CUR", CUR).replace(r#","expectation":{"half_life_events":8,"max_combos":6}"#, "")).unwrap()) { Err(e) => format!("{}: {}", e.path, e.msg), Ok(_) => "ok".into() },
+        assert_eq!(match build(&json::parse(&DOC.replace("CUR", CUR).replace(r#""expectation":{"half_life_events":8,"max_combos":6}"#, r#""comment":"no expectation""#)).unwrap()) { Err(e) => format!("{}: {}", e.path, e.msg), Ok(_) => "ok".into() },
             "curiosity: a curiosity block needs an expectation block (the drive reads its measured surprise)");
         assert_eq!(refused(r#","curiosity":{"effects":{"pursue":1}}"#), "curiosity.effects.pursue: the curiosity drive never moves pursue");
         assert_eq!(refused(r#","curiosity":{"effects":{"nope":1}}"#), r#"curiosity.effects.nope: unknown trait or mood "nope""#);
