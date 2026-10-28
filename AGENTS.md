@@ -7,7 +7,7 @@ This file is for agents (and the people running them). Commands first.
 
 ```sh
 mkdir probbit-try && cd probbit-try
-curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh            # exit 0; last lines start "Next:"
+curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh            # exit 0; ends with a "Next:" list (a "not on your PATH" note is expected)
 export PATH="$HOME/.local/bin:$PATH"                                                             # no output
 probbit --version                                                                                # probbit 0.13.0 (or later); exit 0
 curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml   # no output; tutor.yaml

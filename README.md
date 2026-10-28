@@ -47,7 +47,8 @@ steps are written for and tested on Linux and macOS.
 ```sh
 mkdir probbit-try && cd probbit-try
 
-# 1. Install. Exit 0; the last lines start with "Next:". Installs to ~/.local/bin (PROBBIT_INSTALL_DIR to change it).
+# 1. Install to ~/.local/bin (PROBBIT_INSTALL_DIR to change it). Exit 0; ends with a "Next:" list. If it says the
+#    directory is not on your PATH, that is expected: step 2 adds it for this shell.
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 
 # 2. Put that directory on PATH for this shell. No output.
@@ -66,7 +67,8 @@ probbit persona init tutor.yaml --seed 2 --out tutor.state
 #    "line":"Stance: go easy on the jokes; no jokes; gentle; ... Exit 0.
 echo '{"sentiment":"negative"}' | probbit live tutor.yaml --state tutor.state --strand tutor.strand --clock fixed 2>/dev/null | grep -o '"line":"[^"]*"'
 
-# 7. Replay the strand and check every digest. Expect "ok":true. Exit 0 (the full document: exit 1 if a line differs).
+# 7. Replay the strand and check every digest. Expect "ok":true. Exit 0. (Without the grep: a strand that does not
+#    replay exits 1 and names the first line that differs.)
 probbit live verify tutor.strand | grep -o '"ok":[a-z]*'
 
 # 8. List the MCP server's tools. Expect 10 lines, from "name":"probbit_decide" to "name":"probbit_live_verify". Exit 0.
