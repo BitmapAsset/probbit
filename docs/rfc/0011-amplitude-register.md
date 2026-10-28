@@ -6,7 +6,8 @@ from the thermal odds by 0.25-0.27 at the node; 0 of 4,100 bound cases exceed a 
 this RFC changes a release or `main`; the tier stays off unless a persona asks for it. Turning it on changes the bound
 certificate: compute it again with the tier (section 5). Round 4 adds `engine.amplify` (off by default): exact amplitude
 amplification in place of the projection, which lands on the projection's numbers with feasible mass 1 (section 5,
-"Amplification").
+"Amplification"). Round 5 adds `engine.schedule` (absent = the default sweep): a longer sweep separates the top two levels
+where the thermal tier is indifferent and agrees more elsewhere (section 5, "Schedules and the indifferent set").
 
 ## 1. What it is, in one paragraph
 
@@ -160,6 +161,43 @@ solve on that day (1.19 vs 1.17 ms per event) and 1.06× on a 16-qubit component
 high-water 2,016 B at q 8 and 12. 100 lives with amplification replay byte for byte on x86_64 and on the no_std build, 0
 floats past 6 decimals, and an engine without the tier exits 5. Turning it on therefore buys a receipt whose register holds feasible mass 1 and logs
 how it got there; it does not buy a different stance.
+
+### Schedules and the indifferent set (round 5)
+
+Round 4 showed amplification computes what the projection computed, so the only place the register can decide differently is
+its evolution. `engine.schedule` names it (needs the tier; absent = `tf-linear-16x4`, byte for byte): `tf-linear-16x4` (the
+default sweep, 16 steps over time 4), `tf-linear-64x16` (the same transverse-field sweep, 64 steps over time 16: four times the
+layers) or `qaoa-p2` (two QAOA layers, γ 0.500000 β 0.500000 then γ 1.500000 β 0.250000, fixed by a grid search on a held-out
+third of the corpus's programs and then frozen). The receipt's `schedule` digest and `schedule_name` name it; an unknown name
+is refused.
+
+The study: on the recorded corpus (339,389 exact solves, 130,088 distinct programs, 2,183,612 trait decisions), the thermal
+tier is **indifferent** (its top two levels' odds within 0.05; its own gap a median 0.028) on **234,004 decisions = 10.72 %**
+(fuzz 9.9 %, replay and live 15.5-15.7 %, lint 17.5 %). On those decisions, measured on the two thirds of programs the grid
+did not see, the register's gap between its top two levels:
+
+| schedule | median gap | gap > 0.10 | gap > 0.25 | agreement where the thermal tier is not indifferent |
+|---|---|---|---|---|
+| tf-linear-16x4 (default) | 0.048628 | 9.5 % | 0.1 % | 97.58 % |
+| tf-linear-64x16 | **0.151709** | **64.6 %** | **16.0 %** | **98.17 %** |
+| qaoa-p2 | 0.094292 | 47.4 % | 7.0 % | 92.99 % |
+
+Two disjoint samples of programs give medians within 0.000697 of each other, so the long sweep's margin (0.103) is about 150
+times the noise. By the registered rule (the largest median gap subject to agreement ≥ 90 % on the decisions that are not
+indifferent) the choice is `tf-linear-64x16`; it is not the default, because the default is what every strand recorded so far
+replays. What the longer sweep buys a decision, stated plainly: a slower sweep keeps more of the simulated register's amplitude
+on the most probable plans, so it commits where the thermal answer is a near tie (it takes the thermal plurality on 78.5 % of
+those decisions, the runner-up on 20.1 %, a third level on 1.4 %), and it keeps the thermal choice where there is one. It does
+not create a preference the weights do not hold. Its cost is the layers: 1.5× the default solve per event on a recorded day of a
+52-qubit persona (3.1-3.5× on a lone 8-12 qubit component), 0.8× for `qaoa-p2`; no_std stack at most 2,960 B on every schedule. With amplification on, 165 of the 130,088
+programs reach a component mass near 5e-5 under the long sweep and 100+ iterations, where rounding leaves the landing about
+1e-12 short of its bar; that component now declines to the default tiers (`amplification missed its 1 - 1e-12 landing`)
+instead of stopping the turn (0.12 % of decisions; 0 with the other two schedules). Every number here is a register simulated exactly on a CPU;
+the gap is a property of the evolution's length and phases, not a claim about any device.
+Replay: 100 lives per schedule record twice byte for byte and verify (arm64 host), with 0 floats past 6 decimals; an engine
+without the tier exits 5. Measured on the way: on an arm64 host the no_std build does not reproduce the tier's strands written
+by the std build (the last bits of the platform's math functions differ from the no_std math library's, and a 6-decimal odd
+flips); this holds for the default schedule exactly as on round 4's code, so it is not new; round 4 measured 100 of 100 on x86_64.
 
 ## 6. What this RFC does not claim
 

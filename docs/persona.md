@@ -233,6 +233,7 @@ engine:
   # tier: amplitude     # research (RFC 0011, draft): an exact simulated qubit register on a CPU; absent = the default tiers
   # q_max: 12           # the most encoded qubits (ceil(log2 d) per variable) in one component the amplitude tier takes (1-16)
   # amplify: false      # research (RFC 0011, round 4): with the tier, exact amplitude amplification in place of the projection
+  # schedule: tf-linear-16x4 # research (RFC 0011, round 5): the register's evolution: tf-linear-16x4 | tf-linear-64x16 | qaoa-p2
 line:
   max_tokens: 40        # estimated tokens (max of chars / 4 and 4/3 per word)
   order: [verbosity, caution, directness, warmth, humour, initiative, formality, curiosity]
@@ -251,7 +252,10 @@ the layer list, the schedule and the final amplitudes at 6 decimals) and
 without the tier reports a strand that uses it as `unsupported by this engine: engine.tier` (exit 5). `engine.amplify: true`
 (research, round 4; needs the tier) replaces the projection by exact amplitude amplification, simulated on a CPU: the
 rules are the oracle, the register is rotated onto the plans that obey them, the stance is the projection's (the same plan and odds, measured equal to
-1.1e-12) and `engine.amplify` logs the iterations, the final phases and the mass before and after (`feasible_mass` 1). The register is a
+1.1e-12) and `engine.amplify` logs the iterations, the final phases and the mass before and after (`feasible_mass` 1). `engine.schedule`
+(research, round 5; needs the tier; absent = `tf-linear-16x4`) names the evolution of the register, simulated exactly on a CPU: `tf-linear-64x16` (four times
+the layers) separates the top two levels where the thermal tier is a near tie (median gap 0.152 vs 0.049 on the recorded corpus) and
+agrees more elsewhere; `qaoa-p2` is two fixed QAOA layers (RFC 0011, "Schedules and the indifferent set"). The register is a
 simulation: no quantum hardware, no speedup claim; its stances agree with the default tier in 96 % of trait decisions on the
 recorded corpus (RFC 0011, round 3). With the key, `persona bound` probes through the tier: compute the certificate again with
 it, since one computed without the key does not cover the tier.
