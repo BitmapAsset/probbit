@@ -534,3 +534,27 @@ fn a_served_life_in_segments_is_one_strand_that_follows_its_seals() {
     let list = get(port, "/strands", &host).2; assert!(list.contains(r#""n":7,"#) && list.contains(r#""segment":2"#) && list.matches(r#""id":"#).count() == 1, "{list}");
     drop(s); drop(child); let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RFC 0013, the Mirror tab through the serve path: `/reflection?last=N` is `probbit reflect STRAND --last N` computed from the
+/// file as it is now (`live`, no reflection line: `logged` null); after `live control STRAND reflect --last N` the logged line
+/// is reported and recomputes equal; `/s/ID/reflection` serves strand ID; a bad `last` is 400; the page carries the tab
+#[test]
+fn the_mirror_serves_the_reflection() {
+    let f = tmp("mirror");
+    let ev: String = (0..30).map(|k| format!("{{\"elapsed_hours\":1{}}}\n", if k % 4 == 0 { ",\"praise\":true" } else if k % 7 == 0 { ",\"loss\":true" } else { "" })).collect();
+    lived(&f, "2", &["--checkpoint-every", "5"], &ev);
+    let (c, want, _) = probbit(&["reflect", &f, "--last", "10"]); assert_eq!(c, 0); let want = want.trim_end().to_string();
+    let (child, port) = served(&[&f]); let host = format!("127.0.0.1:{port}");
+    let (st, h, page) = get(port, "/", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(page.contains("id=\"tab-mirror\"") && page.contains("reflection?last=50"), "{h}");
+    let (st, h, body) = get(port, "/reflection?last=10", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(h.contains("application/json"), "{h}");
+    assert_eq!(body, format!("{{\"live\":{want},\"logged\":null}}\n"));
+    assert_eq!(get(port, "/reflection?last=0", &host).0, "HTTP/1.1 400 Bad Request");
+    let (c, out, err) = probbit(&["live", "control", &f, "reflect", "--last", "10"]); assert_eq!(c, 0, "{out}{err}"); assert!(out.contains("\"control\":\"reflect\""), "{out}");
+    let body = get(port, "/reflection?last=10", &host).2;
+    assert!(body.contains(&format!("\"logged\":{{\"doc\":{want},\"line\":")) && body.contains("\"matches\":true"), "{body}");
+    drop(child);
+    let (child, port) = served(&[&f]); let host = format!("127.0.0.1:{port}");
+    let id = std::path::Path::new(&f).file_stem().unwrap().to_string_lossy().replace(|c: char| !(c.is_ascii_alphanumeric() || "_.-".contains(c)), "-");
+    assert_eq!(get(port, &format!("/s/{id}/reflection?last=10", ), &host).0, "HTTP/1.1 200 OK");
+    drop(child); let _ = std::fs::remove_file(&f);
+}

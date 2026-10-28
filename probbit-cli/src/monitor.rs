@@ -1049,6 +1049,15 @@ fn handle(mut c: TcpStream, site: &Site, port: u16) {
     let (id, path) = match path.strip_prefix("/s/") { Some(r) => r.split_once('/').map_or((Some(r), ""), |(id, _)| (Some(id), &path[3 + id.len()..])), None => (None, path) };
     if id.is_none() && path == "/" { return reply(&mut c, "200 OK", "text/html; charset=utf-8", PAGE.as_bytes()); }
     if id.is_none() && path == "/strands" { return reply(&mut c, "200 OK", "application/json; charset=utf-8", strands_json(site).as_bytes()); }
+    // RFC 0013, the Mirror tab: `/reflection?last=N` (default 50), computed from the strand file as it is now
+    if path == "/reflection" {
+        let file = match id { None => entries(site).first().map(|e| e.path.clone()), Some(id) => entries(site).iter().find(|e| e.id == id).map(|e| e.path.clone()) };
+        let Some(file) = file else { return reply(&mut c, "404 Not Found", "text/plain", b"no strand file: the reflection reads a strand (the demo has none)\n") };
+        let last = target.split_once('?').and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("last="))).map_or(Some(50), |v| v.parse::<u64>().ok().filter(|n| *n >= 1));
+        let Some(last) = last else { return reply(&mut c, "400 Bad Request", "text/plain", b"last=N: a whole number >= 1\n") };
+        return match std::fs::read_to_string(&file) { Ok(t) => reply(&mut c, "200 OK", "application/json; charset=utf-8", format!("{}\n", mirror(&t, last)).as_bytes()),
+            Err(_) => reply(&mut c, "404 Not Found", "text/plain", b"the strand file cannot be read\n") };
+    }
     let Some(hub) = hub_for(site, id).filter(|_| path == "/events" || path.starts_with("/doc/")) else {
         return reply(&mut c, "404 Not Found", "text/plain", if id.is_some() { b"not found: /s/ID/events and /s/ID/doc/N serve the strand ID that /strands lists\n" } else { b"not found: / is the page, /events its stream, /doc/N a stance document, /strands the strands served\n" }) };
     let hub = &hub;
@@ -1061,6 +1070,18 @@ fn handle(mut c: TcpStream, site: &Site, port: u16) {
             drop(b);
             match doc { Some(d) => reply(&mut c, "200 OK", "application/json; charset=utf-8", d.as_bytes()), None => reply(&mut c, "404 Not Found", "text/plain", msg.as_bytes()) } }
         _ => {} }
+}
+/// The Mirror's document (RFC 0013): `live`, the reflection of the last `last` events computed now (no solve); `logged`, the
+/// latest reflection line the strand carries (its line number, its document, and whether it is the reflection of the lines
+/// before it: `matches`), or null; `error` when the strand cannot be reflected
+pub fn mirror(text: &str, last: u64) -> String {
+    use probbit_persona::reflect;
+    let ls = crate::live::lines(text); let o = |v: Vec<(&str, Json)>| Json::Obj(v.into_iter().map(|(k, x)| (k.to_string(), x)).collect());
+    let logged = (1..ls.len()).rev().find(|&i| reflect::is_reflection_line(ls[i])).map_or(Json::Null, |i| o(vec![("line", Json::Num((i + 1) as f64)),
+        ("doc", json::parse(ls[i]).ok().and_then(|j| j.get("reflection").cloned()).unwrap_or(Json::Null)), ("matches", Json::Bool(reflect::check_line(&ls[..i], ls[i]).is_ok()))]));
+    persona::canon(&match reflect::reflect_window(&ls, reflect::Window::Last(last)) {
+        Ok(r) => o(vec![("live", r.doc), ("logged", logged)]),
+        Err(e) => o(vec![("error", Json::Str(e.msg)), ("logged", logged)]) })
 }
 /// The headers every answer carries: no caching, no sniffing, and for the page a policy that lets it load nothing and connect
 /// to nothing but its own server
