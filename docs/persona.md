@@ -1031,6 +1031,28 @@ point (and its selector).
 What it is: a lookup from the stance's mood levels, active habits and deviation to a symbol, so a person reading the chat
 or the monitor sees the engine's state at a glance. What it is not: a measurement of anything beyond those fields.
 
+### 2.19 Identity: the self keys (optional; RFC 0014)
+
+Engine 0.14.0 and later; an engine before it refuses a persona that declares them (`identity.keep: unknown field`; `live
+verify` of such a strand exits 5, `unsupported`). Four optional keys in the `identity` block declare which part of the
+individual is "the self" and turn on integrity (section 5.9). They move nothing (effects {}) and stay out of the persona
+digest, as `bound` does: declaring them on a persona with a recorded life leaves every state as it was.
+
+```yaml
+identity:
+  name: Pip
+  version: 1.1.0
+  seed: 1
+  keep: [no_jokes_on_loss, after_error_check]   # identity-bearing habits: reported held or not fired per event
+  warn: 0.5                                     # a share of the allowance in (0, 1], default 0.8
+  cue: hold the line                            # the persona's own words, handed to the host past warn (1-120 characters)
+  traits: [humour, verbosity]                   # the traits measured; default learning.traits, else every trait
+```
+
+Refusals: a `keep` entry that is not a habit id of the persona, a `traits` entry that is not a trait (a mood is refused), an
+entry listed twice, `warn` outside (0, 1], an empty or multi-line `cue`. The allowance per trait comes from the persona's
+`bound` block (section 2.16); without one every allowance is null and `bound_used` reads 0.
+
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
 For turn t of an individual (seed s), with inputs x_t:
@@ -1874,6 +1896,33 @@ reflect_since_checkpoint, reflect_window}` (std and `nostd`). The format is docs
 at each request (`/reflection?last=N`, `/s/ID/reflection` per strand), and the latest reflection line the strand carries with
 whether it recomputes equal; the tab shows the sentences, the top surprises with predicted vs measured, the habits that bound
 and the moods at the checkpoint samples, refreshed with the page's scan of the strand list.
+
+### 5.9 Integrity: the drift from the declared self (RFC 0014)
+
+With the self keys (section 2.19), every live stance document and every event line carries `integrity`, computed after the
+turn from the state it produced (docs/rfcs/0014-integrity.md):
+
+```json
+{"allowance":0.902968,"crossed":[],"cue":null,"drift":0.214,"habits_held":{"held":[],"not_fired":["after_error_check","no_jokes_on_loss"]},
+ "traits":{"humour":{"allowance":0.462081,"bound_used":0.21,"drift":0.097},"verbosity":{"allowance":0.440887,"bound_used":0.27,"drift":0.117}},
+ "used":0.237,"warn":0.5}
+```
+
+- `traits.<t>.drift`: the total variation between the odds at the rest probe (section 2.16) of the individual rested (the
+  channels of the hour, such as moods with a half-life, the credit awaiting feedback, the last stance and the agenda's step, at the fresh individual's
+  values; everything that persists as it is) and of the fresh individual of the same seed. `drift` is the sum over the traits.
+- `allowance`: epsilon at the individual's seed (null without a `bound` block or for an unlearned trait); `bound_used` =
+  drift / allowance; `used` = the summed drift over the traits with an allowance over the summed allowance: the monitor's
+  integrity dial. By RFC 0004's theorem `bound_used` stays at or below 1 (up to the 1e-6 rounding of amendment A7).
+- `crossed`: the traits at or past `warn`; `cue`: `identity.cue` while `crossed` is not empty, else null. The host appends the
+  cue to the line it hands the model; the engine does not edit `line`, which the state's remembered stance digest covers.
+- `habits_held`: of the `keep` habits, those that bound at this event and those that did not fire.
+
+Every number is at 6 decimals. Both stance digests leave `integrity` out; `live verify` recomputes it on every event line and
+refuses an edited value naming the line ("the integrity differs"); `resume` takes it as written. The library call is
+`probbit_persona::integrity::{compute, compute_cached, Integrity}` (std and `nostd`). In the monitor the integrity dial takes
+the place of "room left in the bound" on the instrument panel, and the Mirror tab adds the per-trait drift table of the event
+on view.
 
 ## 6. What a persona can NOT do
 

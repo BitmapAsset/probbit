@@ -431,6 +431,25 @@ The heap peak is the parsed checkpoint lines (a checkpoint line of the recorded 
 it is read); a body short of heap reflects a window with fewer checkpoint lines in it. The document is byte for byte the same
 from the std and `nostd` builds and the CLI (6/6 windows over the two strands). Not measured on silicon.
 
+### Integrity on a body (RFC 0014)
+
+With the identity self keys (docs/persona.md §2.19), `Live::event` computes `integrity` after the turn
+(`probbit_persona::integrity::compute_cached`, std and `nostd`): once per seed the fresh individual's rest probe and the
+allowances (RFC 0004's vertex search at that seed), then per event one rest probe on the rested state, skipped when the rested
+state's body (without `turn`) equals the last one. A rest probe is a whole turn, so the cost is (miss rate) x (one turn).
+Measured on the x86_64 host (release, best of 3 lives), and the stack high-water and heap peak of one call on the `nostd`
+build (painted below the caller, as above):
+
+| Life | Events | Host ms with / without | Share of the turn | Cache hits | Stack (miss / hit) | Heap peak (miss / hit) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| a recorded day of a body (moods, senses, a learning and a bound block; no feedback that day) | 1,160 | 2,255.5 / 1,609.4 (std), 2,250.3 / 1,644.5 (`nostd`) | +40.1 % / +36.8 % | 0 of 1,160 | 20,952 B / 9,312 B | 96,315 B / 25,221 B |
+| the tutor with learning and a bound block, feedback on most events | 200 | 219.4 / 95.9 (std) | +128.9 % | 1 of 200 | 19,680 B / 9,232 B | 121,010 B / 11,029 B |
+
+This is over RFC 0014's budget (2 % of a turn, 8 KB of stack): on the recorded day something that persists moves on every
+event (the drift itself stays 0.000000 all day), so the cache never hits, and a miss carries a turn's own stack. Integrity is
+off by default and costs nothing without the self keys; a body that declares them pays one turn per event today. Not measured
+on silicon.
+
 ### Measured on one board (ESP32-S3)
 
 First numbers from one ESP32-S3 at 240 MHz, the engine on one core shared with a 16 fps renderer, with the boxed setup path

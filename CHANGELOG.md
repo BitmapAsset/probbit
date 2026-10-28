@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **Integrity** (RFC 0014, docs/rfcs/0014-integrity.md, docs/persona.md §2.19 and §5.9): four optional self keys in the
+  `identity` block (`keep`, `warn`, `cue`, `traits`; outside the persona digest) turn on, per live event, an exact account of
+  the drift from the declared self: per trait the total variation between the rest-probe odds of the individual rested (the
+  channels of the hour at the fresh values, what persists as it is) and of the seed's fresh individual, `bound_used` against
+  RFC 0004's epsilon at the seed, the dial's `used`, the `keep` habits held or not fired, and the persona's own `cue` past
+  `warn`; every number at 6 decimals. Library `probbit_persona::integrity::{compute, compute_cached, Integrity}` (std and
+  `nostd`); the rest probe is cached on the rested state's body without `turn`.
+- **Integrity on the event line** (engine 0.14.0+): the stance document and the event line carry `integrity`; `live verify`
+  recomputes it and refuses an edited value naming the line; an engine before 0.14.0 reads such a persona as unsupported
+  (exit 5). A persona without the self keys writes every strand, stance and corpus byte for byte as before.
+- **The monitor's integrity dial and the Mirror's drift table**: the instrument panel's "room left in the bound" placeholder
+  becomes the integrity dial when the stance carries `integrity`; the Mirror tab shows the per-trait drift, allowance and share
+  of the event on view.
 - **Self-report** (RFC 0013, docs/rfcs/0013-self-report.md, docs/persona.md §5.8 "Self-report"): `probbit reflect STRAND
   [--last N | --since-checkpoint] [--json | --text]` and `probbit_persona::reflect` (std and `nostd`): a canonical account of a
   window of a strand's events from its lines alone, no solve: the inputs set, the expectation's surprises (z recomputed from the
