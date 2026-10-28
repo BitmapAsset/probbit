@@ -111,7 +111,9 @@ All notable changes to this project are documented here. The format follows
   of the recorded corpus's trait decisions where the thermal tier is indifferent, the simulated register's top-two gap has median
   0.049 (default), 0.152 (long sweep), 0.094 (qaoa-p2); agreement elsewhere 97.6 / 98.2 / 93.0 %; noise 0.0007. The long sweep
   is the rule's choice (1.5× the solve per event on a recorded day). A missed amplification landing (165 programs under the long sweep) now declines to the
-  default tiers instead of panicking. Without the key every stance and strand is byte-identical to round 4. Exact, on a CPU.
+  default tiers instead of panicking. Failure, stated: the no_std build re-verifies the long sweep's strands 0/100 (qaoa-p2 98/100;
+  the default 100/100): last-bit math differences, so non-default schedules replay only on the recording build for now. Without
+  the key every stance and strand is byte-identical to round 4. Exact, on a CPU.
 - **RFC 0011, round 4: exact amplitude amplification in place of the projection** (research, `engine.amplify: true`, off by
   default; docs/rfc/0011-amplitude-register.md, "Amplification"). `amp::amplify_exact`: the rules as the oracle, the diffusion
   about the swept state, k standard iterations and one phase-matched final one, so the simulated register lands on its

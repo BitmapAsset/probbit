@@ -194,10 +194,13 @@ programs reach a component mass near 5e-5 under the long sweep and 100+ iteratio
 1e-12 short of its bar; that component now declines to the default tiers (`amplification missed its 1 - 1e-12 landing`)
 instead of stopping the turn (0.12 % of decisions; 0 with the other two schedules). Every number here is a register simulated exactly on a CPU;
 the gap is a property of the evolution's length and phases, not a claim about any device.
-Replay: 100 lives per schedule record twice byte for byte and verify (arm64 host), with 0 floats past 6 decimals; an engine
-without the tier exits 5. Measured on the way: on an arm64 host the no_std build does not reproduce the tier's strands written
-by the std build (the last bits of the platform's math functions differ from the no_std math library's, and a 6-decimal odd
-flips); this holds for the default schedule exactly as on round 4's code, so it is not new; round 4 measured 100 of 100 on x86_64.
+Replay, measured, and a failure printed as one: 100 lives per schedule record twice byte for byte, verify on the same build and
+emit 0 floats past 6 decimals; an engine without the tier exits 5. The no_std build (the chip's math library) re-verifies
+the default schedule's lives 100 of 100 on x86_64, but **the long sweep's 0 of 100 and qaoa-p2's 98 of 100**: the platform's
+math functions and the no_std library differ in the last bits, and over four times the layers a 6-decimal odd flips. On an arm64
+host even the default fails there (0 of 5 on round 4's own path), so that part is not new. Until the tier computes with the same
+math functions on every build, a non-default schedule replays only on the build that recorded it: the long sweep is the study's
+answer, not a schedule to record strands with yet.
 
 ## 6. What this RFC does not claim
 
