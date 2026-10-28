@@ -789,7 +789,7 @@ fn reflection_lines_verify_and_forgeries_are_refused() {
     // the life goes on after a reflection line, and the strand still verifies
     assert_eq!(live("{\"elapsed_hours\":1}\n").0, 0); assert_eq!(run(&["live", "verify", &f], "").0, 0);
     // engine-gated: a strand written by 0.13.0 takes no reflection line
-    let old = format!("{}/{STRANDS}/expectation-0.13.0.strand", env!("CARGO_MANIFEST_DIR").trim_end_matches("/probbit-cli")); let g = dir.join("old.strand"); std::fs::copy(&old, &g).unwrap();
+    let old = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("strands").join("expectation-0.13.0.strand"); let g = dir.join("old.strand"); std::fs::copy(&old, &g).unwrap();
     let (c, out, _) = run(&["live", "control", &g.to_string_lossy(), "reflect"], ""); assert_eq!(c, 2, "{out}"); assert!(out.contains("0.14.0"), "{out}");
     assert_eq!(run(&["reflect", &g.to_string_lossy()], "").0, 0, "an older strand is read");
     let _ = std::fs::remove_dir_all(&dir);
