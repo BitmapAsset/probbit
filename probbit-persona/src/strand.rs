@@ -266,8 +266,8 @@ fn rest_line(prev: &str, rest: Json, state: &str) -> String {
     persona::canon(&Json::Obj(vec![("prev".into(), Json::Str(prev.into())), ("rest".into(), rest), ("state".into(), Json::Str(state.into()))]))
 }
 /// What kind of strand line `j` is
-pub enum Kind { Event, Control, Checkpoint, Rest }
-pub fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else if j.get("rest").is_some() { Kind::Rest } else { Kind::Event } }
+pub enum Kind { Event, Control, Checkpoint, Rest, Reflection }
+pub fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else if j.get("rest").is_some() { Kind::Rest } else if j.get("reflection").is_some() { Kind::Reflection } else { Kind::Event } }
 /// The header's keys, as this engine writes them (a segment's header has one more at its end: `segment`)
 const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state", "document"];
 /// The divergence of a segment whose second line is not the line its header links
@@ -301,9 +301,11 @@ pub fn segment_header(lv: &Live, doc: &Json, engine: &str, index: u64, previous:
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
     let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
-        Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"] };
+        Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"], Kind::Reflection => &["prev", "reflection"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
+/// The divergence of a reflection line in a strand of an engine before 0.14.0 (RFC 0013: reflection lines are engine-gated)
+pub const REFLECT_OLD: &str = "a reflection line in a strand of an engine before 0.14.0 (reflection lines need 0.14.0 or later)";
 /// The start of a replay's `why` that is not a divergence: the line has a field or a line kind this engine does not know (a
 /// strand from a newer engine). Nothing from that line on was checked: the strand is not verified, and not shown to differ.
 /// `verify` reports it as `unsupported` (exit 5), never as `diverges`; a changed value of a field this engine knows still
@@ -448,6 +450,9 @@ impl Replay {
                     live.prev = persona::digest_of(l);
                 }
                 self.line = i; self.checkpoint_ready = false; return Ok(None) }
+            // RFC 0013: a reflection line changes nothing (its document is checked against the lines before it: `step_at`)
+            Kind::Reflection => { if live.dev_full { return Err((i, REFLECT_OLD.into())); }
+                live.prev = persona::digest_of(l); self.line = i; self.checkpoint_ready = false; return Ok(None) }
             Kind::Event => {} }
         if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i, format!("n is not {}", live.n + 1))); }
         let ev = j.get("inputs").ok_or((i, "no inputs".to_string()))?;
@@ -476,6 +481,12 @@ impl Replay {
         if let (Some((seen, lost_at)), Some((_, m, lost))) = (self.viab.as_mut(), persona::viability(&self.live.p, &self.live.st)) {
             *seen = seen.min(m); if lost && lost_at.is_none() { *lost_at = Some(self.live.n); } }
         Ok(Some(stance))
+    }
+    /// `step` of `lines[i]`, a reflection line also checked against the lines before it (RFC 0013): every verify path steps so
+    pub fn step_at(&mut self, lines: &[&str], i: usize, eng: Engine) -> Result<Option<Json>, (usize, String)> {
+        let r = self.step(lines[i], eng)?;
+        if r.is_none() && crate::reflect::is_reflection_line(lines[i]) { crate::reflect::check_line(&lines[..i], lines[i]).map_err(|why| (i + 1, why))?; }
+        Ok(r)
     }
     /// The end of the strand: a rest line (RFC 0002 part 2) is only ever written with the event after it, so a strand that ends
     /// on one diverges at it
@@ -529,7 +540,7 @@ pub fn verify_blocks(text: &str, eng: Engine) -> Result<(Json, Blocks), (usize, 
     let lines = lines(text);
     let replay = || -> Result<(Json, Blocks), (usize, String)> {
         let (mut r, k) = Replay::open_lines(&lines)?; let mut out = vec![];
-        for l in lines.iter().skip(k) { if let Some(doc) = r.step(l, eng)? { out.push((r.live.n, persona::block(&r.live.p, &doc))); } }
+        for i in k..lines.len() { if let Some(doc) = r.step_at(&lines, i, eng)? { out.push((r.live.n, persona::block(&r.live.p, &doc))); } }
         Ok((r.summary(), out)) };
     replay().map_err(|e| chain_first(&lines, e))
 }
@@ -549,7 +560,7 @@ pub fn verify(text: &str, eng: Engine) -> Result<Json, (usize, String)> {
     let lines = lines(text);
     let replay = || -> Result<Json, (usize, String)> {
         let (mut r, k) = Replay::open_lines(&lines)?;
-        for l in lines.iter().skip(k) { r.step(l, eng)?; }
+        for i in k..lines.len() { r.step_at(&lines, i, eng)?; }
         r.end()?; Ok(r.summary()) };
     replay().map_err(|e| chain_first(&lines, e))
 }
@@ -580,7 +591,7 @@ pub fn verify_from_checkpoint(text: &str, eng: Engine) -> Result<Json, (usize, S
     let Some(k) = last_checkpoint(&lines, 0).filter(|&k| k >= 2) else { return verify(text, eng) };
     let replay = || -> Result<Json, (usize, String)> {
         let mut r = Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1)?;
-        for l in lines.iter().skip(k + 1) { r.step(l, eng)?; }
+        for i in k + 1..lines.len() { r.step_at(&lines, i, eng)?; }
         r.end()?; Ok(r.summary()) };
     replay().map_err(|e| chain_first(&lines, e))
 }
@@ -589,7 +600,7 @@ pub fn verify_keep(text: &str, eng: Engine, keep: &[u64]) -> Result<(Json, Vec<(
     let lines = lines(text);
     let replay = || -> Result<(Json, Vec<(u64, Json)>, Persona), (usize, String)> {
         let (mut r, k) = Replay::open_lines(&lines)?; let mut kept = vec![];
-        for l in lines.iter().skip(k) { if let Some(doc) = r.step(l, eng)? {
+        for i in k..lines.len() { if let Some(doc) = r.step_at(&lines, i, eng)? {
             if let Some(t) = doc.get("turn").and_then(Json::as_f64).map(|x| x as u64).filter(|t| keep.contains(t)) { kept.push((t, doc)); } } }
         r.end()?; Ok((r.summary(), kept, r.live.p.clone())) };
     replay().map_err(|e| chain_first(&lines, e))
@@ -748,6 +759,7 @@ fn check_chain_head(text: &str) -> Result<(Status, Box<Persona>, Json), InErr> {
                     }
                 }
             }
+            Kind::Reflection => { if !canon { return Err(err(i + 1, REFLECT_OLD.into())); } }
             Kind::Rest => {
                 if status != Status::Active { return Err(err(i + 1, format!("rest line while {}", status.name()))); }
                 if !ls.get(i + 1).and_then(|x| json::parse(x).ok()).is_some_and(|x| matches!(kind(&x), Kind::Event)) { return Err(err(i + 1, "a rest line must be followed by its event line".into())); }
@@ -782,6 +794,8 @@ pub fn resume_boxed(text: &str, p: &Persona, st: Box<State>, clock: Clock) -> Re
     // event or a checkpoint is only ever written while active
     let (mut a, mut tail) = (lines.len() - 1, vec![]);
     while a > 0 { let j = json::parse(lines[a]).map_err(|e| bad(format!("line {} is not JSON: {}", a + 1, e.msg)))?;
+        // RFC 0013: a reflection line changes nothing: the anchor is before it
+        if matches!(kind(&j), Kind::Reflection) { a -= 1; continue; }
         if !matches!(kind(&j), Kind::Control) { break; } tail.push(j); a -= 1; }
     let (n, want) = if a == 0 { (0, h.get("state").and_then(|s| s.get("digest")).and_then(Json::as_str).unwrap_or("").to_string()) } else {
         let j = json::parse(lines[a]).map_err(|e| bad(format!("line {} is not JSON: {}", a + 1, e.msg)))?;
@@ -878,6 +892,7 @@ fn resume_walk<S: AsRef<str>>(q: Box<Persona>, h: &Json, head: &str, cp: Option<
         if rest.is_some() && !matches!(kind(&j), Kind::Event) { return Err(err(at - 1, "a rest line must be followed by its event line".into())); }
         match kind(&j) {
             Kind::Rest => { if status != Status::Active { return Err(err(at, format!("rest line while {}", status.name()))); } rest = Some(l.to_string()); }
+            Kind::Reflection => { if !canon { return Err(err(at, REFLECT_OLD.into())); } }
             Kind::Control => { let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
                 status = status.after(f("control")).map_err(|e| err(at, e.msg))?;
                 let line = control_line(f("prev"), f("control"), f("by"), f("reason"), f("at")).map_err(|e| err(at, e.msg))?;

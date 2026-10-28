@@ -127,6 +127,29 @@ pub fn control_cmd(path: &str, what: &str, by: &str, reason: &str, at: &str) -> 
         ("head".into(), s(&persona::digest_of(&line)))]))
 }
 
+/// `probbit live control STRAND reflect [--last N | --since-checkpoint]` (RFC 0013): a host decides when. Under the writer lock,
+/// the reflection of the strand's lines (no solve) is appended as one line after its last line, chained like every line ->
+/// {ok, control: reflect, digest, events, line, head}. Engine-gated: refused on a strand of an engine before 0.14.0.
+pub fn reflect_cmd(path: &str, w: probbit_persona::reflect::Window) -> Result<Json, InErr> {
+    let lock = Lock::take(path)?;
+    let text = std::fs::read_to_string(path).map_err(|e| perr("strand", format!("cannot read {path}: {e}")))?;
+    if !text.ends_with('\n') { return Err(perr("strand", "its last line is incomplete (no newline at the end)")); }
+    let ls = lines(&text);
+    let h = json::parse(ls.first().copied().unwrap_or("")).ok();
+    if h.as_ref().and_then(|h| h.get("probbit_strand").and_then(Json::as_f64)) != Some(FORMAT) { return Err(perr("strand", "not a probbit strand (format 1)")); }
+    if engine_version(h.as_ref().and_then(|h| h.get("engine")).and_then(Json::as_str).unwrap_or("")).map_or(true, |v| v < probbit_persona::reflect::REFLECT_SINCE) {
+        return Err(perr("strand", "a reflection line needs a strand of engine 0.14.0 or later (`probbit reflect STRAND` reads an older one)")); }
+    check_chain(&text)?;
+    let r = probbit_persona::reflect::reflect_window(&ls, w)?;
+    let line = probbit_persona::reflect::line(&persona::digest_of(ls[ls.len() - 1]), &r);
+    if !lock.held() { return Err(locked(None, &format!("{path}.lock"))); }
+    append(path, &[&line])?;
+    let s = |x: &str| Json::Str(x.to_string());
+    Ok(Json::Obj(vec![("ok".into(), Json::Bool(true)), ("control".into(), s("reflect")), ("digest".into(), s(&r.digest)),
+        ("events".into(), r.doc.get("window").and_then(|x| x.get("events")).cloned().unwrap_or(Json::Null)), ("line".into(), Json::Num((ls.len() + 1) as f64)),
+        ("head".into(), s(&persona::digest_of(&line)))]))
+}
+
 /// `probbit live control STRAND seal` (§5.7, "Segments"): a host decides when to seal. Under the writer lock, the newest segment
 /// of STRAND (`NAME.strand`, `NAME.0001.strand`, ...) is replayed (from its last checkpoint, else from its start); refused unless
 /// its last line is an event line (a seal follows an event); then the sealing checkpoint is appended to it and the next segment
