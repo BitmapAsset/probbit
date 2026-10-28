@@ -5,9 +5,10 @@
 <h1 align="center">probbit</h1>
 
 <p align="center">
-  <b>The p-bit processor your agents decide on.</b><br>
-  A p-bit is a bit that holds a probability. probbit couples thousands of them on the CPU you already own,<br>
-  settles a whole plan under hard rules, prints the odds for every part, and refuses when it can't vouch for the answer.
+  <b>A personality, mood and memory layer for AI agents, on an exact p-bit decision engine.</b><br>
+  An AI persona that lives outside the model: every turn, simulated p-bits on a CPU settle the agent's stance under its
+  habits, give the exact odds, and log a replayable, verifiable record. The same engine plans under hard rules and
+  refuses when it can't vouch. CLI, MCP server, OpenClaw plugin, npm, Python, wasm. Zero-dependency Rust.
 </p>
 
 <p align="center">
@@ -15,19 +16,109 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="license"></a>
 </p>
 
-| **60 PII leaks → 0** | **180,540 plans, counted exactly** | **refused → partial → passed** |
-|:---|:---|:---|
-| 300 agent tasks, six workers, privacy rules and quotas. A rule-ignoring router sends 60 private tasks to cloud models (133 broken rules on `probbit demo`'s queue, 144 on the `agent_router` example's). Every plan probbit returns breaks 0: the sampler never leaves the rule-abiding set. | 12 tasks × 6 workers: every rule-abiding plan enumerated, exact odds for every task, in 7.3-8.2 ms on an Apple M4 ([measured](#what-it-does-measured-apple-m4-one-machine)). | Too little time and it says "I can't vouch for this" (exit 3) instead of guessing. More time: it releases what passed its own error bar and escalates the rest ([watch it refuse](#60-second-tour)). |
+| **For AI agents and their builders** | **For decisions under rules** |
+|:---|:---|
+| **Personality**: a persona file + a seed = one individual, the same whichever LLM writes the words. **Mood**: moods with inertia and half-lives (an affective-computing model, computed exactly). **Memory**: learned adjustments inside caps and a hash-chained strand of every turn. **Receipts**: `probbit live verify` replays the strand byte for byte. | **Plans**: tasks to workers, tickets to agents, jobs to machines, every hard rule kept by construction. **Odds**: exact for every part when the program allows, otherwise sampled with an error bar. **Refusal**: "I can't vouch for this" (exit 3) instead of a guess. A constraint solver built on probabilistic computing (p-bits, Ising/QUBO), simulated on a CPU. |
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
 Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
-One binary of 3 to 4 MB, zero third-party dependencies, nothing phones home. Also inside: **the individuality layer**,
-`probbit persona`, a temperament that lives outside the model: [swap the model, keep the individual](#the-individuality-layer-probbit-persona).
+One binary of 3 to 4 MB, zero third-party dependencies, nothing phones home. Agents: start at
+[For AI agents reading this](#for-ai-agents-reading-this), [AGENTS.md](AGENTS.md) and [llms.txt](llms.txt).
+
+| **60 PII leaks → 0** | **180,540 plans, counted exactly** | **refused → partial → passed** |
+|:---|:---|:---|
+| 300 agent tasks, six workers, privacy rules and quotas. A rule-ignoring router sends 60 private tasks to cloud models (133 broken rules on `probbit demo`'s queue, 144 on the `agent_router` example's). Every plan probbit returns breaks 0: the sampler never leaves the rule-abiding set. | 12 tasks × 6 workers: every rule-abiding plan enumerated, exact odds for every task, in 7.3-8.2 ms on an Apple M4 ([measured](#what-it-does-measured-apple-m4-one-machine)). | Too little time and it says "I can't vouch for this" (exit 3) instead of guessing. More time: it releases what passed its own error bar and escalates the rest ([watch it refuse](#60-second-tour)). |
+
+Also inside: **the individuality layer**, `probbit persona`, a temperament that lives outside the model:
+[swap the model, keep the individual](#the-individuality-layer-probbit-persona).
 
 <p align="center"><img src="docs/art/the-spine-beside-the-model.jpg" alt="a vast glowing cloud (the model) connected by one thin line to a small cyan-lit processor (probbit)" width="100%"></p>
 <p align="center"><sub><i>The spine beside the model: the model writes, probbit decides what the stance is and what the rules allow. 0.3 ms, beside the model.</i></sub></p>
+
+## For AI agents reading this
+
+Run these in order in a POSIX shell (Linux or macOS), in an empty directory. No clone, no Rust, no sudo, no API key; about
+one minute on a normal connection. Each step says what to expect; any other output or exit code means stop and
+[report it](https://github.com/BitmapAsset/probbit/issues). Windows: install with `install.ps1` ([Install](#install)); these
+steps are written for and tested on Linux and macOS.
+
+```sh
+mkdir probbit-try && cd probbit-try
+
+# 1. Install to ~/.local/bin (PROBBIT_INSTALL_DIR to change it). Exit 0; ends with a "Next:" list. If it says the
+#    directory is not on your PATH, that is expected: step 2 adds it for this shell.
+curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
+
+# 2. Put that directory on PATH for this shell. No output.
+export PATH="$HOME/.local/bin:$PATH"
+
+# 3. Expect "probbit 0.13.0" (or later). Exit 0.
+probbit --version
+
+# 4. Fetch an example persona (a tutor called Pip). No output; tutor.yaml appears.
+curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml
+
+# 5. Make an individual: persona + seed 2. Expect "wrote tutor.state (Pip 1.1.0, seed 2)". Exit 0.
+probbit persona init tutor.yaml --seed 2 --out tutor.state
+
+# 6. One live event (an upset user), logged to a strand. Expect one line starting
+#    "line":"Stance: go easy on the jokes; no jokes; gentle; ... Exit 0.
+echo '{"sentiment":"negative"}' | probbit live tutor.yaml --state tutor.state --strand tutor.strand --clock fixed 2>/dev/null | grep -o '"line":"[^"]*"'
+
+# 7. Replay the strand and check every digest. Expect "ok":true. Exit 0. (Without the grep: a strand that does not
+#    replay exits 1 and names the first line that differs.)
+probbit live verify tutor.strand | grep -o '"ok":[a-z]*'
+
+# 8. List the MCP server's tools. Expect 10 lines, from "name":"probbit_decide" to "name":"probbit_live_verify". Exit 0.
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sh","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | probbit mcp 2>/dev/null | grep -o '"name":"probbit_[a-z_]*"'
+```
+
+Then hand it to your harness: `claude mcp add probbit -- probbit mcp` (Claude Code; Codex, Cursor and other MCP clients in
+[docs/agents.md](docs/agents.md)). OpenClaw: `openclaw plugins install npm:probbit-stance --accept-capabilities` (this
+changes that OpenClaw's configuration; set-up and checks in [plugins/openclaw](plugins/openclaw/README.md)). Put the
+stance `line` into your model's prompt each turn; the model writes, the persona decides how. What to read next:
+[AGENTS.md](AGENTS.md) (these commands, plus how to verify a strand and report a bug), [docs/persona.md](docs/persona.md)
+(the persona format), [docs/CHEATSHEET.md](docs/CHEATSHEET.md) (every command and exit code).
+
+## Use it from your harness
+
+| surface | how | one command that proves it works |
+|---|---|---|
+| CLI | the install line above, `npm i -g probbit`, or `install.ps1` | `probbit demo --tasks 12 \| probbit decide --summary` → `"verdict":"exact"`, `"violations":0` |
+| MCP server (Claude Code, Codex, Cursor, mcporter, any MCP client) | `claude mcp add probbit -- probbit mcp` ([docs/agents.md](docs/agents.md)) | step 8 above: 10 tools, `probbit_decide` … `probbit_live_verify` |
+| OpenClaw plugin | `openclaw plugins install npm:probbit-stance --accept-capabilities` | `openclaw plugins inspect probbit-stance --runtime --json` lists both hooks ([plugins/openclaw](plugins/openclaw/README.md)) |
+| npm | `npm i -g probbit` (Node 18+; downloads the prebuilt binary, SHA-256 checked) | `probbit --version` → `probbit 0.13.0` |
+| Python | `curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/python/probbit.py`: a stdlib-only wrapper around the CLI (decide, run, evaluate, persona, live; typed errors); not on PyPI | `python3 -c 'import probbit; s=probbit.persona_init("tutor.yaml", seed=2); print(probbit.persona_turn("tutor.yaml", s, {"sentiment":"negative"})["stance"]["line"])'` → `Stance: go easy on the jokes; …` |
+| Agent SDK adapters | Claude Code hooks, OpenAI Agents SDK, LangChain, Vercel AI SDK ([docs/adapters.md](docs/adapters.md)) | in a clone: `python3 python/test_host.py` (Python hosts) or `node --test examples/node/stance-host.test.mjs` |
+| Browser (wasm) | in a clone, with Rust and `rustup target add wasm32-unknown-unknown`: `playground/build.sh` | `ls -l playground/probbit.wasm`, then open `playground/index.html` |
+| Rust library | not on crates.io yet: `cargo add --git https://github.com/BitmapAsset/probbit probbit-decide` | `cargo test -p probbit-decide` in a clone ([Library API](#library-api-rust)) |
+| `no_std` / microcontrollers | in review for 0.14, not on `main` and not in a release | — |
+
+## FAQ
+
+- **What is a p-bit?** A probabilistic bit: 0 or 1 with a probability you set. Coupled p-bits sample whole configurations
+  together (an Ising/QUBO model). probbit simulates them on a CPU, exactly when the program is small or thin enough,
+  otherwise by Gibbs sampling with an error bar. It is classical: see [Hard questions](#hard-questions).
+- **How do I give an AI agent a consistent personality?** Write a persona file (traits, moods, habits that are hard rules),
+  pick a seed, and put the stance `line` of every turn into the prompt. The individual is a pure function of (persona,
+  seed, the inputs so far, engine version), so the character stays consistent across sessions and prompts.
+  [The individuality layer](#the-individuality-layer-probbit-persona), [docs/persona.md](docs/persona.md).
+- **Can I swap the LLM?** Yes. The persona lives outside the model; the same individual answers whatever model the host
+  calls. Whether a given model writes in the stance it is given has to be measured per model.
+- **Is it deterministic and replayable?** Yes. A turn is a pure function of its inputs; a strand records every event with
+  chained sha256 digests, and `probbit live verify` replays it and names the first line that differs.
+- **What does "refuses" mean?** When the engine cannot vouch for an answer within its budget it says so (verdict `refused`,
+  exit 3) instead of guessing; `partial` releases the parts that passed and escalates the rest.
+- **Is this a memory store?** No. Its memory is the individual's state (learned adjustments within caps, moods) and the
+  replayable strand, not a store of facts. Pair it with a fact memory or RAG if you need recall.
+- **Does it run offline? What does a turn cost?** Fully offline: no network, no API key, nothing phones home. A persona
+  turn takes about 0.2-0.3 ms median on an Apple M4 (measured, [below](#the-individuality-layer-probbit-persona)); the
+  stance line is about 40 tokens of your model's prompt.
+- **What hardware? Which agent framework?** Any CPU: release binaries for Linux x86_64 and arm64, macOS (Apple silicon and
+  Intel) and Windows x86_64; wasm in a browser. It sits beside any agent framework through the CLI, MCP, Python or the
+  adapters above. All timings in this README come from one Apple M4.
 
 ## What's new in 0.12.0 to 0.13.0
 
@@ -925,6 +1016,8 @@ or Windows.
 - Hardware backend through `probbit-ir` when a p-bit fabric is available.
 
 ## Documentation map
+- [AGENTS.md](AGENTS.md): the agent quickstart as commands only, what to read next, how to verify a strand, how to report a bug.
+- [llms.txt](llms.txt) and [llms-full.txt](llms-full.txt): the llms.txt index of these docs, and the main docs in one file for a model's context.
 - [docs/CHEATSHEET.md](docs/CHEATSHEET.md): one page: the verdicts, the tiers, `bound`, the exit codes, every persona, live and
   monitor command.
 - [BENCHMARKS.md](BENCHMARKS.md): every number, with machine, load and `N`.

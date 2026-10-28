@@ -1,13 +1,13 @@
 [package]
 name = "probbit-cli"
-description = "probbit: a virtual probabilistic (p-bit) processor for joint decisions under hard rules, with gated odds. JSON in, JSON out, zero dependencies."
+description = "probbit: a personality, mood and memory layer for AI agents on an exact p-bit decision engine (plans under hard rules, gated odds, refusal), simulated on a CPU. CLI and MCP server; JSON in, JSON out, zero dependencies."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "../README.md"
-keywords = ["p-bit", "cli", "decision", "constraints", "probabilistic"]
+keywords = ["p-bit", "ai-agents", "mcp-server", "persona", "constraints"]
 categories = ["command-line-utilities", "algorithms", "science"]
 
 [[bin]]
