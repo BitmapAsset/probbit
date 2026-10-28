@@ -4117,6 +4117,8 @@ impl ExpectCache {
     }
     fn begin(&mut self) { self.hits = 0; self.solves = 0; self.modeled = 0; self.reused = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
         self.live = self.on && self.skip == 0; self.had = !self.rows.is_empty(); if self.skip > 0 { self.skip -= 1; } }
+    /// Only the rows this event has used so far are kept (`deviation_pre`, before the turn)
+    fn prune(&mut self) { let mut i = 0; self.rows.retain(|_| { i += 1; self.used[i - 1] }); self.used.clear(); self.used.resize(self.rows.len(), true); }
     fn end(&mut self) {
         // an event that had rows to compare and found none backs off; one that started empty only fills (the next one compares)
         if self.live { if self.hits > 0 { self.back = 0; } else if self.had { self.back = (self.back * 2).clamp(1, 32); self.skip = self.back; } }
@@ -4281,6 +4283,103 @@ fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, 
         if i == 0 && m.is_none() { return None; }
         out.push(m); }
     Some(out)
+}
+/// T3-c: one member's exact marginals held through the turn: as a row of f64 in the order of the members' layout (`Held::lay`),
+/// or by name when its layout is another
+enum HeldM { Row(Vec<f64>), Named(Marg) }
+/// T3-c: what the deviation holds through the turn when the members run before it (`deviation_pre`): per member but A_t (E_t,
+/// then the other members in the mixture's order) its marginals or None (it does not compile or is not solved exactly); the
+/// sha256 of the rows' layout (each variable's id and its levels' names, in order); the skeleton's key and the key of its rules
+/// in force (A_t's row goes into the cache under the skeleton when its rules are the skeleton's)
+pub struct Held { ms: Vec<Option<HeldM>>, lay: [u8; 32], skel: Option<[u8; 32]>, rk: [u8; 32] }
+/// The sha256 of a marginals' layout: per variable its id and its levels' names, in order
+fn lay_key(m: &Marg) -> [u8; 32] {
+    let mut h = Sha256::new(); h.update(&(m.len() as u64).to_le_bytes());
+    for (id, ls) in m { hash_str(&mut h, id); h.update(&(ls.len() as u64).to_le_bytes()); for (l, _) in ls { hash_str(&mut h, l); } }
+    h.finish()
+}
+/// The sha256 of a program's rules in force
+fn rules_key(rules: &[Vec<Json>]) -> [u8; 32] {
+    let mut h = Sha256::new(); h.update(&(rules.len() as u64).to_le_bytes());
+    for r in rules { hash_json(&mut h, &Json::Arr(r.clone())); }
+    h.finish()
+}
+/// T3-c, the members before the turn (`Live::event` with the cache reusing the turn's program): every member but A_t is solved
+/// from the pre-event state as `deviation_cached` solves it, nothing of the turn held; their marginals are kept as rows (`Held`)
+/// for `deviation_post`, which reads A_t from the turn. The members' one model is read from the first member's own text (its
+/// skeleton); a member with other rules in force is built and run by the engine. E_t comes last, so the skeleton is a remembered
+/// combo's when there is one (the body's combos share their rules, E_t has others). None: no deviation (no block, or E_t has
+/// no exact marginals); `deviation_post` runs either way (it closes the cache's event)
+#[inline(never)]
+pub fn deviation_pre(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Box<Held>> {
+    cache.begin(); let h = pre_in(p, st, raw, mem, eng, cache);
+    // only this event's rows are held through the turn (A_t's goes in after it)
+    cache.prune(); h
+}
+#[inline(always)]
+fn pre_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Box<Held>> {
+    let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
+    let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
+    let ws = expect_weights(ex, mem);
+    let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
+    for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
+    drop(ws);
+    let mut out: Vec<Option<Marg>> = (0..ins.len()).map(|_| None).collect();
+    let (mut sk, mut base, mut skel): (Option<Option<Box<Skel>>>, Option<Box<Meta>>, Option<[u8; 32]>) = (None, None, None);
+    let mut prog: Option<Json> = None;
+    for i in (1..ins.len()).chain(core::iter::once(0)) {
+        if sk.is_some() { prog = None; }
+        let t = crate::trace::Stopwatch::start();
+        let m = match program_meta(p, st, &ins[i], true) {
+            Err(_) => { crate::trace::expect_split(t.us(), 0); None }
+            Ok((_, mm)) => {
+                let same = match &base { None => { prog = Some(member_text(p, &mm)); skel = cache.live.then(|| skel_key(prog.as_ref().unwrap())); true } Some(b) => mm.rules == b.rules };
+                let (b, t) = (t.us(), crate::trace::Stopwatch::start());
+                let r = if same { let am = base.as_deref().unwrap_or(&mm); model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, am, false, eng, cache) } else { None };
+                // other rules in force, another tier or no usable skeleton: its text from its meta, run by the engine (the members' model
+                // is dropped first when this is the last member)
+                let r = match r { Some(r) => r, None => { if i == 0 { sk = None; prog = None; } let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } };
+                if base.is_none() { base = Some(mm); }
+                crate::trace::expect_split(b, t.us()); r } };
+        out[i] = m; }
+    drop((sk, prog));
+    out[0].as_ref()?;
+    let lay = lay_key(out[0].as_ref().unwrap());
+    let ms = out.into_iter().map(|m| m.map(|m| if lay_key(&m) == lay { HeldM::Row(m.iter().flat_map(|(_, ls)| ls.iter().map(|x| x.1)).collect()) } else { HeldM::Named(m) })).collect();
+    Some(Box::new(Held { ms, lay, skel, rk: base.as_ref().map_or([0; 32], |b| rules_key(&b.rules)) }))
+}
+/// T3-c, after the turn: A_t from the turn (`at`; None: built and solved here), the held members named again from A_t's layout
+/// (the same values, the same names, in the same order), then the mixture as `deviation_cached` computes it. A layout that is
+/// not A_t's (never seen) solves the members again
+#[inline(never)]
+pub fn deviation_post(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, held: Option<Box<Held>>, at: Option<Option<Box<At>>>) -> Option<Deviation> {
+    let d = post_in(p, st, raw, mem, eng, cache, held, at); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
+}
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn post_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, held: Option<Box<Held>>, at: Option<Option<Box<At>>>) -> Option<Deviation> {
+    let ex = p.expect.as_ref()?; let kv = raw.as_obj()?; let h = held?;
+    let a = match at {
+        Some(None) => { cache.reused = 1; if cache.check { assert!(program_json(p, st, raw).ok().and_then(|x| exact_marg(p, st, &x, eng)).is_none(), "A_t: not exact either way"); } return None }
+        Some(Some(a)) => { let At { marg, meta } = *a; cache.reused = 1;
+            if cache.check { at_check(p, st, raw, &member_text(p, &meta), &marg, eng); }
+            if let Some(s) = &h.skel { if rules_key(&meta.rules) == h.rk { cache.put(field_key(s, &meta.field), &marg); } }
+            marg }
+        None => text_marg(p, st, raw, eng, cache)? };
+    let key = combo_key(p, kv); let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
+    let mut ms: Vec<Option<Marg>> = Vec::with_capacity(h.ms.len() + 1);
+    if lay_key(&a) == h.lay {
+        let Held { ms: hm, .. } = *h;
+        for m in hm { ms.push(m.map(|m| match m { HeldM::Named(m) => m, HeldM::Row(r) => { let mut r = r.into_iter();
+            a.iter().map(|(id, ls)| (id.clone(), ls.iter().map(|(l, _)| (l.clone(), r.next().unwrap_or(0.0))).collect())).collect() } })); }
+    } else {
+        drop(h); let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0));
+        let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
+        for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
+        for x in &ins { ms.push(text_marg(p, st, x, eng, cache)); }
+    }
+    ms.insert(0, Some(a));
+    mixture(mem, &ws, &key, member, ms)
 }
 /// The test instrument (`ExpectCache::with_reuse(_, true)`): the A_t the turn handed is the program the deviation builds for the
 /// event, text for text, and its marginals are that program's run by the engine, bit for bit

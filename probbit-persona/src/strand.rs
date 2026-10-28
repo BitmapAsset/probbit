@@ -150,16 +150,20 @@ impl Live {
         enter(Phase::Expect);
         // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without
         // them). The trajectory before the turn (nothing of the turn held while it solves). With the cache reusing the turn's own
-        // program (the default) the deviation runs after the turn, which hands it A_t and its exact answer; else before it, as
-        // before (A_t built and solved by the deviation, nothing of the turn held)
+        // program (the default) the members but A_t run before the turn (their marginals held as rows, nothing of the turn held)
+        // and A_t's mixture after it, which hands A_t and its exact answer; else the whole deviation before it, as before (A_t
+        // built and solved by the deviation)
         let traj = persona::trajectory(&self.p, &self.st, &inputs);
         let want = self.expect.is_some() && self.expect_cache.reuses();
-        let early = if want { None } else { let cache = &mut self.expect_cache; self.expect.as_ref().and_then(|m| persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, None)) };
+        let (early, held) = { let cache = &mut self.expect_cache; match self.expect.as_ref() {
+            Some(m) if want => (None, persona::deviation_pre(&self.p, &self.st, &inputs, m, eng, cache)),
+            Some(m) => (persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, None), None),
+            None => (None, None) } };
         let (mut stance, ns, at) = persona::turn_at(&self.p, &self.st, &inputs, eng, want)?;
         let sd = persona::stance_sha(&stance);
         enter(Phase::Expect);
         let cache = &mut self.expect_cache;
-        let dev = if want { self.expect.as_ref().and_then(|m| persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, at)) } else { early };
+        let dev = if want { self.expect.as_ref().and_then(|m| persona::deviation_post(&self.p, &self.st, &inputs, m, eng, cache, held, at)) } else { early };
         if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, |d| d.to_json(self.dev_full)))); } }
         // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
         persona::set_glyph(&self.p, &mut stance);
