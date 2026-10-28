@@ -6,6 +6,7 @@ Install on Linux or macOS: `curl -fsSL https://raw.githubusercontent.com/BitmapA
 
 ## Start here
 
+- [Website](https://bitmapasset.github.io/probbit/): the one-page front door: what it is for, the install lines, the harness table, the FAQ, and the name (probbit, not probit)
 - [AGENTS.md](https://raw.githubusercontent.com/BitmapAsset/probbit/main/AGENTS.md): the agent quickstart as copy-paste commands with expected output and exit codes, how to verify a strand, how to report a bug
 - [README](https://raw.githubusercontent.com/BitmapAsset/probbit/main/README.md): what it is for, install, the harness table, the FAQ, every measured claim
 - [Cheat sheet](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/CHEATSHEET.md): every command, verdict, tier and exit code on one page
