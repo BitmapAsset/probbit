@@ -110,8 +110,8 @@ pub fn rested_boxed(p: &Persona, st: &State, st0: &State) -> Box<State> {
 
 /// `integrity` of the state `st` (after a turn) whose stance document is `stance` (its `habits.bound`), from a fresh cache
 pub fn compute(p: &Persona, st: &State, stance: &Json, eng: Engine) -> R<Option<Integrity>> { compute_cached(p, st, stance, &mut Cache::new(), eng) }
-/// `compute` through a cache: one rest-probe solve when the state's body (without `turn`) and the probe's program (without its
-/// comment) both changed since the last call, else none; the fresh individual's probe and the allowances once per seed. None
+/// `compute` through a cache: one rest-probe solve when the probe's program (without its comment) and the state's body (without
+/// `turn`) both changed since the last solve, else none; the fresh individual's probe and the allowances once per seed. None
 /// without the self keys.
 pub fn compute_cached(p: &Persona, st: &State, stance: &Json, cache: &mut Cache, eng: Engine) -> R<Option<Integrity>> {
     let Some(id) = p.ident.as_ref() else { return Ok(None) };
@@ -132,16 +132,17 @@ fn base(p: &Persona, seed: u64, id: &Ident, eng: Engine) -> R<Box<Base>> {
             _ => None }); }
     Ok(Box::new((seed, p0, eps, *st0)))
 }
-/// The resting odds of `st` into `cache.odds`: from the state key, else from the program key, else one rest probe
+/// The resting odds of `st` into `cache.odds`: from the program key while the last solved probe left a row (an equal rested state
+/// would compile the same program, so the state key would answer the same: it is not built), else from the state key, else one
+/// rest probe; after a solve without a row the state key is that state's, as before
 #[inline(never)]
 fn resting(p: &Persona, st: &State, id: &Ident, cache: &mut Cache, eng: Engine) -> R<()> {
     let rs = rested_boxed(p, st, &cache.base.as_ref().unwrap().3);
-    let key = key_of(p, &rs);
-    if key == cache.key { cache.hits += 1; return Ok(()); }
-    cache.key = key;
+    if cache.prog.is_none() { let key = key_of(p, &rs); if key == cache.key { cache.hits += 1; return Ok(()); } cache.key = key; }
     match probe_keyed(p, &rs, id, eng, cache.prog.as_ref())? {
         (_, None) => { cache.hits += 1; cache.by_program += 1; }
-        (k, Some((odds, row))) => { cache.odds = odds; cache.prog = row.then_some(k); cache.misses += 1; } }
+        (k, Some((odds, row))) => { cache.odds = odds; cache.misses += 1;
+            if row { cache.prog = Some(k); } else if cache.prog.take().is_some() { cache.key = key_of(p, &rs); } } }
     Ok(())
 }
 /// The integrity document from the resting odds in `cache` and the stance's bound habits
