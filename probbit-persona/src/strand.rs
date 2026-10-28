@@ -149,15 +149,17 @@ impl Live {
         let inputs = Json::Obj(kv);
         enter(Phase::Expect);
         // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without
-        // them). The trajectory before the turn (nothing of the turn held while it solves), the deviation after it: with the
-        // cache on the turn hands it the event's own program (A_t) and its exact answer
+        // them). The trajectory before the turn (nothing of the turn held while it solves). With the cache reusing the turn's own
+        // program (the default) the deviation runs after the turn, which hands it A_t and its exact answer; else before it, as
+        // before (A_t built and solved by the deviation, nothing of the turn held)
         let traj = persona::trajectory(&self.p, &self.st, &inputs);
         let want = self.expect.is_some() && self.expect_cache.reuses();
+        let early = if want { None } else { let cache = &mut self.expect_cache; self.expect.as_ref().and_then(|m| persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, None)) };
         let (mut stance, ns, at) = persona::turn_at(&self.p, &self.st, &inputs, eng, want)?;
         let sd = persona::stance_sha(&stance);
         enter(Phase::Expect);
         let cache = &mut self.expect_cache;
-        let dev = self.expect.as_ref().and_then(|m| persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, at));
+        let dev = if want { self.expect.as_ref().and_then(|m| persona::deviation_at(&self.p, &self.st, &inputs, m, eng, cache, at)) } else { early };
         if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, |d| d.to_json(self.dev_full)))); } }
         // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
         persona::set_glyph(&self.p, &mut stance);

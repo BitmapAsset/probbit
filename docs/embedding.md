@@ -236,7 +236,8 @@ last one): the deviation now runs while the turn's stance document and next stat
 peak is 97,583 B, inside `expect` (89,990 before, at the turn's solve; inside `expect` 87,214); the deviation's own peak above
 what it finds held fell from 86,209 to 60,857 B (one model instead of A_t's parts and a member's model; a member that keeps the
 engine's path still builds its text and the engine's answer). A host short of heap keeps the old order with
-`ExpectCache::with_reuse(false, false)`: the same bytes, A_t built and solved by the deviation.
+`ExpectCache::with_reuse(false, false)`: the deviation before the turn, A_t built and solved by it, the same bytes; the body
+persona's event peak is then 89,990 B, at the turn's solve (inside `expect` 69,332 B), at the cost of A_t's second build and solve.
 
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
