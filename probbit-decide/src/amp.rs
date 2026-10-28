@@ -268,6 +268,36 @@ impl Schedule {
 }
 /// The tier's fixed default schedule (rounds 1 and 2; schedules are a later round's study)
 pub const DEFAULT_SCHEDULE: Schedule = Schedule { steps: 16, time: 4.0 };
+/// Round 5: the longer sweep (`engine.schedule: tf-linear-64x16`): 4x the default's steps and time, so about 4x its layers
+pub const LONG_SCHEDULE: Schedule = Schedule { steps: 64, time: 16.0 };
+/// Round 5: the two layers (gamma, beta) of `engine.schedule: qaoa-p2`, fixed by a grid search on a held-out third of the P0
+/// corpus programs (the largest median separation on the decisions the thermal tier is indifferent on, subject to agreement
+/// >= 90 % on the others; docs/rfc/0011-amplitude-register.md, "Schedules and the indifferent set"), then frozen: gamma 0.500000,
+/// beta 0.500000, then gamma 1.500000, beta 0.250000
+pub const QAOA_P2: [(f64, f64); 2] = [(0.5, 0.5), (1.5, 0.25)];
+/// Round 5: the names `engine.schedule` accepts (the first is the default)
+pub const SCHEDULE_NAMES: [&str; 3] = ["tf-linear-16x4", "tf-linear-64x16", "qaoa-p2"];
+/// Round 5: the evolution the tier runs on each component: a transverse-field sweep or QAOA layers
+#[derive(Clone, Debug, PartialEq)]
+pub enum Evolution { Sweep(Schedule), Qaoa(Vec<(f64, f64)>) }
+impl Evolution {
+    /// The evolution of a name in `SCHEDULE_NAMES` (None for any other name)
+    pub fn named(name: &str) -> Option<Evolution> {
+        match name { "tf-linear-16x4" => Some(Evolution::Sweep(DEFAULT_SCHEDULE)), "tf-linear-64x16" => Some(Evolution::Sweep(LONG_SCHEDULE)),
+            "qaoa-p2" => Some(Evolution::Qaoa(QAOA_P2.to_vec())), _ => None }
+    }
+    /// The register after the evolution from the uniform start
+    pub fn run(&self, enc: &Encoding, e: &[f64]) -> Register { match self { Evolution::Sweep(s) => sweep(enc, e, s), Evolution::Qaoa(p) => qaoa_on(enc, e, p) } }
+    /// The canonical text the schedule digest hashes (a sweep's is `Schedule::text`, unchanged)
+    pub fn text(&self) -> String {
+        match self { Evolution::Sweep(s) => s.text(),
+            Evolution::Qaoa(p) => { let mut t = format!("qaoa layers {}\n", p.len()); for &(g, b) in p { t.push_str(&format!("gamma {} beta {}\n", f6(g), f6(b))); } t } }
+    }
+    /// The receipt's `schedule_name` (a sweep's is `Schedule::name`, unchanged)
+    pub fn name(&self) -> String {
+        match self { Evolution::Sweep(s) => s.name(), Evolution::Qaoa(p) if p[..] == QAOA_P2[..] => "qaoa-p2".into(), Evolution::Qaoa(p) => format!("qaoa-p{}-lab", p.len()) }
+    }
+}
 
 /// The bar on the Born mass of the unused codes, checked after every layer (it is 0 by construction; never renormalised)
 pub const INVALID_MASS_MAX: f64 = 1e-15;
@@ -406,6 +436,17 @@ mod tests {
         }
         let mut r = Register::uniform(&enc); assert!(amplify_exact(&mut r, |_| false).is_none());
         let mut r = Register::uniform(&enc); assert_eq!(amplify_exact(&mut r, |x| enc.decode(x).is_some()).unwrap().iterations, 0);
+    }
+    /// Round 5: the named evolutions: the default name is `sweep` with the default schedule (the same register, text and name),
+    /// the long sweep has 4x the layers, qaoa-p2 two layers with the frozen angles; an unknown name is None
+    #[test]
+    fn named_schedules_run_what_they_name() {
+        let enc = Encoding { levels: vec![3, 2] }; let e: Vec<f64> = (0..8).map(|x| enc.decode(x).map_or(f64::NAN, |v| -[0.4, -0.2, 0.9][v[0]] - 0.3 * v[1] as f64)).collect();
+        let d = Evolution::named(SCHEDULE_NAMES[0]).unwrap(); assert_eq!(d, Evolution::Sweep(DEFAULT_SCHEDULE));
+        assert_eq!(d.run(&enc, &e).amplitudes(), sweep(&enc, &e, &DEFAULT_SCHEDULE).amplitudes()); assert_eq!((d.text(), d.name()), (DEFAULT_SCHEDULE.text(), DEFAULT_SCHEDULE.name()));
+        let l = Evolution::named(SCHEDULE_NAMES[1]).unwrap(); assert_eq!(l.run(&enc, &e).circuit_text().lines().count(), 4 * d.run(&enc, &e).circuit_text().lines().count());
+        let q = Evolution::named(SCHEDULE_NAMES[2]).unwrap(); assert_eq!(q.name(), "qaoa-p2"); assert_eq!(q.run(&enc, &e).amplitudes(), qaoa_on(&enc, &e, &QAOA_P2).amplitudes());
+        assert_eq!(q.text(), "qaoa layers 2\ngamma 0.500000 beta 0.500000\ngamma 1.500000 beta 0.250000\n"); assert!(Evolution::named("tf-linear-8x2").is_none());
     }
     #[test]
     fn measure_and_digest_are_deterministic() {

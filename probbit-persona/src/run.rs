@@ -467,7 +467,10 @@ pub fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map
 /// before and after) and `feasible_mass` is the mass after. The relative amplitudes inside the feasible plans are the swept
 /// state's, so the numbers equal the projection's (docs/rfc/0011-amplitude-register.md, "Amplification").
 #[cfg(feature = "decide")]
-pub fn amplitude(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, String> {
+pub fn amplitude(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, String> { amplitude_with(prog, q_max, amplify, &probbit_decide::amp::Evolution::Sweep(probbit_decide::amp::DEFAULT_SCHEDULE)) }
+/// Round 5: `amplitude` with the evolution `ev` in place of the default sweep (`engine.schedule`; the receipt names it)
+#[cfg(feature = "decide")]
+pub fn amplitude_with(prog: &Json, q_max: usize, amplify: bool, ev: &probbit_decide::amp::Evolution) -> Result<Json, String> {
     use probbit_decide::amp;
     let p = from_json(prog).map_err(|e| format!("program {}: {}", e.path, e.msg))?; let m = &p.m; let (n, k) = (m.n, m.k);
     let cand: Vec<Vec<usize>> = (0..n).map(|i| (0..k).filter(|&v| m.ok(i, v)).collect()).collect();
@@ -484,7 +487,7 @@ pub fn amplitude(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, Strin
     let encs: Vec<amp::Encoding> = mems.iter().map(|mem| amp::Encoding { levels: mem.iter().map(|&i| cand[i].len()).collect() }).collect();
     let qs: Vec<usize> = encs.iter().map(amp::Encoding::qubits).collect(); let qtop = qs.iter().copied().max().unwrap_or(0);
     if qtop > q_max.min(amp::Q_MAX_HOST) { return Err(format!("a component of {qtop} encoded qubits, q_max {q_max}")); }
-    let s = amp::DEFAULT_SCHEDULE; let r6 = |x: f64| (x * 1e6).round() / 1e6;
+    let s = ev; let r6 = |x: f64| (x * 1e6).round() / 1e6;
     let (mut enc_t, mut circ_t, mut state_t) = (String::new(), String::new(), String::new());
     let mut bp = vec![0usize; n]; let mut mg = vec![0.0; n * k]; let mut mass_all = 1.0;
     let (mut am_it, mut am_ph, mut am_before) = (vec![], vec![], 1.0);
@@ -500,7 +503,7 @@ pub fn amplitude(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, Strin
         let enc = &encs[c]; let nb = 1usize << qs[c];
         let plan_of = |codes: &[usize]| -> Vec<usize> { codes.iter().zip(mem).map(|(&cd, &i)| cand[i][cd]).collect() };
         let e: Vec<f64> = (0..nb).map(|x| enc.decode(x).map_or(f64::NAN, |cd| -sub.logw(&plan_of(&cd)))).collect();
-        let mut reg = amp::sweep(enc, &e, &s);
+        let mut reg = s.run(enc, &e);
         if amplify {
             let ok: Vec<bool> = (0..nb).map(|x| enc.decode(x).is_some_and(|cd| sub.violations(&plan_of(&cd)) == 0)).collect();
             let a = amp::amplify_exact(&mut reg, |x| ok[x]).ok_or_else(|| format!("component {c}: no feasible plan has weight in the register"))?;

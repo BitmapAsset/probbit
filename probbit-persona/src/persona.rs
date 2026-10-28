@@ -165,7 +165,9 @@ struct Habit { id: String, when: Vec<(String, Json)>, then: Vec<(String, Json)>,
 #[derive(Clone)]
 struct Eng { op: String, sweeps: usize, polish_sweeps: usize, exact_limit: u64, chains: usize, twin: bool, positional: bool, yields: bool,
     /// RFC 0011 (research): `tier: amplitude` (off when absent) and its `q_max` (default 12); round 4: `amplify` (default false)
-    amp: bool, q_max: usize, amplify: bool }
+    amp: bool, q_max: usize, amplify: bool,
+    /// round 5: `schedule` (a name in `amp::SCHEDULE_NAMES`; absent = the default sweep, the receipt unchanged)
+    schedule: Option<String> }
 /// bounded learning (docs/persona.md §2.8): `from` = the reward flag, then (optional) the correction flag; the traits whose learned
 /// deltas move; the step and total caps (natural-log weights); `credit` = action-addressed feedback, when declared
 #[derive(Clone)]
@@ -479,8 +481,8 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
     for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { habits.push(habit_spec(hb, &ix("habits", i), &inputs, &history, &vars, &steps)?); }
     need((1..habits.len()).all(|i| habits[..i].iter().all(|h| h.id != habits[i].id)), "habits", "habit ids must be distinct")?;
     // engine
-    let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false, amp: false, q_max: 12, amplify: false };
-    if let Some(e) = get_t(kv, "engine") { let ekv = keys(e, "engine", &["op", "sweeps", "polish_sweeps", "exact_limit", "chains", "twin", "values", "on_conflict", "tier", "q_max", "amplify", "comment"], &[])?;
+    let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false, amp: false, q_max: 12, amplify: false, schedule: None };
+    if let Some(e) = get_t(kv, "engine") { let ekv = keys(e, "engine", &["op", "sweeps", "polish_sweeps", "exact_limit", "chains", "twin", "values", "on_conflict", "tier", "q_max", "amplify", "schedule", "comment"], &[])?;
         for (k, x) in ekv { let p = at("engine", k);
             match k.as_str() {
                 "op" => eng.op = x.as_str().filter(|o| ["decide", "sample"].contains(o)).ok_or_else(|| perr(&p, "decide | sample"))?.to_string(),
@@ -491,12 +493,14 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
                 "tier" => { need(x.as_str() == Some("amplitude"), &p, "amplitude (the one optional tier; absent = the default tiers)")?; eng.amp = true; }
                 "q_max" => eng.q_max = num(Some(x), &p, Some(1.0), Some(16.0), true)? as usize,
                 "amplify" => eng.amplify = if let Json::Bool(b) = x { *b } else { return Err(perr(&p, "true | false")) },
+                "schedule" => eng.schedule = Some(x.as_str().filter(|n| SCHEDULE_NAMES.contains(n)).ok_or_else(|| perr(&p, "tf-linear-16x4 | tf-linear-64x16 | qaoa-p2"))?.to_string()),
                 "polish_sweeps" => eng.polish_sweeps = num(Some(x), &p, Some(0.0), Some(1e9), true)? as usize,
                 "sweeps" => eng.sweeps = num(Some(x), &p, Some(1.0), Some(1e9), true)? as usize,
                 "exact_limit" => eng.exact_limit = num(Some(x), &p, Some(1.0), Some(1e9), true)? as u64,
                 _ => eng.chains = num(Some(x), &p, Some(1.0), Some(MAX_CHAINS), true)? as usize,
             } } }
     if eng.amplify && !eng.amp { return Err(perr(&at("engine", "amplify"), "true needs tier: amplitude (amplification acts on the amplitude register)")); }
+    if eng.schedule.is_some() && !eng.amp { return Err(perr(&at("engine", "schedule"), "needs tier: amplitude (the schedule is the amplitude register's evolution)")); }
     // line
     let lkv: &[(String, Json)] = match get_t(kv, "line") { Some(l) => keys(l, "line", &["max_tokens", "order", "prefix", "why_past", "block", "comment"], &[])?, None => &[] };
     // RFC 0008 E: `line.block` puts the engine-rendered block in every stance document (a persona with a bound or a coupling has it)
@@ -2865,14 +2869,18 @@ fn decode(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, confl
 // ------------------------------------------------------------------------------------------------------------ turns
 fn solve(p: &Persona, st: &State, prog: &Json, eng: Engine, calls: &mut usize) -> Json {
     *calls += 1; let was = crate::trace::enter(crate::trace::Phase::Solve);
-    let r = if p.eng.amp { amplitude_tier(prog, p.eng.q_max, p.eng.amplify).unwrap_or_else(|why| declined(eng(prog, &flags(p, st)), &why)) } else { eng(prog, &flags(p, st)) };
+    let r = if p.eng.amp { amplitude_tier(prog, p.eng.q_max, p.eng.amplify, p.eng.schedule.as_deref()).unwrap_or_else(|why| declined(eng(prog, &flags(p, st)), &why)) } else { eng(prog, &flags(p, st)) };
     crate::trace::enter(was); r
 }
 /// RFC 0011 (research): the amplitude tier on a program (`run::amplitude`); Err(why) when it does not take it
 #[cfg(feature = "decide")]
-fn amplitude_tier(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, String> { crate::run::amplitude(prog, q_max, amplify) }
+fn amplitude_tier(prog: &Json, q_max: usize, amplify: bool, schedule: Option<&str>) -> Result<Json, String> {
+    match schedule.and_then(probbit_decide::amp::Evolution::named) { Some(ev) => crate::run::amplitude_with(prog, q_max, amplify, &ev), None => crate::run::amplitude(prog, q_max, amplify) }
+}
 #[cfg(not(feature = "decide"))]
-fn amplitude_tier(_: &Json, _: usize, _: bool) -> Result<Json, String> { Err("this build has no amplitude tier (feature decide)".into()) }
+fn amplitude_tier(_: &Json, _: usize, _: bool, _: Option<&str>) -> Result<Json, String> { Err("this build has no amplitude tier (feature decide)".into()) }
+/// RFC 0011 round 5 (research): the names `engine.schedule` accepts (`probbit_decide::amp::SCHEDULE_NAMES`; checked by a test)
+const SCHEDULE_NAMES: [&str; 3] = ["tf-linear-16x4", "tf-linear-64x16", "qaoa-p2"];
 /// The existing tiers' answer, with the receipt of why the amplitude tier did not run
 fn declined(mut doc: Json, why: &str) -> Json { if let Json::Obj(v) = &mut doc { v.push(("amplitude".into(), Json::Str(format!("declined: {why}")))); } doc
 }
@@ -4533,6 +4541,32 @@ mod tests {
         assert!(strand::verify(&(lines.join("\n") + "\n"), &run).is_ok());
         let e = err(build(&crate::yaml::load(&base.replace("engine:\n", "engine:\n  amplify: true\n")).ok().unwrap()));
         assert!(e.starts_with("engine.amplify: true needs tier: amplitude"), "{e}");
+    }
+    /// RFC 0011 round 5 (research): `engine.schedule` names the register's evolution: the default name is the absent key (the
+    /// same documents, byte for byte), the other two name themselves in the receipt and their strands verify, an unknown name and
+    /// the key without the tier are refused; the name list is the decide crate's
+    #[cfg(feature = "decide")]
+    #[test]
+    fn the_schedule_key_names_the_evolution() {
+        use crate::strand::{self, Clock, Live};
+        assert_eq!(SCHEDULE_NAMES, probbit_decide::amp::SCHEDULE_NAMES);
+        let base = include_str!("../../examples/persona/tutor.yaml").replace("\r\n", "\n");
+        let mk = |extra: &str| { let doc = crate::yaml::load(&base.replace("engine:\n", &format!("engine:\n  tier: amplitude\n  amplify: true\n{extra}"))).ok().unwrap(); (build(&doc).unwrap(), doc) };
+        let (p0, _) = mk(""); let (pd, _) = mk("  schedule: tf-linear-16x4\n"); let s0 = init(&p0, Some(2), true, &run); let sd = init(&pd, Some(2), true, &run);
+        let raw = json::parse(r#"{"elapsed_hours":1,"praise":true}"#).unwrap();
+        let (a, _) = turn(&p0, &s0, &raw, false, &run, false).unwrap(); let (b, _) = turn(&pd, &sd, &raw, false, &run, false).unwrap();
+        assert_eq!(canon(&g(&a, &["engine"])), canon(&g(&b, &["engine"]))); assert_eq!(g(&a, &["engine", "schedule_name"]).as_str(), Some("tf-linear-16x4.000000"));
+        for (name, shown) in [("tf-linear-64x16", "tf-linear-64x16.000000"), ("qaoa-p2", "qaoa-p2")] {
+            let (p, doc) = mk(&format!("  schedule: {name}\n")); let st = init(&p, Some(2), true, &run);
+            let (d, _) = turn(&p, &st, &raw, false, &run, false).unwrap(); assert_eq!(g(&d, &["engine", "schedule_name"]).as_str(), Some(shown));
+            assert_eq!(g(&d, &["engine", "feasible_mass"]).as_f64(), Some(1.0));
+            let (mut live, header) = Live::start(p.clone(), &doc, st, Clock::Fixed, "probbit test"); let mut lines = vec![header];
+            for r in [r#"{"elapsed_hours":1,"praise":true}"#, r#"{"elapsed_hours":2}"#] { let (_, l) = live.event(&json::parse(r).unwrap(), &run).unwrap(); lines.push(l); }
+            assert!(strand::verify(&(lines.join("\n") + "\n"), &run).is_ok(), "{name}"); }
+        let e = err(build(&crate::yaml::load(&base.replace("engine:\n", "engine:\n  tier: amplitude\n  schedule: tf-linear-8x2\n")).ok().unwrap()));
+        assert_eq!(e, "engine.schedule: tf-linear-16x4 | tf-linear-64x16 | qaoa-p2");
+        let e = err(build(&crate::yaml::load(&base.replace("engine:\n", "engine:\n  schedule: qaoa-p2\n")).ok().unwrap()));
+        assert!(e.starts_with("engine.schedule: needs tier: amplitude"), "{e}");
     }
     /// The boxed setup API is the by-value one: the same persona, state, header and individual
     #[test]
