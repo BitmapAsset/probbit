@@ -7,7 +7,7 @@
 //! the window has no line for is `null` (absent, not invented): a window without a checkpoint line reports no levels.
 //!
 //! The document (`Reflection::doc`) is canonical JSON with every number at 6 decimals and `digest` = the sha256 of its
-//! canonical text without `digest`; `summary` is 6 to 12 sentences made by fixed templates from its numbers, part of the
+//! canonical text without `digest`; `summary` is 6 to 12 sentences (13 at most with a declared stir, RFC 0016) made by fixed templates from its numbers, part of the
 //! document. Cost: one pass over the lines from the fold's start (the last checkpoint carrying the expectation's memory before
 //! the window, or the header), each event line parsed once, each checkpoint line in the window parsed once.
 use crate::json::{self, InErr, Json};
@@ -144,6 +144,9 @@ pub fn reflect_window(lines: &[&str], w: Window) -> Result<Reflection, InErr> {
     let mut ctl: Vec<(String, usize)> = ["erase", "pause", "resume", "retire"].iter().map(|k| (k.to_string(), 0)).collect();
     let (mut controls, mut rests, mut reflections) = (0usize, 0usize, 0usize);
     let (mut first_n, mut last_n) = (0u64, 0u64);
+    // RFC 0016: with a curiosity block that declares a stir, the self-started events in the window (count, classes)
+    let stir_on = doc.get("curiosity").and_then(|c| c.get("stir")).is_some_and(|s| !s.is_null());
+    let mut stirs: Vec<(String, usize)> = vec![];
     for i in fold_from.min(start)..lines.len() {
         let in_win = i >= start;
         match kinds[i] {
@@ -159,6 +162,7 @@ pub fn reflect_window(lines: &[&str], w: Window) -> Result<Reflection, InErr> {
                     if first_n == 0 { first_n = n; } last_n = n;
                     let set = set_keys(j.get("inputs").unwrap_or(&Json::Null));
                     for k in &set { bump(&mut inputs, k); }
+                    if stir_on { if let Some(c) = j.get("inputs").and_then(|x| x.get("stir")).and_then(Json::as_str) { bump(&mut stirs, c); } }
                     let on = |k: Option<&String>| k.is_some_and(|k| set.contains(k));
                     match (on(from.first()), on(from.get(1))) { (true, true) => cancelled += 1, (true, false) => rewards += 1, (false, true) => corrections += 1, _ => {} }
                     if let (Some(dv), Some(p), false, true) = (dv, pred, cold, ex.is_some()) {
@@ -253,6 +257,9 @@ pub fn reflect_window(lines: &[&str], w: Window) -> Result<Reflection, InErr> {
         ("traits".into(), none(sampled, traits)),
         ("window".into(), window),
     ];
+    // RFC 0016: `stirs` only with a declared stir (every other reflection document keeps its bytes)
+    if stir_on { let at = kv.iter().position(|(k, _)| k.as_str() > "stirs").unwrap_or(kv.len());
+        kv.insert(at, ("stirs".into(), Json::Obj({ let mut v = stirs.clone(); v.sort_by(|a, b| a.0.cmp(&b.0)); v.into_iter().map(|(k, c)| (k, cnt(c))).collect() }))); }
     let doc0 = Json::Obj(kv.clone());
     let summary = sentences(&doc0, &trs, &mds);
     kv.push(("summary".into(), Json::Arr(summary.into_iter().map(Json::Str).collect())));
@@ -308,6 +315,11 @@ fn sentences(d: &Json, trs: &[Tr], mds: &[Md]) -> Vec<String> {
                 s.push(format!("The learned weights moved by {} in total between the first and the last of {}.", f6(l.get("moved").and_then(Json::as_f64).unwrap_or(0.0)), pl(u(&["learned", "samples"]), "sample", "samples"))); } }
         }
     }
+    // RFC 0016: one sentence on the self-started events, only with a declared stir (so 13 sentences at most then)
+    if let Some(Json::Obj(st)) = g(&["stirs"]) { let n: u64 = st.iter().map(|(_, c)| c.as_f64().unwrap_or(0.0) as u64).sum();
+        let parts: Vec<String> = st.iter().map(|(k, c)| format!("{k} ({})", c.as_f64().unwrap_or(0.0) as u64)).collect();
+        s.push(if n == 0 { "The curiosity drive started no self-started event (stir) in this window.".into() }
+            else { format!("The curiosity drive started {} in this window, by class: {}.", pl(n, "self-started event (stir)", "self-started events (stirs)"), join(&parts)) }); }
     let c = |k: &str| u(&["controls", k]);
     let rests = |n: u64| if n == 1 { "1 rest line was written".to_string() } else { format!("{n} rest lines were written") };
     s.push(if c("zero_credit") == 0 { format!("No control line was applied, and {}.", rests(c("rests"))) }

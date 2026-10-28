@@ -535,7 +535,7 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
     let mut out = vec![];
     // the goals: pursue's odds (canonical order), else the goals a drive object names
     let mut goals: Vec<String> = pz.and_then(|p| p.get("odds")).and_then(Json::as_obj).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default();
-    if goals.is_empty() { goals = dv.and_then(Json::as_obj).and_then(|o| o.iter().find_map(|(_, v)| v.as_obj())).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default(); }
+    if goals.is_empty() { goals = dv.and_then(Json::as_obj).and_then(|o| o.iter().filter(|(k, _)| k != "curiosity").find_map(|(_, v)| v.as_obj())).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default(); }
     if let Some(p) = pz {
         let v = Var { id: "pursue".into(), levels: goals.clone(), say: vec![] };
         let ps: Vec<f64> = goals.iter().map(|g| p.get("odds").and_then(|o| o.get(g)).and_then(Json::as_f64).unwrap_or(0.0)).collect();
@@ -552,6 +552,14 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
             if let Some(x) = want[i] { row += &format!(" wanting {} {x:.2}", nbar(s, x, m.caps.0, ORANGE)); }
             if let Some(x) = glow[i] { row += &format!("  afterglow {} {x:.2}", nbar(s, x, m.caps.1, GREEN)); }
             if let Some(x) = err[i].filter(|x| *x != 0.0) { row += &format!("  {}", s.bold(if x < 0.0 { RED } else { GREEN }, &format!("{x:+.2} {} expectation", if x < 0.0 { "below" } else { "above" }))); }
+            out.push(row);
+        }
+        // RFC 0016: the curiosity drive, its level and its two inputs (and the stir's class on a self-started event)
+        if let Some(c) = d.get("curiosity").filter(|c| c.as_obj().is_some()) {
+            let f = |k: &str| c.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+            let mut row = format!("{}{:<idw$}  level {} {:.2}  surprise_recent {:.2}  failed_contexts {}", lab(if pz.is_none() && goals.is_empty() { "DRIVES" } else { "" }), "curiosity",
+                nbar(s, f("level"), 2.0, ORANGE), f("level"), f("surprise_recent"), f("failed_contexts") as u64);
+            if let Some(cl) = c.get("stir").and_then(Json::as_str) { row += &format!("  {}", s.bold(GREEN, &format!("stir: {cl}"))); }
             out.push(row);
         }
     }
