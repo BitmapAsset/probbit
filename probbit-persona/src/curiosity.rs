@@ -22,7 +22,13 @@ pub const STIR_KEY: &str = "stir";
 
 /// The declared drive
 #[derive(Clone, Debug)]
-pub struct Curio { pub hl: f64, pub quiet_z: f64, pub miss_z: f64, pub last_k: usize, pub w_quiet: f64, pub w_failed: f64, pub cap: f64, pub stir: Option<StirSpec> }
+pub struct Curio { pub hl: f64, pub quiet_z: f64, pub miss_z: f64, pub last_k: usize, pub w_quiet: f64, pub w_failed: f64, pub cap: f64, pub stir: Option<StirSpec>,
+    /// the ordinal shift per unit of the level, per trait or mood (the lowered input's effects)
+    pub effects: Vec<(String, f64)> }
+impl Curio {
+    /// The largest shift the drive can put on the field of the variables in `comp`: sum of |effects| x cap (RFC 0004's residual)
+    pub fn shift(&self, comp: &[String]) -> f64 { r6(self.effects.iter().filter(|(k, _)| comp.contains(k)).fold(0.0, |a, (_, w)| a + w.abs()) * self.cap) }
+}
 /// The self-start: due when the level is at least `threshold`, at most one per `every_min` minutes; while the last event's
 /// `asleep` flag was on, only with `when_asleep` (flag, minutes, class), whose class never speaks
 #[derive(Clone, Debug)]
@@ -47,9 +53,10 @@ pub fn spec(cj: &Json, traits: &[String], flags: &[String]) -> R<(Curio, Json)> 
         let wk = keys(w, "curiosity.weights", &["quiet", "failed"], &[])?;
         (num_or(wk, "quiet", 1.0, "curiosity.weights", Some(0.0), Some(50.0), false)?, num_or(wk, "failed", 0.5, "curiosity.weights", Some(0.0), Some(50.0), false)?) } };
     let ek = get(ck, "effects").and_then(Json::as_obj).filter(|o| !o.is_empty()).ok_or_else(|| perr("curiosity.effects", "a mapping trait or mood -> ordinal shift per unit of the level"))?;
+    let mut effects = vec![];
     for (k, x) in ek { let ep = at("curiosity.effects", k);
         need(k != "pursue", &ep, "the curiosity drive never moves pursue")?; need(traits.contains(k), &ep, &format!("unknown trait or mood {k:?}"))?;
-        num(Some(x), &ep, Some(-50.0), Some(50.0), false)?; }
+        effects.push((k.clone(), num(Some(x), &ep, Some(-50.0), Some(50.0), false)?)); }
     let stir = match get(ck, "stir").filter(|x| !x.is_null()) { None => None, Some(sj) => {
         let sk = keys(sj, "curiosity.stir", &["threshold", "every_minutes", "class", "speaks", "when_asleep"], &["threshold"])?;
         let threshold = num(get(sk, "threshold"), "curiosity.stir.threshold", Some(0.0), Some(cap), false)?;
@@ -67,7 +74,7 @@ pub fn spec(cj: &Json, traits: &[String], flags: &[String]) -> R<(Curio, Json)> 
             need(c != class || !speaks, "curiosity.stir.when_asleep.class", "the asleep class never speaks: name another class than a speaking awake one")?;
             Some((fl, m, c)) } };
         Some(StirSpec { threshold, every_min, class, speaks, asleep }) } };
-    Ok((Curio { hl, quiet_z, miss_z, last_k, w_quiet, w_failed, cap, stir }, Json::Obj(ek.to_vec())))
+    Ok((Curio { hl, quiet_z, miss_z, last_k, w_quiet, w_failed, cap, stir, effects }, Json::Obj(ek.to_vec())))
 }
 
 /// The drive's fold (inside the expectation's canonical memory)

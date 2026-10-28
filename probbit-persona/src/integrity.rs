@@ -105,7 +105,9 @@ pub fn rested_boxed(p: &Persona, st: &State, st0: &State) -> Box<State> {
     for (id, acc) in s.mood.iter_mut() { if p.var(id).is_some_and(|v| v.half_life.is_some()) { if let Some((_, a0)) = st0.mood.iter().find(|(k, _)| k == id) { acc.clone_from(a0); } } }
     s.rbar = st0.rbar; s.load_l = st0.load_l; s.pressure = st0.pressure; s.elig = st0.elig;
     s.prev.clone_from(&st0.prev); s.prev_stance.clone_from(&st0.prev_stance); s.agenda.clone_from(&st0.agenda);
-    s.credit.clone_from(&st0.credit); s.open.clone_from(&st0.open); s.seal(p); s
+    s.credit.clone_from(&st0.credit); s.open.clone_from(&st0.open);
+    // RFC 0016: the curiosity drive's level moves with every event (a channel of the hour): at the fresh individual's (0)
+    s.cur = st0.cur; s.seal(p); s
 }
 
 /// `integrity` of the state `st` (after a turn) whose stance document is `stance` (its `habits.bound`), from a fresh cache

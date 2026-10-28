@@ -106,6 +106,8 @@ pub fn scope(p: &Persona, b: &Bound, t: &str, rest: f64, st: Option<&State>) -> 
         if prev_rel && h.rules.iter().flat_map(|(k, r)| r.iter().map(move |r| rule_vars(k, r))).flatten().any(|x| comp.contains(&x)) { uncounted.push(format!("habits[{i}]")); } }
     for v in p.vars.iter().filter(|v| v.hold.is_some() && comp.contains(&v.id)) { uncounted.push(format!("{}.hold", v.id)); }
     if let Some(pc) = &p.pace { if pc.effects.iter().any(|(k, _)| comp.contains(k)) { d_r += 2.0 * 0.5f64.powf(rest / pc.hl) * pace_shift(pc); } }
+    // RFC 0016: the curiosity drive's level does not decay with the rest hours (it moves per event), so its whole shift counts
+    if let Some(c) = &p.cur { d_r += 2.0 * c.shift(&comp); }
     if p.drives.is_some() && (comp.iter().any(|x| x == "pursue") || t == "pursue") { uncounted.push(if b.count.iter().any(|x| x == "deadlines") { "drives (counted; not yet searched by this build)".into() } else { "drives".into() }); }
     if p.has_needs() && (comp.iter().any(|x| x == "pursue") || t == "pursue") { uncounted.push(if b.count.iter().any(|x| x == "needs") { "needs (counted; not yet searched by this build)".into() } else { "needs".into() }); }
     Scope { coords, flags, d_r, uncounted, comp, others }
