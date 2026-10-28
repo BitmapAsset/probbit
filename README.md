@@ -16,6 +16,14 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="license"></a>
 </p>
 
+<p align="center">
+  <a href="https://bitmapasset.github.io/probbit/">bitmapasset.github.io/probbit</a> ·
+  <a href="AGENTS.md">AGENTS.md</a> ·
+  <a href="llms.txt">llms.txt</a> ·
+  <a href="https://www.npmjs.com/package/probbit">npm</a> ·
+  <a href="https://github.com/BitmapAsset/probbit/releases">releases</a>
+</p>
+
 | **For AI agents and their builders** | **For decisions under rules** |
 |:---|:---|
 | **Personality**: a persona file + a seed = one individual, the same whichever LLM writes the words. **Mood**: moods with inertia and half-lives (an affective-computing model, computed exactly). **Memory**: learned adjustments inside caps and a hash-chained strand of every turn. **Receipts**: `probbit live verify` replays the strand byte for byte. | **Plans**: tasks to workers, tickets to agents, jobs to machines, every hard rule kept by construction. **Odds**: exact for every part when the program allows, otherwise sampled with an error bar. **Refusal**: "I can't vouch for this" (exit 3) instead of a guess. A constraint solver built on probabilistic computing (p-bits, Ising/QUBO), simulated on a CPU. |
@@ -119,6 +127,9 @@ stance `line` into your model's prompt each turn; the model writes, the persona 
 - **What hardware? Which agent framework?** Any CPU: release binaries for Linux x86_64 and arm64, macOS (Apple silicon and
   Intel) and Windows x86_64; wasm in a browser. It sits beside any agent framework through the CLI, MCP, Python or the
   adapters above. All timings in this README come from one Apple M4.
+- **Is probbit the same as probit?** No. probbit (two b's, short for *probabilistic bit*) is this project. It is unrelated to
+  the probit function or probit regression in statistics, to Power BI template files (`.pbit`), to the Python p-bit circuit
+  simulators (p-bit, p-kit), and to other products or companies that share the name.
 
 ## What's new in 0.12.0 to 0.13.0
 
