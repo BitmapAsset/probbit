@@ -205,6 +205,39 @@ compiler's arithmetic, then the components tier; with M members per event this i
 every member. The body persona's turn on the proxy takes 13,824 B of stack (13,840 before) and its heap peak is unchanged
 (89,990 B, at the turn's solve; inside `expect` the peak rises from 68,476 to 87,214 B: A_t's parts and one member's model).
 
+### The expectation's members: what the deviation reuses
+
+The event's own program A_t was compiled and solved twice per event: once by the turn, once as the deviation's own member.
+Since the turn's first compile reads the same state and inputs as the deviation's A_t, `Live::event` now runs the turn first
+and, with the cache on, the turn hands the deviation its first program's compile meta and that answer's exact marginals
+(`persona::turn_at`, `persona::deviation_at`). The two programs are the same text when no rest line is due before the event,
+`src` is taken out of the inputs alike (a `reward_from` without a senses, credit or needs block keeps it in the turn only) and
+the persona's op is `decide`; the answer's marginals are the deviation's when its verdict is exact (an answer without an exact
+verdict means no deviation, either way). Any other event: the deviation builds and solves A_t itself, as before. A_t's text is
+written again from its meta (no prep, no compile) only to read the members' skeleton and key. `ExpectCache::with_reuse(false,
+_)` keeps the old order (A_t built and solved by the deviation); `with_reuse(true, true)` builds and solves A_t a second time
+as well and compares the two, text for text and bit for bit (a test's instrument). The phases' order in `turn_trace` changes:
+the turn's phases come before `expect`.
+
+The member path's cost after that: prep copies only what it steps and reads (the senses and drive states it replaces are not
+copied first; a member's copy leaves out the persona's name, the agenda, the resting stance, the learned-from counts and the
+digest); the compiler's contributions carry no source name for a member (`Opts::meta_only`: the names exist for the turn's
+`why`); and the members share one model (`run::Members`: A_t's parts moved into it, the compile pass's folds of separable
+tables kept apart and replayed per member in the pass's order, checked bit for bit on A_t's own `h`), so no second copy of the
+pairs is built per member; A_t's text is dropped once it is read. The trajectory runs before the turn, the deviation after
+it. Every stance, strand line and digest is the same as before (and as the cache-off reference).
+
+On the proxy (median of 3–5 runs, cache on, `expect`'s share of the turn, before → after): the body persona's recorded day
+67.7% → 63.9% (`expect` 1,042 → 894 µs per event, -14%; the rest of the turn about 500 µs; 5.63 member programs per event,
+each about 79 µs to build and 69 µs to solve); its two recorded events 43.3% → 26.3%; the fixture persona, one event repeated,
+35.8% → 32.9%; 500 events of many combinations 81.9% → 81.7%. Each step: A_t once 65.2%, the prep copy 64.7%, no source names
+64.4%, one model 63.8%. Stack: the body persona's turn 13,584 B (13,824 before). Heap (the body persona's two recorded events, the
+last one): the deviation now runs while the turn's stance document and next state are held (about 36.7 KB), so the event's
+peak is 97,583 B, inside `expect` (89,990 before, at the turn's solve; inside `expect` 87,214); the deviation's own peak above
+what it finds held fell from 86,209 to 60,857 B (one model instead of A_t's parts and a member's model; a member that keeps the
+engine's path still builds its text and the engine's answer). A host short of heap keeps the old order with
+`ExpectCache::with_reuse(false, false)`: the same bytes, A_t built and solved by the deviation.
+
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
 

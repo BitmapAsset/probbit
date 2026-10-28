@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **The expectation's members, trimmed** (docs/embedding.md "The expectation's members: what the deviation reuses"):
+  `Live::event` runs the turn first and, with the cache on, the turn hands the deviation its first program's meta and exact
+  marginals (`persona::turn_at`, `persona::deviation_at`), so the event's own program is compiled and solved once (when no rest
+  is due, `src` is taken out alike and the op is `decide`; else as before). A member's prep copies only what it steps and
+  reads, its compile writes no source names, and the members share one model (`run::Members`, the compile pass's folds
+  replayed per member). `ExpectCache::with_reuse` keeps the old order or checks the reuse. Every stance, strand line and digest
+  is the same; proxy, the body persona's recorded day: `expect` 67.7% → 63.9% of the turn (-14% per event). The deviation
+  runs after the turn, so the event's heap peak (the body persona, proxy) is 97,583 B (89,990 before); `with_reuse(false, false)`
+  keeps the old order.
 - **Resume robustness** (docs/embedding.md "Resume on a body", docs/persona.md section 5.7 "Resume from a record"):
   `strand::Replay::open_boxed` checks the header as the chain check does (the persona built on the heap, the header written
   again in pieces) and keeps its `Live` boxed, so a replay from the header fits a small stack (proxy: 24,752 → 16,192 B);
