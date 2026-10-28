@@ -561,7 +561,8 @@ mod tests {
     /// but A_t solved before the turn and held as rows, A_t's mixture after it; A_t checked against a second build and solve on
     /// every event), with the old order (`with_reuse(false, false)`: the whole deviation before the turn) and with the cache off
     /// (the reference): every stance document, every strand line (a checkpoint every 10) and the final state are the same, A_t
-    /// is read from the turn and members are solved as the model. The sensed persona (floats that move every event, two needs,
+    /// is read from the turn and members are solved as the model (with other rules in force than the skeleton's too: their rules
+    /// lowered into caps). The sensed persona (floats that move every event, two needs,
     /// drives, a habit on a flag), 500 events, max_combos 6 and 16, engines 0.13.0 and 0.14.0; the expectation fixture persona,
     /// 500 varied events, max_combos 16
     #[test]
@@ -577,15 +578,19 @@ mod tests {
         for (d, engine, kind) in &cases { let p = persona::build(d).unwrap_or_else(|e| panic!("{}: {}", e.path, e.msg));
             let ev = |t: usize| if *kind == 0 { sensed(t) } else { s1_event(t) };
             let life = |cache: persona::ExpectCache| { let (mut lv, head) = Live::start(p.clone(), d, persona::init(&p, Some(2), true, &run), Clock::Fixed, engine);
-                lv.expect_cache = cache; let (mut text, mut docs, mut reused, mut modeled) = (format!("{head}\n"), vec![], 0u32, 0u32);
+                lv.expect_cache = cache; let (mut text, mut docs, mut reused, mut modeled, mut texted) = (format!("{head}\n"), vec![], 0u32, 0u32, 0u32);
                 for t in 0..500 { let (s, l) = lv.event(&ev(t), &run).unwrap_or_else(|e| panic!("event {t}: {}: {}", e.path, e.msg)); text += &l; text.push('\n'); docs.push(persona::canon(&s));
-                    reused += lv.expect_cache.reused(); modeled += lv.expect_cache.modeled(); if lv.n % 10 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
-                (text, docs, lv.st.digest.clone(), reused, modeled) };
+                    let (m, (_, sv)) = (lv.expect_cache.modeled(), lv.expect_cache.last()); reused += lv.expect_cache.reused(); modeled += m; texted += sv - m;
+                    if lv.n % 10 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+                (text, docs, lv.st.digest.clone(), reused, modeled, texted) };
             let (new, old, off) = (life(persona::ExpectCache::new(true).with_reuse(true, true)), life(persona::ExpectCache::new(true).with_reuse(false, false)), life(persona::ExpectCache::new(false)));
             let ctx = format!("{engine}, {}", persona::canon(d.get("expectation").unwrap()));
             for (x, what) in [(&old, "the old order"), (&off, "the cache off")] {
                 assert_eq!(new.1, x.1, "every stance document vs {what} ({ctx})"); assert_eq!(new.0, x.0, "every strand byte vs {what} ({ctx})"); assert_eq!(new.2, x.2, "the final state vs {what} ({ctx})"); }
             assert!(new.3 > 0 && old.3 == 0 && new.4 > 0, "A_t read from the turn: new {} old {}; members as models {} ({ctx})", new.3, old.3, new.4);
+            // the fixture's members have other habits in force than A_t: with their rules lowered into caps they take the model too
+            eprintln!("T3-c members ({ctx}): modeled new {} old {}, built and run new {} old {}", new.4, old.4, new.5, old.5);
+            if *kind == 1 { assert!(new.4 > old.4 && new.5 < old.5, "rules into caps: modeled new {} old {}, built and run new {} old {} ({ctx})", new.4, old.4, new.5, old.5); }
             assert_eq!(verify(&new.0, &run).unwrap().get("events"), Some(&Json::Num(500.0)), "{ctx}"); }
     }
 

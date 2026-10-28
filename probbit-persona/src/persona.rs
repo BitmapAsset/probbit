@@ -2608,7 +2608,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let use_twin = o.twin.unwrap_or(p.eng.twin);
     let ids: Vec<String> = active.iter().map(|h| h.id.clone()).collect();
     // the text before the meta, as the compiler always wrote it (the meta's fields move in after)
-    let prog = if o.meta_only { Json::Null } else { emit(p, &field, &rules, &ids, (st.seed, st.turn), use_twin, &sem, &o.clamps) };
+    let prog = if o.meta_only { Json::Null } else { emit(p, &field, &rules, &ids, (st.seed, st.turn), use_twin, &sem, &o.clamps, true) };
     let conditional = active.iter().filter(|h| !h.when.is_empty()).map(|h| h.id.clone()).collect();
     let meta = Meta { vals, hist, ignored, active: ids, conditional, active_inputs, rules, owners, new_mood, new_learned, contrib, field, values: sem, twin: use_twin, lift, learn_sign,
         seed: st.seed, turn: st.turn };
@@ -2619,7 +2619,9 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
 /// Inlined in `compile` (its frame as before); a member's text is written in a frame of its own (`member_text`)
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn emit(p: &Persona, field: &[Vec<f64>], rules: &[Vec<Json>], active: &[String], (seed, turn): (u64, u64), use_twin: bool, sem: &[String], clamps: &[(String, String)]) -> Json {
+/// `with_pairs: false`: no `pairs` (T3-c: a member's rules read by `run::from_json_parts`, the pairs are the skeleton's)
+#[allow(clippy::too_many_arguments)]
+fn emit(p: &Persona, field: &[Vec<f64>], rules: &[Vec<Json>], active: &[String], (seed, turn): (u64, u64), use_twin: bool, sem: &[String], clamps: &[(String, String)], with_pairs: bool) -> Json {
     let (nv, ns) = (p.vars.len(), p.steps.len());
     let pos_vals = p.eng.positional;
     let lmax = p.vars.iter().map(|v| v.levels.len()).max().unwrap_or(0);
@@ -2637,7 +2639,7 @@ fn emit(p: &Persona, field: &[Vec<f64>], rules: &[Vec<Json>], active: &[String],
             ("h".into(), Json::Obj(p.slots.iter().zip(&field[nv + j]).filter(|(_, w)| **w != 0.0).map(|(l, w)| (l.clone(), Json::Num(*w))).collect()))])); }
     let k = values.len(); let vpos = |v: &str| values.iter().position(|x| x == v).unwrap();
     let mut pairs = vec![];
-    for (a, b, tab) in &p.couplings {
+    for (a, b, tab) in p.couplings.iter().filter(|_| with_pairs) {
         let (la, lb) = (&p.var(a).unwrap().levels, &p.var(b).unwrap().levels); let mut t = vec![vec![0.0; k]; k];
         for (x, l1) in la.iter().enumerate() { for (y, l2) in lb.iter().enumerate() { let w = r6(tab[x][y]); if w != 0.0 || !pos_vals { t[vpos(&name_of(a, l1))][vpos(&name_of(b, l2))] = w; } } }
         pairs.push((a.clone(), b.clone(), t)); }
@@ -4227,7 +4229,17 @@ fn mixture(mem: &ExpectMem, ws: &[(String, f64)], key: &str, member: bool, ms: V
 }
 /// A member's program text from its compile meta (no clamps), in a frame of its own
 #[inline(never)]
-fn member_text(p: &Persona, mm: &Meta) -> Json { emit(p, &mm.field, &mm.rules, &mm.active, (mm.seed, mm.turn), mm.twin, &mm.values, &[]) }
+fn member_text(p: &Persona, mm: &Meta) -> Json { emit(p, &mm.field, &mm.rules, &mm.active, (mm.seed, mm.turn), mm.twin, &mm.values, &[], true) }
+/// T3-c: a member's text without its pairs (`emit`, `with_pairs: false`), in a frame of its own
+#[inline(never)]
+fn member_stub(p: &Persona, mm: &Meta) -> Json { emit(p, &mm.field, &mm.rules, &mm.active, (mm.seed, mm.turn), mm.twin, &mm.values, &[], false) }
+/// T3-c: a member's rules in force lowered to caps as `run::from_json` lowers its text's (its text without the pairs, read),
+/// with the program's variables and values; None: not read
+#[inline(never)]
+fn member_caps(p: &Persona, mm: &Meta) -> Option<(Vec<String>, Vec<String>, Vec<probbit_ir::Cap>)> {
+    let t = member_stub(p, mm);
+    crate::run::from_json_parts(&t).ok().map(crate::run::Parts::into_caps)
+}
 /// A program's exact marginals the reference way: its text built (`program_json`) and run by the engine (`ExpectCache::marg`);
 /// turn_trace: the build and the solve timed apart (`expect_build_us`, `expect_solve_us`)
 #[inline(never)]
@@ -4238,7 +4250,9 @@ fn text_marg(p: &Persona, st: &State, ins: &Json, eng: Engine, cache: &mut Expec
 /// The event's own program read once from its text (`run::from_json_parts`) into the members' one model (`run::Members`: its
 /// parts moved in, no second copy), its variables, values and own `h`, with per variable of the persona (traits and moods, then
 /// the agenda steps) the value index of each of its levels in the program
-struct Skel { vars: Vec<String>, values: Vec<String>, h0: Vec<f64>, mm: crate::run::Members, idx: Vec<Vec<usize>> }
+struct Skel { vars: Vec<String>, values: Vec<String>, h0: Vec<f64>, mm: crate::run::Members, idx: Vec<Vec<usize>>,
+    /// T3-c: the key of the skeleton's rules in force, of the rules whose caps the model holds now, and the skeleton's caps
+    base_rk: [u8; 32], cur_rk: [u8; 32], base_caps: Vec<probbit_ir::Cap> }
 /// The expectation's programs -> per program its exact marginals (None: it does not compile or is not solved exactly); None when
 /// A_t or E_t has none (no deviation). With the cache off (`persona::deviation`, the reference) every program's text is built
 /// and run by the engine. With it on, A_t's text is built and read once; every other program is compiled without its text
@@ -4265,7 +4279,7 @@ fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, 
     let mut sk: Option<Option<Box<Skel>>> = None; // read on the first program the cache does not answer; Some(None): not usable
     let a = match own {
         Some(m) => { if cache.check { at_check(p, st, raw, prog.as_ref().unwrap(), &m, eng); } if let Some(s) = &skel { cache.put(field_key(s, &meta.field), &m); } Some(m) }
-        None => model_marg(p, st, &mut prog, &meta, skel.as_ref(), &mut sk, &meta, true, eng, cache).flatten() };
+        None => model_marg(p, st, &mut prog, &meta, skel.as_ref(), &mut sk, &meta, true, None, eng, cache).flatten() };
     crate::trace::expect_split(b, t.us());
     a.as_ref()?; out.push(a);
     for (i, x) in ins.iter().enumerate() {
@@ -4275,7 +4289,7 @@ fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, 
         let m = match program_meta(p, st, x, true) {
             Err(_) => { crate::trace::expect_split(t.us(), 0); None }
             Ok((_, mm)) if mm.rules == meta.rules => { let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-                let r = model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, &meta, false, eng, cache);
+                let r = model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, &meta, false, None, eng, cache);
                 // another tier (or no usable skeleton): its text from its meta, run by the engine
                 let r = match r { Some(r) => r, None => { let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } }; crate::trace::expect_split(b, t.us()); r }
             // other rules in force: its text from its meta (no second build), run by the engine
@@ -4293,12 +4307,14 @@ enum HeldM { Row(Vec<f64>), Named(Marg) }
 /// in force (A_t's row goes into the cache under the skeleton when its rules are the skeleton's)
 pub struct Held { ms: Vec<Option<HeldM>>, lay: [u8; 32], skel: Option<[u8; 32]>, rk: [u8; 32] }
 /// The sha256 of a marginals' layout: per variable its id and its levels' names, in order
+#[inline(never)]
 fn lay_key(m: &Marg) -> [u8; 32] {
     let mut h = Sha256::new(); h.update(&(m.len() as u64).to_le_bytes());
     for (id, ls) in m { hash_str(&mut h, id); h.update(&(ls.len() as u64).to_le_bytes()); for (l, _) in ls { hash_str(&mut h, l); } }
     h.finish()
 }
 /// The sha256 of a program's rules in force
+#[inline(never)]
 fn rules_key(rules: &[Vec<Json>]) -> [u8; 32] {
     let mut h = Sha256::new(); h.update(&(rules.len() as u64).to_le_bytes());
     for r in rules { hash_json(&mut h, &Json::Arr(r.clone())); }
@@ -4307,9 +4323,10 @@ fn rules_key(rules: &[Vec<Json>]) -> [u8; 32] {
 /// T3-c, the members before the turn (`Live::event` with the cache reusing the turn's program): every member but A_t is solved
 /// from the pre-event state as `deviation_cached` solves it, nothing of the turn held; their marginals are kept as rows (`Held`)
 /// for `deviation_post`, which reads A_t from the turn. The members' one model is read from the first member's own text (its
-/// skeleton); a member with other rules in force is built and run by the engine. E_t comes last, so the skeleton is a remembered
-/// combo's when there is one (the body's combos share their rules, E_t has others). None: no deviation (no block, or E_t has
-/// no exact marginals); `deviation_post` runs either way (it closes the cache's event)
+/// skeleton); a member with other rules in force takes it with its own caps (its rules lowered, `member_caps`: the pairs and
+/// folds are the skeleton's); a member the model does not answer is built and run by the engine. E_t comes first, the skeleton
+/// is its. None: no deviation (no block, or E_t has no exact marginals: the other members are then not solved);
+/// `deviation_post` runs either way (it closes the cache's event)
 #[inline(never)]
 pub fn deviation_pre(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Box<Held>> {
     cache.begin(); let h = pre_in(p, st, raw, mem, eng, cache);
@@ -4327,20 +4344,25 @@ fn pre_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cac
     let mut out: Vec<Option<Marg>> = (0..ins.len()).map(|_| None).collect();
     let (mut sk, mut base, mut skel): (Option<Option<Box<Skel>>>, Option<Box<Meta>>, Option<[u8; 32]>) = (None, None, None);
     let mut prog: Option<Json> = None;
-    for i in (1..ins.len()).chain(core::iter::once(0)) {
+    for i in 0..ins.len() {
         if sk.is_some() { prog = None; }
         let t = crate::trace::Stopwatch::start();
         let m = match program_meta(p, st, &ins[i], true) {
             Err(_) => { crate::trace::expect_split(t.us(), 0); None }
             Ok((_, mm)) => {
-                let same = match &base { None => { prog = Some(member_text(p, &mm)); skel = cache.live.then(|| skel_key(prog.as_ref().unwrap())); true } Some(b) => mm.rules == b.rules };
+                // the skeleton from the first member: its text without the pairs (read with the persona's couplings), no program text
+                let same = match &base { None => { prog = Some(member_stub(p, &mm));
+                    skel = cache.live.then(|| stub_key(p, prog.as_ref().unwrap())); true } Some(b) => mm.rules == b.rules };
                 let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-                let r = if same { let am = base.as_deref().unwrap_or(&mm); model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, am, false, eng, cache) } else { None };
-                // other rules in force, another tier or no usable skeleton: its text from its meta, run by the engine (the members' model
-                // is dropped first when this is the last member)
-                let r = match r { Some(r) => r, None => { if i == 0 { sk = None; prog = None; } let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } };
+                // other rules in force: the same model with the member's caps (its rules lowered)
+                let rk = (!same).then(|| rules_key(&mm.rules));
+                let r = { let am = base.as_deref().unwrap_or(&mm); model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, am, false, rk.as_ref(), eng, cache) };
+                // another tier, rules not read or no usable skeleton: its text from its meta, run by the engine
+                let r = match r { Some(r) => r, None => { let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } };
                 if base.is_none() { base = Some(mm); }
                 crate::trace::expect_split(b, t.us()); r } };
+        // E_t without exact marginals: no deviation (the other members are not solved)
+        if i == 0 && m.is_none() { return None; }
         out[i] = m; }
     drop((sk, prog));
     out[0].as_ref()?;
@@ -4395,12 +4417,15 @@ fn at_check(p: &Persona, st: &State, raw: &Json, prog: &Json, m: &Marg, eng: Eng
 /// Some(marginals or None) as the engine would answer; None when the enumeration would not answer it (the caller runs it)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn model_marg(p: &Persona, st: &State, prog: &mut Option<Json>, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, am: &Meta, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
-    let key = skel.map(|s| field_key(s, &mm.field));
+fn model_marg(p: &Persona, st: &State, prog: &mut Option<Json>, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, am: &Meta, own: bool, rk: Option<&[u8; 32]>, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
+    // T3-c: a member with other rules in force than the skeleton's (`rk`, its rules' key) is keyed with them
+    let key = skel.map(|s| match rk { None => field_key(s, &mm.field), Some(r) => field_key(&rules_skel(s, r), &mm.field) });
     if let Some(k) = &key { if let Some(m) = cache.find(k) { return Some(Some(m)); } }
     // A_t's text is read into its parts and dropped before the members' model is built from them (A_t itself, unhanded, keeps
     // its text: its own fallback runs it)
     if sk.is_none() { *sk = Some(if own { prog.as_ref().and_then(|x| skel_parts(p, x, am)) } else { prog.take().and_then(|x| skel_parts_owned(p, x, am)) }); }
+    // T3-c: the model's caps are the member's rules lowered (the skeleton's again for a member with its rules)
+    if let Some(Some(s)) = sk.as_ref() { let want = rk.copied().unwrap_or(s.base_rk); if want != s.cur_rk && !swap_caps(p, sk, mm, want) { return None; } }
     let own_run = |prog: &Option<Json>, cache: &mut ExpectCache| prog.as_ref().and_then(|x| cache.marg(p, st, x, eng));
     let Some(Some(s)) = sk.as_mut() else { return if own { Some(own_run(prog, cache)) } else { None } };
     let h = if own { s.h0.clone() } else { field_h(s, &mm.field) };
@@ -4410,13 +4435,51 @@ fn model_marg(p: &Persona, st: &State, prog: &mut Option<Json>, mm: &Meta, skel:
         let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
     cache.modeled += 1; cache.keep(key, &r); Some(r)
 }
+/// T3-c: the members' model with the caps of the rules `want` (the skeleton's, or member `mm`'s lowered) -> false when they are
+/// not read (the member takes the engine's path); the skeleton is dropped when `Model::new` refuses them
+#[inline(never)]
+fn swap_caps(p: &Persona, sk: &mut Option<Option<Box<Skel>>>, mm: &Meta, want: [u8; 32]) -> bool {
+    let Some(Some(s)) = sk.as_mut() else { return false };
+    let r = if want == s.base_rk { s.mm.set_caps(s.base_caps.clone(), true) } else {
+        let Some((vs, vals, caps)) = member_caps(p, mm) else { return false }; if vs != s.vars || vals != s.values { return false; } s.mm.set_caps(caps, false) };
+    if r.is_err() { *sk = Some(None); return false; }
+    s.cur_rk = want; true
+}
 /// A_t's text read into its parts, and the value index of every level -> None when the parts do not have the shape the compiler
 /// writes (then every program is run the reference way); checked: A_t's own field mapped to `h` is the `h` its text carries
 #[inline(never)]
 fn skel_parts(p: &Persona, prog: &Json, mm: &Meta) -> Option<Box<Skel>> { skel_of(p, crate::run::from_json_parts(prog).ok()?, mm) }
-/// `skel_parts`, the text dropped once its parts are read
+/// `skel_parts`, the text dropped once its parts are read; T3-c: a text written without its pairs (`emit`, `with_pairs: false`)
+/// gets the persona's couplings as `from_json` reads them from the full text (`persona_pairs`)
 #[inline(never)]
-fn skel_parts_owned(p: &Persona, prog: Json, mm: &Meta) -> Option<Box<Skel>> { let parts = crate::run::from_json_parts(&prog).ok(); drop(prog); skel_of(p, parts?, mm) }
+fn skel_parts_owned(p: &Persona, prog: Json, mm: &Meta) -> Option<Box<Skel>> {
+    let bare = prog.get("pairs").is_none(); let mut parts = crate::run::from_json_parts(&prog).ok()?; drop(prog);
+    if bare { let ps = persona_pairs(p, &parts.vars, &parts.values, mm.twin)?; parts.set_pairs(ps); }
+    skel_of(p, parts, mm)
+}
+/// T3-c: the pairs `emit` writes for persona `p` (its couplings, then the twins' when the program has them), read as
+/// `run::from_json_parts` reads them: per pair its variables' indices and its k x k table (r6 of the persona's, at the values'
+/// indices; each weight checked as `json::weight` checks it) -> None when the text's would not read (then no skeleton)
+#[inline(never)]
+fn persona_pairs(p: &Persona, vars: &[String], values: &[String], twin: bool) -> Option<Vec<probbit_ir::Pair>> {
+    let k = values.len(); let pos_vals = p.eng.positional;
+    let name_of = |var: &str, val: &str| -> String { match p.var(var) { Some(v) if pos_vals => format!("l{}", v.levels.iter().position(|l| l == val).unwrap_or(0)), _ => val.to_string() } };
+    let vi = |id: &str| vars.iter().position(|x| x == id); let vpos = |v: &str| values.iter().position(|x| x == v);
+    let mut out = vec![];
+    let mut tabs = vec![];
+    for (a, b, tab) in &p.couplings {
+        let (la, lb) = (&p.var(a)?.levels, &p.var(b)?.levels); let mut t = vec![0.0; k * k];
+        for (x, l1) in la.iter().enumerate() { for (y, l2) in lb.iter().enumerate() { let w = r6(tab[x][y]); if w != 0.0 || !pos_vals { t[vpos(&name_of(a, l1))? * k + vpos(&name_of(b, l2))?] = w; } } }
+        if t.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return None; }
+        let (i, j) = (vi(a)?, vi(b)?); if i == j { return None; }
+        out.push(probbit_ir::Pair { i, j, c: probbit_ir::Coupling::Table(t.clone()) }); tabs.push((a, b, t)); }
+    if twin { for (a, b, t) in tabs { let (i, j) = (vi(&format!("free.{a}"))?, vi(&format!("free.{b}"))?); out.push(probbit_ir::Pair { i, j, c: probbit_ir::Coupling::Table(t) }); } }
+    Some(out)
+}
+/// T3-c: the skeleton's key from a member's text without its pairs: the persona's digest (its couplings) and the text without
+/// `comment` and the vars' `h`, as `skel_key` hashes a full text
+#[inline(never)]
+fn stub_key(p: &Persona, stub: &Json) -> [u8; 32] { let mut h = Sha256::new(); h.update(b"without pairs"); hash_str(&mut h, &p.digest); h.update(&skel_key(stub)); h.finish() }
 /// The skeleton from A_t's parts (`skel_parts`)
 fn skel_of(p: &Persona, parts: crate::run::Parts, mm: &Meta) -> Option<Box<Skel>> {
     let (nv, ns) = (p.vars.len(), p.steps.len());
@@ -4427,8 +4490,9 @@ fn skel_of(p: &Persona, parts: crate::run::Parts, mm: &Meta) -> Option<Box<Skel>
     for _ in &p.steps { idx.push(p.slots.iter().map(|l| q(l)).collect::<Option<Vec<usize>>>()?); }
     let (n, k) = (parts.vars.len(), parts.values.len());
     if !field_hn(n, k, &idx, &mm.field).iter().zip(parts.h()).all(|(a, b)| a.to_bits() == b.to_bits()) { return None; }
-    let (vars, values, h0, mm) = parts.into_members()?;
-    Some(Box::new(Skel { vars, values, h0, mm, idx }))
+    let (vars, values, h0, mm2) = parts.into_members()?; let rk = rules_key(&mm.rules);
+    let base_caps = mm2.m.caps.clone();
+    Some(Box::new(Skel { vars, values, h0, mm: mm2, idx, base_rk: rk, cur_rk: rk, base_caps }))
 }
 /// A field (per persona variable, per level) as the program's `h` (n x k): the value index each level gets, 0 where the text
 /// omits a weight, the twins' rows copied
@@ -4449,6 +4513,10 @@ fn skel_key(prog: &Json) -> [u8; 32] {
             _ => hash_json(&mut h, x) } } }
     h.finish()
 }
+/// T3-c: the skeleton's key for a member with other rules in force (`rk`, its rules' key): its text is the skeleton's with its
+/// own rules and `h`, so (skeleton, rules, field) names it
+#[inline(never)]
+fn rules_skel(skel: &[u8; 32], rk: &[u8; 32]) -> [u8; 32] { let mut h = Sha256::new(); h.update(skel); h.update(b"rules"); h.update(rk); h.finish() }
 /// A program's key from A_t's skeleton and its field (each number by its bits, -0 as 0)
 fn field_key(skel: &[u8; 32], field: &[Vec<f64>]) -> [u8; 32] {
     let mut h = Sha256::new(); h.update(skel);

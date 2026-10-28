@@ -31,6 +31,11 @@ pub struct Parts { pub vars: Vec<String>, pub values: Vec<String>, h: Vec<f64>, 
 impl Parts {
     /// The program's own `h` (n x k), as its text gives it
     pub fn h(&self) -> &[f64] { &self.h }
+    /// T3-c: the pairs of a text read without its `pairs` (the members' skeleton: the persona's couplings, read as `from_json`
+    /// reads the text's)
+    pub fn set_pairs(&mut self, pairs: Vec<Pair>) { self.pairs = pairs; }
+    /// T3-c: the program's caps as read and lowered (before the compile pass), with its variables and values
+    pub fn into_caps(self) -> (Vec<String>, Vec<String>, Vec<Cap>) { (self.vars, self.values, self.caps) }
     /// The program's own model: the compile pass and `Model::new` on its `h`, as `from_json`
     #[inline(always)]
     pub fn into_prog(self) -> Result<Prog, InErr> {
@@ -64,6 +69,18 @@ impl Members {
         for (i, j, row, col) in &self.folds { for a in 0..k { h[i * k + a] += row[a]; h[j * k + a] += col[a]; } }
         if h.iter().any(|x| !x.is_finite()) { return Err(crate::json::value("", "h must contain only finite weights")); }
         self.m.h = h; Ok(())
+    }
+    /// T3-c: the model with `caps` (a member's rules lowered, `compiled`: already through the compile pass) in place of its
+    /// own: the pass's never-binding caps dropped as `compile_parts` drops them, then `Model::new` on the same parts, moved (no
+    /// copy of the pairs): the model `from_json` builds for the member's text. Err: `Model::new` refused them (the model is
+    /// then gone: the caller reads no member from it again)
+    #[inline(never)]
+    pub fn set_caps(&mut self, caps: Vec<Cap>, compiled: bool) -> Result<(), InErr> {
+        let caps = if compiled { caps } else { compile_parts(self.m.k, &mut [], vec![], caps).1 };
+        let m = &mut self.m; let (start, collective, cluster, cycles) = (m.start.take(), m.collective, m.cluster, m.cycles);
+        use core::mem::take;
+        let mut nm = Model::new(m.n, m.k, take(&mut m.h), take(&mut m.allowed), take(&mut m.clamp), take(&mut m.pairs), caps).map_err(|e| crate::json::value("", e))?;
+        nm.start = start; nm.collective = collective; nm.cluster = cluster; nm.cycles = cycles; self.m = nm; Ok(())
     }
 }
 impl Parts {
