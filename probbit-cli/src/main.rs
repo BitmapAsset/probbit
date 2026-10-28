@@ -372,6 +372,20 @@ pub(crate) static COMMANDS: &[Command] = &[
             ("exit", "0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that cannot be had, or a file that cannot be read or is not a strand.")],
         examples: &["probbit monitor --demo --open", "probbit monitor pip.strand --follow", "probbit monitor pip.strand --serve --port 8080"],
         run: monitor::cmd },
+    Command { name: "reflect", aliases: &[], group: "live", summary: "RFC 0013 self-report: a canonical account of a strand's last N events, from its lines alone",
+        usage: &["reflect STRAND [--last N | --since-checkpoint] [--json | --text]"],
+        about: "The self-report (docs/persona.md §5.8): a canonical document computed from the strand's lines alone (no turn is run, nothing is solved, nothing is random): over the window, the inputs set, the expectation's surprises (each receipt's z recomputed from the logged receipts; the K = 5 largest |z| with the predicted and measured values), per trait the levels taken and the odds' drift, the moods' path with its turning points, the drives' peaks and the habits that bound (read from the checkpoint lines in the window: a window without one reports them as null), the credit settled, the learned weights' net movement and the control lines; every number at 6 decimals, `digest` = the sha256 of the canonical text, and `summary`: 6 to 12 sentences from fixed templates. `probbit live control STRAND reflect` appends it as a line (0.14.0 strands), which `live verify` recomputes.",
+        before: &[],
+        flags: &[&[
+            Flag { name: "--last", arg: "N", help: "the last N events (default: every event)" },
+            Flag { name: "--since-checkpoint", arg: "", help: "the events after the last checkpoint line (that checkpoint is the first sample)" },
+            Flag { name: "--json", arg: "", help: "the canonical document (the default)" },
+            Flag { name: "--text", arg: "", help: "the summary's sentences only, one per line" },
+        ]],
+        subs: &[], list_subs: false, shared: false,
+        after: &[("exit", "0 the reflection printed, 2 a bad flag, a file that cannot be read, or a strand with no event line in the window (one {\"error\"} object on stdout).")],
+        examples: &["probbit reflect pip.strand --last 50 --text", "probbit reflect pip.strand --since-checkpoint"],
+        run: reflect_cmd },
     Command { name: "decide", aliases: &[], group: "decide/run", summary: "route tasks to workers: a router document in, a JSON decision out",
         usage: &["decide [flags] < router.json"],
         about: "Route tasks to workers: a router document (workers + caps, tasks + allowed + scores, affinity; README) on stdin, a JSON decision on stdout. Exact where structure allows, else sampled with the diagnostics gate.",
@@ -1022,6 +1036,23 @@ fn lint_report(args: &[String], path: &str, p: &persona::Persona, depth: usize, 
 /// `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds LIST] [--depth N] [--hours LIST] [--json]`: one gate for CI.
 /// `persona lint`'s pipeline on the rules (`lint_report`), then `live verify` on every strand; exit 1 when a rule is broken, a
 /// contradiction is unresolved or a strand fails, else 3 when a rule is unproven, else 0
+/// The window of `--last N` / `--since-checkpoint` (RFC 0013)
+fn reflect_window(args: &[String], what: &str) -> probbit_persona::reflect::Window {
+    use probbit_persona::reflect::Window;
+    let last = args.iter().position(|x| x == "--last").map(|k| args.get(k + 1).and_then(|v| v.parse::<u64>().ok()).filter(|n| *n >= 1)
+        .unwrap_or_else(|| fail(&format!("{what}: --last N: a whole number >= 1"))));
+    match (last, args.iter().any(|a| a == "--since-checkpoint")) { (Some(_), true) => fail(&format!("{what}: --last and --since-checkpoint: one window")),
+        (Some(n), false) => Window::Last(n), (None, true) => Window::SinceCheckpoint, (None, false) => Window::All }
+}
+/// `probbit reflect STRAND [--last N | --since-checkpoint] [--json | --text]` (RFC 0013)
+fn reflect_cmd(args: &[String]) {
+    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else { fail("reflect: the strand file: probbit reflect STRAND [--last N | --since-checkpoint]") };
+    let mut a = vec!["reflect".to_string()]; a.extend(args.iter().skip(2).cloned()); let (v, w) = flags_of("reflect"); check_flags(&a, &v, &w);
+    if args.iter().any(|a| a == "--json") && args.iter().any(|a| a == "--text") { fail("reflect: --json or --text") }
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("reflect: cannot read {path}: {e}")));
+    let r = probbit_persona::reflect::reflect_text(&text, reflect_window(args, "reflect")).unwrap_or_else(|e| bad_input("reflect: ", e));
+    if args.iter().any(|a| a == "--text") { emit(&r.summary().join("\n")) } else { emit(&r.text()) }
+}
 fn check_cmd(args: &[String]) {
     // --strand may be given more than once: take its values out before the flags are checked
     let (mut rest, mut strands) = (vec![], vec![]); let mut i = 0;
