@@ -164,8 +164,10 @@ pub fn stir_cmd(path: &str, idle_hours: f64, eng: Engine) -> Result<Json, InErr>
 /// `probbit live control STRAND rest [--at TIME]` (RFC 0015): a host decides when (standby, night, idle). Under the writer lock,
 /// the strand replayed from its header (every line checked), then the rest pass on the replayed individual and its one
 /// `consolidation` line appended -> {ok, control: rest, consolidation, line, head}. Refused without an `expectation.rest` block,
-/// before engine 0.14.0, and once retired.
-pub fn rest_cmd(path: &str, at: &str, eng: Engine) -> Result<Json, InErr> {
+/// before engine 0.14.0, and once retired. `state`: the host's stored individual (`live --state FILE`), which must be the state
+/// after the strand's last line; it is rewritten with the state after the pass (a `decay` moves it), so `live --state FILE`
+/// continues the strand.
+pub fn rest_cmd(path: &str, at: &str, state: Option<&str>, eng: Engine) -> Result<Json, InErr> {
     let lock = Lock::take(path)?;
     let text = std::fs::read_to_string(path).map_err(|e| perr("strand", format!("cannot read {path}: {e}")))?;
     if !text.ends_with('\n') { return Err(perr("strand", "its last line is incomplete (no newline at the end)")); }
@@ -173,9 +175,15 @@ pub fn rest_cmd(path: &str, at: &str, eng: Engine) -> Result<Json, InErr> {
     let (mut r, start) = probbit_persona::strand::Replay::open_lines(&ls).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?;
     for i in start..ls.len() { r.step_at(&ls, i, eng).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?; }
     if r.live.dev_full { return Err(perr("strand", "a consolidation line needs a strand of engine 0.14.0 or later")); }
+    if let Some(f) = state { let t = std::fs::read_to_string(f).map_err(|e| perr("state", format!("cannot read {f}: {e}")))?;
+        let j = json::parse(t.strip_prefix('\u{feff}').unwrap_or(&t)).map_err(|e| perr("state", format!("not JSON: {}", e.msg)))?;
+        let st = State::read(&r.live.p, &j)?;
+        if st.digest != r.live.st.digest { return Err(perr("state", format!("not the state after the strand's last line ({} != {})", &st.digest[..19], &r.live.st.digest[..19]))); } }
     let line = r.live.consolidate(at)?;
     if !lock.held() { return Err(locked(None, &format!("{path}.lock"))); }
     append(path, &[&line])?;
+    if let Some(f) = state { let tmp = format!("{f}.{}.tmp", std::process::id());
+        std::fs::write(&tmp, persona::canon(&r.live.st.to_json(&r.live.p))).and_then(|_| std::fs::rename(&tmp, f)).map_err(|e| perr("state", format!("cannot write {f}: {e}")))?; }
     let s = |x: &str| Json::Str(x.to_string());
     Ok(Json::Obj(vec![("ok".into(), Json::Bool(true)), ("control".into(), s("rest")),
         ("consolidation".into(), json::parse(&line).ok().and_then(|j| j.get("consolidation").cloned()).unwrap_or(Json::Null)),

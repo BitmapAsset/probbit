@@ -121,11 +121,13 @@ impl Frame {
     }
 }
 /// A strand being watched: the replay, the layout, the latest frame, the moods' recent positions, the line that diverged (if any)
-struct Watch { rep: Replay, meta: Meta, last: Option<Frame>, spark: Vec<VecDeque<f64>>, bad: Option<(usize, String)> }
+struct Watch { rep: Replay, meta: Meta, last: Option<Frame>, spark: Vec<VecDeque<f64>>, bad: Option<(usize, String)>,
+    /// RFC 0015: the last consolidation line replayed (its line number and the line), drawn as "last rest"
+    rest: Option<(usize, Json)> }
 impl Watch {
     fn open(head: &str) -> Result<Watch, (usize, String)> {
         let rep = Replay::open(head)?; let meta = Meta::of(&rep); let n = meta.moods.len();
-        Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None })
+        Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None, rest: None })
     }
     /// Where the replay of `lines` (the header first) starts: the last checkpoint line (index), or None for the header. RFC 0009:
     /// before 0.14.0 a persona with an expectation block folds every event line into its memory, which no checkpoint carries, so
@@ -142,7 +144,7 @@ impl Watch {
     fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Watch, (usize, String)> {
         // a segment's sealed line (line 2, after the header) opens on the header's link
         let rep = if at == 2 { Replay::open_lines(&[head, cp])?.0 } else { Replay::open_at(head, before, cp, at)? }; let meta = Meta::of(&rep); let n = meta.moods.len();
-        let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None };
+        let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None, rest: None };
         if let Some(doc) = w.rep.last_stance().cloned() {
             let given = json::parse(before).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
             for (m, s) in w.meta.moods.iter().zip(w.spark.iter_mut()) { s.push_back(position(&odds(&doc, "mood", m))); }
@@ -153,7 +155,8 @@ impl Watch {
     fn feed(&mut self, l: &str, eng: Engine) {
         if self.bad.is_some() { return; }
         match self.rep.step(l, eng) {
-            Ok(None) => {} // a control or checkpoint line: no stance to draw
+            // a control or checkpoint line: no stance to draw; RFC 0015: a consolidation line is kept for the "last rest" row
+            Ok(None) => if let Some(j) = json::parse(l).ok().filter(|j| j.get("consolidation").is_some()) { self.rest = Some((self.rep.line, j)); }
             Ok(Some(doc)) => {
                 let given = json::parse(l).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
                 for (m, s) in self.meta.moods.iter().zip(self.spark.iter_mut()) { if s.len() == SPARK { s.pop_front(); } s.push_back(position(&odds(&doc, "mood", m))); }
@@ -460,6 +463,12 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         let z = dv.get("z").and_then(Json::as_f64).map_or("z -".to_string(), |z| format!("z {z:+.2}"));
         let txt = format!("pred {:.4} {dot} self {:.4} {dot} input {:.2} {dot} {}{}", g("pred"), g("self"), g("input"), if cold { "cold".to_string() } else { z }, if reg { "  registers deviation" } else { "" });
         out.push(format!("{}  {}", s.bold(MAGENTA, "DEVIATION"), if reg { s.bold(AMBER, &txt) } else { s.paint(CYAN, &txt) })); }
+    // RFC 0015: the last rest pass replayed (only once the strand has one): its clock, the contexts merged, the weights moved
+    if let Some((line, j)) = w.rest.as_ref() { let c = j.get("consolidation"); let g = |k: &str| c.and_then(|c| c.get(k)).and_then(Json::as_f64).unwrap_or(0.0);
+        let merged = c.and_then(|c| c.get("merged")).and_then(|m| m.get("count")).and_then(Json::as_f64).unwrap_or(0.0);
+        let txt = format!("last rest {} {dot} event {} {dot} line {line} {dot} {} merged {dot} moved {:.6} {dot} decay {:.6} {dot} {} events",
+            j.get("at").and_then(Json::as_str).unwrap_or("-"), j.get("n").and_then(Json::as_f64).unwrap_or(0.0) as u64, merged as u64, g("moved"), g("decay"), g("events") as u64);
+        out.push(format!("{}  {}", s.bold(MAGENTA, "REST"), s.paint(CYAN, &txt))); }
     if let Some(tj) = w.rep.live.traj.as_ref() { let st = tj.get("steps").and_then(Json::as_arr).map_or(vec![], |a| a.to_vec());
         let hs: Vec<String> = st.iter().map(|x| format!("{:.2}", x.get("h").and_then(Json::as_f64).unwrap_or(0.0))).collect();
         let b0 = st.first().and_then(|x| x.get("beta")).and_then(Json::as_f64).unwrap_or(1.0);
@@ -609,6 +618,9 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
         ("diverges", bad.map_or(Json::Null, |(l, why)| json::obj(vec![("line", Json::Num(*l as f64)), ("why", json::str(why))]))), ("note", note.map_or(Json::Null, json::str)),
         ("from_checkpoint", w.and_then(|w| w.rep.from).map_or(Json::Null, |n| json::num(n as f64))),
         ("status", w.map_or(Json::Null, |w| json::str(w.rep.live.status.name())))];
+    // RFC 0015: the last rest pass (its line number and line), only once the strand has one
+    if let Some((line, j)) = w.and_then(|w| w.rest.as_ref()) { kv.push(("last_rest", json::obj(vec![("line", Json::Num(*line as f64)), ("at", j.get("at").cloned().unwrap_or(Json::Null)),
+        ("n", j.get("n").cloned().unwrap_or(Json::Null)), ("consolidation", j.get("consolidation").cloned().unwrap_or(Json::Null))]))); }
     // the senses' normals now (§2.11), only when the persona declares them: mean, count and the largest move within 50 events
     if let Some(w) = w.filter(|w| !w.meta.senses.is_empty()) {
         let moved = &w.rep.normals().moved;
