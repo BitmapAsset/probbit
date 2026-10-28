@@ -249,8 +249,8 @@ plans that obey them, when the largest component has at most `q_max` encoded qub
 the layer list, the schedule and the final amplitudes at 6 decimals) and
 `feasible_mass`; `live verify` recomputes them from the strand. Without the key nothing changes, byte for byte. An engine
 without the tier reports a strand that uses it as `unsupported by this engine: engine.tier` (exit 5). `engine.amplify: true`
-(research, round 4; needs the tier) replaces the projection by exact amplitude amplification: the rules are the oracle, the
-register is rotated onto the plans that obey them, the stance is the projection's (the same plan and odds, measured equal to
+(research, round 4; needs the tier) replaces the projection by exact amplitude amplification, simulated on a CPU: the
+rules are the oracle, the register is rotated onto the plans that obey them, the stance is the projection's (the same plan and odds, measured equal to
 1.1e-12) and `engine.amplify` logs the iterations, the final phases and the mass before and after (`feasible_mass` 1). The register is a
 simulation: no quantum hardware, no speedup claim; its stances agree with the default tier in 96 % of trait decisions on the
 recorded corpus (RFC 0011, round 3). With the key, `persona bound` probes through the tier: compute the certificate again with
