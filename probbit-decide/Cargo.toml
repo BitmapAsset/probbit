@@ -7,7 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 readme = "../README.md"
-keywords = ["p-bit", "assignment", "routing", "constraints", "probabilistic"]
+keywords = ["p-bit", "assignment", "routing", "constraint-solver", "probabilistic"]
 categories = ["algorithms", "science"]
 
 [dependencies]

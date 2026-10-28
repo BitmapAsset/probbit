@@ -1,7 +1,7 @@
 {
   "name": "probbit-stance",
   "version": "0.2.0",
-  "description": "OpenClaw plugin: a probbit individual's stance in every turn of the sessions you list (one event per user message, a replayable strand as the receipt), plus a shadow-mode destructive-action gate.",
+  "description": "OpenClaw plugin: a personality and mood layer for your agent. A probbit individual's stance in every turn of the sessions you list (one event per user message, a replayable, verifiable strand as the receipt), plus a shadow-mode destructive-action gate.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -18,7 +18,10 @@
     "persona",
     "stance",
     "agent",
-    "audit"
+    "audit",
+    "ai-agents",
+    "agent-personality",
+    "mood"
   ],
   "type": "module",
   "files": [

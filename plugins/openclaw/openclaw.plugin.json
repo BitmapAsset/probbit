@@ -1,7 +1,7 @@
 {
   "id": "probbit-stance",
   "name": "probbit stance",
-  "description": "A probbit individual (persona + seed) beside the agent: one engine event per user message in the sessions you list, its stance block injected into the turn, a replayable strand as the receipt; destructive tool calls a careful stance would deny are shadow-logged.",
+  "description": "A personality and mood layer for the agent: a probbit individual (persona + seed) beside it: one engine event per user message in the sessions you list, its stance block injected into the turn, a replayable strand as the receipt; destructive tool calls a careful stance would deny are shadow-logged.",
   "categories": [
     "other"
   ],
