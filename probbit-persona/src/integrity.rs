@@ -56,12 +56,14 @@ pub struct Integrity { pub doc: Json, pub drift: f64, pub used: f64 }
 /// were) and by program (the probe's first program without its comment, `prog_key` as the members' cache keys them: a rested state
 /// whose senses or drives moved but whose resting program did not gives the same odds). A program row is kept only when that
 /// program's answer was exact and the stance is that answer's (no yield, hold or conflict): exact marginals read the program alone.
-pub struct Cache { base: Option<(u64, Vec<Vec<f64>>, Vec<Option<f64>>, State)>, key: [u8; 32], odds: Vec<Vec<f64>>, prog: Option<[u8; 32]>,
+pub struct Cache { base: Option<Box<Base>>, key: [u8; 32], odds: Vec<Vec<f64>>, prog: Option<[u8; 32]>,
     /// probes answered from the cache (by state or by program), probes solved, and of the hits those by program
     pub hits: u64, pub misses: u64, pub by_program: u64 }
 impl Cache { pub const fn new() -> Cache { Cache { base: None, key: [0; 32], odds: Vec::new(), prog: None, hits: 0, misses: 0, by_program: 0 } } }
 impl Default for Cache { fn default() -> Cache { Cache::new() } }
 
+/// Per seed: the seed, the fresh individual's odds at the rest probe, the allowances, the fresh individual
+type Base = (u64, Vec<Vec<f64>>, Vec<Option<f64>>, State);
 /// The rest probe's inputs: one event of `id.rest` idle hours
 fn rest_in(id: &Ident) -> Json { Json::Obj(vec![("elapsed_hours".into(), Json::Num(id.rest))]) }
 /// Per measured trait its odds in level order, read from a stance document
@@ -95,8 +97,11 @@ fn key_of(p: &Persona, st: &State) -> [u8; 32] {
 /// average, the load, the rest pressure, the eligibility trace and the credit awaiting feedback with its open decisions, the
 /// levels and stance taken last, the agenda's step); what persists as it is (learned deltas, history, moods without a
 /// half-life, drives, senses, the surprise gates, genes)
-pub fn rested(p: &Persona, st: &State, st0: &State) -> State {
-    let mut s = st.clone();
+pub fn rested(p: &Persona, st: &State, st0: &State) -> State { *rested_boxed(p, st, st0) }
+/// `rested` on the heap (the probe's path: no frame holds a `State` by value)
+#[inline(never)]
+pub fn rested_boxed(p: &Persona, st: &State, st0: &State) -> Box<State> {
+    let mut s = Box::new(st.clone());
     for (id, acc) in s.mood.iter_mut() { if p.var(id).is_some_and(|v| v.half_life.is_some()) { if let Some((_, a0)) = st0.mood.iter().find(|(k, _)| k == id) { acc.clone_from(a0); } } }
     s.rbar = st0.rbar; s.load_l = st0.load_l; s.pressure = st0.pressure; s.elig = st0.elig;
     s.prev.clone_from(&st0.prev); s.prev_stance.clone_from(&st0.prev_stance); s.agenda.clone_from(&st0.agenda);
@@ -110,26 +115,39 @@ pub fn compute(p: &Persona, st: &State, stance: &Json, eng: Engine) -> R<Option<
 /// without the self keys.
 pub fn compute_cached(p: &Persona, st: &State, stance: &Json, cache: &mut Cache, eng: Engine) -> R<Option<Integrity>> {
     let Some(id) = p.ident.as_ref() else { return Ok(None) };
-    if cache.base.as_ref().map_or(true, |(s, _, _, _)| *s != st.seed) {
-        let st0 = init(p, Some(st.seed), true, eng); let p0 = probe(p, &st0, id, eng)?;
-        let mut eps = vec![];
-        for (i, t) in id.traits.iter().enumerate() {
-            let k = p.learning.as_ref().and_then(|l| l.traits.iter().position(|x| x == t));
-            eps.push(match (&id.bound, &p.learning, k) {
-                (Some(b), Some(l), Some(k)) => { let sc = bound::scope(p, b, t, id.rest, Some(&st0));
-                    match bound::bases(p, &sc, &st0) { Some(bs) => Some(bound::search(p, k, &sc.coords, l.total_cap, &bs, &p0[i], id.rest, eng)?.0), None => None } }
-                _ => None }); }
-        cache.base = Some((st.seed, p0, eps, st0)); cache.key = [0; 32]; cache.prog = None;
-    }
-    let rs = Box::new(rested(p, st, &cache.base.as_ref().unwrap().3));
+    if cache.base.as_ref().map_or(true, |b| b.0 != st.seed) { cache.base = Some(base(p, st.seed, id, eng)?); cache.key = [0; 32]; cache.prog = None; }
+    resting(p, st, id, cache, eng)?;
+    document(stance, id, cache).map(Some)
+}
+/// The fresh individual of `seed`: its rest probe and the allowances (on the heap, once per seed)
+#[inline(never)]
+fn base(p: &Persona, seed: u64, id: &Ident, eng: Engine) -> R<Box<Base>> {
+    let st0 = init_boxed(p, Some(seed), true, eng); let p0 = probe(p, &st0, id, eng)?;
+    let mut eps = vec![];
+    for (i, t) in id.traits.iter().enumerate() {
+        let k = p.learning.as_ref().and_then(|l| l.traits.iter().position(|x| x == t));
+        eps.push(match (&id.bound, &p.learning, k) {
+            (Some(b), Some(l), Some(k)) => { let sc = bound::scope(p, b, t, id.rest, Some(&*st0));
+                match bound::bases(p, &sc, &st0) { Some(bs) => Some(bound::search(p, k, &sc.coords, l.total_cap, &bs, &p0[i], id.rest, eng)?.0), None => None } }
+            _ => None }); }
+    Ok(Box::new((seed, p0, eps, *st0)))
+}
+/// The resting odds of `st` into `cache.odds`: from the state key, else from the program key, else one rest probe
+#[inline(never)]
+fn resting(p: &Persona, st: &State, id: &Ident, cache: &mut Cache, eng: Engine) -> R<()> {
+    let rs = rested_boxed(p, st, &cache.base.as_ref().unwrap().3);
     let key = key_of(p, &rs);
-    if key == cache.key { cache.hits += 1; } else {
-        cache.key = key;
-        match probe_keyed(p, &rs, id, eng, cache.prog.as_ref())? {
-            (_, None) => { cache.hits += 1; cache.by_program += 1; }
-            (k, Some((odds, row))) => { cache.odds = odds; cache.prog = row.then_some(k); cache.misses += 1; } } }
-    drop(rs);
-    let (_, p0, eps, _) = cache.base.as_ref().unwrap();
+    if key == cache.key { cache.hits += 1; return Ok(()); }
+    cache.key = key;
+    match probe_keyed(p, &rs, id, eng, cache.prog.as_ref())? {
+        (_, None) => { cache.hits += 1; cache.by_program += 1; }
+        (k, Some((odds, row))) => { cache.odds = odds; cache.prog = row.then_some(k); cache.misses += 1; } }
+    Ok(())
+}
+/// The integrity document from the resting odds in `cache` and the stance's bound habits
+#[inline(never)]
+fn document(stance: &Json, id: &Ident, cache: &Cache) -> R<Integrity> {
+    let b = cache.base.as_ref().unwrap(); let (p0, eps) = (&b.1, &b.2);
     let (mut sum, mut sum_e, mut sum_d) = (0.0f64, 0.0f64, 0.0f64); let mut rows = vec![]; let mut crossed = vec![];
     for (i, t) in id.traits.iter().enumerate() {
         let d = r6(bound::tv(&cache.odds[i], &p0[i])); sum += d;
@@ -146,7 +164,7 @@ pub fn compute_cached(p: &Persona, st: &State, stance: &Json, cache: &mut Cache,
         ("habits_held".into(), Json::Obj(vec![("held".into(), jstrs(&held)), ("not_fired".into(), jstrs(&not_fired))])), ("cue".into(), cue)]);
     // canonical key order (the order the strand line is written in), so the stance's copy equals the line's
     let doc = json::parse(&canon(&doc)).map_err(|e| perr("integrity", e.msg))?;
-    Ok(Some(Integrity { doc, drift, used }))
+    Ok(Integrity { doc, drift, used })
 }
 
 #[cfg(test)]
@@ -192,6 +210,21 @@ mod tests {
         for _ in 0..5 { let (d, ns) = turn(&p, &s, &Json::Obj(vec![("loss".into(), Json::Bool(true)), ("elapsed_hours".into(), Json::Num(0.1))]), false, &run, false).unwrap(); s = ns;
             compute_cached(&p, &s, &d, &mut c, &run).unwrap().unwrap(); }
         assert_eq!((c.hits - before.0, c.misses - before.1), (5, 0), "five mood-only events: five hits");
+    }
+    /// RFC 0014-b: senses that move every event (the rested state's key never repeats): through the program key every number
+    /// equals the uncached computation's
+    #[cfg(feature = "std")]
+    #[test]
+    fn the_program_key_moves_no_number_when_the_senses_move() {
+        let f = concat!(env!("CARGO_MANIFEST_DIR"), "/../bench/bound/fixtures/sensed.yaml");
+        let mut d = crate::yaml::load(&std::fs::read_to_string(f).unwrap()).unwrap_or_else(|e| panic!("{}", e.msg));
+        if let Json::Obj(v) = &mut d { if let Some((_, Json::Obj(i))) = v.iter_mut().find(|(k, _)| k == "identity") { i.push(("warn".into(), Json::Num(0.8))); } }
+        let p = build(&d).unwrap(); let mut c = Cache::new(); let mut s = init(&p, Some(3), true, &run);
+        for n in 0..40u32 { let e = format!(r#"{{"senses":{{"tool_latency":{},"tempo":{}}},"src":"env","elapsed_hours":0.1{}}}"#, 0.5 + f64::from(n % 7) * 0.37, n % 5, if n % 9 == 4 { r#","praise":true"# } else { "" });
+            let (doc, ns) = turn(&p, &s, &json::parse(&e).unwrap(), false, &run, false).unwrap(); s = ns;
+            let i = compute_cached(&p, &s, &doc, &mut c, &run).unwrap().unwrap();
+            assert_eq!(canon(&i.doc), canon(&compute(&p, &s, &doc, &run).unwrap().unwrap().doc), "event {n}: the cache gives the uncached number"); }
+        eprintln!("R14B sensed: hits {} (by program {}) misses {}", c.hits, c.by_program, c.misses);
     }
     /// B3: every repo persona (examples/persona, bench/bound/fixtures) with the self keys declared: a fresh individual drifts 0
     #[cfg(feature = "std")]
