@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **Self-report** (RFC 0013, docs/rfcs/0013-self-report.md, docs/persona.md §5.8 "Self-report"): `probbit reflect STRAND
+  [--last N | --since-checkpoint] [--json | --text]` and `probbit_persona::reflect` (std and `nostd`): a canonical account of a
+  window of a strand's events from its lines alone, no solve: the inputs set, the expectation's surprises (z recomputed from the
+  logged receipts, the 5 largest |z| with predicted vs measured), per trait the levels taken and the odds' drift, the moods'
+  path and turning points, the drives' peaks, the habits bound, the credit settled, the learned weights' net change and the
+  control lines (the stance sections read from the checkpoint lines in the window; `null` without one); every number at 6
+  decimals, a sha256 digest, 6-12 sentences from fixed templates. Off by default: nothing is written unless asked.
+- **Reflection lines** (engine 0.14.0+, docs/persona.md §5.7): `probbit live control STRAND reflect [--last N]` appends the
+  reflection as a line; `live verify` recomputes it from the lines before it and refuses a forged one naming the line; an
+  engine before 0.14.0 reads it as unsupported (exit 5). Every strand without one, and every corpus, is byte for byte unchanged.
+- **The monitor's Mirror tab**: `/reflection?last=N` and `/s/ID/reflection` serve the reflection computed from the strand file
+  and the latest logged reflection line with whether it recomputes equal; the page shows the sentences, the top surprises, the
+  habits bound and the moods at the checkpoint samples.
 - **The expectation's members before the turn** (docs/embedding.md "The expectation's members: the order with the reuse, and
   what is held"): with the cache reusing the turn's program, every member but A_t is solved before the turn (nothing of the
   turn held; `persona::deviation_pre`), its exact marginals held as f64 rows, and A_t's mixture runs after the turn

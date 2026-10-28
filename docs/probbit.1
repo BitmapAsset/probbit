@@ -14,6 +14,7 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         [\-\-actions FILE] [\-\-blocks FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
         TEXT [\-\-at TIME]
+\fBprobbit\fR live control STRAND reflect [\-\-last N | \-\-since\-checkpoint]
 \fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
         [\-\-depth N] [\-\-hours LIST] [\-\-json]
 \fBprobbit\fR monitor STRAND [\-\-follow] [\-\-once] [\-\-plain] [\-\-fps N] [\-\-serve]
@@ -23,6 +24,7 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         [\-\-open] [\-\-port N]
 \fBprobbit\fR monitor \-\-demo [week|drives] [\-\-once] [\-\-plain] [\-\-serve]
         [\-\-open] [\-\-port N]
+\fBprobbit\fR reflect STRAND [\-\-last N | \-\-since\-checkpoint] [\-\-json | \-\-text]
 \fBprobbit\fR decide [flags] < router.json
 \fBprobbit\fR run [flags] < program.json
 \fBprobbit\fR evaluate [flags] < request.json
@@ -301,6 +303,7 @@ a resident individual: JSONL events in, one stance per event out
         [\-\-actions FILE] [\-\-blocks FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
         TEXT [\-\-at TIME]
+\fBprobbit\fR live control STRAND reflect [\-\-last N | \-\-since\-checkpoint]
 .fi
 .PP
 A resident individual (docs/persona.md \[u00A7]5.7): JSONL events (one object of inputs per line) from \-\-events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e\-6 h), so moods decay by their half\-lives between events; feedback moves the learned deltas of a persona with a learning block (\[u00A7]2.8).
@@ -364,7 +367,7 @@ the host's action log, one {"turn": T, "action": {trait: level}} per line: compa
 write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {"block", "n"} per line; replays from the header
 .RE
 .TP
-\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME] | STRAND seal
+\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME] | STRAND seal | STRAND reflect [\-\-last N | \-\-since\-checkpoint]
 pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status. `seal` (section 5.7) seals the newest segment of STRAND: refused unless its last line is an event line, it appends the sealing checkpoint and writes the next segment file (its header links the sealed line, then the sealed line itself), and prints that file in `file`
 .RS 4
 .TP
@@ -376,6 +379,12 @@ why (required, except for seal)
 .TP
 \fB\-\-at\fR \fITIME\fR
 when (default: now, UTC)
+.TP
+\fB\-\-last\fR \fIN\fR
+reflect: the last N events (default: every event)
+.TP
+\fB\-\-since\-checkpoint\fR
+reflect: the events after the last checkpoint line
 .RE
 .RE
 .PP
@@ -497,6 +506,40 @@ Examples:
 probbit monitor \-\-demo \-\-open
 probbit monitor pip.strand \-\-follow
 probbit monitor pip.strand \-\-serve \-\-port 8080
+.fi
+.RE
+.SS reflect
+RFC 0013 self\-report: a canonical account of a strand's last N events, from its lines alone
+.PP
+.nf
+\fBprobbit\fR reflect STRAND [\-\-last N | \-\-since\-checkpoint] [\-\-json | \-\-text]
+.fi
+.PP
+The self\-report (docs/persona.md \[u00A7]5.8): a canonical document computed from the strand's lines alone (no turn is run, nothing is solved, nothing is random): over the window, the inputs set, the expectation's surprises (each receipt's z recomputed from the logged receipts; the K = 5 largest |z| with the predicted and measured values), per trait the levels taken and the odds' drift, the moods' path with its turning points, the drives' peaks and the habits that bound (read from the checkpoint lines in the window: a window without one reports them as null), the credit settled, the learned weights' net movement and the control lines; every number at 6 decimals, `digest` = the sha256 of the canonical text, and `summary`: 6 to 12 sentences from fixed templates. `probbit live control STRAND reflect` appends it as a line (0.14.0 strands), which `live verify` recomputes.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-last\fR \fIN\fR
+the last N events (default: every event)
+.TP
+\fB\-\-since\-checkpoint\fR
+the events after the last checkpoint line (that checkpoint is the first sample)
+.TP
+\fB\-\-json\fR
+the canonical document (the default)
+.TP
+\fB\-\-text\fR
+the summary's sentences only, one per line
+.RE
+.PP
+\fIexit\fR: 0 the reflection printed, 2 a bad flag, a file that cannot be read, or a strand with no event line in the window (one {"error"} object on stdout).
+.PP
+Examples:
+.RS 4
+.nf
+probbit reflect pip.strand \-\-last 50 \-\-text
+probbit reflect pip.strand \-\-since\-checkpoint
 .fi
 .RE
 .SS decide

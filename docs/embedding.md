@@ -408,6 +408,29 @@ the `Live` in the replay; `open` is now `open_boxed` moved out of its box, 16,73
 `resume_from_record` with a record 1, 5 or 49 lines behind **16,080 B** (13,648 with the record last); `resume_boxed_from` a
 checkpoint + 58 lines **12,656 B** (the whole-text `resume_boxed` of the same strand 15,072 B). All three ran on a 20 KB thread.
 
+### Self-report in standby (RFC 0013)
+
+A body that idles can give an account of its recent events without running a turn: `reflect::reflect_window(&lines, w)` reads
+the strand's lines and returns the canonical `reflection` document (docs/rfcs/0013-self-report.md); `reflect::line(prev, &r)`
+is the line to append (`{"prev", "reflection"}`), which `live verify` recomputes. No solve, no randomness, no model: one pass
+over the lines from the expectation fold's start (the last checkpoint before the window carrying the expectation's memory),
+each event line parsed once and each checkpoint line in the window parsed once, so the cost is O(lines read), dominated by
+the checkpoint lines' size. Measured on the x86_64 host (release, LTO; median of 21 calls), with the stack high-water and the
+heap peak of one call on the `nostd` build (the stack painted below the caller and scanned after the call, as for the setup
+path above):
+
+| Strand | Window | Lines | Host µs (std) | Host µs (`nostd`) | Stack high-water | Heap peak |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| a recorded day, 1,160 events, 23 checkpoints (0.99 MB) | last 50 | 1,184 | 664 | 601 | 5,552 B | 217,674 B |
+| the same | last 200 | 1,184 | 1,299 | 1,248 | 5,552 B | 223,787 B |
+| the same | all | 1,184 | 5,303 | 5,283 | 5,552 B | 251,144 B |
+| the tutor with an expectation block, 500 events, checkpoint every 50 | last 50 | 511 | 335 | 344 | 6,568 B | 128,292 B |
+| the same | all | 511 | 1,221 | 1,320 | 6,568 B | 140,547 B |
+
+The heap peak is the parsed checkpoint lines (a checkpoint line of the recorded day is about 20 KB of JSON, held parsed while
+it is read); a body short of heap reflects a window with fewer checkpoint lines in it. The document is byte for byte the same
+from the std and `nostd` builds and the CLI (6/6 windows over the two strands). Not measured on silicon.
+
 ### Measured on one board (ESP32-S3)
 
 First numbers from one ESP32-S3 at 240 MHz, the engine on one core shared with a 16 fps renderer, with the boxed setup path

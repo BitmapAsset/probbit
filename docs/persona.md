@@ -1588,6 +1588,15 @@ whole text (docs/embedding.md "Resume on a body"): the header line, the last che
 like a segment's sealed line) and the lines after it one at a time. The record may be any state logged from that checkpoint on;
 an older one is refused (`state`: resume from the whole strand).
 
+**Reflection lines (engine 0.14.0 on, RFC 0013).** `probbit live control STRAND reflect [--last N | --since-checkpoint]`
+appends the strand's self-report (section 5.8, "Self-report") as one line after its last line, under the writer lock:
+`{"prev": ..., "reflection": <the document>}`. A host decides when; a body calls `reflect::reflect_window` and `reflect::line`
+and appends the line itself. `verify` recomputes the document from the lines before it over the window it names and refuses one
+that differs (exit 1, the line named: "the reflection differs from the lines before it"); replay, the chain check and resume
+pass over the line with no state change, and `live` continues a strand that ends on one (a checkpoint or a seal still follows
+an event line). The writer refuses a strand of an engine before 0.14.0; an engine before 0.14.0 reads the line as
+`unsupported by this engine: reflection` (exit 5). No line is written unless asked.
+
 **Segments.** `probbit live ... --strand NAME.strand --segment-every N` seals the strand after every N-th event and goes on in
 a new file: the sealing line is a checkpoint line (the last line of the segment); the next file, `NAME.0001.strand`, then
 `NAME.0002.strand` and so on (four digits at least), starts with a header that has one more key at its end,
@@ -1843,6 +1852,28 @@ canonical replay documents are unchanged. Demo bars are scripted engine state, n
 
 Exit codes: 0 when every line replays, 1 at a line that differs (the frame names it and shows the event before it), 2 for a bad
 flag, a port that cannot be had, or a file that cannot be read or is not a strand.
+
+#### Self-report (RFC 0013)
+
+`probbit reflect STRAND [--last N | --since-checkpoint] [--json | --text]` prints a canonical account of a window of the
+strand's events, computed from its lines alone: no turn is run, nothing is solved, nothing is random. Per event line it reads
+what the line logs (the inputs, the expectation's receipt, the glyph): the inputs set and how often, and with an expectation
+block each receipt's z, recomputed from the logged receipts (the expectation's mean and variance folded as the engine folds
+them), the events that registered and the K = 5 largest |z| with what the expectation predicted (`pred`) and what the event
+measured (`self`). Per checkpoint line in the window it reads the stance and state the line carries: per trait the levels taken
+and the odds at the first and last sample, the moods' path (each mood's position along its levels, the monitor's sparkline
+value) with its turning points, the drives' peaks, the habits that bound, the learned weights' net change. Feedback that settled
+the credit, control, rest and reflection lines are counted. A window without a checkpoint line reports no levels, moods,
+drives or habits: those sections are `null` (an event line logs digests, not the stance), never invented. Every number is at
+6 decimals, `digest` is the sha256 of the canonical text without it, and `summary` holds 6 to 12 sentences from fixed
+templates, part of the document. `--text` prints the sentences only. The library call is `probbit_persona::reflect::{reflect,
+reflect_since_checkpoint, reflect_window}` (std and `nostd`). The format is docs/rfcs/0013-self-report.md; section 5.7,
+"Reflection lines", appends it to the strand.
+
+**Mirror.** The served page has a Mirror tab: the reflection of the last 50 events computed by the server from the strand file
+at each request (`/reflection?last=N`, `/s/ID/reflection` per strand), and the latest reflection line the strand carries with
+whether it recomputes equal; the tab shows the sentences, the top surprises with predicted vs measured, the habits that bound
+and the moods at the checkpoint samples, refreshed with the page's scan of the strand list.
 
 ## 6. What a persona can NOT do
 
