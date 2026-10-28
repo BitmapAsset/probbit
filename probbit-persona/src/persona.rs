@@ -23,6 +23,10 @@ pub mod hostlint;
 /// RFC 0014 integrity: the drift from the self the persona declares (off without the `identity` self keys)
 #[path = "integrity.rs"]
 pub mod integrity;
+/// RFC 0016 curiosity: a declared drive fed by the measured surprise, and the self-start it gates (off without the block)
+#[path = "curiosity.rs"]
+pub mod curiosity;
+pub use curiosity::{Curio, CUR_ID};
 
 const RULE_KEYS: [&str; 6] = ["caps", "implies", "tables", "precedes", "linear", "all_different"];
 const RESERVED_LEVELS: [&str; 9] = ["true", "false", "null", "yes", "no", "on", "off", "y", "n"];
@@ -212,7 +216,9 @@ pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub d
     /// §2.18: the `display.glyphs` block (outside the digest; effects {})
     pub glyphs: Option<Glyphs>,
     /// RFC 0014: the `identity` block's self keys (outside the digest; effects {})
-    pub ident: Option<integrity::Ident> }
+    pub ident: Option<integrity::Ident>,
+    /// RFC 0016: the `curiosity` drive (in the digest: its level moves the stance through `cur_level`)
+    pub cur: Option<Curio> }
 impl Persona {
     /// `line.why_past` (§2.11): `why` names what the learned weights came from; default on with a senses block, off without
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
@@ -234,7 +240,7 @@ impl Persona {
     /// `load_level` with a load block (RFC 0002 part 2): the engine sets it from L
     fn is_load(&self, id: &str) -> bool { self.load.is_some() && id == LOAD_ID }
     /// An input the engine sets from its own state (pace's two, load's one): never the host's
-    fn is_owned(&self, id: &str) -> bool { self.is_pace(id) || self.is_load(id) }
+    fn is_owned(&self, id: &str) -> bool { self.is_pace(id) || self.is_load(id) || (self.cur.is_some() && id == CUR_ID) }
     fn var(&self, id: &str) -> Option<&Var> { self.vars.iter().find(|v| v.id == id) }
     fn input(&self, id: &str) -> Option<&Input> { self.inputs.iter().find(|x| x.id == id) }
     fn habit(&self, id: &str) -> &Habit { self.habits.iter().find(|h| h.id == id).expect("habit id") }
@@ -362,6 +368,9 @@ pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
     // persona with a recorded life leaves every state, strand and turn byte for byte the same (amendment A1)
     if let Some(b) = doc.get("bound") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "bound"); }
         let p = build_boxed(&d)?; bound::spec(b, &p)?; return Ok(p); }
+    // RFC 0016: `curiosity` lowers to the engine-owned number input `cur_level` (box [0, cap], carrying the block's effects, as
+    // pace lowers to its two) and enters the digest; it needs an expectation block (the drive reads its measured surprise)
+    if let Some(cj) = doc.get("curiosity").filter(|c| !c.is_null()) { return build_curiosity(doc, cj); }
     // RFC 0009: `expectation` and `engine.trajectory` move nothing (effects {}): they are read against the persona built without
     // them and stay out of the digest, so adding either to a persona with a recorded life leaves every state and stance digest as
     // it was (an `engine` mapping left empty is dropped with them)
@@ -377,6 +386,34 @@ pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
         p.traj = match tj { None | Some(Json::Null) => None, Some(x) => Some(traj_spec(&x)?) };
         return Ok(p); }
     build_base(doc)
+}
+/// RFC 0016: the persona with a `curiosity` block (C-R1 .. C-R3 refuse at the field's path): built without the block and with its
+/// input `cur_level` after the declared inputs; the digest is the document's as given (without the keys outside the digest)
+#[inline(never)]
+fn build_curiosity(doc: &Json, cj: &Json) -> R<Box<Persona>> {
+    need(doc.get("expectation").is_some_and(|e| !e.is_null()), "curiosity", "a curiosity block needs an expectation block (the drive reads its measured surprise)")?;
+    let ids_of = |k: &str| -> Vec<String> { match doc.get(k) { Some(Json::Arr(a)) => a.iter().filter_map(|t| t.get("id").and_then(Json::as_str).map(str::to_string)).collect(), _ => vec![] } };
+    let mut ids = ids_of("traits"); ids.extend(ids_of("moods"));
+    let ins: Vec<Json> = match doc.get("inputs") { Some(Json::Arr(a)) => a.clone(), _ => vec![] };
+    let flags: Vec<String> = ins.iter().filter(|x| x.get("kind").and_then(Json::as_str) == Some("flag")).filter_map(|x| x.get("id").and_then(Json::as_str).map(str::to_string)).collect();
+    let (cu, eff) = curiosity::spec(cj, &ids, &flags)?;
+    for (j, x) in ins.iter().enumerate() { if let Some(id) = x.get("id").and_then(Json::as_str) {
+        need(id != CUR_ID && id != curiosity::STIR_KEY, &format!("inputs[{j}].id"), "reserved for the curiosity block (cur_level, stir)")?; } }
+    if let Some(Json::Arr(hs)) = doc.get("habits") { for (i, h) in hs.iter().enumerate() { if let Some(w) = h.get("when").and_then(Json::as_obj) { for (k, _) in w {
+        need(k != CUR_ID && k != curiosity::STIR_KEY, &format!("habits[{i}].when.{k}"), "reserved for the curiosity block")?; } } } }
+    let mut d = doc.clone(); let mut dg = doc.clone();
+    if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "curiosity");
+        let x = Json::Obj(vec![("id".into(), Json::Str(CUR_ID.into())), ("kind".into(), Json::Str("number".into())), ("max".into(), Json::Num(cu.cap)),
+            ("say".into(), Json::Str("curiosity".into())), ("effects".into(), eff)]);
+        let mut ins = ins; ins.push(x);
+        match v.iter_mut().find(|(k, _)| k == "inputs") { Some(e) => e.1 = Json::Arr(ins), None => v.push(("inputs".into(), Json::Arr(ins))) } }
+    // the digest's document: as given, without `expectation` and `engine.trajectory` (outside every digest)
+    if let Json::Obj(v) = &mut dg { v.retain(|(k, _)| k != "expectation");
+        if let Some(i) = v.iter().position(|(k, _)| k == "engine") {
+            if let Json::Obj(e) = &mut v[i].1 { e.retain(|(k, _)| k != "trajectory"); }
+            if v[i].1.as_obj().is_some_and(|e| e.is_empty()) { v.remove(i); } } }
+    let mut p = build_boxed(&d)?; p.digest = sha(&dg); p.cur = Some(cu);
+    Ok(p)
 }
 /// The persona without the layers `build_boxed` peels off: the top-level keys, then the lowered blocks or the base reader
 #[inline(never)]
@@ -513,7 +550,7 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None, ident: None });
+    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None, ident: None, cur: None });
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -1450,9 +1487,14 @@ fn prep(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, che
 fn prep_n(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(State, Vec<(String, Json)>)> {
     // RFC 0002 part 2: the engine sets load_level from L (the host never sends it)
     if p.load.is_some() { need(get(raw, LOAD_ID).is_none(), "inputs.load_level", "reserved for the load block (the engine sets it from the load)")?; }
+    // RFC 0016: the engine sets cur_level from the drive's fold (the host never sends it)
+    if p.cur.is_some() { need(get(raw, CUR_ID).is_none(), "inputs.cur_level", "reserved for the curiosity block (the engine sets it from the drive)")?; }
     let (mut s2, mut host) = prep_body(p, st, raw, src, check, narrow)?;
     pressure_step(p, &mut s2, raw)?;
     load_step(p, st, &mut s2, raw, &mut host)?;
+    // RFC 0016: the level the live writer set from the fold before this event (0 without a memory: `persona turn`); a stir's
+    // marker is the line's, not the compiler's
+    if p.cur.is_some() { host.retain(|(k, _)| k != curiosity::STIR_KEY); host.push((CUR_ID.into(), Json::Num(st.cur.unwrap_or(0.0)))); }
     Ok((s2, host))
 }
 /// Does this event carry feedback (RFC 0002 part 2: a rest line never shares an event with a learning step)? A learning flag on,
@@ -1732,6 +1774,8 @@ fn stance_body(j: &mut Json, p: &Persona, st: &State) {
     // RFC 0002 part 2: load_level leaves `inputs`; `load: {l}` = L after this event
     if let Some(l) = st.load_l { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.retain(|(k, _)| k != LOAD_ID); }
         v.push(("load".into(), Json::Obj(vec![("l".into(), Json::Num(l))]))); }
+    // RFC 0016: cur_level leaves `inputs` (the live writer adds `drives.curiosity` with the level and its two inputs)
+    if p.cur.is_some() { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.retain(|(k, _)| k != CUR_ID); } }
     if let Some(gs) = &st.gate { v.push(("surprise".into(), Json::Obj(gs.iter().filter(|(_, g)| g.g > 1.0).map(|(t, g)| (t.clone(), Json::Num(g.g))).collect()))); }
 }
 /// The pace level of an average (RFC 0002 Design C): slow below `levels[0]`, brisk above `levels[1]`, steady between
@@ -2224,7 +2268,10 @@ fn values_of(p: &Persona) -> Vec<String> {
 pub struct State { pub seed: u64, pub turn: u64, persona: [String; 3], genes: Json, mood: Vec<(String, Vec<f64>)>, history: Vec<(String, Vec<bool>)>, prev: HashMap<String, String>,
     agenda: Option<Vec<String>>, rest: Option<Vec<(String, String)>>, learned: Table, credit: Table, drives: Option<DState>, senses: Option<SState>,
     learned_from: Option<Vec<(String, u64, u64)>>, open: Vec<Open>, prev_stance: Option<String>, control_closed: Vec<u64>, elig: f64, pub digest: String,
-    gate: Option<Vec<(String, Gate)>>, rbar: Option<f64>, disp: Vec<(String, f64)>, pressure: Option<(f64, bool)>, load_l: Option<f64> }
+    gate: Option<Vec<(String, Gate)>>, rbar: Option<f64>, disp: Vec<(String, f64)>, pressure: Option<(f64, bool)>, load_l: Option<f64>,
+    /// RFC 0016: the curiosity drive's level the next turn reads (set from the expectation's memory before each live event; not
+    /// part of the state's JSON or digest: the memory is the fold of the logged lines, so a replay sets it the same way)
+    pub cur: Option<f64> }
 /// A decision awaiting its outcome (§2.8, `open_credit`): its turn, its credit (onehot(level) − odds per learned trait it released)
 /// and its stance's digest
 #[derive(Clone)]
@@ -2325,7 +2372,7 @@ impl State {
             history: self.history.clone(), prev: self.prev.clone(), agenda: self.agenda.as_ref().filter(|_| w(true)).cloned(), rest: self.rest.as_ref().filter(|_| w(true)).cloned(),
             learned: self.learned.clone(), credit: self.credit.clone(), drives: if stepped.1 { None } else { self.drives.clone() }, senses: if stepped.0 { None } else { self.senses.clone() },
             learned_from: self.learned_from.as_ref().filter(|_| w(true)).cloned(), open: self.open.clone(), prev_stance: self.prev_stance.clone(), control_closed: self.control_closed.clone(),
-            elig: self.elig, digest: if w(true) { self.digest.clone() } else { String::new() }, gate: self.gate.clone(), rbar: self.rbar, disp: self.disp.clone(), pressure: self.pressure, load_l: self.load_l }
+            elig: self.elig, digest: if w(true) { self.digest.clone() } else { String::new() }, gate: self.gate.clone(), rbar: self.rbar, disp: self.disp.clone(), pressure: self.pressure, load_l: self.load_l, cur: self.cur }
     }
     fn history_of(&self, of: &str) -> &[bool] { self.history.iter().find(|(k, _)| k == of).map_or(&[], |(_, v)| v) }
     /// The state document without its digest
@@ -2482,7 +2529,7 @@ impl State {
                 _ => return Err(perr("state.prev_stance", "the previous stance's digest (sha256:<64 hex>); null before any turn")) };
             let ca = get(kv, "control_closed").and_then(Json::as_arr).filter(|a| a.len() <= c.max_open).ok_or_else(|| perr("state.control_closed", format!("a list of at most {} turns", c.max_open)))?;
             for (i, x) in ca.iter().enumerate() { let n = turn_at(x, &ix("state.control_closed", i), control_closed.last().copied())?; control_closed.push(n); } }
-        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, open, prev_stance, control_closed, elig: 1.0, gate, rbar, disp, pressure, load_l,
+        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, open, prev_stance, control_closed, elig: 1.0, gate, rbar, disp, pressure, load_l, cur: None,
             digest: get(kv, "digest").and_then(Json::as_str).unwrap_or("").to_string() })
     }
 }
@@ -3099,7 +3146,7 @@ pub fn init(p: &Persona, seed: Option<u64>, rest: bool, eng: Engine) -> State {
         prev: p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect(), agenda: (!p.steps.is_empty()).then(|| p.steps.clone()), rest: None,
         learned: zeros(p), credit: zeros(p), drives: p.drives.as_ref().map(|d| DState::zero(p, d, seed)), senses: p.senses.as_ref().map(|sn| SState::zero(&p.name, sn, seed)),
         learned_from: learned_from0(p), open: vec![], prev_stance: None, control_closed: vec![], elig: 1.0, digest: String::new(),
-        gate: gate0(p), rbar: p.pace.as_ref().map(|_| 0.0), disp: disp_genes(p, seed), pressure: p.rest_b.as_ref().map(|_| (0.0, false)), load_l: p.load.as_ref().map(|_| 0.0) };
+        gate: gate0(p), rbar: p.pace.as_ref().map(|_| 0.0), disp: disp_genes(p, seed), pressure: p.rest_b.as_ref().map(|_| (0.0, false)), load_l: p.load.as_ref().map(|_| 0.0), cur: None };
     if rest { if let Ok((prog, _)) = compile(p, &st, &[], &Opts { twin: Some(false), ..Default::default() }) {
         let doc = eng(&prog, &flags(p, &st));
         if let Some(plan) = doc.get("plan").and_then(Json::as_obj) {
@@ -4003,7 +4050,9 @@ fn traj_spec(x: &Json) -> R<Traj> {
 /// memory is then a small exact object a checkpoint line carries (`to_json`, `read`), the same bytes on every libm, and a fold
 /// restarted from it equals the fold from the strand's header.
 #[derive(Clone, Debug, Default)]
-pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64, rest: f64, canon: bool }
+pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64, rest: f64, canon: bool,
+    /// RFC 0016: the curiosity drive's fold (canonical memory with a `curiosity` block only; None before the first event)
+    pub cur: Option<curiosity::CurMem> }
 const DEV_PRIOR_VAR: f64 = 0.04;
 const DEV_VAR_FLOOR: f64 = 1e-4;
 /// z at or above this registers the deviation (the RFC 0001 sense threshold)
@@ -4018,14 +4067,19 @@ impl ExpectMem {
     /// a combo is a function of its inputs (`combo_key`), so it is not written
     pub fn to_json(&self) -> Json {
         let mut c: Vec<&(String, f64, Json)> = self.combos.iter().collect(); c.sort_by(|a, b| a.0.cmp(&b.0));
-        Json::Obj(vec![("combos".into(), Json::Arr(c.iter().map(|x| Json::Arr(vec![Json::Num(x.1), x.2.clone()])).collect())), ("mean".into(), Json::Num(self.mean)),
-            ("n".into(), Json::Num(self.n as f64)), ("rest".into(), Json::Num(self.rest)), ("var".into(), Json::Num(self.var)), ("warm".into(), Json::Bool(self.warm))])
+        let j = Json::Obj(vec![("combos".into(), Json::Arr(c.iter().map(|x| Json::Arr(vec![Json::Num(x.1), x.2.clone()])).collect())), ("mean".into(), Json::Num(self.mean)),
+            ("n".into(), Json::Num(self.n as f64)), ("rest".into(), Json::Num(self.rest)), ("var".into(), Json::Num(self.var)), ("warm".into(), Json::Bool(self.warm))]);
+        // RFC 0016: the drive's fold rides with the memory (only with a curiosity block)
+        let mut j = j; if let (Some(c), Json::Obj(v)) = (&self.cur, &mut j) { v.insert(1, ("curiosity".into(), c.to_json())); }
+        j
     }
     /// A checkpoint line's `expect` for persona `p` -> the canonical memory; Err(what is wrong). It must be what the canonical fold
     /// can hold: combos in key order, each count > 0 at 6 decimals, distinct keys, at most `max_combos - 1` named ones
     pub fn read(p: &Persona, j: &Json) -> Result<ExpectMem, String> {
         let ex = p.expect.as_ref().ok_or("the persona has no expectation block")?;
-        let kv = j.as_obj().filter(|kv| kv.len() == 6).ok_or("an object {combos, mean, n, rest, var, warm}")?;
+        // RFC 0016: with a curiosity block the memory has a seventh key, `curiosity` (the drive's fold)
+        let want = if p.cur.is_some() { 7 } else { 6 };
+        let kv = j.as_obj().filter(|kv| kv.len() == want).ok_or(if want == 7 { "an object {combos, curiosity, mean, n, rest, var, warm}" } else { "an object {combos, mean, n, rest, var, warm}" })?;
         let f = |k: &str| kv.iter().find(|(x, _)| x == k).map(|(_, v)| v).ok_or(format!("no {k}"));
         let r6n = |k: &str| -> Result<f64, String> { f(k)?.as_f64().filter(|x| x.is_finite() && *x >= 0.0 && r6(*x) == *x).ok_or(format!("{k}: a number >= 0 at 6 decimals")) };
         let mean = f("mean")?.as_f64().filter(|x| x.is_finite() && r6(*x) == *x).ok_or("mean: a number at 6 decimals")?;
@@ -4040,7 +4094,8 @@ impl ExpectMem {
             if combos.last().is_some_and(|l| l.0 >= key) { return Err("combos: in key order, each key once".into()); }
             combos.push((key, cnt, rep.clone())); }
         if combos.iter().filter(|c| c.0 != "{}").count() > ex.max_combos - 1 { return Err(format!("combos: at most {} named", ex.max_combos - 1)); }
-        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true })
+        let cur = match &p.cur { Some(c) => Some(curiosity::CurMem::read(c, f("curiosity")?)?), None => None };
+        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true, cur })
     }
 }
 /// One event's deviation from the engine's own expectation (nats): `s_self` = sum over the non-twin variables of KL(A_i || E_i),
@@ -4548,6 +4603,11 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
     for c in &mut mem.combos { c.1 *= d; }
     match mem.combos.iter_mut().find(|c| c.0 == key) { Some(c) => { c.1 += 1.0; c.2 = rep; } None => mem.combos.push((key.clone(), 1.0, rep)) }
     if key != "{}" { mem.warm = true; }
+    // RFC 0016 (canonical memory): the drive's fold reads the event's z as the deviation computed it (the logged prediction
+    // against the normal before this event), before the normal moves
+    if let (Some(c), true) = (p.cur.as_ref(), mem.canon) {
+        let z = logged_pred.map(|x| ((1.0 + x).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
+        mem.cur.get_or_insert_with(|| curiosity::CurMem::new(c)).step(c, &key, z, kv); }
     if let Some(x) = logged_pred { let (x, a) = ((1.0 + x).ln(), 1.0 - d); let dx = x - mem.mean;
         mem.mean += a * dx; mem.var = (1.0 - a) * (mem.var + a * dx * dx); mem.n += 1; }
     if mem.canon {
@@ -4559,8 +4619,23 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
             let Some(i) = (0..mem.combos.len()).filter(|&i| mem.combos[i].0 != "{}").min_by(|&a, &b| { let (x, y) = (&mem.combos[a], &mem.combos[b]);
                 x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal).then(y.0.cmp(&x.0)) }) else { break };
             let c = mem.combos.remove(i); mem.rest = r6(mem.rest + c.1); }
+        if let Some(cm) = mem.cur.as_mut() { cm.prune(&mem.combos); }
         mem.mean = r6(mem.mean); mem.var = r6(mem.var);
     }
+}
+/// RFC 0016: the curiosity drive's level the next event's turn reads, from the expectation's memory (None without the block or
+/// before the canonical fold, engine 0.14.0); a memory with no event yet reads the fold's start (level 0 from quiet)
+pub fn cur_level(p: &Persona, mem: &ExpectMem) -> Option<f64> {
+    let c = p.cur.as_ref().filter(|_| mem.canon)?; Some(mem.cur.as_ref().map_or_else(|| curiosity::CurMem::new(c).level(c), |m| m.level(c)))
+}
+/// RFC 0016: the stance's `drives.curiosity` (the level and its two inputs, as the turn read them) from the memory before the event
+pub fn cur_doc(p: &Persona, mem: &ExpectMem) -> Option<Json> {
+    let c = p.cur.as_ref().filter(|_| mem.canon)?; Some(mem.cur.as_ref().map_or_else(|| curiosity::CurMem::new(c).doc(c), |m| m.doc(c)))
+}
+/// RFC 0016: is a self-started idle event due `idle_hours` after the last event (`curiosity::stir_due` on the memory's fold)
+pub fn stir_due(p: &Persona, mem: &ExpectMem, idle_hours: f64) -> Option<curiosity::Stir> {
+    let c = p.cur.as_ref().filter(|_| mem.canon)?; let start; let m = match mem.cur.as_ref() { Some(m) => m, None => { start = curiosity::CurMem::new(c); &start } };
+    curiosity::stir_due(c, m, idle_hours)
 }
 /// `j` with every object's keys sorted (by code point) at every level: the value canonical JSON writes, as a value
 fn key_sorted(j: &Json) -> Json {

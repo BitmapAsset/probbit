@@ -142,6 +142,10 @@ impl Live {
         crate::trace::begin();
         if self.status != Status::Active { return Err(refusal(self.status)); }
         let Json::Obj(kv) = ev else { return Err(perr("event", "must be a JSON object of inputs")) };
+        // RFC 0016: a self-started event carries `stir: <class>`, one of the classes the persona's stir block declares
+        let stir = match (self.p.cur.as_ref().and_then(|c| c.stir.as_ref()), ev.get(persona::curiosity::STIR_KEY)) {
+            (Some(sp), Some(x)) => { let cl = x.as_str().filter(|c| sp.classes().contains(c)).ok_or_else(|| perr("event.stir", format!("a declared stir class: {}", sp.classes().join(" | "))))?; Some(cl.to_string()) }
+            _ => None };
         let mut kv: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect();
         let given = ev.get("elapsed_hours");
         let (elapsed, now) = match &self.clock {
@@ -150,6 +154,9 @@ impl Live {
             Clock::Fixed => { let e = match given { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err(perr("event.elapsed_hours", "a number >= 0")) }; (q6(e), self.last) } };
         kv.push(("elapsed_hours".into(), Json::Num(elapsed)));
         let inputs = Json::Obj(kv);
+        // RFC 0016: the drive's level the turn reads (and every member of the expectation with it), from the fold before the event
+        let cdoc = self.expect.as_ref().and_then(|m| persona::cur_doc(&self.p, m));
+        self.st.cur = self.expect.as_ref().and_then(|m| persona::cur_level(&self.p, m));
         enter(Phase::Expect);
         // RFC 0009: the deviation and the trajectory are read from the state before the event (effects {}: the turn is as without
         // them). The trajectory before the turn (nothing of the turn held while it solves). With the cache reusing the turn's own
@@ -164,6 +171,12 @@ impl Live {
             None => (None, None) } };
         let (mut stance, ns, at) = persona::turn_at(&self.p, &self.st, &inputs, eng, want)?;
         let sd = persona::stance_sha(&stance);
+        // RFC 0016: `drives.curiosity` = the level the turn read and its two inputs (and the stir's class on a self-started event);
+        // outside the stance digest, as `deviation` (the line's receipt carries it and `verify` recomputes it)
+        let cdoc = cdoc.map(|mut d| { if let (Some(cl), Json::Obj(v)) = (&stir, &mut d) { v.push(("stir".into(), Json::Str(cl.clone()))); } d });
+        if let (Some(cd), Json::Obj(v)) = (&cdoc, &mut stance) { match v.iter_mut().find(|(k, _)| k == "drives") {
+            Some((_, Json::Obj(dv))) => dv.push(("curiosity".into(), cd.clone())),
+            _ => v.push(("drives".into(), Json::Obj(vec![("curiosity".into(), cd.clone())]))) } }
         enter(Phase::Expect);
         let cache = &mut self.expect_cache;
         let dev = if want { self.expect.as_ref().and_then(|m| persona::deviation_post(&self.p, &self.st, &inputs, m, eng, cache, held, at)) } else { early };
@@ -181,6 +194,7 @@ impl Live {
         let mut lj = vec![("n".into(), Json::Num((self.n + 1) as f64)), ("inputs".into(), inputs.clone()), ("stance".into(), Json::Str(sd)),
             ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), Json::Str(prev))];
         if let Some(d) = &dev { lj.push(("deviation".into(), d.receipt())); }
+        if let Some(cd) = &cdoc { lj.push(("curiosity".into(), cd.clone())); }
         if let Some(g) = stance.get("glyph") { lj.push(("glyph".into(), g.clone())); }
         if let Some(ig) = &integ { lj.push(("integrity".into(), ig.doc.clone())); }
         let line = persona::canon(&Json::Obj(lj));
@@ -215,6 +229,13 @@ impl Live {
     }
     /// The sha256 of the strand's last line (the header's before any event)
     pub fn head(&self) -> &str { &self.prev }
+    /// RFC 0016: is a self-started idle event due `idle_hours` after the last event? Exactly from the drive's fold and the idle
+    /// hours: None without a stir block, below the threshold, inside the rate cap, or asleep without `when_asleep`. A host that
+    /// acts on it feeds `{"stir": class}` with its own readings as an event; a stir it ignores leaves no line.
+    pub fn stir_due(&self, idle_hours: f64) -> Option<persona::curiosity::Stir> {
+        if self.status != Status::Active { return None; }
+        persona::stir_due(&self.p, self.expect.as_ref()?, idle_hours)
+    }
 }
 /// The header piece size `start_boxed` collects with (any size gives the same bytes)
 pub const HEADER_CHUNK: usize = 1024;
@@ -307,7 +328,7 @@ pub fn segment_header(lv: &Live, doc: &Json, engine: &str, index: u64, previous:
 /// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "nap": ...}`
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
-    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "integrity", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
+    let known: &[&str] = match kind(j) { Kind::Event => &["curiosity", "deviation", "glyph", "inputs", "integrity", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
         Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"], Kind::Reflection => &["prev", "reflection"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
@@ -929,6 +950,8 @@ fn resume_walk<S: AsRef<str>>(q: Box<Persona>, h: &Json, head: &str, cp: Option<
                 let logged = j.get("state").and_then(Json::as_str).unwrap_or("");
                 match cur.as_mut() {
                     Some(s) => { let t0 = crate::trace::Stopwatch::start();
+                        // RFC 0016: the drive's level from the fold before this line, as the live writer set it
+                        s.cur = mem.as_ref().and_then(|m| persona::cur_level(&q, m));
                         *s = apply_line(&q, s, &j, l, rest.as_deref(), eng).map_err(|why| err(at, why))?;
                         tr.applied += 1; tr.applied_us += t0.us(); }
                     None => if rec.as_ref().is_some_and(|s| s.digest == logged) { cur = rec.take(); } }
@@ -989,7 +1012,7 @@ fn line_check(j: &Json, l: &str, inputs: Json, stance: &Json, state: &str) -> Re
     if j.get("state").and_then(Json::as_str) != Some(state) { return Err("the state differs".into()); }
     let mut lj = vec![("n".into(), j.get("n").cloned().unwrap_or(Json::Null)), ("inputs".into(), inputs), ("stance".into(), Json::Str(sd)),
         ("state".into(), Json::Str(state.to_string())), ("prev".into(), j.get("prev").cloned().unwrap_or(Json::Null))];
-    for k in ["deviation", "glyph", "integrity"] { if let Some(x) = j.get(k) { lj.push((k.into(), x.clone())); } }
+    for k in ["deviation", "curiosity", "glyph", "integrity"] { if let Some(x) = j.get(k) { lj.push((k.into(), x.clone())); } }
     if persona::canon(&Json::Obj(lj)) != l { return Err("the line differs".into()); }
     Ok(())
 }
