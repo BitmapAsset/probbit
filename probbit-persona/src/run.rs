@@ -460,8 +460,14 @@ pub fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map
 /// component its most probable feasible plan (probabilities at 6 decimals, then the lowest basis index); marginals exact. The
 /// receipt: qubits (encoded, summed), the components' qubits, the digests of the encoding, the circuit, the schedule and the
 /// final amplitudes (6 decimals; the components' texts joined), the mixer's and the schedule's names, the feasible mass.
+/// Round 4, `amplify` (`engine.amplify: true`): no projection; each component's swept state is rotated onto its feasible plans
+/// by exact amplitude amplification (`amp::amplify_exact`: the rules as the oracle, the diffusion about the swept state, one
+/// phase-matched final iteration), so the register itself holds feasible mass 1 (up to 1e-12) and the plan and marginals are
+/// read from its Born probabilities; the receipt adds `amplify` (iterations and the final phases per component, the mass
+/// before and after) and `feasible_mass` is the mass after. The relative amplitudes inside the feasible plans are the swept
+/// state's, so the numbers equal the projection's (docs/rfc/0011-amplitude-register.md, "Amplification").
 #[cfg(feature = "decide")]
-pub fn amplitude(prog: &Json, q_max: usize) -> Result<Json, String> {
+pub fn amplitude(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, String> {
     use probbit_decide::amp;
     let p = from_json(prog).map_err(|e| format!("program {}: {}", e.path, e.msg))?; let m = &p.m; let (n, k) = (m.n, m.k);
     let cand: Vec<Vec<usize>> = (0..n).map(|i| (0..k).filter(|&v| m.ok(i, v)).collect()).collect();
@@ -481,6 +487,7 @@ pub fn amplitude(prog: &Json, q_max: usize) -> Result<Json, String> {
     let s = amp::DEFAULT_SCHEDULE; let r6 = |x: f64| (x * 1e6).round() / 1e6;
     let (mut enc_t, mut circ_t, mut state_t) = (String::new(), String::new(), String::new());
     let mut bp = vec![0usize; n]; let mut mg = vec![0.0; n * k]; let mut mass_all = 1.0;
+    let (mut am_it, mut am_ph, mut am_before) = (vec![], vec![], 1.0);
     for (c, mem) in mems.iter().enumerate() {
         // the component's sub-model: its variables, pairs and capacity rules (local indices), as the components tier builds it
         let mut loc = vec![usize::MAX; n]; for (q, &i) in mem.iter().enumerate() { loc[i] = q; }
@@ -493,7 +500,20 @@ pub fn amplitude(prog: &Json, q_max: usize) -> Result<Json, String> {
         let enc = &encs[c]; let nb = 1usize << qs[c];
         let plan_of = |codes: &[usize]| -> Vec<usize> { codes.iter().zip(mem).map(|(&cd, &i)| cand[i][cd]).collect() };
         let e: Vec<f64> = (0..nb).map(|x| enc.decode(x).map_or(f64::NAN, |cd| -sub.logw(&plan_of(&cd)))).collect();
-        let reg = amp::sweep(enc, &e, &s);
+        let mut reg = amp::sweep(enc, &e, &s);
+        if amplify {
+            let ok: Vec<bool> = (0..nb).map(|x| enc.decode(x).is_some_and(|cd| sub.violations(&plan_of(&cd)) == 0)).collect();
+            let a = amp::amplify_exact(&mut reg, |x| ok[x]).ok_or_else(|| format!("component {c}: no feasible plan has weight in the register"))?;
+            let pr = reg.probabilities();
+            let best = (0..nb).fold(usize::MAX, |bx, x| if enc.decode(x).is_some() && pr[x] > 0.0 && (bx == usize::MAX || r6(pr[x]) > r6(pr[bx])) { x } else { bx });
+            for (&i, v) in mem.iter().zip(plan_of(&enc.decode(best).expect("a plan with weight has valid codes"))) { bp[i] = v; }
+            for (x, &w) in pr.iter().enumerate() { if let Some(cd) = enc.decode(x) { for (&i, v) in mem.iter().zip(plan_of(&cd)) { mg[i * k + v] += w; } } }
+            mass_all *= a.mass_after; am_before *= a.mass_before; am_it.push(num(a.iterations as f64));
+            am_ph.push(Json::Arr(if a.iterations == 0 { vec![] } else { vec![num(r6(a.phases.0)), num(r6(a.phases.1))] }));
+            for t in [&mut enc_t, &mut circ_t, &mut state_t] { t.push_str(&format!("component {c}\n")); }
+            enc_t.push_str(&enc.text()); circ_t.push_str(&reg.circuit_text()); state_t.push_str(&reg.canonical());
+            continue;
+        }
         let pr: Vec<f64> = reg.probabilities().iter().enumerate().map(|(x, &w)| match enc.decode(x) { Some(cd) if sub.violations(&plan_of(&cd)) == 0 => w, _ => 0.0 }).collect();
         let mass: f64 = pr.iter().sum(); if mass <= 0.0 || !mass.is_finite() { return Err(format!("component {c}: no feasible plan has weight in the register")); }
         let best = (0..nb).fold(usize::MAX, |bx, x| if pr[x] > 0.0 && (bx == usize::MAX || r6(pr[x] / mass) > r6(pr[bx] / mass)) { x } else { bx });
@@ -504,9 +524,10 @@ pub fn amplitude(prog: &Json, q_max: usize) -> Result<Json, String> {
         enc_t.push_str(&enc.text()); circ_t.push_str(&reg.circuit_text()); state_t.push_str(&reg.canonical());
     }
     let d = |t: &[u8]| jstr(&format!("sha256:{}", amp::hex(&amp::sha256(t))));
+    let amp_r = if amplify { vec![("amplify", obj(vec![("iterations", Json::Arr(am_it)), ("phases", Json::Arr(am_ph)), ("mass_before", num(r6(am_before))), ("mass_after", num(r6(mass_all)))]))] } else { vec![] };
     Ok(obj(vec![("verdict", jstr("exact")), ("tier", jstr("amplitude")), ("plan", plan(&p, &bp)), ("plan_logw", num(m.logw(&bp))), ("violations", num(m.violations(&bp) as f64)),
         ("marginals", marginals(&p, &mg)), ("released", ids(&p, &vec![true; n], true)), ("escalated", Json::Arr(vec![])),
         ("amplitude", obj(vec![("qubits", num(qs.iter().sum::<usize>() as f64)), ("components", Json::Arr(qs.iter().map(|&q| num(q as f64)).collect())),
             ("encoding", d(enc_t.as_bytes())), ("mixer", jstr(amp::MIXER)), ("circuit", d(circ_t.as_bytes())), ("schedule", d(s.text().as_bytes())), ("schedule_name", jstr(&s.name())),
-            ("state", d(state_t.as_bytes())), ("feasible_mass", num(r6(mass_all)))]))]))
+            ("state", d(state_t.as_bytes())), ("feasible_mass", num(r6(mass_all)))].into_iter().chain(amp_r).collect()))]))
 }

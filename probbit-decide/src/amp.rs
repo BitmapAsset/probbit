@@ -78,10 +78,10 @@ fn f6(x: f64) -> String { let s = format!("{x:.6}"); if s.trim_start_matches('-'
 /// One step of a circuit: a gate, a diagonal phase layer exp(-i g E) (`Register::phase`), or a mixer layer on every variable
 /// (`Register::mix`)
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Op { Gate(Gate), Phase(f64), Mix(f64) }
+pub enum Op { Gate(Gate), Phase(f64), Mix(f64), Oracle(f64), Diffuse(f64) }
 impl Op {
     /// One canonical text line (angles at 6 decimals)
-    pub fn text(&self) -> String { match self { Op::Gate(g) => g.text(), Op::Phase(g) => format!("phase {}", f6(*g)), Op::Mix(t) => format!("mix {}", f6(*t)) } }
+    pub fn text(&self) -> String { match self { Op::Gate(g) => g.text(), Op::Phase(g) => format!("phase {}", f6(*g)), Op::Mix(t) => format!("mix {}", f6(*t)), Op::Oracle(p) => format!("oracle {}", f6(*p)), Op::Diffuse(p) => format!("diffuse {}", f6(*p)) } }
 }
 
 /// The mixer every round-2 layer uses, by name (the receipt's `engine.mixer`)
@@ -200,6 +200,20 @@ impl Register {
         }
         self.ops.push(Op::Mix(t));
     }
+    /// Round 4: the oracle, a_x <- e^{i phi} a_x on the basis states marked good (phi = pi: the sign flip)
+    pub fn oracle(&mut self, good: &[bool], phi: f64) {
+        assert_eq!(good.len(), self.amp.len(), "one mark per basis state"); let w = C::cis(phi);
+        for (a, &g) in self.amp.iter_mut().zip(good) { if g { *a = w.mul(*a); } }
+        self.ops.push(Op::Oracle(phi));
+    }
+    /// Round 4: the diffusion about a stored state psi, I - (1 - e^{i phi}) |psi><psi| (phi = pi: the reflection I - 2 |psi><psi|)
+    pub fn diffuse(&mut self, psi: &[C], phi: f64) {
+        assert_eq!(psi.len(), self.amp.len(), "the stored state's amplitudes");
+        let ip = psi.iter().zip(&self.amp).fold(C::ZERO, |s, (p, a)| s.add(p.conj().mul(*a)));
+        let w = C::cis(phi); let f = C::new(1.0 - w.re, -w.im).mul(ip);
+        for (a, p) in self.amp.iter_mut().zip(psi) { let d = f.mul(*p); *a = C::new(a.re - d.re, a.im - d.im); }
+        self.ops.push(Op::Diffuse(phi));
+    }
     /// The Born mass on unused codes (the basis states whose E is NaN)
     pub fn invalid_mass(&self, e: &[f64]) -> f64 { self.amp.iter().zip(e).filter(|(_, x)| x.is_nan()).map(|(a, _)| a.norm2()).sum() }
     /// The Born probabilities |a_x|^2
@@ -279,6 +293,39 @@ pub fn qaoa(p: &Ising, layers: usize, params: &[(f64, f64)]) -> Register {
     assert_eq!(params.len(), layers, "one (gamma, beta) per layer"); qaoa_on(&Encoding::two_valued(p.q), &p.energies(), params)
 }
 
+/// Round 4: what `amplify_exact` did: the iterations (standard ones + the final phase-matched one), the final step's two
+/// phases (oracle, diffusion; radians), the Born mass on the good states before and after
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Amplified { pub iterations: usize, pub phases: (f64, f64), pub mass_before: f64, pub mass_after: f64 }
+/// The bar on the good states' mass after `amplify_exact` (asserted)
+pub const AMPLIFIED_MASS_MIN: f64 = 1.0 - 1e-12;
+/// Round 4: exact amplitude amplification of the good states (`good(x)` per basis index; an unused code is never good) about
+/// the register's current state psi, in place of a projection. With a0 = the good mass of psi and theta = asin(sqrt(a0)),
+/// k = floor(pi / (4 theta) - 1/2) standard iterations (oracle phase pi, diffusion phase pi about psi) bring the state to angle
+/// (2k + 1) theta <= pi/2 in the plane of |good> (psi's normalised good part) and |bad>; one final iteration with phases
+/// (phi, varphi) chosen so that its bad component is 0 lands on |good> exactly (Long's exact search, one matched step). Every
+/// step stays in that plane, so the result is e^{i chi} |good>: the good states keep psi's relative amplitudes, the Born
+/// probabilities are psi's restricted to the good states and divided by a0 -- the projection's numbers, by a unitary
+/// evolution. a0 = 1: nothing to do (0 iterations); a0 = 0: None (nothing to amplify). The mass after is asserted >= 1 - 1e-12.
+pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<Amplified> {
+    let g: Vec<bool> = (0..r.amp.len()).map(&good).collect(); let mass = |r: &Register| r.amp.iter().zip(&g).filter(|(_, &x)| x).map(|(a, _)| a.norm2()).sum::<f64>();
+    let a0 = mass(r); if !(a0 > 0.0) { return None; }
+    if a0 >= 1.0 - 1e-15 { return Some(Amplified { iterations: 0, phases: (0.0, 0.0), mass_before: a0, mass_after: a0 }); }
+    let psi = r.amp.clone(); let pi = core::f64::consts::PI;
+    let th = a0.sqrt().asin(); let k = (pi / (4.0 * th) - 0.5).floor().max(0.0) as usize;
+    for _ in 0..k { r.oracle(&g, pi); r.diffuse(&psi, pi); }
+    // the final step: the state is +-(al |good> + be |bad>), al, be >= 0; with s = sin theta, c = cos theta, S_psi(varphi)
+    // S_f(phi) leaves be - (1 - e^{i varphi}) c (al s e^{i phi} + be c) on |bad>: it vanishes for
+    // cos phi = -(be / al) cos(2 theta) / sin(2 theta) (|cos phi| < 1 for this k) and 1 - e^{i varphi} = be / (c (al s e^{i phi} + be c))
+    let a = mass(r).min(1.0); let (al, be) = (a.sqrt(), (1.0 - a).max(0.0).sqrt()); let (s, c) = (a0.sqrt(), (1.0 - a0).sqrt());
+    let cphi = (-(be / al) * (1.0 - 2.0 * a0) / (2.0 * s * c)).clamp(-1.0, 1.0); let phi = cphi.acos();
+    let w = C::new(al * s * phi.cos() + be * c, al * s * phi.sin()); let den = w.norm2() * c; // z = be / (c w) = be conj(w) / (c |w|^2)
+    let z = C::new(be * w.re / den, -be * w.im / den); let vphi = (-z.im).atan2(1.0 - z.re);
+    r.oracle(&g, phi); r.diffuse(&psi, vphi);
+    let m = mass(r); assert!(m >= AMPLIFIED_MASS_MIN, "amplified good mass {m:e} < 1 - 1e-12 (a0 {a0:e}, k {k})");
+    Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before: a0, mass_after: m })
+}
+
 /// sha256 (FIPS 180-4), one shot
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     const K: [u32; 64] = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -343,6 +390,22 @@ mod tests {
         let r = qaoa_on(&enc, &e, &[(0.4, 0.7), (0.9, 0.2)]); assert!(r.invalid_mass(&e) == 0.0);
         // the uniform start over the valid codes: 18 of 32 basis states
         assert_eq!(Register::uniform(&enc).probabilities().iter().filter(|&&p| p > 0.0).count(), 18);
+    }
+    #[test]
+    fn exact_amplification_lands_on_the_projection() {
+        // a three-level, a two-valued and a three-level variable; good = a rule over the plans; masses from 0.5 down to ~1e-3
+        let enc = Encoding { levels: vec![3, 2, 3] };
+        let lw = |v: &[usize]| [0.4, -0.2, 0.9][v[0]] + if v[1] == 1 { 0.3 } else { 0.0 } + if v[0] == v[2] { 1.1 } else { 0.0 } + if v[1] == 1 && v[2] == 2 { -0.5 } else { 0.0 };
+        let e: Vec<f64> = (0..32).map(|x| enc.decode(x).map_or(f64::NAN, |v| -lw(&v))).collect();
+        for rule in 0..18usize {
+            let good = |x: usize| enc.decode(x).is_some_and(|v| (v[0] * 6 + v[1] * 3 + v[2] + rule) % 18 < 1 + rule % 9);
+            let sw = sweep(&enc, &e, &DEFAULT_SCHEDULE); let p = sw.probabilities(); let a0: f64 = (0..32).filter(|&x| good(x)).map(|x| p[x]).sum();
+            let mut r = sw.clone(); let am = amplify_exact(&mut r, good).unwrap(); assert!(am.mass_after >= AMPLIFIED_MASS_MIN && (am.mass_before - a0).abs() < 1e-15);
+            let q = r.probabilities(); for x in 0..32 { let want = if good(x) { p[x] / a0 } else { 0.0 }; assert!((q[x] - want).abs() < 1e-12, "rule {rule} x {x}: {} vs {want}", q[x]); }
+            assert_eq!(r.invalid_mass(&e), 0.0);
+        }
+        let mut r = Register::uniform(&enc); assert!(amplify_exact(&mut r, |_| false).is_none());
+        let mut r = Register::uniform(&enc); assert_eq!(amplify_exact(&mut r, |x| enc.decode(x).is_some()).unwrap().iterations, 0);
     }
     #[test]
     fn measure_and_digest_are_deterministic() {

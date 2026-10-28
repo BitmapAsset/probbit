@@ -164,8 +164,8 @@ struct Habit { id: String, when: Vec<(String, Json)>, then: Vec<(String, Json)>,
 /// engine settings (docs/persona.md §2.7)
 #[derive(Clone)]
 struct Eng { op: String, sweeps: usize, polish_sweeps: usize, exact_limit: u64, chains: usize, twin: bool, positional: bool, yields: bool,
-    /// RFC 0011 (research): `tier: amplitude` (off when absent) and its `q_max` (default 12)
-    amp: bool, q_max: usize }
+    /// RFC 0011 (research): `tier: amplitude` (off when absent) and its `q_max` (default 12); round 4: `amplify` (default false)
+    amp: bool, q_max: usize, amplify: bool }
 /// bounded learning (docs/persona.md §2.8): `from` = the reward flag, then (optional) the correction flag; the traits whose learned
 /// deltas move; the step and total caps (natural-log weights); `credit` = action-addressed feedback, when declared
 #[derive(Clone)]
@@ -479,8 +479,8 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
     for (i, hb) in list(get(kv, "habits"), "habits")?.iter().enumerate() { habits.push(habit_spec(hb, &ix("habits", i), &inputs, &history, &vars, &steps)?); }
     need((1..habits.len()).all(|i| habits[..i].iter().all(|h| h.id != habits[i].id)), "habits", "habit ids must be distinct")?;
     // engine
-    let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false, amp: false, q_max: 12 };
-    if let Some(e) = get_t(kv, "engine") { let ekv = keys(e, "engine", &["op", "sweeps", "polish_sweeps", "exact_limit", "chains", "twin", "values", "on_conflict", "tier", "q_max", "comment"], &[])?;
+    let mut eng = Eng { op: "decide".into(), sweeps: 2000, polish_sweeps: 200, exact_limit: 2_000_000, chains: 4, twin: true, positional: true, yields: false, amp: false, q_max: 12, amplify: false };
+    if let Some(e) = get_t(kv, "engine") { let ekv = keys(e, "engine", &["op", "sweeps", "polish_sweeps", "exact_limit", "chains", "twin", "values", "on_conflict", "tier", "q_max", "amplify", "comment"], &[])?;
         for (k, x) in ekv { let p = at("engine", k);
             match k.as_str() {
                 "op" => eng.op = x.as_str().filter(|o| ["decide", "sample"].contains(o)).ok_or_else(|| perr(&p, "decide | sample"))?.to_string(),
@@ -490,11 +490,13 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
                 "comment" => {}
                 "tier" => { need(x.as_str() == Some("amplitude"), &p, "amplitude (the one optional tier; absent = the default tiers)")?; eng.amp = true; }
                 "q_max" => eng.q_max = num(Some(x), &p, Some(1.0), Some(16.0), true)? as usize,
+                "amplify" => eng.amplify = if let Json::Bool(b) = x { *b } else { return Err(perr(&p, "true | false")) },
                 "polish_sweeps" => eng.polish_sweeps = num(Some(x), &p, Some(0.0), Some(1e9), true)? as usize,
                 "sweeps" => eng.sweeps = num(Some(x), &p, Some(1.0), Some(1e9), true)? as usize,
                 "exact_limit" => eng.exact_limit = num(Some(x), &p, Some(1.0), Some(1e9), true)? as u64,
                 _ => eng.chains = num(Some(x), &p, Some(1.0), Some(MAX_CHAINS), true)? as usize,
             } } }
+    if eng.amplify && !eng.amp { return Err(perr(&at("engine", "amplify"), "true needs tier: amplitude (amplification acts on the amplitude register)")); }
     // line
     let lkv: &[(String, Json)] = match get_t(kv, "line") { Some(l) => keys(l, "line", &["max_tokens", "order", "prefix", "why_past", "block", "comment"], &[])?, None => &[] };
     // RFC 0008 E: `line.block` puts the engine-rendered block in every stance document (a persona with a bound or a coupling has it)
@@ -2863,14 +2865,14 @@ fn decode(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json, confl
 // ------------------------------------------------------------------------------------------------------------ turns
 fn solve(p: &Persona, st: &State, prog: &Json, eng: Engine, calls: &mut usize) -> Json {
     *calls += 1; let was = crate::trace::enter(crate::trace::Phase::Solve);
-    let r = if p.eng.amp { amplitude_tier(prog, p.eng.q_max).unwrap_or_else(|why| declined(eng(prog, &flags(p, st)), &why)) } else { eng(prog, &flags(p, st)) };
+    let r = if p.eng.amp { amplitude_tier(prog, p.eng.q_max, p.eng.amplify).unwrap_or_else(|why| declined(eng(prog, &flags(p, st)), &why)) } else { eng(prog, &flags(p, st)) };
     crate::trace::enter(was); r
 }
 /// RFC 0011 (research): the amplitude tier on a program (`run::amplitude`); Err(why) when it does not take it
 #[cfg(feature = "decide")]
-fn amplitude_tier(prog: &Json, q_max: usize) -> Result<Json, String> { crate::run::amplitude(prog, q_max) }
+fn amplitude_tier(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, String> { crate::run::amplitude(prog, q_max, amplify) }
 #[cfg(not(feature = "decide"))]
-fn amplitude_tier(_: &Json, _: usize) -> Result<Json, String> { Err("this build has no amplitude tier (feature decide)".into()) }
+fn amplitude_tier(_: &Json, _: usize, _: bool) -> Result<Json, String> { Err("this build has no amplitude tier (feature decide)".into()) }
 /// The existing tiers' answer, with the receipt of why the amplitude tier did not run
 fn declined(mut doc: Json, why: &str) -> Json { if let Json::Obj(v) = &mut doc { v.push(("amplitude".into(), Json::Str(format!("declined: {why}")))); } doc
 }
@@ -4504,6 +4506,33 @@ mod tests {
         let plain = build(&json::parse(&DOC.replace("LEARN", "")).unwrap()).unwrap(); let (e, _) = turn(&plain, &init(&plain, Some(3), true, &run), &inputs(false, false, false), false, &run, false).unwrap();
         assert!(g(&e, &["engine", "amplitude"]).is_null() && g(&e, &["engine", "qubits"]).is_null());
         assert_eq!(err(build(&json::parse(&DOC.replace("LEARN", r#","engine":{"tier":"pbit"}"#)).unwrap())), "engine.tier: amplitude (the one optional tier; absent = the default tiers)");
+    }
+    /// RFC 0011 round 4 (research): `engine.amplify: true` rotates each component's register onto its feasible plans by exact
+    /// amplitude amplification instead of projecting: the stance is the projection's (plan, odds, line), the receipt carries
+    /// `amplify` and feasible mass 1, the strand verifies; `amplify: false` is the round-3 behaviour; without the tier it is refused
+    #[cfg(feature = "decide")]
+    #[test]
+    fn amplify_lands_on_the_projection_and_logs_it() {
+        use crate::strand::{self, Clock, Live};
+        let base = include_str!("../../examples/persona/tutor.yaml").replace("\r\n", "\n");
+        let mk = |extra: &str| { let doc = crate::yaml::load(&base.replace("engine:\n", &format!("engine:\n  tier: amplitude\n{extra}"))).ok().unwrap(); (build(&doc).unwrap(), doc) };
+        let ((pj, _), (pf, _), (pa, doc)) = (mk(""), mk("  amplify: false\n"), mk("  amplify: true\n"));
+        let keep = |d: &Json| { let mut d = d.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| !["persona", "engine", "state_digest"].contains(&k.as_str())); } canon(&d) };
+        let (sj, sf, sa) = (init(&pj, Some(2), true, &run), init(&pf, Some(2), true, &run), init(&pa, Some(2), true, &run));
+        for raw in [r#"{"elapsed_hours":1,"praise":true}"#, r#"{"elapsed_hours":2}"#, r#"{"elapsed_hours":1,"correction":true}"#] {
+            let raw = json::parse(raw).unwrap(); let (a, _) = turn(&pj, &sj, &raw, false, &run, false).unwrap(); let (f, _) = turn(&pf, &sf, &raw, false, &run, false).unwrap();
+            let (b, _) = turn(&pa, &sa, &raw, false, &run, false).unwrap();
+            assert_eq!(canon(&g(&a, &["engine"])), canon(&g(&f, &["engine"]))); assert!(g(&a, &["engine", "amplify"]).is_null());
+            assert_eq!(keep(&a), keep(&b), "the stance with amplify is the projection's");
+            assert_eq!(g(&b, &["engine", "feasible_mass"]).as_f64(), Some(1.0)); let am = g(&b, &["engine", "amplify"]);
+            let it = am.get("iterations").and_then(Json::as_arr).unwrap(); assert_eq!(it.len(), g(&b, &["engine", "components"]).as_arr().unwrap().len());
+            assert!(it.iter().any(|x| x.as_f64().unwrap() >= 1.0), "{}", canon(&am)); assert_eq!(am.get("mass_after").and_then(Json::as_f64), Some(1.0));
+            assert_eq!(am.get("mass_before").and_then(Json::as_f64), g(&a, &["engine", "feasible_mass"]).as_f64()); }
+        let (mut live, header) = Live::start(pa.clone(), &doc, sa, Clock::Fixed, "probbit test"); let mut lines = vec![header];
+        for raw in [r#"{"elapsed_hours":1,"praise":true}"#, r#"{"elapsed_hours":2}"#] { let (_, l) = live.event(&json::parse(raw).unwrap(), &run).unwrap(); lines.push(l); }
+        assert!(strand::verify(&(lines.join("\n") + "\n"), &run).is_ok());
+        let e = err(build(&crate::yaml::load(&base.replace("engine:\n", "engine:\n  amplify: true\n")).ok().unwrap()));
+        assert!(e.starts_with("engine.amplify: true needs tier: amplitude"), "{e}");
     }
     /// The boxed setup API is the by-value one: the same persona, state, header and individual
     #[test]

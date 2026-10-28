@@ -127,6 +127,7 @@ pub trait FloatExt: Sized {
     fn exp(self) -> Self; fn exp_m1(self) -> Self; fn ln(self) -> Self; fn ln_1p(self) -> Self; fn log2(self) -> Self; fn log10(self) -> Self;
     fn sqrt(self) -> Self; fn powf(self, e: Self) -> Self; fn powi(self, n: i32) -> Self; fn tanh(self) -> Self; fn cos(self) -> Self; fn sin(self) -> Self;
     fn floor(self) -> Self; fn ceil(self) -> Self; fn round(self) -> Self; fn trunc(self) -> Self; fn fract(self) -> Self;
+    fn asin(self) -> Self; fn acos(self) -> Self; fn atan2(self, x: Self) -> Self;
 }
 /// `powi` as compiler-rt's `__powidf2` computes it (what `std`'s `f64::powi` lowers to), not `pow`: same bits as the host.
 fn powi64(mut a: f64, mut b: i32) -> f64 {
@@ -141,6 +142,7 @@ impl FloatExt for f64 {
     fn tanh(self) -> f64 { libm::tanh(self) } fn cos(self) -> f64 { libm::cos(self) } fn sin(self) -> f64 { libm::sin(self) }
     fn floor(self) -> f64 { libm::floor(self) } fn ceil(self) -> f64 { libm::ceil(self) } fn round(self) -> f64 { libm::round(self) }
     fn trunc(self) -> f64 { libm::trunc(self) } fn fract(self) -> f64 { self - libm::trunc(self) }
+    fn asin(self) -> f64 { libm::asin(self) } fn acos(self) -> f64 { libm::acos(self) } fn atan2(self, x: f64) -> f64 { libm::atan2(self, x) }
 }
 impl FloatExt for f32 {
     fn exp(self) -> f32 { libm::expf(self) } fn exp_m1(self) -> f32 { libm::expm1f(self) } fn ln(self) -> f32 { libm::logf(self) }
@@ -149,6 +151,7 @@ impl FloatExt for f32 {
     fn tanh(self) -> f32 { libm::tanhf(self) } fn cos(self) -> f32 { libm::cosf(self) } fn sin(self) -> f32 { libm::sinf(self) }
     fn floor(self) -> f32 { libm::floorf(self) } fn ceil(self) -> f32 { libm::ceilf(self) } fn round(self) -> f32 { libm::roundf(self) }
     fn trunc(self) -> f32 { libm::truncf(self) } fn fract(self) -> f32 { self - libm::truncf(self) }
+    fn asin(self) -> f32 { libm::asinf(self) } fn acos(self) -> f32 { libm::acosf(self) } fn atan2(self, x: f32) -> f32 { libm::atan2f(self, x) }
 }
 
 /// What a `no_std` module adds with one line (`use std::prelude::rust_2021::*;`) to see the names `std`'s prelude gives it.
