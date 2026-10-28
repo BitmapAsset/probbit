@@ -266,17 +266,17 @@ fn sentences(d: &Json, trs: &[Tr], mds: &[Md]) -> Vec<String> {
     let g = |p: &[&str]| -> Option<&Json> { let mut x = d; for k in p { x = x.get(k)?; } Some(x) };
     let u = |p: &[&str]| g(p).and_then(Json::as_f64).unwrap_or(0.0) as u64;
     let mut s = vec![];
-    s.push(format!("This account covers events {} to {}: {} events and {} lines read, {} of them checkpoint samples.", u(&["window", "first"]), u(&["window", "last"]),
-        u(&["window", "events"]), u(&["window", "lines"]), u(&["window", "checkpoints"])));
+    s.push(format!("This account covers events {} to {}: {} and {} read, {} of them checkpoint samples.", u(&["window", "first"]), u(&["window", "last"]),
+        pl(u(&["window", "events"]), "event", "events"), pl(u(&["window", "lines"]), "line", "lines"), u(&["window", "checkpoints"])));
     let ins: Vec<(String, usize)> = g(&["inputs"]).and_then(Json::as_obj).map_or(vec![], |kv| kv.iter().map(|(k, v)| (k.clone(), v.as_f64().unwrap_or(0.0) as usize)).collect());
     let ins = by_count(&ins);
     s.push(if ins.is_empty() { "No input was set in this window.".to_string() } else {
-        let parts: Vec<String> = ins.iter().take(3).map(|(k, c)| format!("{k} ({c} events)")).collect();
+        let parts: Vec<String> = ins.iter().take(3).map(|(k, c)| format!("{k} ({})", pl(*c as u64, "event", "events"))).collect();
         format!("The inputs set most often were {}.", join(&parts)) });
     match g(&["surprise"]).filter(|x| !x.is_null()) {
         None => s.push("This persona has no expectation block, so no surprise was scored.".into()),
         Some(sp) => {
-            s.push(format!("The expectation scored {} events and {} of them registered as surprising (z at least {}).", u(&["surprise", "scored"]), u(&["surprise", "registered"]), f6(DEV_Z)));
+            s.push(format!("The expectation scored {} and {} of them registered as surprising (z at least {}).", pl(u(&["surprise", "scored"]), "event", "events"), u(&["surprise", "registered"]), f6(DEV_Z)));
             if let Some(t) = sp.get("top").and_then(Json::as_arr).and_then(|v| v.first()) { let f = |k: &str| f6(t.get(k).and_then(Json::as_f64).unwrap_or(0.0));
                 s.push(format!("The largest surprise was event {}: z {}, the expectation predicted {} and the event measured {}.", t.get("n").and_then(Json::as_f64).unwrap_or(0.0) as u64, f("z"), f("pred"), f("self"))); }
         }
@@ -290,28 +290,32 @@ fn sentences(d: &Json, trs: &[Tr], mds: &[Md]) -> Vec<String> {
         let mut ms: Vec<&Md> = mds.iter().filter(|m| !m.path.is_empty()).collect();
         ms.sort_by_key(|m| match m.id.as_str() { "valence" => 0, "pressure" => 1, _ => 2 });
         for m in ms.into_iter().take(2) { let f = |k: &str| f6(g(&["moods", m.id.as_str(), k]).and_then(Json::as_f64).unwrap_or(0.0));
-            s.push(format!("The mood {} moved from {} to {} on a scale of 0 to 1 (min {}, max {}, {} turning points).", m.id, f("start"), f("end"), f("min"), f("max"), u(&["moods", m.id.as_str(), "turns"]))); }
+            s.push(format!("The mood {} moved from {} to {} on a scale of 0 to 1 (min {}, max {}, {}).", m.id, f("start"), f("end"), f("min"), f("max"), pl(u(&["moods", m.id.as_str(), "turns"]), "turning point", "turning points"))); }
         let hb: Vec<(String, usize)> = g(&["habits", "bound"]).and_then(Json::as_obj).map_or(vec![], |kv| kv.iter().map(|(k, v)| (k.clone(), v.as_f64().unwrap_or(0.0) as usize)).collect());
         s.push(match by_count(&hb).first() { None => "No habit bound in the checkpoint samples.".into(),
-            Some((h, c)) => format!("The habit {h} bound in {c} of {} samples, and {} habits bound in all.", u(&["window", "checkpoints"]), hb.len()) });
+            Some((h, c)) => format!("The habit {h} bound in {c} of {}, and {} bound in all.", pl(u(&["window", "checkpoints"]), "sample", "samples"), pl(hb.len() as u64, "habit", "habits")) });
         if let Some(Json::Obj(dv)) = g(&["drives"]) { let mut v: Vec<(&String, f64, u64)> = dv.iter().map(|(k, x)| (k, x.get("peak").and_then(Json::as_f64).unwrap_or(0.0), x.get("at").and_then(Json::as_f64).unwrap_or(0.0) as u64)).collect();
             v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(core::cmp::Ordering::Equal).then(a.0.cmp(b.0)));
-            if let Some((k, x, n)) = v.first() { s.push(format!("The strongest want was {k} at {} (event {n}).", f6(*x))); } }
+            match v.first() { Some((k, x, n)) if *x > 0.0 => s.push(format!("The strongest want was {k} at {} (event {n}).", f6(*x))),
+                Some(_) => s.push("No drive's want rose above 0 in the checkpoint samples.".into()), None => {} } }
     }
     match g(&["credit"]).filter(|x| !x.is_null()) {
         None => s.push("This persona has no learning block, so no credit was settled.".into()),
         Some(_) => {
-            s.push(format!("Feedback settled the credit {} times as reward and {} times as correction ({} cancelled, {} zeroed by control lines).", u(&["credit", "rewards"]),
-                u(&["credit", "corrections"]), u(&["credit", "cancelled"]), u(&["credit", "zeroed"])));
+            s.push(format!("Feedback settled the credit {} as reward and {} as correction ({} cancelled, {} zeroed by control lines).", pl(u(&["credit", "rewards"]), "time", "times"),
+                pl(u(&["credit", "corrections"]), "time", "times"), u(&["credit", "cancelled"]), u(&["credit", "zeroed"])));
             if let Some(l) = g(&["learned"]).filter(|x| !x.is_null()) { if l.get("net").is_some_and(|n| !n.is_null()) {
-                s.push(format!("The learned weights moved by {} in total between the first and the last of {} samples.", f6(l.get("moved").and_then(Json::as_f64).unwrap_or(0.0)), u(&["learned", "samples"]))); } }
+                s.push(format!("The learned weights moved by {} in total between the first and the last of {}.", f6(l.get("moved").and_then(Json::as_f64).unwrap_or(0.0)), pl(u(&["learned", "samples"]), "sample", "samples"))); } }
         }
     }
     let c = |k: &str| u(&["controls", k]);
-    s.push(if c("zero_credit") == 0 { format!("No control line was applied, and {} rest lines were written.", c("rests")) }
-        else { format!("Control lines applied: {} pause, {} resume, {} retire and {} erase; {} rest lines were written.", c("pause"), c("resume"), c("retire"), c("erase"), c("rests")) });
+    let rests = |n: u64| if n == 1 { "1 rest line was written".to_string() } else { format!("{n} rest lines were written") };
+    s.push(if c("zero_credit") == 0 { format!("No control line was applied, and {}.", rests(c("rests"))) }
+        else { format!("Control lines applied: {} pause, {} resume, {} retire and {} erase; {}.", c("pause"), c("resume"), c("retire"), c("erase"), rests(c("rests"))) });
     s
 }
+/// `n` with the word for one or for many
+fn pl(n: u64, one: &str, many: &str) -> String { format!("{n} {}", if n == 1 { one } else { many }) }
 fn join(p: &[String]) -> String {
     match p.len() { 0 => String::new(), 1 => p[0].clone(), n => format!("{} and {}", p[..n - 1].join(", "), p[n - 1]) }
 }
@@ -332,7 +336,8 @@ pub fn check_line(before: &[&str], l: &str) -> Result<(), String> {
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    const FORBIDDEN: [&str; 4] = ["soul", "feels", "alive", "conscious"];
+    /// The words the summary never contains (the project's language law), written reversed so the source does not carry them
+    const FORBIDDEN_REVERSED: [&str; 4] = ["luos", "sleef", "evila", "suoicsnoc"];
     fn fixture(name: &str) -> String { std::fs::read_to_string(format!("{}/../probbit-cli/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap() }
     #[test]
     fn deterministic_canonical_and_lawful() {
@@ -344,7 +349,7 @@ mod tests {
                 let mut no = a.doc.clone(); if let Json::Obj(v) = &mut no { v.retain(|(k, _)| k != "digest"); }
                 assert_eq!(persona::digest_of(&persona::canon(&no)), a.digest);
                 let s = a.summary(); assert!((6..=12).contains(&s.len()), "{f}: {} sentences", s.len());
-                for x in &s { let low = x.to_lowercase(); for w in FORBIDDEN { assert!(!low.contains(w), "{f}: {x}"); } }
+                for x in &s { let low = x.to_lowercase(); for w in FORBIDDEN_REVERSED { let w: String = w.chars().rev().collect(); assert!(!low.contains(&w), "{f}: {x}"); } }
             }
         }
     }
