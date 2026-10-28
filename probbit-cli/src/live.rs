@@ -161,6 +161,26 @@ pub fn stir_cmd(path: &str, idle_hours: f64, eng: Engine) -> Result<Json, InErr>
     let st = r.live.stir_due(idle_hours);
     Ok(Json::Obj(vec![("due".into(), Json::Bool(st.is_some())), ("events".into(), Json::Num(r.live.n as f64)), ("stir".into(), st.map_or(Json::Null, |s| s.to_json()))]))
 }
+/// `probbit live control STRAND rest [--at TIME]` (RFC 0015): a host decides when (standby, night, idle). Under the writer lock,
+/// the strand replayed from its header (every line checked), then the rest pass on the replayed individual and its one
+/// `consolidation` line appended -> {ok, control: rest, consolidation, line, head}. Refused without an `expectation.rest` block,
+/// before engine 0.14.0, and once retired.
+pub fn rest_cmd(path: &str, at: &str, eng: Engine) -> Result<Json, InErr> {
+    let lock = Lock::take(path)?;
+    let text = std::fs::read_to_string(path).map_err(|e| perr("strand", format!("cannot read {path}: {e}")))?;
+    if !text.ends_with('\n') { return Err(perr("strand", "its last line is incomplete (no newline at the end)")); }
+    let ls = lines(&text);
+    let (mut r, start) = probbit_persona::strand::Replay::open_lines(&ls).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?;
+    for i in start..ls.len() { r.step_at(&ls, i, eng).map_err(|(i, why)| perr("strand", format!("line {i}: {why}")))?; }
+    if r.live.dev_full { return Err(perr("strand", "a consolidation line needs a strand of engine 0.14.0 or later")); }
+    let line = r.live.consolidate(at)?;
+    if !lock.held() { return Err(locked(None, &format!("{path}.lock"))); }
+    append(path, &[&line])?;
+    let s = |x: &str| Json::Str(x.to_string());
+    Ok(Json::Obj(vec![("ok".into(), Json::Bool(true)), ("control".into(), s("rest")),
+        ("consolidation".into(), json::parse(&line).ok().and_then(|j| j.get("consolidation").cloned()).unwrap_or(Json::Null)),
+        ("line".into(), Json::Num((ls.len() + 1) as f64)), ("head".into(), s(&persona::digest_of(&line)))]))
+}
 /// `probbit live control STRAND seal` (§5.7, "Segments"): a host decides when to seal. Under the writer lock, the newest segment
 /// of STRAND (`NAME.strand`, `NAME.0001.strand`, ...) is replayed (from its last checkpoint, else from its start); refused unless
 /// its last line is an event line (a seal follows an event); then the sealing checkpoint is appended to it and the next segment

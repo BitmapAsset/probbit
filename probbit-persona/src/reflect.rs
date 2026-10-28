@@ -53,9 +53,11 @@ impl Reflection {
 
 /// What kind a canonical strand line is, from its first bytes (`reflect` reads lines `verify` checks; it does not check them)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum K { Header, Event, Control, Checkpoint, Rest, Reflection }
+enum K { Header, Event, Control, Checkpoint, Rest, Reflection, Consolidation }
 fn kind_of(l: &str) -> K {
-    if l.starts_with("{\"probbit_strand\":") { K::Header } else if l.starts_with("{\"checkpoint\":") { K::Checkpoint } else if l.starts_with("{\"at\":") { K::Control }
+    if l.starts_with("{\"probbit_strand\":") { K::Header } else if l.starts_with("{\"checkpoint\":") { K::Checkpoint } else if l.starts_with("{\"at\":") {
+        // RFC 0015: a consolidation line also starts with `at` (its next key is `consolidation`, a control line's is `by`)
+        if json::parse(l).ok().is_some_and(|j| j.get("consolidation").is_some()) { K::Consolidation } else { K::Control } }
     else if l.starts_with("{\"prev\":") { let t = l.get(80..).unwrap_or(""); if t.starts_with("\",\"reflection\":") { K::Reflection } else { K::Rest } }
     else { K::Event }
 }
@@ -143,6 +145,8 @@ pub fn reflect_window(lines: &[&str], w: Window) -> Result<Reflection, InErr> {
     let (mut samples, mut drive_samples, mut learned): (usize, usize, Vec<Json>) = (0, 0, vec![]);
     let mut ctl: Vec<(String, usize)> = ["erase", "pause", "resume", "retire"].iter().map(|k| (k.to_string(), 0)).collect();
     let (mut controls, mut rests, mut reflections) = (0usize, 0usize, 0usize);
+    // RFC 0015: the rest passes in the window (lines, contexts merged, weights moved)
+    let (mut cons, mut cons_merged, mut cons_moved) = (0usize, 0usize, 0.0f64);
     let (mut first_n, mut last_n) = (0u64, 0u64);
     // RFC 0016: with a curiosity block that declares a stir, the self-started events in the window (count, classes)
     let stir_on = doc.get("curiosity").and_then(|c| c.get("stir")).is_some_and(|s| !s.is_null());
@@ -209,6 +213,10 @@ pub fn reflect_window(lines: &[&str], w: Window) -> Result<Reflection, InErr> {
             }
             K::Rest if in_win => rests += 1,
             K::Reflection if in_win => reflections += 1,
+            K::Consolidation if in_win => { let j = json::parse(lines[i]).map_err(|e| bad(format!("line {}: {}", i + 1, e.msg)))?;
+                let c = j.get("consolidation"); cons += 1;
+                cons_merged += c.and_then(|c| c.get("merged")).and_then(|m| m.get("count")).and_then(Json::as_f64).unwrap_or(0.0) as usize;
+                cons_moved = r6(cons_moved + c.and_then(|c| c.get("moved")).and_then(Json::as_f64).unwrap_or(0.0)); }
             _ => {}
         }
     }
@@ -257,6 +265,9 @@ pub fn reflect_window(lines: &[&str], w: Window) -> Result<Reflection, InErr> {
         ("traits".into(), none(sampled, traits)),
         ("window".into(), window),
     ];
+    // RFC 0015: `consolidation` only when the window holds a consolidation line (every other reflection document keeps its bytes)
+    if cons > 0 { let at = kv.iter().position(|(k, _)| k.as_str() > "consolidation").unwrap_or(kv.len());
+        kv.insert(at, ("consolidation".into(), Json::Obj(vec![("lines".into(), cnt(cons)), ("merged".into(), cnt(cons_merged)), ("moved".into(), n6(cons_moved))]))); }
     // RFC 0016: `stirs` only with a declared stir (every other reflection document keeps its bytes)
     if stir_on { let at = kv.iter().position(|(k, _)| k.as_str() > "stirs").unwrap_or(kv.len());
         kv.insert(at, ("stirs".into(), Json::Obj({ let mut v = stirs.clone(); v.sort_by(|a, b| a.0.cmp(&b.0)); v.into_iter().map(|(k, c)| (k, cnt(c))).collect() }))); }
@@ -320,6 +331,10 @@ fn sentences(d: &Json, trs: &[Tr], mds: &[Md]) -> Vec<String> {
         let parts: Vec<String> = st.iter().map(|(k, c)| format!("{k} ({})", c.as_f64().unwrap_or(0.0) as u64)).collect();
         s.push(if n == 0 { "The curiosity drive started no self-started event (stir) in this window.".into() }
             else { format!("The curiosity drive started {} in this window, by class: {}.", pl(n, "self-started event (stir)", "self-started events (stirs)"), join(&parts)) }); }
+    // RFC 0015: one sentence on the rest passes, only when the window holds one
+    if let Some(cj) = g(&["consolidation"]) { let k = |x: &str| cj.get(x).and_then(Json::as_f64).unwrap_or(0.0);
+        s.push(format!("The rest pass ran {} in this window: {} merged, the remembered weights moved by {} in total.", pl(k("lines") as u64, "time", "times"),
+            pl(k("merged") as u64, "context", "contexts"), f6(k("moved")))); }
     let c = |k: &str| u(&["controls", k]);
     let rests = |n: u64| if n == 1 { "1 rest line was written".to_string() } else { format!("{n} rest lines were written") };
     s.push(if c("zero_credit") == 0 { format!("No control line was applied, and {}.", rests(c("rests"))) }

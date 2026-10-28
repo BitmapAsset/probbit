@@ -27,6 +27,9 @@ pub mod integrity;
 #[path = "curiosity.rs"]
 pub mod curiosity;
 pub use curiosity::{Curio, CUR_ID};
+/// RFC 0015 the rest pass: the expectation's memory consolidated at rest, one `consolidation` line (off without `expectation.rest`)
+#[path = "rest.rs"]
+pub mod rest;
 
 const RULE_KEYS: [&str; 6] = ["caps", "implies", "tables", "precedes", "linear", "all_different"];
 const RESERVED_LEVELS: [&str; 9] = ["true", "false", "null", "yes", "no", "on", "off", "y", "n"];
@@ -4024,14 +4027,28 @@ pub fn prove_seed(p: &Persona, pr: &Prop, seed: u64, eng: Engine) -> Result<(usi
 // --------------------------------------------------------------------------------- RFC 0009: the expectation and the trajectory
 /// RFC 0009 `expectation` (effects {}): the decayed combo counts' half-life in events and the most mixture members
 #[derive(Clone, Debug)]
-pub struct Expect { pub half_life: f64, pub max_combos: usize }
+pub struct Expect { pub half_life: f64, pub max_combos: usize,
+    /// RFC 0015: the rest pass (`expectation.rest`; None without the block: the pass is refused and nothing is folded for it)
+    pub rest: Option<RestPass> }
+/// RFC 0015 `expectation.rest`: the rest pass's half-life in events for the window it re-folds (default the expectation's own,
+/// which leaves every count as it is), the bins of a declared number input in the merge key (1-3; 3 = the waking key's thirds,
+/// so nothing merges), the gain of a context's mean surprise in its weight (0: none) and the factor on the learned deltas (1: none)
+#[derive(Clone, Debug, PartialEq)]
+pub struct RestPass { pub half_life: f64, pub bucket: u8, pub surprise_gain: f64, pub decay: f64 }
 /// RFC 0009 `engine.trajectory`: K steps of beta from beta0 to 1 (linear), each solved by the exact tier
 #[derive(Clone, Debug)]
 pub struct Traj { pub k: usize, pub beta0: f64 }
 fn expect_spec(x: &Json) -> R<Expect> {
-    let kv = keys(x, "expectation", &["half_life_events", "max_combos", "comment"], &[])?;
-    Ok(Expect { half_life: num_or(kv, "half_life_events", 32.0, "expectation", Some(1.0), Some(1e6), false)?,
-        max_combos: num_or(kv, "max_combos", 16.0, "expectation", Some(1.0), Some(64.0), true)? as usize })
+    let kv = keys(x, "expectation", &["half_life_events", "max_combos", "rest", "comment"], &[])?;
+    let half_life = num_or(kv, "half_life_events", 32.0, "expectation", Some(1.0), Some(1e6), false)?;
+    // RFC 0015: `rest` (every key optional, with the defaults that change nothing)
+    let rest = match get(kv, "rest") { None => None, Some(r) => {
+        let rk = keys(r, "expectation.rest", &["half_life", "bucket", "surprise_gain", "decay", "comment"], &[])?;
+        Some(RestPass { half_life: num_or(rk, "half_life", half_life, "expectation.rest", Some(1.0), Some(1e6), false)?,
+            bucket: num_or(rk, "bucket", 3.0, "expectation.rest", Some(1.0), Some(3.0), true)? as u8,
+            surprise_gain: num_or(rk, "surprise_gain", 0.0, "expectation.rest", Some(0.0), Some(4.0), false)?,
+            decay: num_or(rk, "decay", 1.0, "expectation.rest", Some(0.0), Some(1.0), false)? }) } };
+    Ok(Expect { half_life, max_combos: num_or(kv, "max_combos", 16.0, "expectation", Some(1.0), Some(64.0), true)? as usize, rest })
 }
 fn traj_spec(x: &Json) -> R<Traj> {
     let kv = keys(x, "engine.trajectory", &["k", "beta0", "comment"], &[])?;
@@ -4052,7 +4069,9 @@ fn traj_spec(x: &Json) -> R<Traj> {
 #[derive(Clone, Debug, Default)]
 pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64, rest: f64, canon: bool,
     /// RFC 0016: the curiosity drive's fold (canonical memory with a `curiosity` block only; None before the first event)
-    pub cur: Option<curiosity::CurMem> }
+    pub cur: Option<curiosity::CurMem>,
+    /// RFC 0015: the rest pass's window (canonical memory with an `expectation.rest` block only; None before the first event)
+    pub win: Option<rest::RestWin> }
 const DEV_PRIOR_VAR: f64 = 0.04;
 const DEV_VAR_FLOOR: f64 = 1e-4;
 /// z at or above this registers the deviation (the RFC 0001 sense threshold)
@@ -4071,6 +4090,8 @@ impl ExpectMem {
             ("n".into(), Json::Num(self.n as f64)), ("rest".into(), Json::Num(self.rest)), ("var".into(), Json::Num(self.var)), ("warm".into(), Json::Bool(self.warm))]);
         // RFC 0016: the drive's fold rides with the memory (only with a curiosity block)
         let mut j = j; if let (Some(c), Json::Obj(v)) = (&self.cur, &mut j) { v.insert(1, ("curiosity".into(), c.to_json())); }
+        // RFC 0015: the rest pass's window rides with the memory (only with an `expectation.rest` block), its rows in key order
+        if let (Some(w), Json::Obj(v)) = (&self.win, &mut j) { let ks: Vec<&str> = c.iter().map(|x| x.0.as_str()).collect(); v.push(("window".into(), w.to_json(&ks))); }
         j
     }
     /// A checkpoint line's `expect` for persona `p` -> the canonical memory; Err(what is wrong). It must be what the canonical fold
@@ -4078,8 +4099,12 @@ impl ExpectMem {
     pub fn read(p: &Persona, j: &Json) -> Result<ExpectMem, String> {
         let ex = p.expect.as_ref().ok_or("the persona has no expectation block")?;
         // RFC 0016: with a curiosity block the memory has a seventh key, `curiosity` (the drive's fold)
-        let want = if p.cur.is_some() { 7 } else { 6 };
-        let kv = j.as_obj().filter(|kv| kv.len() == want).ok_or(if want == 7 { "an object {combos, curiosity, mean, n, rest, var, warm}" } else { "an object {combos, mean, n, rest, var, warm}" })?;
+        // RFC 0015: with an `expectation.rest` block one more key, `window` (the rest pass's window)
+        let rw = ex.rest.is_some();
+        let want = 6 + usize::from(p.cur.is_some()) + usize::from(rw);
+        let shape = match (p.cur.is_some(), rw) { (true, false) => "an object {combos, curiosity, mean, n, rest, var, warm}", (false, false) => "an object {combos, mean, n, rest, var, warm}",
+            (true, true) => "an object {combos, curiosity, mean, n, rest, var, warm, window}", (false, true) => "an object {combos, mean, n, rest, var, warm, window}" };
+        let kv = j.as_obj().filter(|kv| kv.len() == want).ok_or(shape)?;
         let f = |k: &str| kv.iter().find(|(x, _)| x == k).map(|(_, v)| v).ok_or(format!("no {k}"));
         let r6n = |k: &str| -> Result<f64, String> { f(k)?.as_f64().filter(|x| x.is_finite() && *x >= 0.0 && r6(*x) == *x).ok_or(format!("{k}: a number >= 0 at 6 decimals")) };
         let mean = f("mean")?.as_f64().filter(|x| x.is_finite() && r6(*x) == *x).ok_or("mean: a number at 6 decimals")?;
@@ -4095,7 +4120,8 @@ impl ExpectMem {
             combos.push((key, cnt, rep.clone())); }
         if combos.iter().filter(|c| c.0 != "{}").count() > ex.max_combos - 1 { return Err(format!("combos: at most {} named", ex.max_combos - 1)); }
         let cur = match &p.cur { Some(c) => Some(curiosity::CurMem::read(c, f("curiosity")?)?), None => None };
-        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true, cur })
+        let win = if rw { let ks: Vec<String> = combos.iter().map(|c| c.0.clone()).collect(); Some(rest::RestWin::read(f("window")?, &ks)?) } else { None };
+        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true, cur, win })
     }
 }
 /// One event's deviation from the engine's own expectation (nats): `s_self` = sum over the non-twin variables of KL(A_i || E_i),
@@ -4172,6 +4198,9 @@ impl ExpectCache {
     pub fn reused(&self) -> u32 { self.reused }
     /// Whether the cache is used
     pub fn is_on(&self) -> bool { self.on }
+    /// RFC 0015: every row dropped and the pause reset (the rest pass changed the memory the rows were built for); the switches
+    /// and the counters stay. The receipts are the same with or without it: a row is keyed by its program's text.
+    pub fn invalidate(&mut self) { self.rows.clear(); self.used.clear(); self.skip = 0; self.back = 0; self.had = false; }
     /// The last event's programs answered from the cache and solved
     pub fn last(&self) -> (u32, u32) { (self.hits, self.solves) }
     /// The last event's programs solved as the event's own model with their own `h` (the rest of the solves: built and run)
@@ -4608,6 +4637,10 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
     if let (Some(c), true) = (p.cur.as_ref(), mem.canon) {
         let z = logged_pred.map(|x| ((1.0 + x).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
         mem.cur.get_or_insert_with(|| curiosity::CurMem::new(c)).step(c, &key, z, kv); }
+    // RFC 0015 (canonical memory): the rest pass's window reads the same z (one-sided: z+), before the normal moves
+    if let (Some(rp), true) = (ex.rest.as_ref(), mem.canon) {
+        let z = logged_pred.map(|x| ((1.0 + x).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
+        mem.win.get_or_insert_with(Default::default).step(&key, d, 0.5f64.powf(1.0 / rp.half_life), z.map_or(0.0, |z| r6(z.max(0.0)))); }
     if let Some(x) = logged_pred { let (x, a) = ((1.0 + x).ln(), 1.0 - d); let dx = x - mem.mean;
         mem.mean += a * dx; mem.var = (1.0 - a) * (mem.var + a * dx * dx); mem.n += 1; }
     if mem.canon {
@@ -4620,6 +4653,7 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
                 x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal).then(y.0.cmp(&x.0)) }) else { break };
             let c = mem.combos.remove(i); mem.rest = r6(mem.rest + c.1); }
         if let Some(cm) = mem.cur.as_mut() { cm.prune(&mem.combos); }
+        if let Some(w) = mem.win.as_mut() { w.settle(&mem.combos); }
         mem.mean = r6(mem.mean); mem.var = r6(mem.var);
     }
 }

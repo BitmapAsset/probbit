@@ -227,6 +227,26 @@ impl Live {
         let line = persona::canon(&Json::Obj(kv));
         self.checkpoints += 1; self.prev = persona::digest_of(&line); line
     }
+    /// RFC 0015 the rest pass (memory consolidation), when a host decides (standby, night, idle), stamped `at` (1-64 characters,
+    /// the host's clock): the expectation's memory consolidated from the window since the last pass, the learned deltas times the
+    /// pass's `decay`, and one `consolidation` line chained -> the line. Refused without an `expectation.rest` block, before engine
+    /// 0.14.0, and once retired. In place: no `State` or `Live` by value on a frame (the boxed individual of a small-stack target
+    /// calls it as it is; `consolidate_boxed` is this call). The expectation's cache is emptied (a changed memory: its rows are
+    /// rebuilt), which changes no byte.
+    #[inline(never)]
+    pub fn consolidate(&mut self, at: &str) -> Result<String, InErr> {
+        if self.status == Status::Retired { return Err(refusal(self.status)); }
+        if at.is_empty() || at.len() > 64 { return Err(perr("rest.at", "a time stamp, 1-64 characters (RFC 3339 by default)")); }
+        let mem = self.expect.as_mut().ok_or_else(|| perr("rest", "the persona has no expectation block (the rest pass consolidates its memory)"))?;
+        let c = persona::rest::consolidate_mem(&self.p, mem).map_err(|m| perr("rest", m))?;
+        persona::rest::decay_learned(&self.p, &mut self.st);
+        let line = persona::rest::line(&self.prev, at, self.n, c, &self.st.digest);
+        self.expect_cache.invalidate(); self.prev = persona::digest_of(&line);
+        Ok(line)
+    }
+    /// `consolidate` for the boxed individual of a `no_std` body (docs/embedding.md): the same call, the same line
+    #[inline(never)]
+    pub fn consolidate_boxed(lv: &mut Box<Live>, at: &str) -> Result<String, InErr> { lv.consolidate(at) }
     /// The sha256 of the strand's last line (the header's before any event)
     pub fn head(&self) -> &str { &self.prev }
     /// RFC 0016: is a self-started idle event due `idle_hours` after the last event? Exactly from the drive's fold and the idle
@@ -294,8 +314,10 @@ fn rest_line(prev: &str, rest: Json, state: &str) -> String {
     persona::canon(&Json::Obj(vec![("prev".into(), Json::Str(prev.into())), ("rest".into(), rest), ("state".into(), Json::Str(state.into()))]))
 }
 /// What kind of strand line `j` is
-pub enum Kind { Event, Control, Checkpoint, Rest, Reflection }
-pub fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else if j.get("rest").is_some() { Kind::Rest } else if j.get("reflection").is_some() { Kind::Reflection } else { Kind::Event } }
+pub enum Kind { Event, Control, Checkpoint, Rest, Reflection, Consolidation }
+pub fn kind(j: &Json) -> Kind { if j.get("control").is_some() { Kind::Control } else if j.get("checkpoint").is_some() { Kind::Checkpoint } else if j.get("rest").is_some() { Kind::Rest } else if j.get("reflection").is_some() { Kind::Reflection } else if j.get("consolidation").is_some() { Kind::Consolidation } else { Kind::Event } }
+/// The divergence of a consolidation line in a strand of an engine before 0.14.0 (RFC 0015: consolidation lines are engine-gated)
+pub const CONSOLIDATE_OLD: &str = "a consolidation line in a strand of an engine before 0.14.0 (the rest pass needs 0.14.0 or later)";
 /// The header's keys, as this engine writes them (a segment's header has one more at its end: `segment`)
 const HEADER: [&str; 6] = ["probbit_strand", "engine", "persona", "seed", "state", "document"];
 /// The divergence of a segment whose second line is not the line its header links
@@ -329,7 +351,8 @@ pub fn segment_header(lv: &Live, doc: &Json, engine: &str, index: u64, previous:
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
     let known: &[&str] = match kind(j) { Kind::Event => &["curiosity", "deviation", "glyph", "inputs", "integrity", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
-        Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"], Kind::Reflection => &["prev", "reflection"] };
+        Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"], Kind::Reflection => &["prev", "reflection"],
+        Kind::Consolidation => &["at", "consolidation", "n", "prev", "state"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
 /// The divergence of a reflection line in a strand of an engine before 0.14.0 (RFC 0013: reflection lines are engine-gated)
@@ -481,6 +504,11 @@ impl Replay {
             // RFC 0013: a reflection line changes nothing (its document is checked against the lines before it: `step_at`)
             Kind::Reflection => { if live.dev_full { return Err((i, REFLECT_OLD.into())); }
                 live.prev = persona::digest_of(l); self.line = i; self.checkpoint_ready = false; return Ok(None) }
+            // RFC 0015: the rest pass run again from the lines before; a forged line is refused naming its first field that differs
+            Kind::Consolidation => { if live.dev_full { return Err((i, CONSOLIDATE_OLD.into())); }
+                let line = live.consolidate(j.get("at").and_then(Json::as_str).unwrap_or("")).map_err(|e| (i, format!("consolidation line: {}: {}", e.path, e.msg)))?;
+                if line != l { return Err((i, format!("the consolidation line differs at {}", persona::rest::first_field(&line, l)))); }
+                self.line = i; self.checkpoint_ready = false; return Ok(None) }
             Kind::Event => {} }
         if j.get("n").and_then(Json::as_f64) != Some((live.n + 1) as f64) { return Err((i, format!("n is not {}", live.n + 1))); }
         let ev = j.get("inputs").ok_or((i, "no inputs".to_string()))?;
@@ -791,6 +819,12 @@ fn check_chain_head(text: &str) -> Result<(Status, Box<Persona>, Json), InErr> {
                 }
             }
             Kind::Reflection => { if !canon { return Err(err(i + 1, REFLECT_OLD.into())); } }
+            Kind::Consolidation => {
+                if !canon { return Err(err(i + 1, CONSOLIDATE_OLD.into())); }
+                if status == Status::Retired { return Err(err(i + 1, "consolidation line while retired".into())); }
+                if j.get("n").and_then(Json::as_f64) != Some(n as f64) { return Err(err(i + 1, format!("the consolidation line is not at event {n}"))); }
+                if !j.get("state").and_then(Json::as_str).is_some_and(|s| s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_hexdigit())) { return Err(err(i + 1, "invalid state digest".into())); }
+            }
             Kind::Rest => {
                 if status != Status::Active { return Err(err(i + 1, format!("rest line while {}", status.name()))); }
                 if !ls.get(i + 1).and_then(|x| json::parse(x).ok()).is_some_and(|x| matches!(kind(&x), Kind::Event)) { return Err(err(i + 1, "a rest line must be followed by its event line".into())); }
@@ -924,6 +958,18 @@ fn resume_walk<S: AsRef<str>>(q: Box<Persona>, h: &Json, head: &str, cp: Option<
         match kind(&j) {
             Kind::Rest => { if status != Status::Active { return Err(err(at, format!("rest line while {}", status.name()))); } rest = Some(l.to_string()); }
             Kind::Reflection => { if !canon { return Err(err(at, REFLECT_OLD.into())); } }
+            // RFC 0015: the pass applied to the memory (and to the state once anchored) as the live writer applies it
+            Kind::Consolidation => {
+                if !canon { return Err(err(at, CONSOLIDATE_OLD.into())); }
+                if status == Status::Retired { return Err(err(at, "consolidation line while retired".into())); }
+                let m = mem.as_mut().ok_or_else(|| err(at, "a consolidation line for a persona without an expectation block".into()))?;
+                let c = persona::rest::consolidate_mem(&q, m).map_err(|why| err(at, why))?;
+                let logged = j.get("state").and_then(Json::as_str).unwrap_or("");
+                match cur.as_mut() {
+                    Some(s) => { persona::rest::decay_learned(&q, s);
+                        let line = persona::rest::line(&prev, j.get("at").and_then(Json::as_str).unwrap_or(""), n, c, &s.digest);
+                        if line != l { return Err(err(at, format!("the consolidation line differs at {}", persona::rest::first_field(&line, l)))); } }
+                    None => if rec.as_ref().is_some_and(|s| s.digest == logged) { cur = rec.take(); } } }
             Kind::Control => { let f = |k: &str| j.get(k).and_then(Json::as_str).unwrap_or("");
                 status = status.after(f("control")).map_err(|e| err(at, e.msg))?;
                 let line = control_line(f("prev"), f("control"), f("by"), f("reason"), f("at")).map_err(|e| err(at, e.msg))?;
@@ -1025,8 +1071,11 @@ fn new_mem(dev_full: bool) -> persona::ExpectMem { if dev_full { persona::Expect
 /// RFC 0009: the expectation's memory `m` with the event lines of `lines` folded in, one line read at a time
 #[inline(never)]
 fn expect_fold(q: &Persona, mut m: persona::ExpectMem, lines: &[&str]) -> persona::ExpectMem {
-    for l in lines.iter() { if let Ok(j) = json::parse(l) { if matches!(kind(&j), Kind::Event) {
-        persona::expect_step(q, &mut m, j.get("inputs").unwrap_or(&Json::Null), logged_pred(&j)); } } }
+    for l in lines.iter() { if let Ok(j) = json::parse(l) { match kind(&j) {
+        Kind::Event => persona::expect_step(q, &mut m, j.get("inputs").unwrap_or(&Json::Null), logged_pred(&j)),
+        // RFC 0015: the rest pass on the memory (the chain check has read the line)
+        Kind::Consolidation => { let _ = persona::rest::consolidate_mem(q, &mut m); }
+        _ => {} } } }
     m
 }
 /// The audit of a recorded life (`probbit persona bound PERSONA --audit STRAND`): the strand replayed line by line; after every
