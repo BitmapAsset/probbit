@@ -244,7 +244,12 @@ fn readings(m: &Meta, doc: &Json, learned: &Json, disp: Option<&Json>, open: Opt
     out.push(r("habits".into(), "habits", Field::Habits { active: n("active"), bound: n("bound"), declared: m.n_habits }));
     for x in &m.senses { let z = doc.get("senses").and_then(|s| s.get(&x.id)).and_then(|s| s.get("z")).and_then(Json::as_f64);
         out.push(r(format!("sense:{}", x.id), &format!("sense {}", x.id), Field::Sense { z })); }
-    out.push(r("room".into(), "room left in the bound", Field::Room));
+    // RFC 0014: with the identity self keys the stance carries `integrity`: its dial replaces the room placeholder
+    match doc.get("integrity").filter(|x| x.as_obj().is_some()) {
+        Some(ig) => { let g = |k: &str| ig.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+            out.push(r("integrity".into(), "integrity (drift from the declared self)", Field::Integrity { used: g("used"), drift: g("drift"),
+                crossed: ig.get("crossed").and_then(Json::as_arr).map_or(0, <[Json]>::len), traits: ig.get("traits").and_then(Json::as_obj).map_or(0, <[(String, Json)]>::len) })); }
+        None => out.push(r("room".into(), "room left in the bound", Field::Room)) }
     out
 }
 

@@ -558,3 +558,32 @@ fn the_mirror_serves_the_reflection() {
     assert_eq!(get(port, &format!("/s/{id}/reflection?last=10", ), &host).0, "HTTP/1.1 200 OK");
     drop(child); let _ = std::fs::remove_file(&f);
 }
+
+/// RFC 0014, the integrity dial through the serve path: a life of a persona with the identity self keys; the latest frame's
+/// document carries the last line's `integrity` (canonical, byte for byte), its `integrity` word's dial is that line's `used`,
+/// and the page carries the Mirror's drift table
+#[test]
+fn the_integrity_dial_reads_the_strands_number() {
+    use probbit_persona::json::{self, Json};
+    let f = tmp("integrity"); let _ = std::fs::remove_file(&f);
+    let ev: String = (0..24).map(|k| format!("{{\"elapsed_hours\":0.5,\"src\":\"human\",\"{}\":true}}\n", if k % 5 == 4 { "criticism" } else { "praise" })).collect();
+    let mut live = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["live", "tests/fixtures/monitor/tutor-self.yaml", "--seed", "3", "--clock", "fixed", "--strand", &f])
+        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    live.stdin.take().unwrap().write_all(ev.as_bytes()).unwrap(); assert!(live.wait().unwrap().success());
+    let (c, out, _) = probbit(&["live", "verify", &f]); assert_eq!(c, 0, "{out}");
+    let text = std::fs::read_to_string(&f).unwrap(); let last = json::parse(text.lines().last().unwrap()).unwrap();
+    let ig = last.get("integrity").expect("the last line carries integrity").clone();
+    let used = ig.get("used").and_then(Json::as_f64).unwrap(); assert!(used > 0.0, "{}", probbit_persona::persona::canon(&ig));
+    let (child, port) = served(&[&f]); let host = format!("127.0.0.1:{port}");
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
+    let frame = evs.iter().rev().find(|(_, d)| d.contains("\"words\"")).map(|(_, d)| json::parse(d).unwrap()).unwrap_or_else(|| panic!("{buf}"));
+    assert_eq!(frame.get("n").and_then(Json::as_f64), Some(24.0));
+    let canon = probbit_persona::persona::canon;
+    assert_eq!(canon(frame.get("doc").and_then(|d| d.get("integrity")).unwrap()), canon(&ig), "the frame's document carries the line's number");
+    let w = frame.get("words").and_then(Json::as_arr).unwrap().iter().find(|w| w.get("key").and_then(Json::as_str) == Some("integrity")).cloned().expect("the integrity word");
+    assert_eq!(w.get("dial").and_then(Json::as_f64), Some(used.min(1.0)), "{}", canon(&w));
+    assert!(get(port, "/", &host).2.contains("id=\"mirror-integrity\""));
+    drop(s); drop(child); let _ = std::fs::remove_file(&f);
+}
