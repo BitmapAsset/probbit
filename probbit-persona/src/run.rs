@@ -506,7 +506,10 @@ pub fn amplitude_with(prog: &Json, q_max: usize, amplify: bool, ev: &probbit_dec
         let mut reg = s.run(enc, &e);
         if amplify {
             let ok: Vec<bool> = (0..nb).map(|x| enc.decode(x).is_some_and(|cd| sub.violations(&plan_of(&cd)) == 0)).collect();
-            let a = amp::amplify_exact(&mut reg, |x| ok[x]).ok_or_else(|| format!("component {c}: no feasible plan has weight in the register"))?;
+            let Some(a) = amp::amplify_exact(&mut reg, |x| ok[x]) else {
+                // round 5: None after a rotation (good mass near 1) = the landing missed its bar: decline, never panic
+                let m: f64 = reg.probabilities().iter().zip(&ok).filter(|(_, &g)| g).map(|(p, _)| p).sum();
+                return Err(if m > 0.5 { format!("component {c}: amplification missed its 1 - 1e-12 landing") } else { format!("component {c}: no feasible plan has weight in the register") }); };
             let pr = reg.probabilities();
             let best = (0..nb).fold(usize::MAX, |bx, x| if enc.decode(x).is_some() && pr[x] > 0.0 && (bx == usize::MAX || r6(pr[x]) > r6(pr[bx])) { x } else { bx });
             for (&i, v) in mem.iter().zip(plan_of(&enc.decode(best).expect("a plan with weight has valid codes"))) { bp[i] = v; }

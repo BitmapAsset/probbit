@@ -336,7 +336,9 @@ pub const AMPLIFIED_MASS_MIN: f64 = 1.0 - 1e-12;
 /// (phi, varphi) chosen so that its bad component is 0 lands on |good> exactly (Long's exact search, one matched step). Every
 /// step stays in that plane, so the result is e^{i chi} |good>: the good states keep psi's relative amplitudes, the Born
 /// probabilities are psi's restricted to the good states and divided by a0 -- the projection's numbers, by a unitary
-/// evolution. a0 = 1: nothing to do (0 iterations); a0 = 0: None (nothing to amplify). The mass after is asserted >= 1 - 1e-12.
+/// evolution. a0 = 1: nothing to do (0 iterations); a0 = 0: None (nothing to amplify). Round 5: a landing whose mass after is
+/// below 1 - 1e-12 (rounding drift over many iterations at a tiny a0, measured with the long sweep) is also None, so the tier
+/// declines to the default tiers instead of panicking; the register is then left mid-rotation and must not be read.
 pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<Amplified> {
     let g: Vec<bool> = (0..r.amp.len()).map(&good).collect(); let mass = |r: &Register| r.amp.iter().zip(&g).filter(|(_, &x)| x).map(|(a, _)| a.norm2()).sum::<f64>();
     let a0 = mass(r); if !(a0 > 0.0) { return None; }
@@ -352,7 +354,7 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     let w = C::new(al * s * phi.cos() + be * c, al * s * phi.sin()); let den = w.norm2() * c; // z = be / (c w) = be conj(w) / (c |w|^2)
     let z = C::new(be * w.re / den, -be * w.im / den); let vphi = (-z.im).atan2(1.0 - z.re);
     r.oracle(&g, phi); r.diffuse(&psi, vphi);
-    let m = mass(r); assert!(m >= AMPLIFIED_MASS_MIN, "amplified good mass {m:e} < 1 - 1e-12 (a0 {a0:e}, k {k})");
+    let m = mass(r); if m < AMPLIFIED_MASS_MIN { return None; }
     Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before: a0, mass_after: m })
 }
 
