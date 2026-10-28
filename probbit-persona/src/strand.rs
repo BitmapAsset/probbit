@@ -727,9 +727,10 @@ fn check_checkpoint(p: &Persona, canon: bool, before: Option<&str>, cp: &str, at
         return Err((at, if with { "checkpoint fields must be checkpoint, expect, prev, stance and state" } else { "checkpoint fields must be checkpoint, prev, stance and state" }.into()));
     }
     // §2.18: an event line of a persona with glyphs also carries `glyph`; RFC 0009: of a persona with an expectation block, `deviation`
-    let extra = |kv: &[(String, Json)]| kv.iter().filter(|(k, _)| k == "glyph" || k == "deviation" || k == "integrity").count();
+    // RFC 0016: of a persona with a curiosity block, `curiosity`
+    let extra = |kv: &[(String, Json)]| kv.iter().filter(|(k, _)| k == "glyph" || k == "deviation" || k == "integrity" || k == "curiosity").count();
     if let Some(before) = before {
-        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation", "integrity"].contains(&k.as_str()))) {
+        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation", "integrity", "curiosity"].contains(&k.as_str()))) {
             return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
         }
         if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
