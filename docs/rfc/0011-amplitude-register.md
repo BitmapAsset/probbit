@@ -4,7 +4,9 @@ Status: **accepted as optional tier (research; off by default)**, round 3. Verdi
 of 2,176,371 trait decisions on the recorded corpus agree with the exact default tier; B5 passes (three designed programs differ
 from the thermal odds by 0.25-0.27 at the node; 0 of 4,100 bound cases exceed a certificate computed with the tier). Nothing in
 this RFC changes a release or `main`; the tier stays off unless a persona asks for it. Turning it on changes the bound
-certificate: compute it again with the tier (section 5).
+certificate: compute it again with the tier (section 5). Round 4 adds `engine.amplify` (off by default): exact amplitude
+amplification in place of the projection, which lands on the projection's numbers with feasible mass 1 (section 5,
+"Amplification").
 
 ## 1. What it is, in one paragraph
 
@@ -74,6 +76,13 @@ RFC is closed with that number. Both outcomes are publishable with receipts.
   computed from the persona file, so with `engine.tier: amplitude` in the file `persona bound` probes through the tier and
   its epsilon changes; a certificate computed without the flag does not cover the tier (measured in round 3, section 5). Public text, if any: "an exact simulated qubit register as an optional
   solver tier for small programs; measured against the default tier; no quantum hardware".
+- **Amplification (round 4, `engine.amplify: true`, off by default).** Instead of projecting, each component's swept state
+  |ψ⟩ is rotated onto its feasible plans: the rules are the oracle (a phase on the plans that obey them), the diffusion is
+  about the stored |ψ⟩, k = ⌊π/(4θ) − 1/2⌋ standard iterations with θ = asin √a₀ (a₀ the feasible mass) and one final
+  iteration whose two phases are chosen so that it lands exactly (`amp::amplify_exact`; mass after asserted ≥ 1 − 1e-12).
+  Plan and marginals are read from the register's own Born probabilities. The receipt adds `engine.amplify` (iterations and
+  the final phases per component, the mass before and after) and `feasible_mass` is the mass after (1.000000); the layer list
+  logs `oracle` and `diffuse` lines. The register holds a second copy of |ψ⟩ while it amplifies (16 · 2^q bytes more).
 - Scope (rounds 1-2): the tier answers the turn's solves (the stance and its habit checks). The rest position at the start, the
   expectation's members and the trajectory stay on the existing tiers.
 
@@ -126,6 +135,31 @@ Round 3 (the verdict round; simulated exactly on a CPU, x86_64 host):
 Verdict: **KEEP as an optional tier** (research; off by default). It reproduces the stance semantics in 96 % of decisions and
 differs where the thermal answer is nearly indifferent; it adds interference where designed programs have two paths. Not
 verified: silicon cost and replay on a chip.
+
+### Amplification (round 4)
+
+Why it changes nothing in the stance, and why that is the point. Write the swept state as |ψ⟩ = sin θ |g⟩ + cos θ |b⟩, with
+|g⟩ its normalised part on the plans that obey the rules and |b⟩ the rest. A phase on the feasible plans and the diffusion
+about |ψ⟩ both map the plane of |g⟩ and |b⟩ into itself, so every state the amplification visits is α|g⟩ + β|b⟩; one final
+iteration with matched phases makes β exactly 0, and the result is |g⟩ up to a global phase. Its Born probability on a
+feasible plan x is |ψ_x|² / a₀, which is what the projection computes by renormalising. So the plan and the odds are the
+projection's, and the feasible mass is 1: the projection was never an approximation layered over the register, it is the
+distribution exact amplification produces by a unitary evolution, simulated exactly on a CPU. Nothing in the argument depends
+on the program or the rules; it needs only the exact landing.
+
+Measured (x86_64 host): on 220 programs (200 random mixed two- and three-level programs and 20 designed ones, a rule each:
+seeded random plan subsets at densities 0.03-0.8 or "at most one variable at its top level"; a₀ from 1.7e-06 to 1, 0 to 611
+iterations) the marginals with amplification differ from the projection's by at most 1.1e-12 (bar 1e-9), the feasible mass
+after is at least 1 − 3.3e-13 (bar 1 − 1e-12; the largest drift, 1.1e-12 above 1, after 611 iterations), and the most
+probable plan is the same on 220 of 220. On every program the recorded corpus solves (339,389 exact solves, each run both
+ways) the plans are equal on 339,389 of 339,389 and the marginals differ by at most 2.1e-13, so B4 is round 3's to the
+decision: 2,095,627 of 2,176,371 = 96.29 %. A 287-event recorded
+day of a 52-qubit persona gives the same stance line on 287 of 287 events (per component 1-2 iterations: the per-component
+mass is mostly near 1 and the receipt's small product, median 0.058, multiplies 11 components). Cost: 1.02× the projected
+solve on that day (1.19 vs 1.17 ms per event) and 1.06× on a 16-qubit component at a₀ = 0.022 (5 iterations); no_std stack
+high-water 2,016 B at q 8 and 12. 100 lives with amplification replay byte for byte on x86_64 and on the no_std build, 0
+floats past 6 decimals, and an engine without the tier exits 5. Turning it on therefore buys a receipt whose register holds feasible mass 1 and logs
+how it got there; it does not buy a different stance.
 
 ## 6. What this RFC does not claim
 

@@ -105,6 +105,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Research
 
+- **RFC 0011, round 4: exact amplitude amplification in place of the projection** (research, `engine.amplify: true`, off by
+  default; docs/rfc/0011-amplitude-register.md, "Amplification"). `amp::amplify_exact`: the rules as the oracle, the diffusion
+  about the swept state, k standard iterations and one phase-matched final one, so the simulated register lands on its
+  feasible plans exactly (mass ≥ 1 − 1e-12, asserted). The plane argument says the result is the projection's distribution;
+  measured: marginals equal to 1.1e-12 on 220 programs, the same plan on 220/220 and on all 339,389 solves of the recorded corpus (B4 unchanged, 96.29 %),
+  287/287 stance lines on a recorded day;
+  cost 1.02× the projected solve. The receipt adds `engine.amplify` and `feasible_mass` becomes 1. Without the key every stance
+  and strand is byte-identical to round 3. Simulated exactly on a CPU; no quantum hardware, no speedup claim.
 - **RFC 0011, round 3: the verdict, KEEP as an optional tier** (research, off by default; docs/rfc/0011-amplitude-register.md,
   status "accepted as optional tier"). Measured on every program the recorded corpus's 653 outputs solve (338,567 exact solves,
   0 declined, the corpus byte-identical with the comparison beside it): the exact simulated register picks the same level as the
