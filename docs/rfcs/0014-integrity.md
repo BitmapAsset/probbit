@@ -60,18 +60,33 @@ Every number is rounded to 6 decimals.
 
 ## Cost
 
-One extra exact solve per event at most, the rest probe of the rested individual, cached on the rested state's body without
-`turn` and `digest` (a rested state has no open decision, so nothing in it ages in turns); the fresh individual's
-probe and the allowances once per seed. Because the rested state leaves out the channels of the hour, the cache hits on every
-event that moves only moods, the last stance or the agenda, and misses when something that persists moved (a learning step,
-a credit, a history window, a drive). Measured (docs/embedding.md "Integrity on a body"): on a body's recorded day of 1,160
-events it still missed on every event (a persisting channel moves each event while the drift stays 0.000000), +40 % of a
-turn on the host and a turn's stack (about 21 KB on the `nostd` build) per miss. The bar of this RFC (2 % of a turn, 8 KB)
-is not met; a cache keyed on the rest probe's program, as the expectation's cache keys its members, is the next step.
+At most one extra solve per event: the rest probe of the rested individual. The fresh individual's probe and the
+allowances are computed once per seed. The probe is cached twice (RFC 0014-b):
+
+- **By program.** The probe's turn steps run as the turn runs them, its first program is compiled and keyed by its structure
+  without the `comment` (the key the expectation's cache gives its members). An equal key answers from the row. Otherwise the
+  turn finishes on that same compiled program, so a miss compiles once. A row is kept only when the program's answer was exact
+  and the stance is that answer's (no yield, no hold's clamped solve, no conflict): exact marginals read the program's model
+  alone, so a row is the uncached computation's value bit for bit. A body whose senses, drives or needs move every event hits
+  whenever its resting program did not move.
+- **By state**, as before: the rested state's body without `turn` and `digest`, used while no program row is held (after a
+  sampled answer). While a row is held an equal rested state would compile the same program, so the state key is not built.
+
+Measured (docs/embedding.md "Integrity on a body"): on a body's recorded day of 1,160 events the resting program moved on 4
+events (the `pursue` goal's drive terms), so the probe was answered from the cache 1,156 times (99.66 %). The cost fell from
++40.1 % to +16.1 % of a turn on the host (std and the `nostd` proxy alike): what remains on a hit is building the probe's program (the turn's steps before the
+compiler, the compile, the key). A miss is a whole turn and carries its stack (13,656 B on the `nostd` build, against
+12,520 B for the bare rest-probe turn); a hit by program reaches the same depth (13,656 B): the turn's steps before the solve
+are the deepest part of a turn. The bar of this RFC (2 % of a turn, 8 KB per miss) is still not
+met. The floor of a program key is one program build per event. The remaining lever is to skip the build when nothing the
+probe's program reads has moved (a key on the compiler's inputs: the learned deltas, the credit, the history windows, the drives'
+terms, the senses' gains). That key is not built here: its exactness needs the slice proved field by field, the way the
+expectation's members would need it (T2's NEXT 1). A per-miss stack under 8 KB needs a rest probe lighter than a turn.
 
 ## Not in this build
 
-- The cost bar: a rest probe whose cache hits on a body's ordinary event (see Cost).
+- The cost bar (2 % of a turn, 8 KB per miss): the cache now hits on a body's ordinary event; what remains is one program
+  build per event and a turn's stack per miss (see Cost).
 
 - Appending the cue to the stance's `line` (the line is inside the stance digest the state remembers); the host appends
   `integrity.cue` itself.

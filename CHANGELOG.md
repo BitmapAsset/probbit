@@ -11,7 +11,12 @@ All notable changes to this project are documented here. The format follows
   channels of the hour at the fresh values, what persists as it is) and of the seed's fresh individual, `bound_used` against
   RFC 0004's epsilon at the seed, the dial's `used`, the `keep` habits held or not fired, and the persona's own `cue` past
   `warn`; every number at 6 decimals. Library `probbit_persona::integrity::{compute, compute_cached, Integrity}` (std and
-  `nostd`); the rest probe is cached on the rested state's body without `turn`.
+  `nostd`); the rest probe is cached by its program without the comment (the members' key; a row only for an exact answer) and,
+  while no row is held, by the rested state's body without `turn`.
+- **Integrity's cost** (RFC 0014-b): on a body's recorded day the rest probe is answered from the cache 1,156 of 1,160 times
+  (from 0): +16.1 % of a turn on the host (from +40.1 %), 13,656 B on the `nostd` build per miss (from 20,952 B). Every
+  integrity number is byte for byte as before. Still over the 2 % / 8 KB budget: a hit builds the probe's program, a miss is a
+  turn (docs/embedding.md "Integrity on a body").
 - **Integrity on the event line** (engine 0.14.0+): the stance document and the event line carry `integrity`; `live verify`
   recomputes it and refuses an edited value naming the line; an engine before 0.14.0 reads such a persona as unsupported
   (exit 5). A persona without the self keys writes every strand, stance and corpus byte for byte as before.

@@ -434,21 +434,26 @@ from the std and `nostd` builds and the CLI (6/6 windows over the two strands). 
 ### Integrity on a body (RFC 0014)
 
 With the identity self keys (docs/persona.md §2.19), `Live::event` computes `integrity` after the turn
-(`probbit_persona::integrity::compute_cached`, std and `nostd`): once per seed the fresh individual's rest probe and the
-allowances (RFC 0004's vertex search at that seed), then per event one rest probe on the rested state, skipped when the rested
-state's body (without `turn`) equals the last one. A rest probe is a whole turn, so the cost is (miss rate) x (one turn).
-Measured on the x86_64 host (release, best of 3 lives), and the stack high-water and heap peak of one call on the `nostd`
-build (painted below the caller, as above):
+(`probbit_persona::integrity::compute_cached`, std and `nostd`). Once per seed it runs the fresh individual's rest probe and
+computes the allowances (RFC 0004's vertex search at that seed). Then, per event, it handles the rest probe on the rested
+state. The probe's turn steps run, its first program is compiled and keyed by structure without its `comment`, and an equal key
+answers from the row the last exact probe left. Otherwise the turn finishes on that program. A row is kept only for an exact
+answer with no yield, hold or conflict, so every number is the uncached computation's: with the self keys declared, the strands
+of the lives below are byte for byte those of the build before the program key. A hit costs one program build; a miss costs one
+turn. The probe's path is boxed (the rested state, the fresh individual, the cache step and the document each in a frame of
+their own). Measured on the x86_64 host (release, best of 3 lives), and the stack high-water and heap peak of one call on the
+`nostd` build (painted below the caller, as above):
 
-| Life | Events | Host ms with / without | Share of the turn | Cache hits | Stack (miss / hit) | Heap peak (miss / hit) |
+| Life | Events | Host ms with / without | Share of the turn | Answered from the cache | Stack (miss / hit) | Heap peak (miss / hit) |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| a recorded day of a body (moods, senses, a learning and a bound block; no feedback that day) | 1,160 | 2,255.5 / 1,609.4 (std), 2,250.3 / 1,644.5 (`nostd`) | +40.1 % / +36.8 % | 0 of 1,160 | 20,952 B / 9,312 B | 96,315 B / 25,221 B |
-| the tutor with learning and a bound block, feedback on most events | 200 | 219.4 / 95.9 (std) | +128.9 % | 1 of 200 | 19,680 B / 9,232 B | 121,010 B / 11,029 B |
+| a recorded day of a body (moods, senses, drives, needs, a learning block; no feedback that day) | 1,160 | 1,849.9 / 1,593.5 (std), 1,889.5 / 1,627.9 (`nostd`) | +16.1 % / +16.1 % | 1,156 of 1,160 (the resting program moved on 4 events) | 13,656 B / 13,656 B | 93,190 B / 68,748 B |
+| the tutor with learning, feedback on most events | 200 | 195.9 / 97.0 (std) | +102.0 % | 88 of 200 (a learning step moves the program) | 12,784 B / 11,008 B | 119,933 B / 75,476 B |
 
-This is over RFC 0014's budget (2 % of a turn, 8 KB of stack): on the recorded day something that persists moves on every
-event (the drift itself stays 0.000000 all day), so the cache never hits, and a miss carries a turn's own stack. Integrity is
-off by default and costs nothing without the self keys; a body that declares them pays one turn per event today. Not measured
-on silicon.
+The bare rest-probe turn (`turn_boxed` on the rested state, no cache) reaches 12,520 B on the same build, so a miss is a turn's
+stack plus 1,136 B of the probe's own frames. A hit by program runs the turn's steps before the solve, the deepest part of
+a turn, so it reaches the same 13,656 B; a hit by state (a life where nothing that persists moved) 5,104 B. Before the program key the day cost +40.1 % / +36.8 % with 0 hits,
+20,952 B per miss. This is still over RFC 0014's budget (2 % of a turn, 8 KB per miss): a hit still builds the probe's
+program, and a miss is a turn. Integrity is off by default and costs nothing without the self keys. Not measured on silicon.
 
 ### Measured on one board (ESP32-S3)
 
