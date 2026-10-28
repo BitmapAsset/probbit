@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+- **The expectation's members before the turn** (docs/embedding.md "The expectation's members: the order with the reuse, and
+  what is held"): with the cache reusing the turn's program, every member but A_t is solved before the turn (nothing of the
+  turn held; `persona::deviation_pre`), its exact marginals held as f64 rows, and A_t's mixture runs after the turn
+  (`persona::deviation_post`). Every member takes the members' one model, read without any program text (the persona's
+  couplings, a text without its pairs): a member with other rules in force than E_t's takes it with its own caps
+  (`run::Members::set_caps`), and the components tier's split is computed once per caps and reused per member
+  (`probbit_ir::exact_components_split`). Every stance, strand line and digest is the same. Proxy, the body persona: event
+  heap peak 97,583 → 88,844 B, inside `expect` 97,583 → 55,920 B; recorded day: `expect` 64.1% → 57.5% of the turn,
+  0 members on the engine's path (253).
 - **The expectation's members, trimmed** (docs/embedding.md "The expectation's members: what the deviation reuses"):
   `Live::event` runs the turn first and, with the cache on, the turn hands the deviation its first program's meta and exact
   marginals (`persona::turn_at`, `persona::deviation_at`), so the event's own program is compiled and solved once (when no rest

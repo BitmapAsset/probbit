@@ -239,6 +239,51 @@ engine's path still builds its text and the engine's answer). A host short of he
 `ExpectCache::with_reuse(false, false)`: the deviation before the turn, A_t built and solved by it, the same bytes; the body
 persona's event peak is then 89,990 B, at the turn's solve (inside `expect` 69,332 B), at the cost of A_t's second build and solve.
 
+### The expectation's members: the order with the reuse, and what is held
+
+With the cache reusing the turn's program (the default), `Live::event` runs the deviation in two parts around the turn
+(`persona::deviation_pre`, `persona::deviation_post`):
+
+1. **Before the turn** (nothing of the turn held): every member but A_t is solved from the pre-event state, E_t first (when E_t
+   has no exact answer there is no deviation and no other member is solved), then the remembered combos in the mixture's
+   order. Each member's exact marginals are kept as a row of f64 in the order of its layout (about 0.4 KB per member on the
+   body persona; the layout is kept only as its sha256: each variable's id and its levels' names in order). The cache keeps
+   only this event's rows through the turn.
+2. **The turn**, which hands A_t's compile meta and exact marginals (T3-b).
+3. **After the turn**: A_t's layout must hash to the held one; the rows are named again from it (the same names, values and
+   order), A_t's row goes into the cache, and the mixture runs as before. A layout that differs solves the members again; an
+   event the turn does not hand A_t for (a rest due, another op) builds and solves A_t after the turn.
+
+The members share one model, read without any program text: the skeleton comes from E_t's text without its pairs (a few KB),
+and the pairs are the persona's couplings read as `run::from_json` reads the text's (r6 of each table entry at its values'
+indices, each weight checked as the text's). A member whose rules in force differ from E_t's (other habits, rules on inputs)
+takes the same model with its own caps: its rules lowered as `from_json` lowers a text's (from its text without the pairs),
+the compile pass's never-binding caps dropped, `Model::new` on the same parts (`run::Members::set_caps`, no copy of the pairs);
+its cache key is the skeleton's, its rules' and its field's. The components tier's split of that model (the components, their
+kinds, the sub-models of the components with caps or cycles) does not read `h`, so it is computed once per caps and reused by
+every member (`probbit_ir::exact_components_split`, each sub-model's `h` copied in; the same tiers on the same numbers).
+
+Every stance, strand line and digest is the same as with the old order and as with the cache off
+(`the_members_before_the_turn_move_no_byte`; the IR test `one_split_over_many_h_is_bit_identical` for the split).
+
+On the proxy (cache on; the body persona: its recorded day for time, its last recorded event for heap; one node session):
+
+| | T3-b head | members before the turn | every member a model | the split once |
+|---|---:|---:|---:|---:|
+| `expect` share of the turn, recorded day | 64.1% | 63.2% | 57.9% | 57.5% |
+| per member: build / solve (µs) | 80.7 / 71.0 | 71.7 / 65.7 | 66.9 / 41.6 | 67.5 / 40.5 |
+| members on the engine's path, recorded day | 253 | 159 | 0 | 0 |
+| event heap peak (B) | 97,583 | 88,844 | 88,844 | 88,844 |
+| heap inside `expect` (B) | 97,583 | 72,568 | 55,920 | 55,920 |
+| turn stack (B) | 13,584 | 13,504 | 13,552 | 13,552 |
+
+The event's heap peak is now the turn's solve (its own allocations as before, plus about 1.2 KB of held rows); inside `expect`
+the peak is the members' (no program text, no answer document). `ExpectCache::with_reuse(false, false)` keeps the old order
+(the whole deviation before the turn, A_t built and solved by it): event peak 89,990 B, inside `expect` 72,003 B, same bytes;
+the reuse is the better default now on both. On the fixture persona's 500 varied events the members are solved before the
+turn knows whether A_t has an exact answer, so events without one solve their members for nothing (about 3.6 programs per
+event); the model path still brings that life's share from 81.7% to 74.8% (its steady life 33.2% → 19.4%).
+
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
 
