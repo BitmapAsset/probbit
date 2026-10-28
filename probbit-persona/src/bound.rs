@@ -5,6 +5,7 @@
 use super::*;
 
 /// The `bound` block: every field optional
+#[derive(Clone)]
 pub struct Bound { pub rest_hours: Option<f64>, pub max_epsilon: Option<f64>, pub seeds: Option<Vec<u64>>, pub count: Vec<String> }
 const SEED_MAX: u64 = 2_147_483_647;
 const MAX_SEEDS: usize = 10_000;

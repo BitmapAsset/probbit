@@ -56,7 +56,9 @@ pub struct Live { pub p: Persona, pub st: State, clock: Clock, last: f64, prev: 
     /// The strand's engine is before 0.14.0 (DEV_R6_SINCE): the stance's `deviation` keeps full precision, as that engine wrote it
     pub dev_full: bool,
     /// RFC 0009: the members' exact marginals by program (`persona::ExpectCache`, on by default; off gives the same bytes)
-    pub expect_cache: persona::ExpectCache }
+    pub expect_cache: persona::ExpectCache,
+    /// RFC 0014: the rest probes of `integrity` (the fresh individual's once per seed; the individual's when its state moved)
+    pub integ: persona::integrity::Cache }
 /// The engine from which the stance's `deviation` (on checkpoint lines) is rounded to 6 decimals: a transcendental's last bits
 /// differ between platforms' libm (macOS, glibc, the `libm` crate of a `nostd` build), and 6 decimals make the line's bytes,
 /// and so the chain, the same on all of them
@@ -115,7 +117,7 @@ impl Live {
     fn boxed(p: Box<Persona>, st: Box<State>, clock: Clock, prev: String, n: u64, expect: Option<persona::ExpectMem>, dev_full: bool) -> Box<Live> {
         use core::mem::MaybeUninit; use core::ptr::{addr_of_mut, copy_nonoverlapping};
         // every field is written below: this pattern stops compiling when a field is added and not written
-        let _all = |l: &Live| { let Live { p: _, st: _, clock: _, last: _, prev: _, n: _, status: _, controls: _, checkpoints: _, rests: _, expect: _, traj: _, dev_full: _, expect_cache: _ } = l; };
+        let _all = |l: &Live| { let Live { p: _, st: _, clock: _, last: _, prev: _, n: _, status: _, controls: _, checkpoints: _, rests: _, expect: _, traj: _, dev_full: _, expect_cache: _, integ: _ } = l; };
         let mut b: Box<MaybeUninit<Live>> = Box::new(MaybeUninit::uninit());
         let l = b.as_mut_ptr();
         // SAFETY: `l` points to an allocation for one `Live`; each field is written once, through raw field pointers (no reference
@@ -129,6 +131,7 @@ impl Live {
             addr_of_mut!((*l).status).write(Status::Active); addr_of_mut!((*l).controls).write(0); addr_of_mut!((*l).checkpoints).write(0); addr_of_mut!((*l).rests).write(0);
             addr_of_mut!((*l).expect).write(expect); addr_of_mut!((*l).traj).write(None); addr_of_mut!((*l).dev_full).write(dev_full);
             addr_of_mut!((*l).expect_cache).write(persona::ExpectCache::new(true));
+            addr_of_mut!((*l).integ).write(persona::integrity::Cache::new());
             Box::from_raw(Box::into_raw(b) as *mut Live)
         }
     }
@@ -167,6 +170,9 @@ impl Live {
         if self.expect.is_some() { if let Json::Obj(v) = &mut stance { v.push(("deviation".into(), dev.as_ref().map_or(Json::Null, |d| d.to_json(self.dev_full)))); } }
         // §2.18: the glyph reads the finished document, `deviation` included (the surprise modifier)
         persona::set_glyph(&self.p, &mut stance);
+        // RFC 0014 (0.14.0+): the drift from the declared self, from the state after the turn (effects {}: outside both digests)
+        let integ = if self.dev_full { None } else { persona::integrity::compute_cached(&self.p, &ns, &stance, &mut self.integ, eng)? };
+        if let (Some(ig), Json::Obj(v)) = (&integ, &mut stance) { v.push(("integrity".into(), ig.doc.clone())); }
         // RFC 0002 part 2: a rest line due before this event is its own line, chained before the event line (the turn applied it)
         enter(Phase::Line);
         let (rest, prev) = match persona::rest_line_digest(&self.p, &self.st, &inputs) {
@@ -176,6 +182,7 @@ impl Live {
             ("state".into(), Json::Str(ns.digest.clone())), ("prev".into(), Json::Str(prev))];
         if let Some(d) = &dev { lj.push(("deviation".into(), d.receipt())); }
         if let Some(g) = stance.get("glyph") { lj.push(("glyph".into(), g.clone())); }
+        if let Some(ig) = &integ { lj.push(("integrity".into(), ig.doc.clone())); }
         let line = persona::canon(&Json::Obj(lj));
         enter(Phase::Fold);
         if let Some(m) = self.expect.as_mut() { persona::expect_step(&self.p, m, &inputs, dev.as_ref().and_then(persona::Deviation::logged_pred)); }
@@ -300,7 +307,7 @@ pub fn segment_header(lv: &Live, doc: &Json, engine: &str, index: u64, previous:
 /// this engine does not know (a line without `control` or `checkpoint` is read as an event line, so `{"prev": ..., "nap": ...}`
 /// gives `nap`) or a field it does not know on a known one
 fn unknown_key(j: &Json) -> Option<&str> {
-    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
+    let known: &[&str] = match kind(j) { Kind::Event => &["deviation", "glyph", "inputs", "integrity", "n", "prev", "stance", "state"], Kind::Control => &["at", "by", "control", "prev", "reason"],
         Kind::Checkpoint => &["checkpoint", "expect", "prev", "stance", "state"], Kind::Rest => &["prev", "rest", "state"], Kind::Reflection => &["prev", "reflection"] };
     j.as_obj()?.iter().map(|(k, _)| k.as_str()).find(|k| !known.contains(k))
 }
@@ -471,6 +478,8 @@ impl Replay {
         if json::parse(&line).ok().and_then(|x| x.get("deviation").cloned()) != j.get("deviation").cloned() { return Err((i, "the deviation differs".into())); }
         // §2.18: the logged glyph is recomputed from the replayed stance (an edited glyph diverges here)
         if stance.get("glyph") != j.get("glyph") { return Err((i, "the glyph differs".into())); }
+        // RFC 0014: the logged integrity is recomputed from the replayed state (an edited number diverges here)
+        if stance.get("integrity") != j.get("integrity") { return Err((i, "the integrity differs".into())); }
         if j.get("state").and_then(Json::as_str) != Some(live.st.digest.as_str()) { return Err((i, "the state differs".into())); }
         if line != l { return Err((i, "the line differs".into())); }
         self.line = i; self.last = Some(stance.clone()); self.checkpoint_ready = true; self.norms.track(&self.live.p, &self.live.st);
@@ -697,9 +706,9 @@ fn check_checkpoint(p: &Persona, canon: bool, before: Option<&str>, cp: &str, at
         return Err((at, if with { "checkpoint fields must be checkpoint, expect, prev, stance and state" } else { "checkpoint fields must be checkpoint, prev, stance and state" }.into()));
     }
     // §2.18: an event line of a persona with glyphs also carries `glyph`; RFC 0009: of a persona with an expectation block, `deviation`
-    let extra = |kv: &[(String, Json)]| kv.iter().filter(|(k, _)| k == "glyph" || k == "deviation").count();
+    let extra = |kv: &[(String, Json)]| kv.iter().filter(|(k, _)| k == "glyph" || k == "deviation" || k == "integrity").count();
     if let Some(before) = before {
-        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation"].contains(&k.as_str()))) {
+        if !b.as_obj().is_some_and(|kv| kv.len() == 5 + extra(kv) && kv.iter().all(|(k, _)| ["n", "inputs", "prev", "stance", "state", "glyph", "deviation", "integrity"].contains(&k.as_str()))) {
             return Err((at - 1, "a checkpoint must immediately follow an event line".into()));
         }
         if j.get("prev").and_then(Json::as_str) != Some(persona::digest_of(before).as_str()) { return Err((at, "prev is not the sha256 of the line before".into())); }
@@ -980,7 +989,7 @@ fn line_check(j: &Json, l: &str, inputs: Json, stance: &Json, state: &str) -> Re
     if j.get("state").and_then(Json::as_str) != Some(state) { return Err("the state differs".into()); }
     let mut lj = vec![("n".into(), j.get("n").cloned().unwrap_or(Json::Null)), ("inputs".into(), inputs), ("stance".into(), Json::Str(sd)),
         ("state".into(), Json::Str(state.to_string())), ("prev".into(), j.get("prev").cloned().unwrap_or(Json::Null))];
-    for k in ["deviation", "glyph"] { if let Some(x) = j.get(k) { lj.push((k.into(), x.clone())); } }
+    for k in ["deviation", "glyph", "integrity"] { if let Some(x) = j.get(k) { lj.push((k.into(), x.clone())); } }
     if persona::canon(&Json::Obj(lj)) != l { return Err("the line differs".into()); }
     Ok(())
 }

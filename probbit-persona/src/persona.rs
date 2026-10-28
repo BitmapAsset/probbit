@@ -20,6 +20,9 @@ pub mod bound;
 /// The dead-rule lint: habits a host can never bring into force (`persona lint --host`)
 #[path = "hostlint.rs"]
 pub mod hostlint;
+/// RFC 0014 integrity: the drift from the self the persona declares (off without the `identity` self keys)
+#[path = "integrity.rs"]
+pub mod integrity;
 
 const RULE_KEYS: [&str; 6] = ["caps", "implies", "tables", "precedes", "linear", "all_different"];
 const RESERVED_LEVELS: [&str; 9] = ["true", "false", "null", "yes", "no", "on", "off", "y", "n"];
@@ -207,7 +210,9 @@ pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub d
     /// RFC 0009: the `expectation` block and `engine.trajectory` (both outside the digest; effects {})
     pub expect: Option<Expect>, pub traj: Option<Traj>,
     /// §2.18: the `display.glyphs` block (outside the digest; effects {})
-    pub glyphs: Option<Glyphs> }
+    pub glyphs: Option<Glyphs>,
+    /// RFC 0014: the `identity` block's self keys (outside the digest; effects {})
+    pub ident: Option<integrity::Ident> }
 impl Persona {
     /// `line.why_past` (§2.11): `why` names what the learned weights came from; default on with a senses block, off without
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
@@ -343,6 +348,12 @@ pub fn build(doc: &Json) -> R<Persona> { build_boxed(doc).map(|p| *p) }
 /// recursion through the layers holds only this dispatcher's frame (docs/embedding.md "Stack budget").
 #[inline(never)]
 pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
+    // RFC 0014: the `identity` block's self keys move nothing (effects {}): they are read against the persona built without them
+    // and stay out of the digest, so declaring them on a persona with a recorded life leaves every state as it was
+    if let Some(idn) = doc.get("identity").filter(|i| integrity::declared(i)) {
+        let mut d = doc.clone();
+        if let Json::Obj(v) = &mut d { if let Some((_, Json::Obj(i))) = v.iter_mut().find(|(k, _)| k == "identity") { i.retain(|(k, _)| !integrity::KEYS.contains(&k.as_str())); } }
+        let mut p = build_boxed(&d)?; let id = integrity::spec(idn, doc, &p)?; p.ident = Some(id); return Ok(p); }
     // §2.18: `display` moves nothing (effects {}): it is read against the persona built without it and stays out of the digest,
     // so adding it to a persona with a recorded life leaves every state and stance digest as it was
     if let Some(dj) = doc.get("display") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "display"); }
@@ -502,7 +513,7 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None });
+    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None, ident: None });
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -1547,10 +1558,11 @@ struct Pay { wait: bool, pays: Option<(u64, Option<String>)>, cancel: Option<Vec
 const PAY_KEYS: [&str; 3] = ["await", "for", "cancel"];
 /// "sha256:" and 64 lower-case hex digits
 fn is_digest(s: &str) -> bool { s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) }
-/// A stance's digest (§2.8): sha256 of the stance document's canonical JSON without `credit`, `state_digest` and `timing`. The
+/// A stance's digest (§2.8): sha256 of the stance document's canonical JSON without `credit`, `state_digest`, `timing` and
+/// `integrity` (RFC 0014, computed after the turn). The
 /// state remembers it (an open decision's, the previous stance's) without hashing itself, and `for: {turn, stance}` binds it.
 pub fn stance_digest(doc: &Json) -> String {
-    match doc { Json::Obj(v) => sha(&Json::Obj(v.iter().filter(|(k, _)| !["credit", "state_digest", "timing"].contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
+    match doc { Json::Obj(v) => sha(&Json::Obj(v.iter().filter(|(k, _)| !["credit", "state_digest", "timing", "integrity"].contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
 }
 /// With a credit block: `await`, `for` and `cancel` taken out of the inputs and read (B-R5: a malformed value refuses the event);
 /// without one they stay undeclared inputs (listed in `ignored`)
@@ -4592,10 +4604,10 @@ pub fn trajectory_program(prog: &Json, k: usize, beta0: f64, limit: u64) -> Opti
 pub fn trajectory(p: &Persona, st: &State, raw: &Json) -> Option<Json> {
     let t = p.traj.as_ref()?; trajectory_program(&program_json(p, st, raw).ok()?, t.k, t.beta0, p.eng.exact_limit)
 }
-/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009) and without `glyph` and `glyph_why` (§2.18);
-/// both have effects {}: the blocks on or off, one digest
+/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009), without `glyph` and `glyph_why` (§2.18) and
+/// without `integrity` (RFC 0014); all have effects {}: the blocks on or off, one digest
 pub fn stance_sha(doc: &Json) -> String {
-    const OUT: [&str; 3] = ["deviation", "glyph", "glyph_why"];
+    const OUT: [&str; 4] = ["deviation", "glyph", "glyph_why", "integrity"];
     match doc { Json::Obj(v) if v.iter().any(|(k, _)| OUT.contains(&k.as_str())) => sha(&Json::Obj(v.iter().filter(|(k, _)| !OUT.contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
 }
 
