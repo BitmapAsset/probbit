@@ -2940,7 +2940,7 @@ fn turn_src_at(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engin
     let pr = turn_prep(p, st, raw, check)?;
     // the deviation's A_t is `program_meta` of the same state and inputs: no rest, `src` taken out only with these blocks
     let want = want && check && pr.fresh && !no_inertia && p.eng.op == "decide" && (p.reward.is_none() || p.senses.is_some() || p.credit().is_some() || p.has_needs());
-    let mut sv = turn_solve(p, &pr, no_inertia, eng, timing, want)?; let at = sv.at.take();
+    let mut sv = turn_solve(p, &pr, no_inertia, eng, timing, want, None)?; let at = sv.at.take();
     let (j, s) = turn_doc(p, pr, sv); Ok((j, s, at))
 }
 /// The steps before the compiler: the inputs read, `src` and the payments taken out, a rest due applied, then the sense / needs /
@@ -2985,15 +2985,17 @@ fn decode_boxed(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json,
 #[inline(never)]
 fn settle_boxed(p: &Persona, j: &mut Json, ns: Box<State>, k: &Pay, s: Settled) -> Box<State> { Box::new(settle(p, j, *ns, k, s)) }
 /// The compiler, the engine and the decoder: the program for the stepped state, its solve (a yield on a habit conflict, a second,
-/// clamped solve for the persona's vouch rule) and the answer read back
+/// clamped solve for the persona's vouch rule) and the answer read back; `first`: the first program already compiled from the same
+/// stepped state and inputs with these options (RFC 0014's rest probe keys its cache on it), so it is not compiled twice
 #[inline(never)]
-fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool, want: bool) -> R<Solved> {
+#[allow(clippy::too_many_arguments)]
+fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool, want: bool, first: Option<Box<(Json, Meta)>>) -> R<Solved> {
     use crate::trace::{enter, Phase};
     let (st, raw): (&State, &[(String, Json)]) = (&pr.st, &pr.raw);
     enter(Phase::Compile);
     let t0 = Instant::now(); let mut calls = 0;
     let o = Opts { no_inertia, ..Default::default() };
-    let (mut prog, mut meta) = compile(p, st, &raw, &o)?; let mut ptext = digest_of(&text(&prog));
+    let (mut prog, mut meta) = match first { Some(b) => *b, None => compile(p, st, &raw, &o)? }; let mut ptext = digest_of(&text(&prog));
     let compile_ms = ms(t0); let t1 = Instant::now(); let mut doc = solve(p, st, &prog, eng, &mut calls);
     // the expectation's A_t: this answer's exact marginals (an exact answer never yields, so `meta` stays this program's)
     let first = want.then(|| doc_marg(&doc));

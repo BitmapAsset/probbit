@@ -51,22 +51,45 @@ pub fn spec(idn: &Json, doc: &Json, p: &Persona) -> R<Ident> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Integrity { pub doc: Json, pub drift: f64, pub used: f64 }
 
-/// The fresh individual's odds at the rest probe and the allowances (both fixed per seed), and the last probe by state (the
-/// state's body without its `turn` and digest: a turn that changes nothing else leaves the resting odds as they were)
-pub struct Cache { base: Option<(u64, Vec<Vec<f64>>, Vec<Option<f64>>, State)>, key: String, odds: Vec<Vec<f64>>, pub hits: u64, pub misses: u64 }
-impl Cache { pub const fn new() -> Cache { Cache { base: None, key: String::new(), odds: Vec::new(), hits: 0, misses: 0 } } }
+/// The fresh individual's odds at the rest probe and the allowances (both fixed per seed), and the last probe twice keyed: by
+/// state (the rested state's body without its `turn` and digest: a turn that changes nothing else leaves the resting odds as they
+/// were) and by program (the probe's first program without its comment, `prog_key` as the members' cache keys them: a rested state
+/// whose senses or drives moved but whose resting program did not gives the same odds). A program row is kept only when that
+/// program's answer was exact and the stance is that answer's (no yield, hold or conflict): exact marginals read the program alone.
+pub struct Cache { base: Option<(u64, Vec<Vec<f64>>, Vec<Option<f64>>, State)>, key: [u8; 32], odds: Vec<Vec<f64>>, prog: Option<[u8; 32]>,
+    /// probes answered from the cache (by state or by program), probes solved, and of the hits those by program
+    pub hits: u64, pub misses: u64, pub by_program: u64 }
+impl Cache { pub const fn new() -> Cache { Cache { base: None, key: [0; 32], odds: Vec::new(), prog: None, hits: 0, misses: 0, by_program: 0 } } }
 impl Default for Cache { fn default() -> Cache { Cache::new() } }
 
+/// The rest probe's inputs: one event of `id.rest` idle hours
+fn rest_in(id: &Ident) -> Json { Json::Obj(vec![("elapsed_hours".into(), Json::Num(id.rest))]) }
+/// Per measured trait its odds in level order, read from a stance document
+fn odds_of(p: &Persona, doc: &Json, id: &Ident) -> Vec<Vec<f64>> {
+    id.traits.iter().map(|t| { let o = doc.get("stance").and_then(|s| s.get(t)).and_then(|x| x.get("odds"));
+        p.var(t).map_or(vec![], |v| v.levels.iter().map(|lv| o.and_then(|o| o.get(lv)).and_then(Json::as_f64).unwrap_or(0.0)).collect()) }).collect()
+}
 /// The rest probe: one event of `id.rest` idle hours, no inputs -> per measured trait its odds in level order
 fn probe(p: &Persona, st: &State, id: &Ident, eng: Engine) -> R<Vec<Vec<f64>>> {
-    let (doc, _) = turn(p, st, &Json::Obj(vec![("elapsed_hours".into(), Json::Num(id.rest))]), false, eng, false)?;
-    Ok(id.traits.iter().map(|t| { let o = doc.get("stance").and_then(|s| s.get(t)).and_then(|x| x.get("odds"));
-        p.var(t).map_or(vec![], |v| v.levels.iter().map(|lv| o.and_then(|o| o.get(lv)).and_then(Json::as_f64).unwrap_or(0.0)).collect()) }).collect())
+    let (doc, _) = turn_boxed(p, st, &rest_in(id), false, eng, false)?; Ok(odds_of(p, &doc, id))
+}
+/// The rest probe through the program key: the turn's steps as `turn_boxed` runs them, its first program compiled here and keyed;
+/// when the key is `known` -> (key, None), else the turn finishes on that program -> (key, Some((odds, whether a row may keep them)))
+#[inline(never)]
+fn probe_keyed(p: &Persona, st: &State, id: &Ident, eng: Engine, known: Option<&[u8; 32]>) -> R<([u8; 32], Option<(Vec<Vec<f64>>, bool)>)> {
+    let pr = turn_prep(p, st, &rest_in(id), true)?;
+    let first = Box::new(compile(p, &pr.st, &pr.raw, &Opts::default())?);
+    let key = prog_key(&first.0);
+    if known == Some(&key) { return Ok((key, None)); }
+    let sv = turn_solve(p, &pr, false, eng, false, false, Some(first))?;
+    let o = &sv.out; let row = o.verdict.as_str() == Some("exact") && o.held.is_empty() && o.yielded.is_empty() && o.conflict.is_empty();
+    let (doc, _) = turn_doc(p, pr, sv); Ok((key, Some((odds_of(p, &doc, id), row))))
 }
 /// The cache key of a rested state: its body without `turn` and `digest` (a rested state has no open decision, whose credit
-/// would age in turns)
-fn key_of(p: &Persona, st: &State) -> String {
-    let mut b = st.body(p); if let Json::Obj(v) = &mut b { v.retain(|(k, _)| k != "turn" && k != "digest"); } canon(&b)
+/// would age in turns), hashed by structure (`prog_key`)
+#[inline(never)]
+fn key_of(p: &Persona, st: &State) -> [u8; 32] {
+    let mut b = st.body(p); if let Json::Obj(v) = &mut b { v.retain(|(k, _)| k != "turn" && k != "digest"); } prog_key(&b)
 }
 /// The individual rested: the channels of the hour at the fresh individual's values `st0` (moods with a half-life, the pace
 /// average, the load, the rest pressure, the eligibility trace and the credit awaiting feedback with its open decisions, the
@@ -82,8 +105,9 @@ pub fn rested(p: &Persona, st: &State, st0: &State) -> State {
 
 /// `integrity` of the state `st` (after a turn) whose stance document is `stance` (its `habits.bound`), from a fresh cache
 pub fn compute(p: &Persona, st: &State, stance: &Json, eng: Engine) -> R<Option<Integrity>> { compute_cached(p, st, stance, &mut Cache::new(), eng) }
-/// `compute` through a cache: one rest-probe solve when the state's body (without `turn`) changed since the last call, else none;
-/// the fresh individual's probe and the allowances once per seed. None without the self keys.
+/// `compute` through a cache: one rest-probe solve when the state's body (without `turn`) and the probe's program (without its
+/// comment) both changed since the last call, else none; the fresh individual's probe and the allowances once per seed. None
+/// without the self keys.
 pub fn compute_cached(p: &Persona, st: &State, stance: &Json, cache: &mut Cache, eng: Engine) -> R<Option<Integrity>> {
     let Some(id) = p.ident.as_ref() else { return Ok(None) };
     if cache.base.as_ref().map_or(true, |(s, _, _, _)| *s != st.seed) {
@@ -95,11 +119,16 @@ pub fn compute_cached(p: &Persona, st: &State, stance: &Json, cache: &mut Cache,
                 (Some(b), Some(l), Some(k)) => { let sc = bound::scope(p, b, t, id.rest, Some(&st0));
                     match bound::bases(p, &sc, &st0) { Some(bs) => Some(bound::search(p, k, &sc.coords, l.total_cap, &bs, &p0[i], id.rest, eng)?.0), None => None } }
                 _ => None }); }
-        cache.base = Some((st.seed, p0, eps, st0)); cache.key.clear();
+        cache.base = Some((st.seed, p0, eps, st0)); cache.key = [0; 32]; cache.prog = None;
     }
-    let rs = rested(p, st, &cache.base.as_ref().unwrap().3);
+    let rs = Box::new(rested(p, st, &cache.base.as_ref().unwrap().3));
     let key = key_of(p, &rs);
-    if key == cache.key { cache.hits += 1; } else { cache.odds = probe(p, &rs, id, eng)?; cache.key = key; cache.misses += 1; }
+    if key == cache.key { cache.hits += 1; } else {
+        cache.key = key;
+        match probe_keyed(p, &rs, id, eng, cache.prog.as_ref())? {
+            (_, None) => { cache.hits += 1; cache.by_program += 1; }
+            (k, Some((odds, row))) => { cache.odds = odds; cache.prog = row.then_some(k); cache.misses += 1; } } }
+    drop(rs);
     let (_, p0, eps, _) = cache.base.as_ref().unwrap();
     let (mut sum, mut sum_e, mut sum_d) = (0.0f64, 0.0f64, 0.0f64); let mut rows = vec![]; let mut crossed = vec![];
     for (i, t) in id.traits.iter().enumerate() {
