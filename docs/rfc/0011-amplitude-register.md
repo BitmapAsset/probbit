@@ -7,7 +7,8 @@ this RFC changes a release or `main`; the tier stays off unless a persona asks f
 certificate: compute it again with the tier (section 5). Round 4 adds `engine.amplify` (off by default): exact amplitude
 amplification in place of the projection, which lands on the projection's numbers with feasible mass 1 (section 5,
 "Amplification"). Round 5 adds `engine.schedule` (absent = the default sweep): a longer sweep separates the top two levels
-where the thermal tier is indifferent and agrees more elsewhere (section 5, "Schedules and the indifferent set").
+where the thermal tier is indifferent and agrees more elsewhere (section 5, "Schedules and the indifferent set"). Round 6 shows
+one such decision end to end, with a demo persona, its two recorded strands and the monitor's two faces (section 5, "The demo").
 
 ## 1. What it is, in one paragraph
 
@@ -201,6 +202,57 @@ math functions and the no_std library differ in the last bits, and over four tim
 host even the default fails there (0 of 5 on round 4's own path), so that part is not new. Until the tier computes with the same
 math functions on every build, a non-default schedule replays only on the build that recorded it: the long sweep is the study's
 answer, not a schedule to record strands with yet.
+
+### The demo (round 6)
+
+One decision where the thermal tier is a near tie, shown end to end on the recording (std) build: the program, the two odds,
+the receipts and the monitor's two faces. Every number is a register simulated exactly on a CPU.
+
+**The program, from the corpus.** The recorded corpus's tutor fixture (seed 1, script 2, the 58th exact solve of its replay)
+solves program `a7fae99b114ea2d2` (first 8 bytes of the sha256 of its compact JSON). Humour, regenerated from the corpus:
+thermal `playful` 0.452774 vs `light` 0.442258 (gap 0.010516); the register with the default sweep, gap 0.080846; with the
+long sweep, `playful` 0.975625 (gap 0.951467). The runner-up, `07d909f824f224e4` (the same fixture, script 3): thermal
+`light` 0.444788 vs `playful` 0.425243 (gap 0.019545), long sweep `playful` 0.972868 (gap 0.945965): here the register takes
+the thermal runner-up, as it does on 20.1 % of the indifferent decisions.
+
+**The persona and the life** (`examples/persona/demo/`). A fictional tutor reduced to its humour component (warmth, humour,
+formality, emoji, the valence mood, their couplings and the two habits that bind them) and the two drives that pull humour
+in opposite directions: praise up, criticism (a correction) down. `register.yaml` carries `engine: {tier: amplitude, amplify:
+true, schedule: tf-linear-64x16}`; `thermal.yaml` is the same persona without the engine block (`amplify` and `schedule` need
+the tier). The life, 17 events at seed 1 on a fixed clock, opens with a run of corrections; at event 9 praise and a correction
+arrive together. Both strands verify, record twice byte for byte, emit 0 floats past 6 decimals; event 9 is line 10 of both,
+and its two documents solve the same program.
+
+| event 9, humour | none | light | playful | top-two gap |
+|---|---|---|---|---|
+| thermal (default tiers) | 0.059462 | 0.466563 | 0.473975 | **0.007412** |
+| register, default sweep (comparison) | 0.013180 | 0.566151 | 0.420670 | 0.145481 |
+| register, long sweep (`register.yaml`) | 0.007171 | 0.249010 | 0.743818 | **0.494808** |
+
+The register document's receipts at event 9: `tier` amplitude, `qubits` 20 (`components` [10, 10]), `mixer` complete-graph,
+`schedule_name` tf-linear-64x16, `amplify` iterations [10, 1] with the mass before 0.006196 and after 1, `feasible_mass` 1, the
+`state` digest `sha256:6dbfd5a4…1bbe11`, the program digest `sha256:06517240…ab9a66` (the thermal document's too). Events 2 and
+11 are near ties of the same kind (thermal gaps 0.033093 and 0.048852, register gaps 0.656343 and 0.725300). The register is not
+always the more decisive face: at event 14 the thermal gap is 0.072051 and the register's 0.009221. At event 9 the default sweep
+leans to `light` (gap 0.145481); the long sweep commits to `playful`, the thermal plurality.
+
+**The two faces.** The Mood Monitor (`probbit monitor`, section 5.8 of docs/persona.md) on each strand at event 9, replayed
+from the strand alone ("replay verified"; the document it serves for event 9 is the recorded one, byte for byte), humour
+selected. Thermal: `playful` 47.4 %, `light` 46.7 %, the panel's words "playful, slightly". Register: `playful` 74.4 %,
+`light` 24.9 %, "playful, clearly".
+
+![The Mood Monitor on the thermal strand at event 9, humour selected](0011-demo-thermal.png)
+
+![The Mood Monitor on the register strand at event 9, humour selected](0011-demo-register.png)
+
+**The sentence.** On one recorded decision of a fictional tutor, the default solver's odds for its two leading humour levels
+sit 0.007412 apart; the same program, solved by a qubit register simulated exactly on a CPU, separates them by 0.494808.
+Caveat: the long sweep replays on the recording (std) build only, and the default schedule stays the one for every recorded
+strand.
+
+**Cost** (x86_64, best of 5, the life repeated 20 times, 340 events): thermal 2,184 µs per event, the register with the long
+sweep 1,822 µs (0.83× the thermal copy), the register with the default sweep 913 µs (the long sweep 2.00× the default sweep).
+On this five-variable persona the thermal copy's exact enumeration costs more than the register.
 
 ## 6. What this RFC does not claim
 

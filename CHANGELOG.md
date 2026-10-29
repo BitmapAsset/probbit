@@ -105,6 +105,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Research
 
+- **RFC 0011, round 6: the demo** (research; `examples/persona/demo/`, docs/rfc/0011-amplitude-register.md, "The demo"). A
+  fictional tutor reduced to its humour component, with praise and criticism pulling humour in opposite directions, in two
+  copies: `register.yaml` (`engine: {tier: amplitude, amplify: true, schedule: tf-linear-64x16}`) and `thermal.yaml` (no engine
+  block). One 17-event life recorded on each (both verify, twice byte for byte, 0 floats past 6 decimals). At event 9 (line 10
+  of both strands, the same program) the thermal odds of the top two humour levels sit 0.007412 apart and the simulated
+  register separates them by 0.494808; the Mood Monitor's two faces at that event are in the RFC. On the corpus's own program
+  `a7fae99b114ea2d2`: thermal gap 0.010516, long sweep 0.951467. The long sweep replays on the recording build only; the
+  default schedule stays for every recorded strand. No engine change. Simulated, exact, on a CPU.
 - **RFC 0011, round 5: schedules and the indifferent set** (research, `engine.schedule`, absent = the default sweep;
   docs/rfc/0011-amplitude-register.md, "Schedules and the indifferent set"). Three names: `tf-linear-16x4` (default),
   `tf-linear-64x16` (four times the layers), `qaoa-p2` (two layers, angles fixed on a held-out third of the corpus). On the 10.7 %
