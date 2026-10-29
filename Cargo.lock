@@ -59,6 +59,7 @@ dependencies = [
 name = "probbit-decide"
 version = "0.14.0-dev"
 dependencies = [
+ "libm",
  "probbit-core",
  "probbit-ir",
  "probbit-nostd",

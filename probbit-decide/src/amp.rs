@@ -13,6 +13,21 @@
 use std::prelude::rust_2021::*;
 use probbit_core::Philox4x32;
 
+/// Round 7: the register's one math path. Every function past + - * / that the register evaluates (cos, sin, sqrt, asin, acos,
+/// atan2, floor) is the `libm` crate's on every build, std and no_std alike: pure Rust, the same code and the same evaluation
+/// order on every target, no platform libm and no fused multiply-add, so a strand recorded on one build replays bit for bit on
+/// the other whatever the schedule's length (round 5: the platform's cos/sin against libm's flipped a 6-decimal odd over the
+/// long sweep's layers).
+mod m {
+    #[inline] pub fn cos(x: f64) -> f64 { libm::cos(x) }
+    #[inline] pub fn sin(x: f64) -> f64 { libm::sin(x) }
+    #[inline] pub fn sqrt(x: f64) -> f64 { libm::sqrt(x) }
+    #[inline] pub fn asin(x: f64) -> f64 { libm::asin(x) }
+    #[inline] pub fn acos(x: f64) -> f64 { libm::acos(x) }
+    #[inline] pub fn atan2(y: f64, x: f64) -> f64 { libm::atan2(y, x) }
+    #[inline] pub fn floor(x: f64) -> f64 { libm::floor(x) }
+}
+
 /// The largest register on the host (16 qubits = 1 MiB of amplitudes)
 pub const Q_MAX_HOST: usize = 16;
 /// Bytes per amplitude: two f64
@@ -30,7 +45,7 @@ impl C {
     #[inline] pub fn conj(self) -> C { C { re: self.re, im: -self.im } }
     #[inline] pub fn norm2(self) -> f64 { self.re * self.re + self.im * self.im }
     /// e^{i t}
-    #[inline] pub fn cis(t: f64) -> C { C { re: t.cos(), im: t.sin() } }
+    #[inline] pub fn cis(t: f64) -> C { C { re: m::cos(t), im: m::sin(t) } }
 }
 
 /// The gate set: enough for Ising-type programs and QAOA layers. Angles in radians; RX(t) = exp(-i t X / 2),
@@ -49,7 +64,7 @@ impl Gate {
     /// The gate's matrix on its own qubits (2x2, or 4x4 on (a, b) with basis index bit_a + 2 bit_b), row-major
     pub fn matrix(&self) -> Vec<C> {
         let (r, z) = (core::f64::consts::FRAC_1_SQRT_2, C::ZERO);
-        let half = |t: f64| (C::new((t / 2.0).cos(), 0.0), (t / 2.0).sin());
+        let half = |t: f64| (C::new(m::cos(t / 2.0), 0.0), m::sin(t / 2.0));
         match *self {
             Gate::H(_) => vec![C::new(r, 0.0), C::new(r, 0.0), C::new(r, 0.0), C::new(-r, 0.0)],
             Gate::X(_) => vec![z, C::ONE, C::ONE, z],
@@ -147,7 +162,7 @@ impl Register {
     /// Round 2: the uniform superposition over the valid codes of every variable, 1/sqrt(prod d_i) on each valid basis state and
     /// 0 on the rest (for an all-two-valued encoding this is H on every qubit)
     pub fn uniform(enc: &Encoding) -> Register {
-        let mut r = Register::new(enc.qubits()); let a = 1.0 / (enc.levels.iter().map(|&d| d as f64).product::<f64>()).sqrt();
+        let mut r = Register::new(enc.qubits()); let a = 1.0 / m::sqrt(enc.levels.iter().map(|&d| d as f64).product::<f64>());
         for (x, v) in r.amp.iter_mut().enumerate() { *v = if enc.decode(x).is_some() { C::new(a, 0.0) } else { C::ZERO }; }
         r
     }
@@ -344,15 +359,15 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     let a0 = mass(r); if !(a0 > 0.0) { return None; }
     if a0 >= 1.0 - 1e-15 { return Some(Amplified { iterations: 0, phases: (0.0, 0.0), mass_before: a0, mass_after: a0 }); }
     let psi = r.amp.clone(); let pi = core::f64::consts::PI;
-    let th = a0.sqrt().asin(); let k = (pi / (4.0 * th) - 0.5).floor().max(0.0) as usize;
+    let th = m::asin(m::sqrt(a0)); let k = m::floor(pi / (4.0 * th) - 0.5).max(0.0) as usize;
     for _ in 0..k { r.oracle(&g, pi); r.diffuse(&psi, pi); }
     // the final step: the state is +-(al |good> + be |bad>), al, be >= 0; with s = sin theta, c = cos theta, S_psi(varphi)
     // S_f(phi) leaves be - (1 - e^{i varphi}) c (al s e^{i phi} + be c) on |bad>: it vanishes for
     // cos phi = -(be / al) cos(2 theta) / sin(2 theta) (|cos phi| < 1 for this k) and 1 - e^{i varphi} = be / (c (al s e^{i phi} + be c))
-    let a = mass(r).min(1.0); let (al, be) = (a.sqrt(), (1.0 - a).max(0.0).sqrt()); let (s, c) = (a0.sqrt(), (1.0 - a0).sqrt());
-    let cphi = (-(be / al) * (1.0 - 2.0 * a0) / (2.0 * s * c)).clamp(-1.0, 1.0); let phi = cphi.acos();
-    let w = C::new(al * s * phi.cos() + be * c, al * s * phi.sin()); let den = w.norm2() * c; // z = be / (c w) = be conj(w) / (c |w|^2)
-    let z = C::new(be * w.re / den, -be * w.im / den); let vphi = (-z.im).atan2(1.0 - z.re);
+    let a = mass(r).min(1.0); let (al, be) = (m::sqrt(a), m::sqrt((1.0 - a).max(0.0))); let (s, c) = (m::sqrt(a0), m::sqrt(1.0 - a0));
+    let cphi = (-(be / al) * (1.0 - 2.0 * a0) / (2.0 * s * c)).clamp(-1.0, 1.0); let phi = m::acos(cphi);
+    let w = C::new(al * s * m::cos(phi) + be * c, al * s * m::sin(phi)); let den = w.norm2() * c; // z = be / (c w) = be conj(w) / (c |w|^2)
+    let z = C::new(be * w.re / den, -be * w.im / den); let vphi = m::atan2(-z.im, 1.0 - z.re);
     r.oracle(&g, phi); r.diffuse(&psi, vphi);
     let m = mass(r); if m < AMPLIFIED_MASS_MIN { return None; }
     Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before: a0, mass_after: m })
