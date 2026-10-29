@@ -21,6 +21,7 @@ use probbit_core::Philox4x32;
 use std::collections::HashMap;
 pub mod oracle;
 pub mod ir;
+pub mod amp;
 
 /// Tasks up to which `Problem::logw` uses the pairwise loop. R19.8 re-measured (`examples/logw_threshold.rs`, 6 workers, groups
 /// of 4 / 8, median of 7 alternating rounds, load ~8.6): linear / pairwise ns per call = 1.52 / 1.25 at 96 tasks, 0.96 / 0.92 at

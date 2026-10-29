@@ -195,6 +195,75 @@ checkpoint's `expect`, `expectation.rest`, the `identity` self keys) read as uns
   npm): `docs/monitor-app.md` says to remove the quarantine mark before the first open and how to recover after a refused
   one (move the app, or Open Anyway), and that the bundled probbit serves several strands with a switcher; the plugin
   README names the second warning an older probbit gives; REPRODUCE.md no longer says only 0.12.0 replays the strand.
+### Research
+
+- **RFC 0011, round 7: one math path for the register** (research, `engine.tier: amplitude` stays opt-in; docs/rfc/0011-amplitude-register.md,
+  "One math path"). The simulated register evaluates cos, sin, sqrt, asin, acos, atan2 and floor through the `libm` crate on the std and
+  the no_std build alike (a direct dependency of probbit-decide). 100 fresh lives per schedule recorded on the std build re-verify on
+  the no_std build 100/100 for `tf-linear-16x4`, `tf-linear-64x16` (round 5: 0/100) and `qaoa-p2` (98/100), x86_64; the tutor's
+  default-schedule strands are byte-identical to before (100/100) and both demo strands re-record byte for byte (a 52-qubit
+  recorded day's default strands moved in the last bits). Cost on that day: long sweep 1.50x the default. Exact, on a CPU.
+- **RFC 0011, round 7: the amplification lands on the long sweep** (research). `amplify_exact` renormalises the swept state once
+  before the standard iterations: the diffusion about a state of squared norm 1 + eps is not unitary, so the shortfall grew with the
+  iterations and 165 corpus programs declined under the long sweep; now 0 decline under any schedule (median gap 0.151709, agreement
+  0.981671 on the corpus). The receipt's mass before is unchanged; a mass that is not a number declines instead of panicking.
+  Simulated, exact, on a CPU.
+- **RFC 0011, round 7: docs** (research). docs/persona.md's `engine.schedule` paragraph and the demo README state the measured
+  replay on both builds; docs/persona.md section 5.8: the stance digest is the sha256 of `/doc/N`'s JSON without the trailing newline.
+- **RFC 0011, round 6: the demo** (research; `examples/persona/demo/`, docs/rfc/0011-amplitude-register.md, "The demo"). A
+  fictional tutor reduced to its humour component, with praise and criticism pulling humour in opposite directions, in two
+  copies: `register.yaml` (`engine: {tier: amplitude, amplify: true, schedule: tf-linear-64x16}`) and `thermal.yaml` (no engine
+  block). One 17-event life recorded on each (both verify, twice byte for byte, 0 floats past 6 decimals). At event 9 (line 10
+  of both strands, the same program) the thermal odds of the top two humour levels sit 0.007412 apart and the simulated
+  register separates them by 0.494808; the Mood Monitor's two faces at that event are in the RFC. On the corpus's own program
+  `a7fae99b114ea2d2`: thermal gap 0.010516, long sweep 0.951467. The long sweep replays on the recording build only; the
+  default schedule stays for every recorded strand. No engine change. Simulated, exact, on a CPU.
+- **RFC 0011, round 5: schedules and the indifferent set** (research, `engine.schedule`, absent = the default sweep;
+  docs/rfc/0011-amplitude-register.md, "Schedules and the indifferent set"). Three names: `tf-linear-16x4` (default),
+  `tf-linear-64x16` (four times the layers), `qaoa-p2` (two layers, angles fixed on a held-out third of the corpus). On the 10.7 %
+  of the recorded corpus's trait decisions where the thermal tier is indifferent, the simulated register's top-two gap has median
+  0.049 (default), 0.152 (long sweep), 0.094 (qaoa-p2); agreement elsewhere 97.6 / 98.2 / 93.0 %; noise 0.0007. The long sweep
+  is the rule's choice (1.5× the solve per event on a recorded day). A missed amplification landing (165 programs under the long sweep) now declines to the
+  default tiers instead of panicking. Failure, stated: the no_std build re-verifies the long sweep's strands 0/100 (qaoa-p2 98/100;
+  the default 100/100): last-bit math differences, so non-default schedules replay only on the recording build for now. Without
+  the key every stance and strand is byte-identical to round 4. Exact, on a CPU.
+- **RFC 0011, round 4: exact amplitude amplification in place of the projection** (research, `engine.amplify: true`, off by
+  default; docs/rfc/0011-amplitude-register.md, "Amplification"). `amp::amplify_exact`: the rules as the oracle, the diffusion
+  about the swept state, k standard iterations and one phase-matched final one, so the simulated register lands on its
+  feasible plans exactly (mass ≥ 1 − 1e-12, asserted). The plane argument says the result is the projection's distribution;
+  measured: marginals equal to 1.1e-12 on 220 programs, the same plan on 220/220 and on all 339,389 solves of the recorded corpus (B4 unchanged, 96.29 %),
+  287/287 stance lines on a recorded day;
+  cost 1.02× the projected solve. The receipt adds `engine.amplify` and `feasible_mass` becomes 1. Without the key every stance
+  and strand is byte-identical to round 3. Simulated exactly on a CPU; no quantum hardware, no speedup claim.
+- **RFC 0011, round 3: the verdict, KEEP as an optional tier** (research, off by default; docs/rfc/0011-amplitude-register.md,
+  status "accepted as optional tier"). Measured on every program the recorded corpus's 653 outputs solve (338,567 exact solves,
+  0 declined, the corpus byte-identical with the comparison beside it): the exact simulated register picks the same level as the
+  exact default tier in 2,095,627 of 2,176,371 trait decisions (96.29 %, bar 90 %); the differing cases sit where the default
+  tier's own level holds less than half the mass (91 % of them), not where the rules' projection does the work. Three designed
+  two-path programs differ from the thermal odds by 0.25-0.27 at the node (engine vs reference 1.4e-14). The bound harness with
+  the tier: 0 of 4,100 cases above a certificate computed with the tier, 1,598 above one computed without it, so `persona bound`
+  must run with the tier on (docs/persona.md says so). A rule-penalty term was measured and not adopted (it lifts the Born mass
+  on rule-abiding plans and drops agreement to 83 %). No code change in this round. Simulated exactly on a CPU; no quantum
+  hardware, no speedup claim.
+- **RFC 0011, round 2: multi-level traits on the amplitude register** (draft, research; docs/rfc/0011-amplitude-register.md):
+  a variable with d allowed values takes ⌈log2 d⌉ qubits (`amp::Encoding`; a three-level trait two qubits, its fourth code
+  unused), the start is the uniform superposition over the valid codes, the mixer is the complete-graph mixer per variable
+  (`amp::MIXER`, the identity on unused codes; exp(i t X) for two values, round 1's mixer exactly), and the cost is one general
+  diagonal phase layer exp(−iγE), E = −log w per basis state (`Register::phase`), so pair tables between three-level traits
+  need no decomposition (round 1's Walsh transform and its decline are gone). The unused codes keep amplitude 0, checked after
+  every layer, never renormalised. The tier runs one register per connected component of the program (exact: the state is the
+  product of the components' states); `engine.q_max` bounds the largest component's encoded qubits. New receipt fields
+  `engine.components`, `encoding`, `mixer`; `qubits` counts encoded qubits. Measured against an independent mixed-radix
+  reference: max |Δ marginal| 2.7e-13 on 220 programs. Simulated exactly on a CPU; no quantum hardware, no speedup claim.
+- **RFC 0011, round 1: an amplitude register** (draft; docs/rfc/0011-amplitude-register.md): `probbit-decide::amp`, an exact
+  simulated qubit register on a CPU (q ≤ 16 on the host; 16 · 2^q bytes of amplitudes on the heap; std and no_std + alloc):
+  gates H, X, Z, RX, RZ, CNOT, CZ, RZZ, a Trotterised transverse-field sweep, QAOA layers, exact marginals, Born-rule
+  measurement with the engine's RNG, a sha256 digest of the state at 6 decimals. The persona flag `engine.tier: amplitude`
+  (off by default, `engine.q_max` default 12) solves a turn's program on it when every variable has at most two values;
+  otherwise the default tiers answer and the stance document says why. Receipt fields `engine.qubits`, `circuit`,
+  `schedule`, `schedule_name`, `state`, `feasible_mass`. Without the flag no byte of any stance or strand changes. No quantum
+  hardware, no speedup claim; the comparison with the default tier is the next round.
+
 ## 0.13.0 - 2026-10-26
 
 The monitor face and the Mac app, identity labels and many strands in one monitor, and the OpenClaw plugin 0.2.0. A persona
