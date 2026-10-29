@@ -354,11 +354,16 @@ pub const AMPLIFIED_MASS_MIN: f64 = 1.0 - 1e-12;
 /// evolution. a0 = 1: nothing to do (0 iterations); a0 = 0: None (nothing to amplify). Round 5: a landing whose mass after is
 /// below 1 - 1e-12 (rounding drift over many iterations at a tiny a0, measured with the long sweep) is also None, so the tier
 /// declines to the default tiers instead of panicking; the register is then left mid-rotation and must not be read.
+/// Round 7: psi is renormalised once before the iterations (its squared norm summed with compensation). The sweep's layers
+/// leave it 1 + eps, a larger eps the more layers; the diffusion about such a psi is not unitary (|D v|^2 = |v|^2 + 4 eps |<psi|v>|^2),
+/// so the error grows with every iteration, linearly in k: that, not the rotation, was the ~1e-12 shortfall of the long sweep's
+/// 165 corpus programs (k in the hundreds at a tiny a0), and the same eps of the other sign is round 4's drift above 1.
 pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<Amplified> {
     let g: Vec<bool> = (0..r.amp.len()).map(&good).collect(); let mass = |r: &Register| r.amp.iter().zip(&g).filter(|(_, &x)| x).map(|(a, _)| a.norm2()).sum::<f64>();
     let a0 = mass(r); if !(a0 > 0.0) { return None; }
     if a0 >= 1.0 - 1e-15 { return Some(Amplified { iterations: 0, phases: (0.0, 0.0), mass_before: a0, mass_after: a0 }); }
-    let psi = r.amp.clone(); let pi = core::f64::consts::PI;
+    let n2 = compensated_norm2(&r.amp); let u = 1.0 / m::sqrt(n2); for a in r.amp.iter_mut() { *a = C::new(a.re * u, a.im * u); }
+    let a0 = mass(r); let psi = r.amp.clone(); let pi = core::f64::consts::PI;
     let th = m::asin(m::sqrt(a0)); let k = m::floor(pi / (4.0 * th) - 0.5).max(0.0) as usize;
     for _ in 0..k { r.oracle(&g, pi); r.diffuse(&psi, pi); }
     // the final step: the state is +-(al |good> + be |bad>), al, be >= 0; with s = sin theta, c = cos theta, S_psi(varphi)
@@ -371,6 +376,14 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     r.oracle(&g, phi); r.diffuse(&psi, vphi);
     let m = mass(r); if m < AMPLIFIED_MASS_MIN { return None; }
     Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before: a0, mass_after: m })
+}
+
+/// Round 7: sum |a_x|^2 with Neumaier's compensation (the plain running sum of 2^16 terms can be off by ~1e-14, the size of the
+/// drift the renormalisation removes)
+fn compensated_norm2(amp: &[C]) -> f64 {
+    let (mut s, mut c) = (0.0f64, 0.0f64);
+    for a in amp { let x = a.norm2(); let t = s + x; c += if s >= x { (s - t) + x } else { (x - t) + s }; s = t; } // s, x >= 0
+    s + c
 }
 
 /// sha256 (FIPS 180-4), one shot
@@ -464,6 +477,17 @@ mod tests {
         let l = Evolution::named(SCHEDULE_NAMES[1]).unwrap(); assert_eq!(l.run(&enc, &e).circuit_text().lines().count(), 4 * d.run(&enc, &e).circuit_text().lines().count());
         let q = Evolution::named(SCHEDULE_NAMES[2]).unwrap(); assert_eq!(q.name(), "qaoa-p2"); assert_eq!(q.run(&enc, &e).amplitudes(), qaoa_on(&enc, &e, &QAOA_P2).amplitudes());
         assert_eq!(q.text(), "qaoa layers 2\ngamma 0.500000 beta 0.500000\ngamma 1.500000 beta 0.250000\n"); assert!(Evolution::named("tf-linear-8x2").is_none());
+    }
+    /// Round 7: a psi whose squared norm is off by 1e-12 (a long sweep leaves ~1e-14) and one good state of 2^14, so about a
+    /// hundred iterations: without the renormalisation the landing drifts by ~2 k eps (~2e-10); with it the mass stays within
+    /// 1e-12 of 1 and the good state's probability is 1
+    #[test]
+    fn a_landing_after_a_hundred_iterations_keeps_its_mass() {
+        let enc = Encoding::two_valued(14); let mut r = Register::uniform(&enc); let f = (1.0 + 1e-12f64).sqrt();
+        for a in r.amp.iter_mut() { *a = C::new(a.re * f, a.im * f); }
+        let am = amplify_exact(&mut r, |x| x == 5).unwrap(); assert!(am.iterations > 90, "{}", am.iterations);
+        assert!((am.mass_after - 1.0).abs() <= 1e-12, "mass after {:e}", am.mass_after - 1.0); assert!((r.probabilities()[5] - 1.0).abs() <= 1e-12);
+        assert!((compensated_norm2(r.amplitudes()) - 1.0).abs() <= 1e-12);
     }
     #[test]
     fn measure_and_digest_are_deterministic() {
