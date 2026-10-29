@@ -199,9 +199,9 @@ Replay, measured, and a failure printed as one: 100 lives per schedule record tw
 emit 0 floats past 6 decimals; an engine without the tier exits 5. The no_std build (the chip's math library) re-verifies
 the default schedule's lives 100 of 100 on x86_64, but **the long sweep's 0 of 100 and qaoa-p2's 98 of 100**: the platform's
 math functions and the no_std library differ in the last bits, and over four times the layers a 6-decimal odd flips. On an arm64
-host even the default fails there (0 of 5 on round 4's own path), so that part is not new. Until the tier computes with the same
-math functions on every build, a non-default schedule replays only on the build that recorded it: the long sweep is the study's
-answer, not a schedule to record strands with yet.
+host even the default fails there (0 of 5 on round 4's own path), so that part is not new. Round 7 (below, "One math path")
+makes the tier compute with the same math functions on every build: all three schedules now replay 100 of 100 on the no_std
+build on x86_64.
 
 ### The demo (round 6)
 
@@ -247,12 +247,36 @@ selected. Thermal: `playful` 47.4 %, `light` 46.7 %, the panel's words "playful,
 
 **The sentence.** On one recorded decision of a fictional tutor, the default solver's odds for its two leading humour levels
 sit 0.007412 apart; the same program, solved by a qubit register simulated exactly on a CPU, separates them by 0.494808.
-Caveat: the long sweep replays on the recording (std) build only, and the default schedule stays the one for every recorded
-strand.
+Since round 7 both strands re-record byte for byte and re-verify on the no_std build as well ("One math path", below).
 
 **Cost** (x86_64, best of 5, the life repeated 20 times, 340 events): thermal 2,184 µs per event, the register with the long
 sweep 1,822 µs (0.83× the thermal copy), the register with the default sweep 913 µs (the long sweep 2.00× the default sweep).
 On this five-variable persona the thermal copy's exact enumeration costs more than the register.
+
+### One math path (round 7)
+
+What an optional tier needs: the same odds on every build, no declines, the numbers re-measured. The register, simulated
+exactly on a CPU, now evaluates every function past + − × ÷ (cos, sin, sqrt, asin, acos, atan2, floor) through the `libm`
+crate on the std and the no_std build alike: pure Rust, the same code and evaluation order on every target, no platform math
+library, no fused multiply-add. Measured on x86_64 (100 fresh tutor lives per schedule recorded on the std build, each
+re-verified and re-written by a no_std build of the persona crate on the host):
+
+| schedule | recorded twice byte-equal | verify (std) | verify (no_std) | no_std re-write byte-equal | strands equal to the round-6 engine's |
+|---|---|---|---|---|---|
+| `tf-linear-16x4` (default) | 100/100 | 100/100 | **100/100** (round 5: 100/100) | 100/100 | 100/100 |
+| `tf-linear-64x16` | 100/100 | 100/100 | **100/100** (round 5: 0/100) | 100/100 | 0/100 |
+| `qaoa-p2` | 100/100 | 100/100 | **100/100** (round 5: 98/100) | 100/100 | 98/100 |
+
+The default schedule's strands are byte-identical to the round-6 engine's, so no recorded register strand moves; the long
+sweep's do move (the math changed in the last bits, and the 6-decimal digests with it), which an unreleased tier allows. Both demo strands re-record byte for byte. The arm64 leg is not measured (no arm64 runner for the replay).
+
+The missed landing: the diffusion about a swept state of squared norm 1 + ε is not unitary (|Dv|² = |v|² + 4ε|⟨ψ|v⟩|²), so
+the error grows with every iteration, linearly in their number; at a tiny feasible mass (hundreds of iterations) the long
+sweep's ε left 165 corpus programs about 1e-12 short of the landing, and the same ε of the other sign is round 4's drift above
+1. `amplify_exact` now renormalises the swept state once before the standard iterations (squared norm by a compensated sum;
+only when there are iterations, so the one matched step of a mass above 1/4 is unchanged), and a mass that is not a number
+declines like a miss. A rotation in the plane would have hidden the cause; renormalising keeps every iteration the same
+unitary step. The receipt's mass before stays the swept state's; `feasible_mass` stays 1.
 
 ## 6. What this RFC does not claim
 

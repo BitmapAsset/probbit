@@ -255,8 +255,10 @@ rules are the oracle, the register is rotated onto the plans that obey them, the
 1.1e-12) and `engine.amplify` logs the iterations, the final phases and the mass before and after (`feasible_mass` 1). `engine.schedule`
 (research, round 5; needs the tier; absent = `tf-linear-16x4`) names the evolution of the register, simulated exactly on a CPU: `tf-linear-64x16` (four times
 the layers) separates the top two levels where the thermal tier is a near tie (median gap 0.152 vs 0.049 on the recorded corpus) and
-agrees more elsewhere; `qaoa-p2` is two fixed QAOA layers (RFC 0011, "Schedules and the indifferent set"). Strands recorded with a
-non-default schedule do not yet replay on the no_std build (last-bit math differences; the default does). The register is a
+agrees more elsewhere; `qaoa-p2` is two fixed QAOA layers (RFC 0011, "Schedules and the indifferent set"). Since round 7 the
+register computes its math functions with one library (`libm`) on the std and the no_std build: 100 fresh lives per schedule
+recorded on the std build re-verify on the no_std build 100 of 100 and re-write byte for byte, on each of the three schedules
+(x86_64; arm64 not measured), and the default schedule's strands are byte-identical to before. The register is a
 simulation: no quantum hardware, no speedup claim; its stances agree with the default tier in 96 % of trait decisions on the
 recorded corpus (RFC 0011, round 3). With the key, `persona bound` probes through the tier: compute the certificate again with
 it, since one computed without the key does not cover the tier.
@@ -1849,7 +1851,7 @@ cannot read the documents:
 |---|---|
 | `/` | the page: one file embedded in the binary (under 72 KB, styles and script inline; it fetches no fonts, styles or scripts), with a Content-Security-Policy that lets it connect to its own server and nowhere else |
 | `/events` | server-sent events: `meta` (the layout: the strand, the engine, the persona, its traits, moods, inputs and history features in the persona's order, and `face`, the two moods the face's meters show), the latest `frame`, then a frame per event: `{n, doc, given, learned, spark, diverges, note}` (with `engine.trajectory` also `trajectory` and `settle`, below), that is the stance document, the inputs as the strand logs them, the learned deltas, the moods' recent positions, the line that differs and a warning; a heartbeat comment after 15 quiet seconds; events that land within one poll (100 ms), or while a page falls behind, come as the latest frame |
-| `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (its sha256 is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
+| `/doc/N` | event N's stance document, canonical JSON and a newline, as `probbit live` printed it (the sha256 of the JSON without that newline is the `stance` digest of the strand's line N + 1); the latest 10,000 are kept |
 | `/strands` | the strands served, canonical JSON: `{demo, dir, strands: [{id, strand, labels, persona, n, glyph, age_s, labels_error?, segment?}]}` (the file name, never its directory; `age_s`: seconds since the strand file was last written, a life in segments: its newest file; `segment`: that file's index, when it is not the first); the demo lists none |
 | `/s/ID/events`, `/s/ID/doc/N` | as `/events` and `/doc/N`, for strand ID; `/events` and `/doc/N` are the first strand's, so a single-strand page is as before |
 

@@ -45,6 +45,7 @@ The register strand's documents carry the receipts: `engine.tier` `amplitude`, `
 `engine.amplify` (iterations, phases, the mass before and after), `feasible_mass` 1.000000 and the `state` digest of the final
 amplitudes at 6 decimals.
 
-**Caveat.** The long sweep replays on the recording (std) build only for now: the no_std build's math library differs from the
-platform's in the last bits, and over four times the layers a 6-decimal odd can flip. The default schedule stays the one for
-every recorded strand; an engine without the tier (0.13.0) refuses `register.strand` (exit 5) and verifies `thermal.strand`.
+**Replay on every build.** Since round 7 the register computes its math functions with one library on the std and the no_std
+build, so the long sweep replays on both: 100 fresh lives per schedule recorded on the std build re-verify on the no_std build
+100 of 100 (x86_64; arm64 not measured), and both strands here re-record byte for byte and verify on the no_std build. An
+engine without the tier (0.13.0) refuses `register.strand` (exit 5) and verifies `thermal.strand`.
