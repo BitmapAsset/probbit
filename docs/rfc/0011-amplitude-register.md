@@ -267,8 +267,13 @@ re-verified and re-written by a no_std build of the persona crate on the host):
 | `tf-linear-64x16` | 100/100 | 100/100 | **100/100** (round 5: 0/100) | 100/100 | 0/100 |
 | `qaoa-p2` | 100/100 | 100/100 | **100/100** (round 5: 98/100) | 100/100 | 98/100 |
 
-The default schedule's strands are byte-identical to the round-6 engine's, so no recorded register strand moves; the long
-sweep's do move (the math changed in the last bits, and the 6-decimal digests with it), which an unreleased tier allows. Both demo strands re-record byte for byte. The arm64 leg is not measured (no arm64 runner for the replay).
+The tutor's default-schedule strands are byte-identical to the round-6 engine's and both demo strands re-record byte for byte,
+but the change is in the last bits and a larger persona's default strands can move: on a recorded day of a 52-qubit persona
+they did (qaoa-p2's did not); the long sweep's tutor strands all moved. An unreleased tier allows it; no shipped fixture moved.
+The study of round 5 re-run on this tree: 0 programs decline under any schedule (round 5: 165 under the long sweep), the long
+sweep's median gap on the indifferent decisions 0.151709 and agreement on the others 0.981671 (round 5: 0.151709, 0.981717,
+now over the formerly declined decisions too), the default's and qaoa-p2's rows unchanged to 6 decimals; cost per event on that
+day 1.50x the default for the long sweep (branch vs the round-6 engine 0.95-1.00x); no_std stack at most 2,944 B per schedule. Both demo strands re-record byte for byte. The arm64 leg is not measured (no arm64 runner for the replay).
 
 The missed landing: the diffusion about a swept state of squared norm 1 + ε is not unitary (|Dv|² = |v|² + 4ε|⟨ψ|v⟩|²), so
 the error grows with every iteration, linearly in their number; at a tiny feasible mass (hundreds of iterations) the long

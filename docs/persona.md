@@ -258,7 +258,8 @@ the layers) separates the top two levels where the thermal tier is a near tie (m
 agrees more elsewhere; `qaoa-p2` is two fixed QAOA layers (RFC 0011, "Schedules and the indifferent set"). Since round 7 the
 register computes its math functions with one library (`libm`) on the std and the no_std build: 100 fresh lives per schedule
 recorded on the std build re-verify on the no_std build 100 of 100 and re-write byte for byte, on each of the three schedules
-(x86_64; arm64 not measured), and the default schedule's strands are byte-identical to before. The register is a
+(x86_64; arm64 not measured). The math change is in the last bits: the tutor's and the demo's default-schedule strands are
+byte-identical to before, a larger persona's can move. The register is a
 simulation: no quantum hardware, no speedup claim; its stances agree with the default tier in 96 % of trait decisions on the
 recorded corpus (RFC 0011, round 3). With the key, `persona bound` probes through the tier: compute the certificate again with
 it, since one computed without the key does not cover the tier.

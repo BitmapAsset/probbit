@@ -200,12 +200,14 @@ checkpoint's `expect`, `expectation.rest`, the `identity` self keys) read as uns
 - **RFC 0011, round 7: one math path for the register** (research, `engine.tier: amplitude` stays opt-in; docs/rfc/0011-amplitude-register.md,
   "One math path"). The simulated register evaluates cos, sin, sqrt, asin, acos, atan2 and floor through the `libm` crate on the std and
   the no_std build alike (a direct dependency of probbit-decide). 100 fresh lives per schedule recorded on the std build re-verify on
-  the no_std build 100/100 for `tf-linear-16x4`, `tf-linear-64x16` (round 5: 0/100) and `qaoa-p2` (98/100), x86_64; the default
-  schedule's strands are byte-identical to before (100/100) and both demo strands re-record byte for byte. Exact, on a CPU.
+  the no_std build 100/100 for `tf-linear-16x4`, `tf-linear-64x16` (round 5: 0/100) and `qaoa-p2` (98/100), x86_64; the tutor's
+  default-schedule strands are byte-identical to before (100/100) and both demo strands re-record byte for byte (a 52-qubit
+  recorded day's default strands moved in the last bits). Cost on that day: long sweep 1.50x the default. Exact, on a CPU.
 - **RFC 0011, round 7: the amplification lands on the long sweep** (research). `amplify_exact` renormalises the swept state once
   before the standard iterations: the diffusion about a state of squared norm 1 + eps is not unitary, so the shortfall grew with the
-  iterations and 165 corpus programs declined under the long sweep. The receipt's mass before is unchanged; a mass that is not a
-  number declines instead of panicking. Simulated, exact, on a CPU.
+  iterations and 165 corpus programs declined under the long sweep; now 0 decline under any schedule (median gap 0.151709, agreement
+  0.981671 on the corpus). The receipt's mass before is unchanged; a mass that is not a number declines instead of panicking.
+  Simulated, exact, on a CPU.
 - **RFC 0011, round 7: docs** (research). docs/persona.md's `engine.schedule` paragraph and the demo README state the measured
   replay on both builds; docs/persona.md section 5.8: the stance digest is the sha256 of `/doc/N`'s JSON without the trailing newline.
 - **RFC 0011, round 6: the demo** (research; `examples/persona/demo/`, docs/rfc/0011-amplitude-register.md, "The demo"). A
