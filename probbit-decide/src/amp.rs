@@ -363,7 +363,8 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     let a0 = mass(r); if !(a0 > 0.0) { return None; }
     if a0 >= 1.0 - 1e-15 { return Some(Amplified { iterations: 0, phases: (0.0, 0.0), mass_before: a0, mass_after: a0 }); }
     let n2 = compensated_norm2(&r.amp); let u = 1.0 / m::sqrt(n2); for a in r.amp.iter_mut() { *a = C::new(a.re * u, a.im * u); }
-    let a0 = mass(r); let psi = r.amp.clone(); let pi = core::f64::consts::PI;
+    // the receipt's mass before stays the swept state's (a0); the rotation uses the renormalised state's
+    let (mass_before, a0) = (a0, mass(r)); let psi = r.amp.clone(); let pi = core::f64::consts::PI;
     let th = m::asin(m::sqrt(a0)); let k = m::floor(pi / (4.0 * th) - 0.5).max(0.0) as usize;
     for _ in 0..k { r.oracle(&g, pi); r.diffuse(&psi, pi); }
     // the final step: the state is +-(al |good> + be |bad>), al, be >= 0; with s = sin theta, c = cos theta, S_psi(varphi)
@@ -375,7 +376,7 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     let z = C::new(be * w.re / den, -be * w.im / den); let vphi = m::atan2(-z.im, 1.0 - z.re);
     r.oracle(&g, phi); r.diffuse(&psi, vphi);
     let m = mass(r); if m < AMPLIFIED_MASS_MIN { return None; }
-    Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before: a0, mass_after: m })
+    Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before, mass_after: m })
 }
 
 /// Round 7: sum |a_x|^2 with Neumaier's compensation (the plain running sum of 2^16 terms can be off by ~1e-14, the size of the
