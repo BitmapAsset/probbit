@@ -354,7 +354,8 @@ pub const AMPLIFIED_MASS_MIN: f64 = 1.0 - 1e-12;
 /// evolution. a0 = 1: nothing to do (0 iterations); a0 = 0: None (nothing to amplify). Round 5: a landing whose mass after is
 /// below 1 - 1e-12 (rounding drift over many iterations at a tiny a0, measured with the long sweep) is also None, so the tier
 /// declines to the default tiers instead of panicking; the register is then left mid-rotation and must not be read.
-/// Round 7: psi is renormalised once before the iterations (its squared norm summed with compensation). The sweep's layers
+/// Round 7: psi is renormalised once before the standard iterations, when there are any (its squared norm summed with
+/// compensation; a NaN mass declines like a miss). The sweep's layers
 /// leave it 1 + eps, a larger eps the more layers; the diffusion about such a psi is not unitary (|D v|^2 = |v|^2 + 4 eps |<psi|v>|^2),
 /// so the error grows with every iteration, linearly in k: that, not the rotation, was the ~1e-12 shortfall of the long sweep's
 /// 165 corpus programs (k in the hundreds at a tiny a0), and the same eps of the other sign is round 4's drift above 1.
@@ -362,10 +363,14 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     let g: Vec<bool> = (0..r.amp.len()).map(&good).collect(); let mass = |r: &Register| r.amp.iter().zip(&g).filter(|(_, &x)| x).map(|(a, _)| a.norm2()).sum::<f64>();
     let a0 = mass(r); if !(a0 > 0.0) { return None; }
     if a0 >= 1.0 - 1e-15 { return Some(Amplified { iterations: 0, phases: (0.0, 0.0), mass_before: a0, mass_after: a0 }); }
-    let n2 = compensated_norm2(&r.amp); let u = 1.0 / m::sqrt(n2); for a in r.amp.iter_mut() { *a = C::new(a.re * u, a.im * u); }
-    // the receipt's mass before stays the swept state's (a0); the rotation uses the renormalised state's
-    let (mass_before, a0) = (a0, mass(r)); let psi = r.amp.clone(); let pi = core::f64::consts::PI;
-    let th = m::asin(m::sqrt(a0)); let k = m::floor(pi / (4.0 * th) - 0.5).max(0.0) as usize;
+    let pi = core::f64::consts::PI; let k_of = |a0: f64| m::floor(pi / (4.0 * m::asin(m::sqrt(a0))) - 0.5).max(0.0) as usize;
+    // renormalise only when there are standard iterations to drift over (k >= 1, so a0 <= 1/4): with none, the one matched step
+    // is round 4's, unchanged, and a mass near 1 cannot round above 1. The receipt's mass before stays the swept state's (a0);
+    // the rotation uses the renormalised state's.
+    let mass_before = a0;
+    let a0 = if k_of(a0) == 0 { a0 } else { let u = 1.0 / m::sqrt(compensated_norm2(&r.amp)); for a in r.amp.iter_mut() { *a = C::new(a.re * u, a.im * u); } mass(r) };
+    let psi = r.amp.clone();
+    let k = k_of(a0);
     for _ in 0..k { r.oracle(&g, pi); r.diffuse(&psi, pi); }
     // the final step: the state is +-(al |good> + be |bad>), al, be >= 0; with s = sin theta, c = cos theta, S_psi(varphi)
     // S_f(phi) leaves be - (1 - e^{i varphi}) c (al s e^{i phi} + be c) on |bad>: it vanishes for
@@ -375,7 +380,7 @@ pub fn amplify_exact(r: &mut Register, good: impl Fn(usize) -> bool) -> Option<A
     let w = C::new(al * s * m::cos(phi) + be * c, al * s * m::sin(phi)); let den = w.norm2() * c; // z = be / (c w) = be conj(w) / (c |w|^2)
     let z = C::new(be * w.re / den, -be * w.im / den); let vphi = m::atan2(-z.im, 1.0 - z.re);
     r.oracle(&g, phi); r.diffuse(&psi, vphi);
-    let m = mass(r); if m < AMPLIFIED_MASS_MIN { return None; }
+    let m = mass(r); if !(m >= AMPLIFIED_MASS_MIN) { return None; } // a NaN declines too
     Some(Amplified { iterations: k + 1, phases: (phi, vphi), mass_before, mass_after: m })
 }
 
