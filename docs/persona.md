@@ -990,6 +990,25 @@ keeps that formatting when it is replayed or continued, and `live verify` accept
 replay's at 6 decimals (the chain goes on from the logged bytes), so a strand written on one platform verifies on another.
 The event line's receipt (5 significant digits) is checked exactly, as before.
 
+**Rest pass (RFC 0015).** An optional `rest` key of the block declares the rest pass (memory consolidation) a host may run at
+rest (standby, night, idle) with `Live::consolidate(at)` or `probbit live control STRAND rest [--at TIME]`:
+
+```yaml
+expectation:
+  rest:                 # optional; every key optional; {} = the pass with nothing moving
+    half_life: 64       # the window since the last pass re-folded with this half-life in events (default half_life_events)
+    bucket: 2           # bins of a declared number input in the merge key, 1-3 (default 3 = the thirds: nothing merges)
+    surprise_gain: 1    # weight gain of a context's mean z+ in the window, 0-4 (default 0)
+    decay: 0.5          # factor on the learned deltas, 0-1 (default 1)
+```
+
+With the key, the canonical memory (0.14.0 on) carries a `window` (per remembered context [a, b, k, zs] in key order and
+`since`; checkpoint lines carry it). The pass re-folds each count as count − a + b, weighs counts by 1 + g · min(zs/k, 1.5)/1.5
+(total kept), merges contexts with the same key under B bins, multiplies the learned deltas by `decay`, and appends one
+`consolidation` line: `{at, consolidation {after, before, decay, events, merged {count, keys}, moved}, n, prev, state}`.
+`live verify` re-runs the pass and names the first field of a forged line; an engine before 0.14.0 refuses the line. Without
+the key the pass is refused and every document is byte for byte as before. Full definition: docs/rfcs/0015-consolidation.md.
+
 **Trajectory.** p_beta, proportional to p^beta, of the event's program at the k betas, each solved by the exact tier on
 `Model::scaled(beta)`: no sampler, a pure function of the program. It is derived and never logged: `probbit monitor`
 shows a `TRAJECTORY` row (mean marginal entropy per step) and its JSON frame a `trajectory` key; `probbit persona
@@ -1055,6 +1074,63 @@ point (and its selector).
 
 What it is: a lookup from the stance's mood levels, active habits and deviation to a symbol, so a person reading the chat
 or the monitor sees the engine's state at a glance. What it is not: a measurement of anything beyond those fields.
+
+### 2.19 Identity: the self keys (optional; RFC 0014)
+
+Engine 0.14.0 and later; an engine before it refuses a persona that declares them (`identity.keep: unknown field`; `live
+verify` of such a strand exits 5, `unsupported`). Four optional keys in the `identity` block declare which part of the
+individual is "the self" and turn on integrity (section 5.9). They move nothing (effects {}) and stay out of the persona
+digest, as `bound` does: declaring them on a persona with a recorded life leaves every state as it was.
+
+```yaml
+identity:
+  name: Pip
+  version: 1.1.0
+  seed: 1
+  keep: [no_jokes_on_loss, after_error_check]   # identity-bearing habits: reported held or not fired per event
+  warn: 0.5                                     # a share of the allowance in (0, 1], default 0.8
+  cue: hold the line                            # the persona's own words, handed to the host past warn (1-120 characters)
+  traits: [humour, verbosity]                   # the traits measured; default learning.traits, else every trait
+```
+
+Refusals: a `keep` entry that is not a habit id of the persona, a `traits` entry that is not a trait (a mood is refused), an
+entry listed twice, `warn` outside (0, 1], an empty or multi-line `cue`. The allowance per trait comes from the persona's
+`bound` block (section 2.16); without one every allowance is null and `bound_used` reads 0.
+
+### 2.20 Curiosity and the stir (optional; RFC 0016)
+
+Engine 0.14.0 and later (an engine before it refuses the block, `curiosity: unknown field`; `live verify` of such a strand
+exits 5, `unsupported`). A drive named `curiosity`, fed by the surprise the expectation block (section 2.17) measures, and
+an optional self-started idle event, the **stir**, that it gates. It needs an expectation block and is in the persona digest
+(its level moves the stance). Full definition, refusals and bars: docs/rfcs/0016-curiosity.md.
+
+```yaml
+curiosity:
+  half_life_events: 8        # surprise_recent: the average of z+ = max(z, 0), its half-life in events (starts at quiet_z)
+  quiet_z: 0.5               # below it nothing is new
+  miss_z: 1.5                # a context's visit misses when z+ > miss_z
+  last_k: 3                  # failed_contexts: the contexts whose last K visits all missed
+  weights: {quiet: 1.0, failed: 0.5}
+  cap: 2
+  effects: {initiative: 0.6} # per unit of the level, on traits or moods (never pursue)
+  stir: {threshold: 1.0, every_minutes: 30, class: check, when_asleep: {flag: night, every_minutes: 120, class: glance}}
+```
+
+**The level** = clip(quiet x max(0, 1 - surprise_recent / quiet_z) + failed x failed_contexts, 0, cap), 6 decimals. Event t's
+turn reads the level after event t-1 as the engine-owned number input `cur_level` (box [0, cap], carrying `effects`; a host
+that sends it is refused at `inputs.cur_level`; the stance's `inputs` leave it out). The stance gains
+`drives.curiosity: {failed_contexts, level, surprise_recent}` and the event line the same object under `curiosity`
+(`live verify` recomputes it). The drive's state is folded from the logged lines inside the expectation's memory, so a
+checkpoint carries it (`expect.curiosity`) and resume and replay from a checkpoint read it back. `persona turn` and
+`persona replay` carry no memory: the level is 0 there.
+
+**The stir.** `Live::stir_due(idle_hours)` (and `probbit live control STRAND stir? [--idle-hours H]`) answers whether a
+self-started event is due: the level at least `threshold`, at most one per `every_minutes` since the last stir; while the
+last event had the `when_asleep.flag` on, only with `when_asleep`, at its slower rate and with its class, which never
+speaks. A host that acts on it feeds an ordinary event with `"stir": "<class>"` and its own current readings; a habit in
+force on those readings binds the stir's stance as any other (a persona that sleeps on a flag names that flag in
+`when_asleep`). A stir the host ignores leaves no line. Without the block nothing changes: no `cur_level`, no `drives`
+key, no line field, every document as before.
 
 ## 3. Compilation: persona + state + inputs → one probbit IR program
 
@@ -1613,6 +1689,15 @@ whole text (docs/embedding.md "Resume on a body"): the header line, the last che
 like a segment's sealed line) and the lines after it one at a time. The record may be any state logged from that checkpoint on;
 an older one is refused (`state`: resume from the whole strand).
 
+**Reflection lines (engine 0.14.0 on, RFC 0013).** `probbit live control STRAND reflect [--last N | --since-checkpoint]`
+appends the strand's self-report (section 5.8, "Self-report") as one line after its last line, under the writer lock:
+`{"prev": ..., "reflection": <the document>}`. A host decides when; a body calls `reflect::reflect_window` and `reflect::line`
+and appends the line itself. `verify` recomputes the document from the lines before it over the window it names and refuses one
+that differs (exit 1, the line named: "the reflection differs from the lines before it"); replay, the chain check and resume
+pass over the line with no state change, and `live` continues a strand that ends on one (a checkpoint or a seal still follows
+an event line). The writer refuses a strand of an engine before 0.14.0; an engine before 0.14.0 reads the line as
+`unsupported by this engine: reflection` (exit 5). No line is written unless asked.
+
 **Segments.** `probbit live ... --strand NAME.strand --segment-every N` seals the strand after every N-th event and goes on in
 a new file: the sealing line is a checkpoint line (the last line of the segment); the next file, `NAME.0001.strand`, then
 `NAME.0002.strand` and so on (four digits at least), starts with a header that has one more key at its end,
@@ -1868,6 +1953,55 @@ canonical replay documents are unchanged. Demo bars are scripted engine state, n
 
 Exit codes: 0 when every line replays, 1 at a line that differs (the frame names it and shows the event before it), 2 for a bad
 flag, a port that cannot be had, or a file that cannot be read or is not a strand.
+
+#### Self-report (RFC 0013)
+
+`probbit reflect STRAND [--last N | --since-checkpoint] [--json | --text]` prints a canonical account of a window of the
+strand's events, computed from its lines alone: no turn is run, nothing is solved, nothing is random. Per event line it reads
+what the line logs (the inputs, the expectation's receipt, the glyph): the inputs set and how often, and with an expectation
+block each receipt's z, recomputed from the logged receipts (the expectation's mean and variance folded as the engine folds
+them), the events that registered and the K = 5 largest |z| with what the expectation predicted (`pred`) and what the event
+measured (`self`). Per checkpoint line in the window it reads the stance and state the line carries: per trait the levels taken
+and the odds at the first and last sample, the moods' path (each mood's position along its levels, the monitor's sparkline
+value) with its turning points, the drives' peaks, the habits that bound, the learned weights' net change. Feedback that settled
+the credit, control, rest and reflection lines are counted. A window without a checkpoint line reports no levels, moods,
+drives or habits: those sections are `null` (an event line logs digests, not the stance), never invented. Every number is at
+6 decimals, `digest` is the sha256 of the canonical text without it, and `summary` holds 6 to 12 sentences (13 at most with a declared stir, RFC 0016) from fixed
+templates, part of the document. `--text` prints the sentences only. The library call is `probbit_persona::reflect::{reflect,
+reflect_since_checkpoint, reflect_window}` (std and `nostd`). The format is docs/rfcs/0013-self-report.md; section 5.7,
+"Reflection lines", appends it to the strand.
+
+**Mirror.** The served page has a Mirror tab: the reflection of the last 50 events computed by the server from the strand file
+at each request (`/reflection?last=N`, `/s/ID/reflection` per strand), and the latest reflection line the strand carries with
+whether it recomputes equal; the tab shows the sentences, the top surprises with predicted vs measured, the habits that bound
+and the moods at the checkpoint samples, refreshed with the page's scan of the strand list.
+
+### 5.9 Integrity: the drift from the declared self (RFC 0014)
+
+With the self keys (section 2.19), every live stance document and every event line carries `integrity`, computed after the
+turn from the state it produced (docs/rfcs/0014-integrity.md):
+
+```json
+{"allowance":0.902968,"crossed":[],"cue":null,"drift":0.214,"habits_held":{"held":[],"not_fired":["after_error_check","no_jokes_on_loss"]},
+ "traits":{"humour":{"allowance":0.462081,"bound_used":0.21,"drift":0.097},"verbosity":{"allowance":0.440887,"bound_used":0.27,"drift":0.117}},
+ "used":0.237,"warn":0.5}
+```
+
+- `traits.<t>.drift`: the total variation between the odds at the rest probe (section 2.16) of the individual rested (the
+  channels of the hour, such as moods with a half-life, the credit awaiting feedback, the last stance and the agenda's step, at the fresh individual's
+  values; everything that persists as it is) and of the fresh individual of the same seed. `drift` is the sum over the traits.
+- `allowance`: epsilon at the individual's seed (null without a `bound` block or for an unlearned trait); `bound_used` =
+  drift / allowance; `used` = the summed drift over the traits with an allowance over the summed allowance: the monitor's
+  integrity dial. By RFC 0004's theorem `bound_used` stays at or below 1 (up to the 1e-6 rounding of amendment A7).
+- `crossed`: the traits at or past `warn`; `cue`: `identity.cue` while `crossed` is not empty, else null. The host appends the
+  cue to the line it hands the model; the engine does not edit `line`, which the state's remembered stance digest covers.
+- `habits_held`: of the `keep` habits, those that bound at this event and those that did not fire.
+
+Every number is at 6 decimals. Both stance digests leave `integrity` out; `live verify` recomputes it on every event line and
+refuses an edited value naming the line ("the integrity differs"); `resume` takes it as written. The library call is
+`probbit_persona::integrity::{compute, compute_cached, Integrity}` (std and `nostd`). In the monitor the integrity dial takes
+the place of "room left in the bound" on the instrument panel, and the Mirror tab adds the per-trait drift table of the event
+on view.
 
 ## 6. What a persona can NOT do
 

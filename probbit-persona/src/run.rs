@@ -31,6 +31,11 @@ pub struct Parts { pub vars: Vec<String>, pub values: Vec<String>, h: Vec<f64>, 
 impl Parts {
     /// The program's own `h` (n x k), as its text gives it
     pub fn h(&self) -> &[f64] { &self.h }
+    /// T3-c: the pairs of a text read without its `pairs` (the members' skeleton: the persona's couplings, read as `from_json`
+    /// reads the text's)
+    pub fn set_pairs(&mut self, pairs: Vec<Pair>) { self.pairs = pairs; }
+    /// T3-c: the program's caps as read and lowered (before the compile pass), with its variables and values
+    pub fn into_caps(self) -> (Vec<String>, Vec<String>, Vec<Cap>) { (self.vars, self.values, self.caps) }
     /// The program's own model: the compile pass and `Model::new` on its `h`, as `from_json`
     #[inline(always)]
     pub fn into_prog(self) -> Result<Prog, InErr> {
@@ -47,6 +52,62 @@ impl Parts {
         let (pairs, caps, _) = compile_parts(self.values.len(), &mut h, self.pairs.clone(), self.caps.clone());
         let mut m = Model::new(self.vars.len(), self.values.len(), h, self.allowed.clone(), self.clamp.clone(), pairs, caps).map_err(|e| crate::json::value("", e))?; m.start = self.start.clone();
         Ok(m)
+    }
+}
+/// RFC 0009 (the expectation's members, T3-b): one model for every program of an event that differs from A_t only in `h`. The
+/// compile pass's folds (each separable table, in the pass's order: per value the row term into its first variable, then the
+/// column term into its second) are kept apart, so a member's model is this one with the member's `h`, the folds replayed in
+/// the same order: the same floats `compile_parts` makes, with no copy of the pairs and no second model held
+pub struct Members { pub m: Model, folds: Vec<(usize, usize, Vec<f64>, Vec<f64>)>,
+    /// T3-c: the components tier's split of the model (built on the first member it answers; dropped when the caps change)
+    split: Split }
+impl Members {
+    /// The model with `h` (n x k) in place of its own, as `Parts::model_with` builds it: each weight checked as the text's, the
+    /// folds added in the pass's order, then `Model::new`'s finite check
+    pub fn set_h(&mut self, mut h: Vec<f64>) -> Result<(), InErr> {
+        let bad = || crate::json::value("vars", "a weight beyond the finite weight limit");
+        if h.len() != self.m.h.len() || h.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return Err(bad()); }
+        let k = self.m.k;
+        for (i, j, row, col) in &self.folds { for a in 0..k { h[i * k + a] += row[a]; h[j * k + a] += col[a]; } }
+        if h.iter().any(|x| !x.is_finite()) { return Err(crate::json::value("", "h must contain only finite weights")); }
+        self.m.h = h; Ok(())
+    }
+    /// T3-c: the model with `caps` (a member's rules lowered, `compiled`: already through the compile pass) in place of its
+    /// own: the pass's never-binding caps dropped as `compile_parts` drops them, then `Model::new` on the same parts, moved (no
+    /// copy of the pairs): the model `from_json` builds for the member's text. Err: `Model::new` refused them (the model is
+    /// then gone: the caller reads no member from it again)
+    #[inline(never)]
+    pub fn set_caps(&mut self, caps: Vec<Cap>, compiled: bool) -> Result<(), InErr> {
+        let caps = if compiled { caps } else { compile_parts(self.m.k, &mut [], vec![], caps).1 };
+        let m = &mut self.m; let (start, collective, cluster, cycles) = (m.start.take(), m.collective, m.cluster, m.cycles);
+        use core::mem::take;
+        let mut nm = Model::new(m.n, m.k, take(&mut m.h), take(&mut m.allowed), take(&mut m.clamp), take(&mut m.pairs), caps).map_err(|e| crate::json::value("", e))?;
+        nm.start = start; nm.collective = collective; nm.cluster = cluster; nm.cycles = cycles; self.m = nm; self.split = Split::default(); Ok(())
+    }
+    /// `enumerated` on the model, the components tier with the members' one split (`probbit_ir::exact_components_split`: the
+    /// members differ only in `h` while the caps stay)
+    pub fn enumerated(&mut self, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> { enumerated_in(&mut self.m, Some(&mut self.split), exact_limit, sweeps) }
+}
+impl Parts {
+    /// The members' model (`Members`): this program's model built from its parts (moved, as `into_prog`: no copy of the pairs),
+    /// its folds apart, with its variables, values and own `h` -> None when the folds read here are not the pass's (checked:
+    /// replayed on the program's own `h` they give the model's `h` bit for bit, and the pairs add up)
+    pub fn into_members(self) -> Option<(Vec<String>, Vec<String>, Vec<f64>, Members)> {
+        let k = self.values.len(); let mut folds = vec![]; let mut dropped = 0;
+        for p in &self.pairs { match &p.c {
+            Coupling::Potts(w) if *w == 0.0 => dropped += 1,
+            Coupling::Table(t) if t.iter().all(|&x| x == 0.0) => dropped += 1,
+            Coupling::Table(t) if t.len() == k * k && (0..k).all(|a| (0..k).all(|b| t[a * k + b] == t[a * k] + (t[b] - t[0]))) =>
+                folds.push((p.i, p.j, (0..k).map(|a| t[a * k]).collect(), (0..k).map(|a| t[a] - t[0]).collect())),
+            _ => {} } }
+        let np = self.pairs.len();
+        let Parts { vars, values, h, allowed, clamp, pairs, caps, start } = self; let h0 = h.clone(); let mut h = h;
+        let (pairs, caps, _) = compile_parts(k, &mut h, pairs, caps);
+        let mut m = Model::new(vars.len(), k, h, allowed, clamp, pairs, caps).ok()?; m.start = start;
+        if m.pairs.len() + folds.len() + dropped != np { return None; }
+        let want: Vec<u64> = m.h.iter().map(|x| x.to_bits()).collect(); let mut s = Members { m, folds, split: Split::default() };
+        s.set_h(h0.clone()).ok()?;
+        (s.m.h.iter().map(|x| x.to_bits()).collect::<Vec<u64>>() == want).then_some((vars, values, h0, s))
     }
 }
 /// `from_json` up to the compile pass (inlined: `from_json` keeps one frame)
@@ -226,13 +287,14 @@ pub fn from_json_parts(j: &Json) -> Result<Parts, InErr> {
 /// probabilities, the marginals of the allowed values); Some(None) for an answer without an exact verdict (infeasible, or a number
 /// not finite); None when `run` would go on to another tier (that one declining), or would stop its exact tiers on the wall
 /// clock (`sweeps` 0 over the limit): the caller runs the program.
-pub fn enumerated(m: &mut Model, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> {
+pub fn enumerated(m: &mut Model, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> { enumerated_in(m, None, exact_limit, sweeps) }
+fn enumerated_in(m: &mut Model, split: Option<&mut Split>, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> {
     m.collective = true; m.cluster = true; m.cycles = true; // as `persona::run_program` sets them before `run`
     let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();
     let fin = |m: &Model, marg: &[f64]| (0..m.n * m.k).all(|q| !m.allowed[q] || marg[q].is_finite());
     if space > exact_limit as f64 {
         if sweeps == 0 { return None; }
-        let c = exact_components_until(m, exact_limit, FRONTIER_MAX_STATES, None)?;
+        let c = match split { Some(s) => exact_components_split(m, s, exact_limit, FRONTIER_MAX_STATES, None)?, None => exact_components_until(m, exact_limit, FRONTIER_MAX_STATES, None)? };
         if c.infeasible { return Some(None); }
         let ok = c.map_logw.is_finite() && c.logz.is_finite() && (c.map_logw - c.logz).exp().is_finite() && fin(m, &c.marg);
         return Some(ok.then_some(c.marg));

@@ -6,6 +6,8 @@
 //!   `evaluate` (feature `decide`): the decision-API adapter.
 //! - `strand`: the strand writer (`Live`: start, event, control, checkpoint and rest lines, the `prev` chain) and its checks over
 //!   a `&str` (`Replay`, `verify*`, `read_actions`, `first_difference`), with no file I/O.
+//! - `integrity`: RFC 0014, the drift from the declared self per turn (off without the `identity` self keys).
+//! - `reflect`: RFC 0013, self-report: the canonical account of a window of a strand's events, from its lines alone (no solve).
 //! - `trace`: with feature `turn_trace`, one event's time and a host probe's bytes by phase (`Live::event`).
 //! - `sys`: the process's resource usage (getrusage on 64-bit Unix; `None` elsewhere). `hooks`: the host's monitor and config echo.
 //!
@@ -29,6 +31,9 @@ pub mod evaluate;
 pub mod hooks;
 pub mod json;
 pub mod persona;
+/// RFC 0014: `integrity::{Integrity, compute}` (the module lives under `persona`, beside RFC 0004's `bound`)
+pub use persona::integrity;
+pub mod reflect;
 #[cfg(feature = "decide")]
 pub mod router;
 pub mod run;

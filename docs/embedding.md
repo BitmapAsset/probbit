@@ -205,6 +205,85 @@ compiler's arithmetic, then the components tier; with M members per event this i
 every member. The body persona's turn on the proxy takes 13,824 B of stack (13,840 before) and its heap peak is unchanged
 (89,990 B, at the turn's solve; inside `expect` the peak rises from 68,476 to 87,214 B: A_t's parts and one member's model).
 
+### The expectation's members: what the deviation reuses
+
+The event's own program A_t was compiled and solved twice per event: once by the turn, once as the deviation's own member.
+Since the turn's first compile reads the same state and inputs as the deviation's A_t, `Live::event` now runs the turn first
+and, with the cache on, the turn hands the deviation its first program's compile meta and that answer's exact marginals
+(`persona::turn_at`, `persona::deviation_at`). The two programs are the same text when no rest line is due before the event,
+`src` is taken out of the inputs alike (a `reward_from` without a senses, credit or needs block keeps it in the turn only) and
+the persona's op is `decide`; the answer's marginals are the deviation's when its verdict is exact (an answer without an exact
+verdict means no deviation, either way). Any other event: the deviation builds and solves A_t itself, as before. A_t's text is
+written again from its meta (no prep, no compile) only to read the members' skeleton and key. `ExpectCache::with_reuse(false,
+_)` keeps the old order (A_t built and solved by the deviation); `with_reuse(true, true)` builds and solves A_t a second time
+as well and compares the two, text for text and bit for bit (a test's instrument). The phases' order in `turn_trace` changes:
+the turn's phases come before `expect`.
+
+The member path's cost after that: prep copies only what it steps and reads (the senses and drive states it replaces are not
+copied first; a member's copy leaves out the persona's name, the agenda, the resting stance, the learned-from counts and the
+digest); the compiler's contributions carry no source name for a member (`Opts::meta_only`: the names exist for the turn's
+`why`); and the members share one model (`run::Members`: A_t's parts moved into it, the compile pass's folds of separable
+tables kept apart and replayed per member in the pass's order, checked bit for bit on A_t's own `h`), so no second copy of the
+pairs is built per member; A_t's text is dropped once it is read. The trajectory runs before the turn, the deviation after
+it. Every stance, strand line and digest is the same as before (and as the cache-off reference).
+
+On the proxy (median of 3–5 runs, cache on, `expect`'s share of the turn, before → after): the body persona's recorded day
+67.7% → 63.9% (`expect` 1,042 → 894 µs per event, -14%; the rest of the turn about 500 µs; 5.63 member programs per event,
+each about 79 µs to build and 69 µs to solve); its two recorded events 43.3% → 26.3%; the fixture persona, one event repeated,
+35.8% → 32.9%; 500 events of many combinations 81.9% → 81.7%. Each step: A_t once 65.2%, the prep copy 64.7%, no source names
+64.4%, one model 63.8%. Stack: the body persona's turn 13,584 B (13,824 before). Heap (the body persona's two recorded events, the
+last one): the deviation now runs while the turn's stance document and next state are held (about 36.7 KB), so the event's
+peak is 97,583 B, inside `expect` (89,990 before, at the turn's solve; inside `expect` 87,214); the deviation's own peak above
+what it finds held fell from 86,209 to 60,857 B (one model instead of A_t's parts and a member's model; a member that keeps the
+engine's path still builds its text and the engine's answer). A host short of heap keeps the old order with
+`ExpectCache::with_reuse(false, false)`: the deviation before the turn, A_t built and solved by it, the same bytes; the body
+persona's event peak is then 89,990 B, at the turn's solve (inside `expect` 69,332 B), at the cost of A_t's second build and solve.
+
+### The expectation's members: the order with the reuse, and what is held
+
+With the cache reusing the turn's program (the default), `Live::event` runs the deviation in two parts around the turn
+(`persona::deviation_pre`, `persona::deviation_post`):
+
+1. **Before the turn** (nothing of the turn held): every member but A_t is solved from the pre-event state, E_t first (when E_t
+   has no exact answer there is no deviation and no other member is solved), then the remembered combos in the mixture's
+   order. Each member's exact marginals are kept as a row of f64 in the order of its layout (about 0.4 KB per member on the
+   body persona; the layout is kept only as its sha256: each variable's id and its levels' names in order). The cache keeps
+   only this event's rows through the turn.
+2. **The turn**, which hands A_t's compile meta and exact marginals (T3-b).
+3. **After the turn**: A_t's layout must hash to the held one; the rows are named again from it (the same names, values and
+   order), A_t's row goes into the cache, and the mixture runs as before. A layout that differs solves the members again; an
+   event the turn does not hand A_t for (a rest due, another op) builds and solves A_t after the turn.
+
+The members share one model, read without any program text: the skeleton comes from E_t's text without its pairs (a few KB),
+and the pairs are the persona's couplings read as `run::from_json` reads the text's (r6 of each table entry at its values'
+indices, each weight checked as the text's). A member whose rules in force differ from E_t's (other habits, rules on inputs)
+takes the same model with its own caps: its rules lowered as `from_json` lowers a text's (from its text without the pairs),
+the compile pass's never-binding caps dropped, `Model::new` on the same parts (`run::Members::set_caps`, no copy of the pairs);
+its cache key is the skeleton's, its rules' and its field's. The components tier's split of that model (the components, their
+kinds, the sub-models of the components with caps or cycles) does not read `h`, so it is computed once per caps and reused by
+every member (`probbit_ir::exact_components_split`, each sub-model's `h` copied in; the same tiers on the same numbers).
+
+Every stance, strand line and digest is the same as with the old order and as with the cache off
+(`the_members_before_the_turn_move_no_byte`; the IR test `one_split_over_many_h_is_bit_identical` for the split).
+
+On the proxy (cache on; the body persona: its recorded day for time, its last recorded event for heap; one node session):
+
+| | T3-b head | members before the turn | every member a model | the split once |
+|---|---:|---:|---:|---:|
+| `expect` share of the turn, recorded day | 64.1% | 63.2% | 57.9% | 57.5% |
+| per member: build / solve (µs) | 80.7 / 71.0 | 71.7 / 65.7 | 66.9 / 41.6 | 67.5 / 40.5 |
+| members on the engine's path, recorded day | 253 | 159 | 0 | 0 |
+| event heap peak (B) | 97,583 | 88,844 | 88,844 | 88,844 |
+| heap inside `expect` (B) | 97,583 | 72,568 | 55,920 | 55,920 |
+| turn stack (B) | 13,584 | 13,504 | 13,552 | 13,552 |
+
+The event's heap peak is now the turn's solve (its own allocations as before, plus about 1.2 KB of held rows); inside `expect`
+the peak is the members' (no program text, no answer document). `ExpectCache::with_reuse(false, false)` keeps the old order
+(the whole deviation before the turn, A_t built and solved by it): event peak 89,990 B, inside `expect` 72,003 B, same bytes;
+the reuse is the better default now on both. On the fixture persona's 500 varied events the members are solved before the
+turn knows whether A_t has an exact answer, so events without one solve their members for nothing (about 3.6 programs per
+event); the model path still brings that life's share from 81.7% to 74.8% (its steady life 33.2% → 19.4%).
+
 Silicon numbers (the same calls on the target's engine thread) are measured by the firmware and will follow; the x86_64 proxy
 and an Xtensa build differ in frame layout, so read the proxy as the shape and the ratio, not the target's bytes.
 
@@ -328,6 +407,98 @@ Stack on the proxy (the same harness as the table above, 20 KB thread run too): 
 the `Live` in the replay; `open` is now `open_boxed` moved out of its box, 16,736 B with the replay in the caller's frame);
 `resume_from_record` with a record 1, 5 or 49 lines behind **16,080 B** (13,648 with the record last); `resume_boxed_from` a
 checkpoint + 58 lines **12,656 B** (the whole-text `resume_boxed` of the same strand 15,072 B). All three ran on a 20 KB thread.
+
+### Self-report in standby (RFC 0013)
+
+A body that idles can give an account of its recent events without running a turn: `reflect::reflect_window(&lines, w)` reads
+the strand's lines and returns the canonical `reflection` document (docs/rfcs/0013-self-report.md); `reflect::line(prev, &r)`
+is the line to append (`{"prev", "reflection"}`), which `live verify` recomputes. No solve, no randomness, no model: one pass
+over the lines from the expectation fold's start (the last checkpoint before the window carrying the expectation's memory),
+each event line parsed once and each checkpoint line in the window parsed once, so the cost is O(lines read), dominated by
+the checkpoint lines' size. Measured on the x86_64 host (release, LTO; median of 21 calls), with the stack high-water and the
+heap peak of one call on the `nostd` build (the stack painted below the caller and scanned after the call, as for the setup
+path above):
+
+| Strand | Window | Lines | Host µs (std) | Host µs (`nostd`) | Stack high-water | Heap peak |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| a recorded day, 1,160 events, 23 checkpoints (0.99 MB) | last 50 | 1,184 | 664 | 601 | 5,552 B | 217,674 B |
+| the same | last 200 | 1,184 | 1,299 | 1,248 | 5,552 B | 223,787 B |
+| the same | all | 1,184 | 5,303 | 5,283 | 5,552 B | 251,144 B |
+| the tutor with an expectation block, 500 events, checkpoint every 50 | last 50 | 511 | 335 | 344 | 6,568 B | 128,292 B |
+| the same | all | 511 | 1,221 | 1,320 | 6,568 B | 140,547 B |
+
+The heap peak is the parsed checkpoint lines (a checkpoint line of the recorded day is about 20 KB of JSON, held parsed while
+it is read); a body short of heap reflects a window with fewer checkpoint lines in it. The document is byte for byte the same
+from the std and `nostd` builds and the CLI (6/6 windows over the two strands). Not measured on silicon.
+
+### Integrity on a body (RFC 0014)
+
+With the identity self keys (docs/persona.md §2.19), `Live::event` computes `integrity` after the turn
+(`probbit_persona::integrity::compute_cached`, std and `nostd`). Once per seed it runs the fresh individual's rest probe and
+computes the allowances (RFC 0004's vertex search at that seed). Then, per event, it handles the rest probe on the rested
+state. The probe's turn steps run, its first program is compiled and keyed by structure without its `comment`, and an equal key
+answers from the row the last exact probe left. Otherwise the turn finishes on that program. A row is kept only for an exact
+answer with no yield, hold or conflict, so every number is the uncached computation's: with the self keys declared, the strands
+of the lives below are byte for byte those of the build before the program key. A hit costs one program build; a miss costs one
+turn. The probe's path is boxed (the rested state, the fresh individual, the cache step and the document each in a frame of
+their own). Measured on the x86_64 host (release, best of 3 lives), and the stack high-water and heap peak of one call on the
+`nostd` build (painted below the caller, as above):
+
+| Life | Events | Host ms with / without | Share of the turn | Answered from the cache | Stack (miss / hit) | Heap peak (miss / hit) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| a recorded day of a body (moods, senses, drives, needs, a learning block; no feedback that day) | 1,160 | 1,849.9 / 1,593.5 (std), 1,889.5 / 1,627.9 (`nostd`) | +16.1 % / +16.1 % | 1,156 of 1,160 (the resting program moved on 4 events) | 13,656 B / 13,656 B | 93,190 B / 68,748 B |
+| the tutor with learning, feedback on most events | 200 | 195.9 / 97.0 (std) | +102.0 % | 88 of 200 (a learning step moves the program) | 12,784 B / 11,008 B | 119,933 B / 75,476 B |
+
+The bare rest-probe turn (`turn_boxed` on the rested state, no cache) reaches 12,520 B on the same build, so a miss is a turn's
+stack plus 1,136 B of the probe's own frames. A hit by program runs the turn's steps before the solve, the deepest part of
+a turn, so it reaches the same 13,656 B; a hit by state (a life where nothing that persists moved) 5,104 B. Before the program key the day cost +40.1 % / +36.8 % with 0 hits,
+20,952 B per miss. This is still over RFC 0014's budget (2 % of a turn, 8 KB per miss): a hit still builds the probe's
+program, and a miss is a turn. Integrity is off by default and costs nothing without the self keys. Not measured on silicon.
+
+### Curiosity and the stir on a body (RFC 0016)
+
+With a `curiosity` block (docs/persona.md §2.20), `Live::event` reads the drive's level from the expectation's memory before
+the turn and folds the event into it after the turn: an average, one short miss list per remembered context (at most
+`max_combos`), the hours since the last stir. A body's idle loop polls `Live::stir_due(idle_hours)` (the hours since its last
+event, from its own clock): the call reads that fold and returns `None` or a `Stir` (class, speaks, asleep, level, minutes
+since the last stir). It solves nothing and writes nothing (its one allocation is the class name it returns), so a body may poll it every
+minute; it logs nothing either. When the body acts on a stir it feeds an ordinary event with `"stir": "<class>"` and its current readings, so
+the stir is one strand line like any event, and a habit in force on those readings (a night flag) binds it.
+Measured on the x86_64 host and on the `nostd` build (the chip's proxy, painted as above), on a body's recorded day (134
+events) with a curiosity block added, against the same individual with the drive cleared (best of 3):
+
+| What | std | `nostd` |
+| --- | ---: | ---: |
+| the day, drive on / off | 174.023 / 174.688 ms | 178.970 / 178.274 ms |
+| the drive's share of a turn (fold + level + receipt) | -0.38 % (noise) | +0.39 % |
+| `stir_due`, one call | 0.000060 ms | 0.000060 ms |
+| `stir_due`'s share, one poll per event | 0.0046 % | 0.0045 % |
+| `stir_due` stack high-water / heap peak | | 2,768 B / 8 B |
+| `expect_step` with the drive, stack / heap | | 3,040 B / 2,184 B |
+
+The drive's cost is within the run-to-run noise of a turn; polling once a minute through a night adds about 60 calls an hour.
+Not measured on silicon.
+
+### The rest pass on a body (RFC 0015)
+
+With an `expectation.rest` key (docs/persona.md §2.17), `Live::event` folds each event into the pass's window (one row of four
+numbers per remembered context, at most `max_combos`), and a body in standby calls `Live::consolidate_boxed(&mut live, at)`
+with its own time stamp: the pass works on the boxed individual in place (no `State` or `Live` by value on a frame), solves
+nothing, and returns the one `consolidation` line the body appends to its strand (the line logs the memory's digests before and
+after, the contexts merged, the weights moved, the decay and the state digest after). The expectation's cache is emptied (its
+rows are rebuilt by the next events). Measured on the x86_64 host and on the `nostd` build (painted as above), on a body's
+recorded day (134 events, one pass at its end over a window of 134 events; `half_life` 64, `bucket` 2, `surprise_gain` 1,
+`decay` 0.5), against the same persona without the key (best of 3):
+
+| What | std | `nostd` |
+| --- | ---: | ---: |
+| the day, with / without the key | 218.383 / 224.205 ms | 193.365 / 190.726 ms |
+| the window fold, per event | within noise (-43.449 µs) | +19.694 µs (+1.4 %) |
+| one pass over the day's window | 121.492 µs | 120.649 µs (0.900 µs per event of the window) |
+| `consolidate_boxed` stack high-water / heap peak | | 3,760 B / 17,345 B |
+
+The pass is O(contexts) per event of the window plus O(contexts²) for the merge (at most 64 contexts); its heap peak is the
+memory written twice for its digests. Not measured on silicon.
 
 ### Measured on one board (ESP32-S3)
 

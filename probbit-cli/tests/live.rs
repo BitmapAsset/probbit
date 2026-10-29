@@ -757,3 +757,40 @@ fn a_host_seals_a_strand_and_the_chain_verifies() {
     assert_eq!((s(&v, &["segments"]), s(&v, &["events"]), s(&v, &["final_state"])), (&Json::Num(3.0), &Json::Num(15.0), s(&parse(&vone), &["final_state"])));
     let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2]);
 }
+
+/// RFC 0013: `probbit reflect` prints the canonical document (or its sentences); `live control STRAND reflect` appends it as a
+/// line that `live verify` recomputes (ok, the events unchanged); a changed number, a changed sentence or a moved window is
+/// refused naming the line (exit 1); `live` continues a strand that ends on a reflection line; a strand of 0.13.0 is refused
+#[test]
+fn reflection_lines_verify_and_forgeries_are_refused() {
+    let dir = std::env::temp_dir().join(format!("probbit-reflect-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("r.strand").to_string_lossy().into_owned();
+    let run = |args: &[&str], stdin: &str| { let mut c = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap(); let o = c.wait_with_output().unwrap();
+        (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()) };
+    let ev: String = (0..12).map(|k| format!("{{\"elapsed_hours\":1{}}}\n", if k % 3 == 0 { ",\"praise\":true" } else { "" })).collect();
+    let st = dir.join("r.json").to_string_lossy().into_owned();
+    assert_eq!(run(&["persona", "init", "../examples/persona/tutor.yaml", "--seed", "2", "--out", &st], "").0, 0);
+    let live = |stdin: &str| run(&["live", "../examples/persona/tutor.yaml", "--state", &st, "--clock", "fixed", "--strand", &f, "--checkpoint-every", "4"], stdin);
+    assert_eq!(live(&ev).0, 0);
+    let before = std::fs::read_to_string(&f).unwrap();
+    let (c, doc, _) = run(&["reflect", &f, "--last", "6"], ""); assert_eq!(c, 0);
+    assert!(doc.starts_with("{\"controls\":") && doc.contains("\"digest\":\"sha256:") && doc.contains("\"summary\":[\"This account covers events 7 to 12"), "{doc}");
+    let (c, text, _) = run(&["reflect", &f, "--last", "6", "--text"], ""); assert_eq!(c, 0); let n = text.lines().count(); assert!((6..=12).contains(&n), "{text}");
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), before, "reflect writes nothing");
+    let (c, out, err) = run(&["live", "control", &f, "reflect", "--last", "6"], ""); assert_eq!(c, 0, "{out}{err}");
+    let (c, v, _) = run(&["live", "verify", &f], ""); assert_eq!(c, 0, "{v}"); assert!(v.contains("\"events\":12"), "{v}");
+    let text = std::fs::read_to_string(&f).unwrap(); let last = text.lines().last().unwrap().to_string(); let at = text.lines().count();
+    for (what, from, to) in [("a number", "\"events\":6", "\"events\":7"), ("a sentence", "This account covers", "This account spans"), ("the window", "\"last_n\":6", "\"last_n\":5")] {
+        let forged = text.replacen(&last, &last.replacen(from, to, 1), 1); assert_ne!(forged, text, "{what}");
+        let g = dir.join("forged.strand"); std::fs::write(&g, &forged).unwrap();
+        let (c, v, _) = run(&["live", "verify", &g.to_string_lossy()], ""); assert_eq!(c, 1, "{what}: {v}"); assert!(v.contains(&format!("\"line\":{at}")), "{what}: {v}");
+    }
+    // the life goes on after a reflection line, and the strand still verifies
+    assert_eq!(live("{\"elapsed_hours\":1}\n").0, 0); assert_eq!(run(&["live", "verify", &f], "").0, 0);
+    // engine-gated: a strand written by 0.13.0 takes no reflection line
+    let old = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("strands").join("expectation-0.13.0.strand"); let g = dir.join("old.strand"); std::fs::copy(&old, &g).unwrap();
+    let (c, out, _) = run(&["live", "control", &g.to_string_lossy(), "reflect"], ""); assert_eq!(c, 2, "{out}"); assert!(out.contains("0.14.0"), "{out}");
+    assert_eq!(run(&["reflect", &g.to_string_lossy()], "").0, 0, "an older strand is read");
+    let _ = std::fs::remove_dir_all(&dir);
+}

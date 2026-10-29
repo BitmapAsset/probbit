@@ -20,6 +20,16 @@ pub mod bound;
 /// The dead-rule lint: habits a host can never bring into force (`persona lint --host`)
 #[path = "hostlint.rs"]
 pub mod hostlint;
+/// RFC 0014 integrity: the drift from the self the persona declares (off without the `identity` self keys)
+#[path = "integrity.rs"]
+pub mod integrity;
+/// RFC 0016 curiosity: a declared drive fed by the measured surprise, and the self-start it gates (off without the block)
+#[path = "curiosity.rs"]
+pub mod curiosity;
+pub use curiosity::{Curio, CUR_ID};
+/// RFC 0015 the rest pass: the expectation's memory consolidated at rest, one `consolidation` line (off without `expectation.rest`)
+#[path = "rest.rs"]
+pub mod rest;
 
 const RULE_KEYS: [&str; 6] = ["caps", "implies", "tables", "precedes", "linear", "all_different"];
 const RESERVED_LEVELS: [&str; 9] = ["true", "false", "null", "yes", "no", "on", "off", "y", "n"];
@@ -211,7 +221,11 @@ pub struct Persona { pub name: String, pub version: String, pub seed: u64, pub d
     /// RFC 0009: the `expectation` block and `engine.trajectory` (both outside the digest; effects {})
     pub expect: Option<Expect>, pub traj: Option<Traj>,
     /// §2.18: the `display.glyphs` block (outside the digest; effects {})
-    pub glyphs: Option<Glyphs> }
+    pub glyphs: Option<Glyphs>,
+    /// RFC 0014: the `identity` block's self keys (outside the digest; effects {})
+    pub ident: Option<integrity::Ident>,
+    /// RFC 0016: the `curiosity` drive (in the digest: its level moves the stance through `cur_level`)
+    pub cur: Option<Curio> }
 impl Persona {
     /// `line.why_past` (§2.11): `why` names what the learned weights came from; default on with a senses block, off without
     fn why_past(&self) -> bool { self.why_past.unwrap_or(self.senses.is_some()) }
@@ -233,7 +247,7 @@ impl Persona {
     /// `load_level` with a load block (RFC 0002 part 2): the engine sets it from L
     fn is_load(&self, id: &str) -> bool { self.load.is_some() && id == LOAD_ID }
     /// An input the engine sets from its own state (pace's two, load's one): never the host's
-    fn is_owned(&self, id: &str) -> bool { self.is_pace(id) || self.is_load(id) }
+    fn is_owned(&self, id: &str) -> bool { self.is_pace(id) || self.is_load(id) || (self.cur.is_some() && id == CUR_ID) }
     fn var(&self, id: &str) -> Option<&Var> { self.vars.iter().find(|v| v.id == id) }
     fn input(&self, id: &str) -> Option<&Input> { self.inputs.iter().find(|x| x.id == id) }
     fn habit(&self, id: &str) -> &Habit { self.habits.iter().find(|h| h.id == id).expect("habit id") }
@@ -347,6 +361,12 @@ pub fn build(doc: &Json) -> R<Persona> { build_boxed(doc).map(|p| *p) }
 /// recursion through the layers holds only this dispatcher's frame (docs/embedding.md "Stack budget").
 #[inline(never)]
 pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
+    // RFC 0014: the `identity` block's self keys move nothing (effects {}): they are read against the persona built without them
+    // and stay out of the digest, so declaring them on a persona with a recorded life leaves every state as it was
+    if let Some(idn) = doc.get("identity").filter(|i| integrity::declared(i)) {
+        let mut d = doc.clone();
+        if let Json::Obj(v) = &mut d { if let Some((_, Json::Obj(i))) = v.iter_mut().find(|(k, _)| k == "identity") { i.retain(|(k, _)| !integrity::KEYS.contains(&k.as_str())); } }
+        let mut p = build_boxed(&d)?; let id = integrity::spec(idn, doc, &p)?; p.ident = Some(id); return Ok(p); }
     // §2.18: `display` moves nothing (effects {}): it is read against the persona built without it and stays out of the digest,
     // so adding it to a persona with a recorded life leaves every state and stance digest as it was
     if let Some(dj) = doc.get("display") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "display"); }
@@ -355,6 +375,9 @@ pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
     // persona with a recorded life leaves every state, strand and turn byte for byte the same (amendment A1)
     if let Some(b) = doc.get("bound") { let mut d = doc.clone(); if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "bound"); }
         let p = build_boxed(&d)?; bound::spec(b, &p)?; return Ok(p); }
+    // RFC 0016: `curiosity` lowers to the engine-owned number input `cur_level` (box [0, cap], carrying the block's effects, as
+    // pace lowers to its two) and enters the digest; it needs an expectation block (the drive reads its measured surprise)
+    if let Some(cj) = doc.get("curiosity").filter(|c| !c.is_null()) { return build_curiosity(doc, cj); }
     // RFC 0009: `expectation` and `engine.trajectory` move nothing (effects {}): they are read against the persona built without
     // them and stay out of the digest, so adding either to a persona with a recorded life leaves every state and stance digest as
     // it was (an `engine` mapping left empty is dropped with them)
@@ -370,6 +393,34 @@ pub fn build_boxed(doc: &Json) -> R<Box<Persona>> {
         p.traj = match tj { None | Some(Json::Null) => None, Some(x) => Some(traj_spec(&x)?) };
         return Ok(p); }
     build_base(doc)
+}
+/// RFC 0016: the persona with a `curiosity` block (C-R1 .. C-R3 refuse at the field's path): built without the block and with its
+/// input `cur_level` after the declared inputs; the digest is the document's as given (without the keys outside the digest)
+#[inline(never)]
+fn build_curiosity(doc: &Json, cj: &Json) -> R<Box<Persona>> {
+    need(doc.get("expectation").is_some_and(|e| !e.is_null()), "curiosity", "a curiosity block needs an expectation block (the drive reads its measured surprise)")?;
+    let ids_of = |k: &str| -> Vec<String> { match doc.get(k) { Some(Json::Arr(a)) => a.iter().filter_map(|t| t.get("id").and_then(Json::as_str).map(str::to_string)).collect(), _ => vec![] } };
+    let mut ids = ids_of("traits"); ids.extend(ids_of("moods"));
+    let ins: Vec<Json> = match doc.get("inputs") { Some(Json::Arr(a)) => a.clone(), _ => vec![] };
+    let flags: Vec<String> = ins.iter().filter(|x| x.get("kind").and_then(Json::as_str) == Some("flag")).filter_map(|x| x.get("id").and_then(Json::as_str).map(str::to_string)).collect();
+    let (cu, eff) = curiosity::spec(cj, &ids, &flags)?;
+    for (j, x) in ins.iter().enumerate() { if let Some(id) = x.get("id").and_then(Json::as_str) {
+        need(id != CUR_ID && id != curiosity::STIR_KEY, &format!("inputs[{j}].id"), "reserved for the curiosity block (cur_level, stir)")?; } }
+    if let Some(Json::Arr(hs)) = doc.get("habits") { for (i, h) in hs.iter().enumerate() { if let Some(w) = h.get("when").and_then(Json::as_obj) { for (k, _) in w {
+        need(k != CUR_ID && k != curiosity::STIR_KEY, &format!("habits[{i}].when.{k}"), "reserved for the curiosity block")?; } } } }
+    let mut d = doc.clone(); let mut dg = doc.clone();
+    if let Json::Obj(v) = &mut d { v.retain(|(k, _)| k != "curiosity");
+        let x = Json::Obj(vec![("id".into(), Json::Str(CUR_ID.into())), ("kind".into(), Json::Str("number".into())), ("max".into(), Json::Num(cu.cap)),
+            ("say".into(), Json::Str("curiosity".into())), ("effects".into(), eff)]);
+        let mut ins = ins; ins.push(x);
+        match v.iter_mut().find(|(k, _)| k == "inputs") { Some(e) => e.1 = Json::Arr(ins), None => v.push(("inputs".into(), Json::Arr(ins))) } }
+    // the digest's document: as given, without `expectation` and `engine.trajectory` (outside every digest)
+    if let Json::Obj(v) = &mut dg { v.retain(|(k, _)| k != "expectation");
+        if let Some(i) = v.iter().position(|(k, _)| k == "engine") {
+            if let Json::Obj(e) = &mut v[i].1 { e.retain(|(k, _)| k != "trajectory"); }
+            if v[i].1.as_obj().is_some_and(|e| e.is_empty()) { v.remove(i); } } }
+    let mut p = build_boxed(&d)?; p.digest = sha(&dg); p.cur = Some(cu);
+    Ok(p)
 }
 /// The persona without the layers `build_boxed` peels off: the top-level keys, then the lowered blocks or the base reader
 #[inline(never)]
@@ -512,7 +563,7 @@ fn build_base(doc: &Json) -> R<Box<Persona>> {
     let prefix = match get(lkv, "prefix") { None => "Stance: ".to_string(), Some(Json::Str(s)) => s.clone(), Some(_) => return Err(perr("line.prefix", "a string")) };
     let learning = match get(kv, "learning").filter(|l| !l.is_null()) { None => None, Some(l) => Some(learning_spec(l, &vars, &inputs)?) };
     let reward = match get(kv, "reward_from").filter(|x| !x.is_null()) { None => None, Some(rf) => Some(reward_spec(rf, &learning.as_ref().map_or(vec![], |l| l.from.clone()), &inputs)?) };
-    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None });
+    let p = Box::new(Persona { name, version, seed, digest, vars, steps, slots, say_order, prefer, couplings, inputs, history, habits, eng, max_tokens, order, prefix, learning, drives: None, reward, senses: None, why_past, surprise: None, pace: None, disp: None, rest_b: None, load: None, block, expect: None, traj: None, glyphs: None, ident: None, cur: None });
     // the fallback stance must obey every unconditional habit (checked once, here)
     let mut fb: HashMap<String, String> = p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect();
     for (i, s) in p.steps.iter().enumerate() { fb.insert(format!("step.{s}"), p.slots[i].clone()); }
@@ -1443,12 +1494,20 @@ fn host_inputs(d: &Drives, ds: &DState, c: &DriveCtx, raw: &[(String, Json)]) ->
 /// against the normals, `src` the event's source, `check` the provenance check), then with a drives block the stepped drives and
 /// the host inputs plus the drive aggregates; then with a pace block (RFC 0002 Design C) the pace step and its two inputs; else the
 /// state and inputs as given
-fn prep(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(State, Vec<(String, Json)>)> {
+fn prep(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(State, Vec<(String, Json)>)> { prep_n(p, st, raw, src, check, false) }
+/// `prep`; `narrow`: an expectation member's (`State::prep_clone`)
+#[inline(always)]
+fn prep_n(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(State, Vec<(String, Json)>)> {
     // RFC 0002 part 2: the engine sets load_level from L (the host never sends it)
     if p.load.is_some() { need(get(raw, LOAD_ID).is_none(), "inputs.load_level", "reserved for the load block (the engine sets it from the load)")?; }
-    let (mut s2, mut host) = prep_body(p, st, raw, src, check)?;
+    // RFC 0016: the engine sets cur_level from the drive's fold (the host never sends it)
+    if p.cur.is_some() { need(get(raw, CUR_ID).is_none(), "inputs.cur_level", "reserved for the curiosity block (the engine sets it from the drive)")?; }
+    let (mut s2, mut host) = prep_body(p, st, raw, src, check, narrow)?;
     pressure_step(p, &mut s2, raw)?;
     load_step(p, st, &mut s2, raw, &mut host)?;
+    // RFC 0016: the level the live writer set from the fold before this event (0 without a memory: `persona turn`); a stir's
+    // marker is the line's, not the compiler's
+    if p.cur.is_some() { host.retain(|(k, _)| k != curiosity::STIR_KEY); host.push((CUR_ID.into(), Json::Num(st.cur.unwrap_or(0.0)))); }
     Ok((s2, host))
 }
 /// Does this event carry feedback (RFC 0002 part 2: a rest line never shares an event with a learning step)? A learning flag on,
@@ -1521,8 +1580,8 @@ pub fn load_level(p: &Persona, st: &State) -> Option<(f64, f64)> { p.load.as_ref
 /// The rest pressure of a state with a rest block (RFC 0002 part 2): (S, pending); none without one
 pub fn rest_pressure(st: &State) -> Option<(f64, bool)> { st.pressure }
 /// prep without part 2: the sense, needs, drive and pace steps
-fn prep_body(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(State, Vec<(String, Json)>)> {
-    let mut s2 = st.clone(); let mut x = raw.to_vec();
+fn prep_body(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(State, Vec<(String, Json)>)> {
+    let mut s2 = st.prep_clone((p.senses.is_some() && st.senses.is_some(), p.drives.is_some() && st.drives.is_some()), narrow); let mut x = raw.to_vec();
     // RFC 0002 Design C: the engine sets pace_up and pace_down from R̄ (the host never sends them)
     if p.pace.is_some() { for k in PACE_IDS { need(get(&x, k).is_none(), &format!("inputs.{k}"), "reserved for the pace block (the engine sets it from the average reward)")?; } }
     if let (Some(sn), Some(ss)) = (&p.senses, &st.senses) { let (ns, host) = sense_step(sn, ss, &x, src, check)?; s2.senses = Some(ns); x = host; }
@@ -1554,10 +1613,11 @@ struct Pay { wait: bool, pays: Option<(u64, Option<String>)>, cancel: Option<Vec
 const PAY_KEYS: [&str; 3] = ["await", "for", "cancel"];
 /// "sha256:" and 64 lower-case hex digits
 fn is_digest(s: &str) -> bool { s.len() == 71 && s.starts_with("sha256:") && s[7..].bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) }
-/// A stance's digest (§2.8): sha256 of the stance document's canonical JSON without `credit`, `state_digest` and `timing`. The
+/// A stance's digest (§2.8): sha256 of the stance document's canonical JSON without `credit`, `state_digest`, `timing` and
+/// `integrity` (RFC 0014, computed after the turn). The
 /// state remembers it (an open decision's, the previous stance's) without hashing itself, and `for: {turn, stance}` binds it.
 pub fn stance_digest(doc: &Json) -> String {
-    match doc { Json::Obj(v) => sha(&Json::Obj(v.iter().filter(|(k, _)| !["credit", "state_digest", "timing"].contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
+    match doc { Json::Obj(v) => sha(&Json::Obj(v.iter().filter(|(k, _)| !["credit", "state_digest", "timing", "integrity"].contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
 }
 /// With a credit block: `await`, `for` and `cancel` taken out of the inputs and read (B-R5: a malformed value refuses the event);
 /// without one they stay undeclared inputs (listed in `ignored`)
@@ -1727,6 +1787,8 @@ fn stance_body(j: &mut Json, p: &Persona, st: &State) {
     // RFC 0002 part 2: load_level leaves `inputs`; `load: {l}` = L after this event
     if let Some(l) = st.load_l { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.retain(|(k, _)| k != LOAD_ID); }
         v.push(("load".into(), Json::Obj(vec![("l".into(), Json::Num(l))]))); }
+    // RFC 0016: cur_level leaves `inputs` (the live writer adds `drives.curiosity` with the level and its two inputs)
+    if p.cur.is_some() { if let Some((_, Json::Obj(ins))) = v.iter_mut().find(|(k, _)| k == "inputs") { ins.retain(|(k, _)| k != CUR_ID); } }
     if let Some(gs) = &st.gate { v.push(("surprise".into(), Json::Obj(gs.iter().filter(|(_, g)| g.g > 1.0).map(|(t, g)| (t.clone(), Json::Num(g.g))).collect()))); }
 }
 /// The pace level of an average (RFC 0002 Design C): slow below `levels[0]`, brisk above `levels[1]`, steady between
@@ -2219,7 +2281,10 @@ fn values_of(p: &Persona) -> Vec<String> {
 pub struct State { pub seed: u64, pub turn: u64, persona: [String; 3], genes: Json, mood: Vec<(String, Vec<f64>)>, history: Vec<(String, Vec<bool>)>, prev: HashMap<String, String>,
     agenda: Option<Vec<String>>, rest: Option<Vec<(String, String)>>, learned: Table, credit: Table, drives: Option<DState>, senses: Option<SState>,
     learned_from: Option<Vec<(String, u64, u64)>>, open: Vec<Open>, prev_stance: Option<String>, control_closed: Vec<u64>, elig: f64, pub digest: String,
-    gate: Option<Vec<(String, Gate)>>, rbar: Option<f64>, disp: Vec<(String, f64)>, pressure: Option<(f64, bool)>, load_l: Option<f64> }
+    gate: Option<Vec<(String, Gate)>>, rbar: Option<f64>, disp: Vec<(String, f64)>, pressure: Option<(f64, bool)>, load_l: Option<f64>,
+    /// RFC 0016: the curiosity drive's level the next turn reads (set from the expectation's memory before each live event; not
+    /// part of the state's JSON or digest: the memory is the fold of the logged lines, so a replay sets it the same way)
+    pub cur: Option<f64> }
 /// A decision awaiting its outcome (§2.8, `open_credit`): its turn, its credit (onehot(level) − odds per learned trait it released)
 /// and its stance's digest
 #[derive(Clone)]
@@ -2310,6 +2375,18 @@ impl State {
     fn disp_of(&self, k: &str) -> Option<f64> { self.disp.iter().find(|(x, _)| x == k).map(|(_, v)| *v) }
     /// The surprise gain per learned trait in `learning.traits` order (RFC 0002 Design B); empty without a surprise block (gain 1)
     fn gains(&self) -> Vec<f64> { self.gate.as_ref().map_or(vec![], |gs| gs.iter().map(|(_, g)| g.g).collect()) }
+    /// The prep step's copy of the state (`prep_body`): the senses and drive states it steps are not copied (`stepped`: the
+    /// senses' then the drives' are replaced before anything reads them); `narrow` (an expectation member: its state is read
+    /// by the steps and the compiler only) also leaves out what neither reads: the persona's name, the agenda, the resting
+    /// stance, the learned-from counts and the digest
+    fn prep_clone(&self, stepped: (bool, bool), narrow: bool) -> State {
+        let w = |b: bool| !(narrow && b);
+        State { seed: self.seed, turn: self.turn, persona: if w(true) { self.persona.clone() } else { Default::default() }, genes: self.genes.clone(), mood: self.mood.clone(),
+            history: self.history.clone(), prev: self.prev.clone(), agenda: self.agenda.as_ref().filter(|_| w(true)).cloned(), rest: self.rest.as_ref().filter(|_| w(true)).cloned(),
+            learned: self.learned.clone(), credit: self.credit.clone(), drives: if stepped.1 { None } else { self.drives.clone() }, senses: if stepped.0 { None } else { self.senses.clone() },
+            learned_from: self.learned_from.as_ref().filter(|_| w(true)).cloned(), open: self.open.clone(), prev_stance: self.prev_stance.clone(), control_closed: self.control_closed.clone(),
+            elig: self.elig, digest: if w(true) { self.digest.clone() } else { String::new() }, gate: self.gate.clone(), rbar: self.rbar, disp: self.disp.clone(), pressure: self.pressure, load_l: self.load_l, cur: self.cur }
+    }
     fn history_of(&self, of: &str) -> &[bool] { self.history.iter().find(|(k, _)| k == of).map_or(&[], |(_, v)| v) }
     /// The state document without its digest
     fn body(&self, p: &Persona) -> Json {
@@ -2465,7 +2542,7 @@ impl State {
                 _ => return Err(perr("state.prev_stance", "the previous stance's digest (sha256:<64 hex>); null before any turn")) };
             let ca = get(kv, "control_closed").and_then(Json::as_arr).filter(|a| a.len() <= c.max_open).ok_or_else(|| perr("state.control_closed", format!("a list of at most {} turns", c.max_open)))?;
             for (i, x) in ca.iter().enumerate() { let n = turn_at(x, &ix("state.control_closed", i), control_closed.last().copied())?; control_closed.push(n); } }
-        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, open, prev_stance, control_closed, elig: 1.0, gate, rbar, disp, pressure, load_l,
+        Ok(State { seed, turn, persona, genes: g.clone(), mood, history, prev, agenda, rest, learned, credit, drives, senses, learned_from, open, prev_stance, control_closed, elig: 1.0, gate, rbar, disp, pressure, load_l, cur: None,
             digest: get(kv, "digest").and_then(Json::as_str).unwrap_or("").to_string() })
     }
 }
@@ -2503,6 +2580,11 @@ struct Opts { no_inertia: bool, clamps: Vec<(String, String)>, twin: Option<bool
     /// RFC 0009 (the expectation's members): the compiler's arithmetic and the rules in force, no program text (Json::Null)
     meta_only: bool }
 
+/// A compile meta with only what the expectation's members read of it (the field, the rules and habits in force, the values,
+/// the twin flag, seed and turn: `member_text` and the rules' comparison), on the heap
+fn slim(m: Meta) -> Box<Meta> {
+    Box::new(Meta { vals: vec![], hist: vec![], ignored: vec![], conditional: vec![], active_inputs: vec![], owners: vec![], new_mood: vec![], new_learned: Default::default(), contrib: vec![], lift: vec![], ..m })
+}
 /// Inputs -> (values per declared input, history features, elapsed hours, ignored ids); a bad value is a persona error
 #[allow(clippy::type_complexity)]
 fn resolve_inputs(p: &Persona, st: &State, raw: &[(String, Json)]) -> R<(Vec<(String, Json)>, Vec<(String, f64)>, f64, Vec<String>)> {
@@ -2539,6 +2621,8 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let (nv, ns) = (p.vars.len(), p.steps.len());
     let tix = |t: &str| -> usize { match t.strip_prefix("step.") { Some(s) => nv + p.steps.iter().position(|x| x == s).unwrap(), None => p.vars.iter().position(|v| v.id == t).unwrap() } };
     let mut contrib: Vec<Vec<(String, Vec<f64>)>> = vec![vec![]; nv + ns];
+    // a contribution's source names the turn's `why` (and `explain`); a member's meta (`meta_only`) is never read for it: unnamed
+    let nm = |s: &str| if o.meta_only { String::new() } else { s.to_string() };
     let mut mood_ev: Vec<Option<Vec<f64>>> = p.vars.iter().map(|v| v.mood.then(|| vec![0.0; v.levels.len()])).collect();
     // the learned deltas after this turn's feedback (the reward flag +1, the correction flag -1) on the previous stance's credit
     // with a drives block (§2.9): the turn's drive context, read from the (stepped) drive state; its surprise joins the learning sign
@@ -2548,11 +2632,11 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
         let sign = l.from.iter().enumerate().fold(0.0, |s, (i, id)| if matches!(get(&vals, id), Some(Json::Bool(true))) { s + if i == 0 { 1.0 } else { -1.0 } } else { s });
         let sign = match &dctx { Some(c) => (sign + c.learn_sign).clamp(-1.0, 1.0), None => sign }; learn_sign = sign;
         learn(l, &st.credit, sign, st.elig, &st.learned, &st.gains(), st.disp_of("optimism")) } };
-    for (i, v) in p.vars.iter().enumerate() { contrib[i].push(("prior".into(), v.base.clone()));
-        if let Some(g) = st.shift(&v.id) { contrib[i].push(("genes".into(), centered(v.levels.len()).iter().map(|c| g * c).collect())); }
-        if let Some((_, d)) = new_learned.iter().find(|(t, d)| *t == v.id && d.iter().any(|x| *x != 0.0)) { contrib[i].push(("learned".into(), d.clone())); } }
-    for (j, s) in p.steps.iter().enumerate() { contrib[nv + j].push(("prior".into(), vec![0.0; ns]));
-        if let Some((_, pf)) = p.prefer.iter().find(|(t, _)| *t == format!("step.{s}")) { contrib[nv + j].push(("prefer".into(), pf.clone())); } }
+    for (i, v) in p.vars.iter().enumerate() { contrib[i].push((nm("prior"), v.base.clone()));
+        if let Some(g) = st.shift(&v.id) { contrib[i].push((nm("genes"), centered(v.levels.len()).iter().map(|c| g * c).collect())); }
+        if let Some((_, d)) = new_learned.iter().find(|(t, d)| *t == v.id && d.iter().any(|x| *x != 0.0)) { contrib[i].push((nm("learned"), d.clone())); } }
+    for (j, s) in p.steps.iter().enumerate() { contrib[nv + j].push((nm("prior"), vec![0.0; ns]));
+        if let Some((_, pf)) = p.prefer.iter().find(|(t, _)| *t == format!("step.{s}")) { contrib[nv + j].push((nm("prefer"), pf.clone())); } }
     let mut active_inputs = vec![];
     let mut push = |t: &str, src: String, w: Vec<f64>, contrib: &mut Vec<Vec<(String, Vec<f64>)>>| { let i = tix(t);
         match mood_ev.get_mut(i).and_then(Option::as_mut) { Some(ev) => for (a, b) in ev.iter_mut().zip(&w) { *a += b; }, None => contrib[i].push((src, w)) } };
@@ -2562,17 +2646,17 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
             Kind::Number => (&x.effects, v.as_f64().unwrap()),
             Kind::Level => (x.by_level.iter().find(|(l, _)| Some(l.as_str()) == v.as_str()).map_or(&[][..], |(_, e)| &e[..]), 1.0) };
         if !eff.is_empty() && scale != 0.0 { active_inputs.push(x.id.clone()); }
-        for (t, vec) in eff { push(t, format!("input:{}", x.id), vec.iter().map(|y| g * scale * y).collect(), &mut contrib); } }
+        for (t, vec) in eff { push(t, if o.meta_only { String::new() } else { format!("input:{}", x.id) }, vec.iter().map(|y| g * scale * y).collect(), &mut contrib); } }
     for h in &p.history { let n = hist.iter().find(|(k, _)| *k == h.id).unwrap().1.min(h.cap as f64);
         if n != 0.0 && !h.effects.is_empty() { active_inputs.push(h.id.clone()); }
-        for (t, vec) in &h.effects { push(t, format!("history:{}", h.id), vec.iter().map(|y| n * y).collect(), &mut contrib); } }
+        for (t, vec) in &h.effects { push(t, if o.meta_only { String::new() } else { format!("history:{}", h.id) }, vec.iter().map(|y| n * y).collect(), &mut contrib); } }
     let mut new_mood = vec![];
     for (i, v) in p.vars.iter().enumerate().filter(|(_, v)| v.mood) {
         let k = if o.no_inertia { 0.0 } else { v.inertia };
         let decay = match v.half_life { Some(hl) if elapsed > 0.0 => 0.5f64.powf(elapsed / hl), _ => 1.0 };
         let prev = &st.mood.iter().find(|(id, _)| *id == v.id).unwrap().1;
         let m: Vec<f64> = prev.iter().zip(mood_ev[i].as_ref().unwrap()).map(|(a, e)| r6(k * decay * a + (1.0 - k) * e)).collect();
-        if m.iter().any(|&x| x != 0.0) { contrib[i].push(("mood_accumulator".into(), m.clone())); }
+        if m.iter().any(|&x| x != 0.0) { contrib[i].push((nm("mood_accumulator"), m.clone())); }
         new_mood.push((v.id.clone(), m)); }
     // habits in force and their rules
     let active: Vec<&Habit> = p.habits.iter().filter(|h| !o.exclude.contains(&h.id) && h.when.iter().all(|(k, c)| cond_true(p, k, c, &vals, &hist))).collect();
@@ -2583,7 +2667,7 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     let sem = values_of(p);
     // `pursue`'s drive terms after its prior, learned, input and history contributions: genes, wanting, afterglow, deadline (§3 step 2b)
     let pix = dctx.as_ref().and_then(|_| p.vars.iter().position(|v| v.id == "pursue"));
-    if let (Some(c), Some(i)) = (&dctx, pix) { for (src, vec) in &c.terms { if vec.iter().any(|x| *x != 0.0) { contrib[i].push((src.to_string(), vec.clone())); } } }
+    if let (Some(c), Some(i)) = (&dctx, pix) { for (src, vec) in &c.terms { if vec.iter().any(|x| *x != 0.0) { contrib[i].push((nm(*src), vec.clone())); } } }
     let total = |c: &[(String, Vec<f64>)], n: usize| -> Vec<f64> { let mut tot = vec![0.0; n]; for (_, vec) in c { for (a, b) in tot.iter_mut().zip(vec) { *a += b; } } tot.into_iter().map(r6).collect() };
     let mut field: Vec<Vec<f64>> = (0..nv + ns).map(|i| total(&contrib[i], if i < nv { p.vars[i].levels.len() } else { ns })).collect();
     // the floor lift (§2.9): on the rounded field, over the levels the habits in force allow; then the field is summed again
@@ -2591,12 +2675,12 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
     if let (Some(d), Some(i)) = (&p.drives, pix) { if d.goals.iter().any(|g| g.floor > 0.0) {
         let ti = RULE_KEYS.iter().position(|k| *k == "tables").unwrap();
         let l = floor_lifts(p, d, &field[i], &pursue_allowed(&p.vars[i].levels, &rules[ti]));
-        if l.iter().any(|x| *x != 0.0) { contrib[i].push(("floor".into(), l.clone())); field[i] = total(&contrib[i], l.len()); }
+        if l.iter().any(|x| *x != 0.0) { contrib[i].push((nm("floor"), l.clone())); field[i] = total(&contrib[i], l.len()); }
         lift = d.goals.iter().zip(&l).filter(|(_, x)| **x != 0.0).map(|(g, x)| (g.id.clone(), *x)).collect(); } }
     let use_twin = o.twin.unwrap_or(p.eng.twin);
     let ids: Vec<String> = active.iter().map(|h| h.id.clone()).collect();
     // the text before the meta, as the compiler always wrote it (the meta's fields move in after)
-    let prog = if o.meta_only { Json::Null } else { emit(p, &field, &rules, &ids, (st.seed, st.turn), use_twin, &sem, &o.clamps) };
+    let prog = if o.meta_only { Json::Null } else { emit(p, &field, &rules, &ids, (st.seed, st.turn), use_twin, &sem, &o.clamps, true) };
     let conditional = active.iter().filter(|h| !h.when.is_empty()).map(|h| h.id.clone()).collect();
     let meta = Meta { vals, hist, ignored, active: ids, conditional, active_inputs, rules, owners, new_mood, new_learned, contrib, field, values: sem, twin: use_twin, lift, learn_sign,
         seed: st.seed, turn: st.turn };
@@ -2607,7 +2691,9 @@ fn compile(p: &Persona, st: &State, raw: &[(String, Json)], o: &Opts) -> R<(Json
 /// Inlined in `compile` (its frame as before); a member's text is written in a frame of its own (`member_text`)
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-fn emit(p: &Persona, field: &[Vec<f64>], rules: &[Vec<Json>], active: &[String], (seed, turn): (u64, u64), use_twin: bool, sem: &[String], clamps: &[(String, String)]) -> Json {
+/// `with_pairs: false`: no `pairs` (T3-c: a member's rules read by `run::from_json_parts`, the pairs are the skeleton's)
+#[allow(clippy::too_many_arguments)]
+fn emit(p: &Persona, field: &[Vec<f64>], rules: &[Vec<Json>], active: &[String], (seed, turn): (u64, u64), use_twin: bool, sem: &[String], clamps: &[(String, String)], with_pairs: bool) -> Json {
     let (nv, ns) = (p.vars.len(), p.steps.len());
     let pos_vals = p.eng.positional;
     let lmax = p.vars.iter().map(|v| v.levels.len()).max().unwrap_or(0);
@@ -2625,7 +2711,7 @@ fn emit(p: &Persona, field: &[Vec<f64>], rules: &[Vec<Json>], active: &[String],
             ("h".into(), Json::Obj(p.slots.iter().zip(&field[nv + j]).filter(|(_, w)| **w != 0.0).map(|(l, w)| (l.clone(), Json::Num(*w))).collect()))])); }
     let k = values.len(); let vpos = |v: &str| values.iter().position(|x| x == v).unwrap();
     let mut pairs = vec![];
-    for (a, b, tab) in &p.couplings {
+    for (a, b, tab) in p.couplings.iter().filter(|_| with_pairs) {
         let (la, lb) = (&p.var(a).unwrap().levels, &p.var(b).unwrap().levels); let mut t = vec![vec![0.0; k]; k];
         for (x, l1) in la.iter().enumerate() { for (y, l2) in lb.iter().enumerate() { let w = r6(tab[x][y]); if w != 0.0 || !pos_vals { t[vpos(&name_of(a, l1))][vpos(&name_of(b, l2))] = w; } } }
         pairs.push((a.clone(), b.clone(), t)); }
@@ -2908,14 +2994,31 @@ pub fn turn_boxed(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: En
 pub fn turn_any_source(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool) -> R<(Json, State)> { turn_src(p, st, raw, no_inertia, eng, timing, false).map(|(j, s)| (j, *s)) }
 /// A turn's inputs and state after the steps before the compiler (`turn_prep`): the stepped state, the compiler's inputs, the
 /// inputs as given, the event's `src`, its payments and what they settled
-struct Prepped { st: Box<State>, raw: Vec<(String, Json)>, given: Vec<(String, Json)>, src: Option<Json>, pay: Option<Pay>, settled: Option<Settled> }
-/// The engine's answer read back (`turn_solve`): the stance under construction and the next state
-struct Solved { out: Box<Out>, ns: Box<State> }
+struct Prepped { st: Box<State>, raw: Vec<(String, Json)>, given: Vec<(String, Json)>, src: Option<Json>, pay: Option<Pay>, settled: Option<Settled>, fresh: bool }
+/// The engine's answer read back (`turn_solve`): the stance under construction, the next state and, when asked for, what the
+/// expectation reads of the turn's first program (`At`; None inside: that answer was not exact)
+struct Solved { out: Box<Out>, ns: Box<State>, at: Option<Option<Box<At>>> }
+/// RFC 0009: the turn's first program as the deviation's A_t (the same program: `turn_at`): its exact marginals read as
+/// `exact_marg` reads them and its compile meta (the fields the members read), so A_t is neither built nor solved again
+pub struct At { marg: Marg, meta: Box<Meta> }
 #[inline(never)]
 fn turn_src(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool) -> R<(Json, Box<State>)> {
+    turn_src_at(p, st, raw, no_inertia, eng, timing, check, false).map(|(j, s, _)| (j, s))
+}
+/// `turn_boxed` (no inertia off, no timing, the provenance check on) that also hands the expectation its A_t when `want`
+/// (`Live::event` with the cache on): Some when the turn's first program is the program the deviation would build for the
+/// event (no rest due before it, `src` taken out alike, the persona's op `decide`), Some(None) inside when its answer is not
+/// exact (then there is no deviation); None: the deviation builds and solves A_t itself
+#[inline(never)]
+pub fn turn_at(p: &Persona, st: &State, raw: &Json, eng: Engine, want: bool) -> R<(Json, Box<State>, Option<Option<Box<At>>>)> { turn_src_at(p, st, raw, false, eng, false, true, want) }
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn turn_src_at(p: &Persona, st: &State, raw: &Json, no_inertia: bool, eng: Engine, timing: bool, check: bool, want: bool) -> R<(Json, Box<State>, Option<Option<Box<At>>>)> {
     let pr = turn_prep(p, st, raw, check)?;
-    let sv = turn_solve(p, &pr, no_inertia, eng, timing)?;
-    Ok(turn_doc(p, pr, sv))
+    // the deviation's A_t is `program_meta` of the same state and inputs: no rest, `src` taken out only with these blocks
+    let want = want && check && pr.fresh && !no_inertia && p.eng.op == "decide" && (p.reward.is_none() || p.senses.is_some() || p.credit().is_some() || p.has_needs());
+    let mut sv = turn_solve(p, &pr, no_inertia, eng, timing, want, None)?; let at = sv.at.take();
+    let (j, s) = turn_doc(p, pr, sv); Ok((j, s, at))
 }
 /// The steps before the compiler: the inputs read, `src` and the payments taken out, a rest due applied, then the sense / needs /
 /// drive / pace steps, the credit step and the surprise gate, each on the heap
@@ -2939,12 +3042,15 @@ fn turn_prep(p: &Persona, st: &State, raw: &Json, check: bool) -> R<Prepped> {
     let (st2, settled) = match &pay { Some(k) => { let (s, d) = credit_boxed(p, &st2, &raw, k, src.as_ref(), check)?; (s, Some(d)) } None => (st2, None) };
     // RFC 0002 Design B: the surprise gate steps v, r̂, g and the counts of each paid learned trait before the learner reads g
     let st2 = gate_boxed(p, st2, &raw)?;
-    Ok(Prepped { st: st2, raw, given, src, pay, settled })
+    Ok(Prepped { st: st2, raw, given, src, pay, settled, fresh: rested.is_none() })
 }
 #[inline(never)]
 fn rest_boxed(p: &Persona, st: &State) -> Box<State> { Box::new(rest_apply(p, st)) }
 #[inline(never)]
 fn prep_boxed(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool) -> R<(Box<State>, Vec<(String, Json)>)> { let (s, x) = prep(p, st, raw, src, check)?; Ok((Box::new(s), x)) }
+/// `prep_boxed` for an expectation member (`narrow`)
+#[inline(never)]
+fn prep_boxed_n(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>, check: bool, narrow: bool) -> R<(Box<State>, Vec<(String, Json)>)> { let (s, x) = prep_n(p, st, raw, src, check, narrow)?; Ok((Box::new(s), x)) }
 #[inline(never)]
 fn credit_boxed(p: &Persona, st: &State, host: &[(String, Json)], k: &Pay, src: Option<&Json>, check: bool) -> R<(Box<State>, Settled)> { let (s, d) = credit_step(p, st, host, k, src, check)?; Ok((Box::new(s), d)) }
 #[inline(never)]
@@ -2956,16 +3062,20 @@ fn decode_boxed(p: &Persona, st: &State, program: &str, meta: &Meta, doc: &Json,
 #[inline(never)]
 fn settle_boxed(p: &Persona, j: &mut Json, ns: Box<State>, k: &Pay, s: Settled) -> Box<State> { Box::new(settle(p, j, *ns, k, s)) }
 /// The compiler, the engine and the decoder: the program for the stepped state, its solve (a yield on a habit conflict, a second,
-/// clamped solve for the persona's vouch rule) and the answer read back
+/// clamped solve for the persona's vouch rule) and the answer read back; `first`: the first program already compiled from the same
+/// stepped state and inputs with these options (RFC 0014's rest probe keys its cache on it), so it is not compiled twice
 #[inline(never)]
-fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool) -> R<Solved> {
+#[allow(clippy::too_many_arguments)]
+fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: bool, want: bool, first: Option<Box<(Json, Meta)>>) -> R<Solved> {
     use crate::trace::{enter, Phase};
     let (st, raw): (&State, &[(String, Json)]) = (&pr.st, &pr.raw);
     enter(Phase::Compile);
     let t0 = Instant::now(); let mut calls = 0;
     let o = Opts { no_inertia, ..Default::default() };
-    let (mut prog, mut meta) = compile(p, st, &raw, &o)?; let mut ptext = digest_of(&text(&prog));
+    let (mut prog, mut meta) = match first { Some(b) => *b, None => compile(p, st, &raw, &o)? }; let mut ptext = digest_of(&text(&prog));
     let compile_ms = ms(t0); let t1 = Instant::now(); let mut doc = solve(p, st, &prog, eng, &mut calls);
+    // the expectation's A_t: this answer's exact marginals (an exact answer never yields, so `meta` stays this program's)
+    let first = want.then(|| doc_marg(&doc));
     let (mut conflict, mut yielded): (Option<Vec<String>>, Option<Vec<String>>) = (None, None);
     if doc.get("verdict").and_then(Json::as_str) == Some("infeasible") && !meta.active.is_empty() {
         let c = habit_conflict(p, st, &raw, &meta.active, &o, eng, &mut calls)?; conflict = Some(c.clone());
@@ -2999,17 +3109,18 @@ fn turn_solve(p: &Persona, pr: &Prepped, no_inertia: bool, eng: Engine, timing: 
             out2.line = line(p, &levels, &meta2.active, &out.bound, &out.unsure, out2.agenda.as_deref().unwrap_or(&[]), &vouched, &meta2.conditional, &baseline(p, st));
             out = out2; ns = ns2; } }
     out.held = held; out.lift = lift;
+    let at = first.map(|m| m.map(|marg| Box::new(At { marg, meta: slim(meta) })));
     if timing { let r3 = |x: f64| Json::Num((x * 1e3).round() / 1e3);
         out.timing = Some(Json::Obj(vec![("compile_ms".into(), r3(compile_ms)), ("engine_ms".into(), r3(engine_ms)), ("decode_ms".into(), r3((ms(t0) - compile_ms - engine_ms).max(0.0))), ("turn_ms".into(), r3(ms(t0))),
             ("engine_calls".into(), Json::Num(calls as f64)), ("holds".into(), Json::Num(out.held.len() as f64)), ("load_avg_1m".into(), crate::sys::loadavg().map_or(Json::Null, |l| Json::Num((l * 100.0).round() / 100.0)))])); }
-    Ok(Solved { out, ns })
+    Ok(Solved { out, ns, at })
 }
 /// The stance document from the decoded stance: its senses, drives and body blocks, `src` back in its inputs, the credit settled,
 /// the injected block and the glyph
 #[inline(never)]
 fn turn_doc(p: &Persona, pr: Prepped, sv: Solved) -> (Json, Box<State>) {
     crate::trace::enter(crate::trace::Phase::Document);
-    let Prepped { st, given, src, pay, settled, .. } = pr; let st: &State = &st; let Solved { out, mut ns } = sv;
+    let Prepped { st, given, src, pay, settled, .. } = pr; let st: &State = &st; let Solved { out, mut ns, .. } = sv;
     let mut j = out.to_json(p, st);
     if let (Some(sn), Some(ss)) = (&p.senses, &st.senses) { stance_senses(&mut j, sn, ss, &given); }
     if let (Some(d), Some(ds)) = (&p.drives, &st.drives) { stance_drives(&mut j, d, ds, &out.lift, &given); }
@@ -3065,7 +3176,7 @@ pub fn init(p: &Persona, seed: Option<u64>, rest: bool, eng: Engine) -> State {
         prev: p.vars.iter().map(|v| (v.id.clone(), v.fallback.clone())).collect(), agenda: (!p.steps.is_empty()).then(|| p.steps.clone()), rest: None,
         learned: zeros(p), credit: zeros(p), drives: p.drives.as_ref().map(|d| DState::zero(p, d, seed)), senses: p.senses.as_ref().map(|sn| SState::zero(&p.name, sn, seed)),
         learned_from: learned_from0(p), open: vec![], prev_stance: None, control_closed: vec![], elig: 1.0, digest: String::new(),
-        gate: gate0(p), rbar: p.pace.as_ref().map(|_| 0.0), disp: disp_genes(p, seed), pressure: p.rest_b.as_ref().map(|_| (0.0, false)), load_l: p.load.as_ref().map(|_| 0.0) };
+        gate: gate0(p), rbar: p.pace.as_ref().map(|_| 0.0), disp: disp_genes(p, seed), pressure: p.rest_b.as_ref().map(|_| (0.0, false)), load_l: p.load.as_ref().map(|_| 0.0), cur: None };
     if rest { if let Ok((prog, _)) = compile(p, &st, &[], &Opts { twin: Some(false), ..Default::default() }) {
         let doc = eng(&prog, &flags(p, &st));
         if let Some(plan) = doc.get("plan").and_then(Json::as_obj) {
@@ -3153,7 +3264,7 @@ fn program_meta(p: &Persona, st: &State, raw: &Json, meta_only: bool) -> R<(Json
     let raw: Vec<(String, Json)> = match raw { Json::Null => vec![], Json::Obj(v) => v.clone(), _ => return Err(perr("inputs", "must be a JSON object")) };
     let (src, raw) = if p.senses.is_some() || p.credit().is_some() || p.has_needs() { take_src(p, raw, true)? } else { (None, raw) };
     let (pay, raw) = take_pay(p, raw)?;
-    let (st, raw) = prep_boxed(p, st, &raw, src.as_ref(), true)?;
+    let (st, raw) = prep_boxed_n(p, st, &raw, src.as_ref(), true, meta_only)?;
     let st = match &pay { Some(k) => credit_boxed(p, &st, &raw, k, src.as_ref(), true)?.0, None => st };
     let st = gate_boxed(p, st, &raw)?;
     let (j, m) = compile(p, &st, &raw, &Opts { meta_only, ..Default::default() })?; Ok((j, Box::new(m)))
@@ -3943,14 +4054,28 @@ pub fn prove_seed(p: &Persona, pr: &Prop, seed: u64, eng: Engine) -> Result<(usi
 // --------------------------------------------------------------------------------- RFC 0009: the expectation and the trajectory
 /// RFC 0009 `expectation` (effects {}): the decayed combo counts' half-life in events and the most mixture members
 #[derive(Clone, Debug)]
-pub struct Expect { pub half_life: f64, pub max_combos: usize }
+pub struct Expect { pub half_life: f64, pub max_combos: usize,
+    /// RFC 0015: the rest pass (`expectation.rest`; None without the block: the pass is refused and nothing is folded for it)
+    pub rest: Option<RestPass> }
+/// RFC 0015 `expectation.rest`: the rest pass's half-life in events for the window it re-folds (default the expectation's own,
+/// which leaves every count as it is), the bins of a declared number input in the merge key (1-3; 3 = the waking key's thirds,
+/// so nothing merges), the gain of a context's mean surprise in its weight (0: none) and the factor on the learned deltas (1: none)
+#[derive(Clone, Debug, PartialEq)]
+pub struct RestPass { pub half_life: f64, pub bucket: u8, pub surprise_gain: f64, pub decay: f64 }
 /// RFC 0009 `engine.trajectory`: K steps of beta from beta0 to 1 (linear), each solved by the exact tier
 #[derive(Clone, Debug)]
 pub struct Traj { pub k: usize, pub beta0: f64 }
 fn expect_spec(x: &Json) -> R<Expect> {
-    let kv = keys(x, "expectation", &["half_life_events", "max_combos", "comment"], &[])?;
-    Ok(Expect { half_life: num_or(kv, "half_life_events", 32.0, "expectation", Some(1.0), Some(1e6), false)?,
-        max_combos: num_or(kv, "max_combos", 16.0, "expectation", Some(1.0), Some(64.0), true)? as usize })
+    let kv = keys(x, "expectation", &["half_life_events", "max_combos", "rest", "comment"], &[])?;
+    let half_life = num_or(kv, "half_life_events", 32.0, "expectation", Some(1.0), Some(1e6), false)?;
+    // RFC 0015: `rest` (every key optional, with the defaults that change nothing)
+    let rest = match get(kv, "rest") { None => None, Some(r) => {
+        let rk = keys(r, "expectation.rest", &["half_life", "bucket", "surprise_gain", "decay", "comment"], &[])?;
+        Some(RestPass { half_life: num_or(rk, "half_life", half_life, "expectation.rest", Some(1.0), Some(1e6), false)?,
+            bucket: num_or(rk, "bucket", 3.0, "expectation.rest", Some(1.0), Some(3.0), true)? as u8,
+            surprise_gain: num_or(rk, "surprise_gain", 0.0, "expectation.rest", Some(0.0), Some(4.0), false)?,
+            decay: num_or(rk, "decay", 1.0, "expectation.rest", Some(0.0), Some(1.0), false)? }) } };
+    Ok(Expect { half_life, max_combos: num_or(kv, "max_combos", 16.0, "expectation", Some(1.0), Some(64.0), true)? as usize, rest })
 }
 fn traj_spec(x: &Json) -> R<Traj> {
     let kv = keys(x, "engine.trajectory", &["k", "beta0", "comment"], &[])?;
@@ -3969,7 +4094,11 @@ fn traj_spec(x: &Json) -> R<Traj> {
 /// memory is then a small exact object a checkpoint line carries (`to_json`, `read`), the same bytes on every libm, and a fold
 /// restarted from it equals the fold from the strand's header.
 #[derive(Clone, Debug, Default)]
-pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64, rest: f64, canon: bool }
+pub struct ExpectMem { combos: Vec<(String, f64, Json)>, warm: bool, mean: f64, var: f64, n: u64, rest: f64, canon: bool,
+    /// RFC 0016: the curiosity drive's fold (canonical memory with a `curiosity` block only; None before the first event)
+    pub cur: Option<curiosity::CurMem>,
+    /// RFC 0015: the rest pass's window (canonical memory with an `expectation.rest` block only; None before the first event)
+    pub win: Option<rest::RestWin> }
 const DEV_PRIOR_VAR: f64 = 0.04;
 const DEV_VAR_FLOOR: f64 = 1e-4;
 /// z at or above this registers the deviation (the RFC 0001 sense threshold)
@@ -3984,14 +4113,25 @@ impl ExpectMem {
     /// a combo is a function of its inputs (`combo_key`), so it is not written
     pub fn to_json(&self) -> Json {
         let mut c: Vec<&(String, f64, Json)> = self.combos.iter().collect(); c.sort_by(|a, b| a.0.cmp(&b.0));
-        Json::Obj(vec![("combos".into(), Json::Arr(c.iter().map(|x| Json::Arr(vec![Json::Num(x.1), x.2.clone()])).collect())), ("mean".into(), Json::Num(self.mean)),
-            ("n".into(), Json::Num(self.n as f64)), ("rest".into(), Json::Num(self.rest)), ("var".into(), Json::Num(self.var)), ("warm".into(), Json::Bool(self.warm))])
+        let j = Json::Obj(vec![("combos".into(), Json::Arr(c.iter().map(|x| Json::Arr(vec![Json::Num(x.1), x.2.clone()])).collect())), ("mean".into(), Json::Num(self.mean)),
+            ("n".into(), Json::Num(self.n as f64)), ("rest".into(), Json::Num(self.rest)), ("var".into(), Json::Num(self.var)), ("warm".into(), Json::Bool(self.warm))]);
+        // RFC 0016: the drive's fold rides with the memory (only with a curiosity block)
+        let mut j = j; if let (Some(c), Json::Obj(v)) = (&self.cur, &mut j) { v.insert(1, ("curiosity".into(), c.to_json())); }
+        // RFC 0015: the rest pass's window rides with the memory (only with an `expectation.rest` block), its rows in key order
+        if let (Some(w), Json::Obj(v)) = (&self.win, &mut j) { let ks: Vec<&str> = c.iter().map(|x| x.0.as_str()).collect(); v.push(("window".into(), w.to_json(&ks))); }
+        j
     }
     /// A checkpoint line's `expect` for persona `p` -> the canonical memory; Err(what is wrong). It must be what the canonical fold
     /// can hold: combos in key order, each count > 0 at 6 decimals, distinct keys, at most `max_combos - 1` named ones
     pub fn read(p: &Persona, j: &Json) -> Result<ExpectMem, String> {
         let ex = p.expect.as_ref().ok_or("the persona has no expectation block")?;
-        let kv = j.as_obj().filter(|kv| kv.len() == 6).ok_or("an object {combos, mean, n, rest, var, warm}")?;
+        // RFC 0016: with a curiosity block the memory has a seventh key, `curiosity` (the drive's fold)
+        // RFC 0015: with an `expectation.rest` block one more key, `window` (the rest pass's window)
+        let rw = ex.rest.is_some();
+        let want = 6 + usize::from(p.cur.is_some()) + usize::from(rw);
+        let shape = match (p.cur.is_some(), rw) { (true, false) => "an object {combos, curiosity, mean, n, rest, var, warm}", (false, false) => "an object {combos, mean, n, rest, var, warm}",
+            (true, true) => "an object {combos, curiosity, mean, n, rest, var, warm, window}", (false, true) => "an object {combos, mean, n, rest, var, warm, window}" };
+        let kv = j.as_obj().filter(|kv| kv.len() == want).ok_or(shape)?;
         let f = |k: &str| kv.iter().find(|(x, _)| x == k).map(|(_, v)| v).ok_or(format!("no {k}"));
         let r6n = |k: &str| -> Result<f64, String> { f(k)?.as_f64().filter(|x| x.is_finite() && *x >= 0.0 && r6(*x) == *x).ok_or(format!("{k}: a number >= 0 at 6 decimals")) };
         let mean = f("mean")?.as_f64().filter(|x| x.is_finite() && r6(*x) == *x).ok_or("mean: a number at 6 decimals")?;
@@ -4006,7 +4146,9 @@ impl ExpectMem {
             if combos.last().is_some_and(|l| l.0 >= key) { return Err("combos: in key order, each key once".into()); }
             combos.push((key, cnt, rep.clone())); }
         if combos.iter().filter(|c| c.0 != "{}").count() > ex.max_combos - 1 { return Err(format!("combos: at most {} named", ex.max_combos - 1)); }
-        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true })
+        let cur = match &p.cur { Some(c) => Some(curiosity::CurMem::read(c, f("curiosity")?)?), None => None };
+        let win = if rw { let ks: Vec<String> = combos.iter().map(|c| c.0.clone()).collect(); Some(rest::RestWin::read(f("window")?, &ks)?) } else { None };
+        Ok(ExpectMem { combos, warm: *warm, mean, var, n, rest, canon: true, cur, win })
     }
 }
 /// One event's deviation from the engine's own expectation (nats): `s_self` = sum over the non-twin variables of KL(A_i || E_i),
@@ -4046,7 +4188,10 @@ type Marg = Vec<(String, Vec<(String, f64)>)>;
 /// The non-twin exact marginals of a program -> None unless the exact tier solved it
 #[inline(never)]
 fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg> {
-    let doc = eng(prog, &Flags { op: "decide".into(), ..flags(p, st) });
+    doc_marg(&eng(prog, &Flags { op: "decide".into(), ..flags(p, st) }))
+}
+/// An answer's non-twin marginals -> None unless its verdict is exact
+fn doc_marg(doc: &Json) -> Option<Marg> {
     if doc.get("verdict").and_then(Json::as_str) != Some("exact") { return None; }
     Some(doc.get("marginals")?.as_obj()?.iter().filter(|(k, _)| !k.starts_with("free.")).map(|(k, v)| (k.clone(), v.as_obj().map_or(vec![], |o| {
         let mut r: Vec<(String, f64)> = o.iter().map(|(l, x)| (l.clone(), x.as_f64().unwrap_or(0.0))).collect(); r.sort_by(|a, b| a.0.cmp(&b.0)); r }))).collect())
@@ -4063,13 +4208,26 @@ fn exact_marg(p: &Persona, st: &State, prog: &Json, eng: Engine) -> Option<Marg>
 /// one the cache is not consulted for the next 1, 2, 4, ... 32 events (a hit resets it; the rows are dropped meanwhile and the event
 /// after the pause fills them for the one after it to compare), so such a life keys two events in 34.
 #[derive(Clone, Debug)]
-pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool, modeled: u32 }
+pub struct ExpectCache { on: bool, rows: Vec<([u8; 32], Marg)>, used: Vec<bool>, hits: u32, solves: u32, skip: u32, back: u32, live: bool, had: bool, modeled: u32,
+    /// T3-b: A_t from the turn (`turn_at`); `check`: also built and solved again, and compared
+    reuse: bool, check: bool, reused: u32 }
 impl Default for ExpectCache { fn default() -> ExpectCache { ExpectCache::new(true) } }
 impl ExpectCache {
     /// An empty cache; `on: false` solves every program (the receipt is the same)
-    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false, modeled: 0 } }
+    pub fn new(on: bool) -> ExpectCache { ExpectCache { on, rows: vec![], used: vec![], hits: 0, solves: 0, skip: 0, back: 0, live: false, had: false, modeled: 0, reuse: true, check: false, reused: 0 } }
+    /// The same cache with the turn's own program read as A_t (`reuse`, the default: `Live::event` runs the turn first and hands
+    /// the deviation its first program's meta and exact marginals) or built and solved again by the deviation; `check`: when
+    /// handed, A_t is built and solved again as well and the two compared (a mismatch panics: a test's instrument)
+    pub fn with_reuse(mut self, reuse: bool, check: bool) -> ExpectCache { self.reuse = reuse; self.check = check; self }
+    /// Whether `Live::event` hands the deviation the turn's own program (the cache on, reuse on)
+    pub fn reuses(&self) -> bool { self.on && self.reuse }
+    /// The last event's A_t read from the turn (1) or not (0)
+    pub fn reused(&self) -> u32 { self.reused }
     /// Whether the cache is used
     pub fn is_on(&self) -> bool { self.on }
+    /// RFC 0015: every row dropped and the pause reset (the rest pass changed the memory the rows were built for); the switches
+    /// and the counters stay. The receipts are the same with or without it: a row is keyed by its program's text.
+    pub fn invalidate(&mut self) { self.rows.clear(); self.used.clear(); self.skip = 0; self.back = 0; self.had = false; }
     /// The last event's programs answered from the cache and solved
     pub fn last(&self) -> (u32, u32) { (self.hits, self.solves) }
     /// The last event's programs solved as the event's own model with their own `h` (the rest of the solves: built and run)
@@ -4084,8 +4242,10 @@ impl ExpectCache {
         self.rows.capacity() * size_of::<([u8; 32], Marg)>() + self.used.capacity() + self.rows.iter().map(|(_, m)| m.capacity() * size_of::<(String, Vec<(String, f64)>)>()
             + m.iter().map(|(id, ls)| id.capacity() + ls.capacity() * size_of::<(String, f64)>() + ls.iter().map(|(l, _)| l.capacity()).sum::<usize>()).sum::<usize>()).sum::<usize>()
     }
-    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.modeled = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
+    fn begin(&mut self) { self.hits = 0; self.solves = 0; self.modeled = 0; self.reused = 0; self.used.clear(); self.used.resize(self.rows.len(), false);
         self.live = self.on && self.skip == 0; self.had = !self.rows.is_empty(); if self.skip > 0 { self.skip -= 1; } }
+    /// Only the rows this event has used so far are kept (`deviation_pre`, before the turn)
+    fn prune(&mut self) { let mut i = 0; self.rows.retain(|_| { i += 1; self.used[i - 1] }); self.used.clear(); self.used.resize(self.rows.len(), true); }
     fn end(&mut self) {
         // an event that had rows to compare and found none backs off; one that started empty only fills (the next one compares)
         if self.live { if self.hits > 0 { self.back = 0; } else if self.had { self.back = (self.back * 2).clamp(1, 32); self.skip = self.back; } }
@@ -4094,6 +4254,11 @@ impl ExpectCache {
     fn find(&mut self, key: &[u8; 32]) -> Option<Marg> {
         if !self.live { return None; }
         let i = self.rows.iter().position(|r| r.0 == *key)?; self.used[i] = true; self.hits += 1; Some(self.rows[i].1.clone())
+    }
+    /// A_t's marginals from the turn, kept under `key` while the cache is live (not a solve of the deviation's)
+    fn put(&mut self, key: [u8; 32], m: &Marg) {
+        if !self.live { return; }
+        match self.rows.iter().position(|r| r.0 == key) { Some(i) => self.used[i] = true, None => { self.rows.push((key, m.clone())); self.used.push(true); } }
     }
     /// A program solved here, not by `marg`: counted, and kept under `key` while the cache is live
     fn keep(&mut self, key: Option<[u8; 32]>, m: &Option<Marg>) {
@@ -4147,11 +4312,14 @@ fn kl_marg(a: &Marg, b: &Marg) -> Option<(f64, Vec<f64>)> {
 pub fn deviation(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine) -> Option<Deviation> { deviation_cached(p, st, raw, mem, eng, &mut ExpectCache::new(false)) }
 /// `deviation` with the members' marginals from `cache` (`ExpectCache`): the same value, fewer solves
 #[inline(never)]
-pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
-    cache.begin(); let d = deviation_in(p, st, raw, mem, eng, cache); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
+pub fn deviation_cached(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> { deviation_at(p, st, raw, mem, eng, cache, None) }
+/// `deviation_cached` after the turn: `at` is what `turn_at` handed of the event's own program (None: A_t built and solved here)
+#[inline(never)]
+pub fn deviation_at(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, at: Option<Option<Box<At>>>) -> Option<Deviation> {
+    cache.begin(); let d = deviation_in(p, st, raw, mem, eng, cache, at); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
 }
 #[inline(always)]
-fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Deviation> {
+fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, at: Option<Option<Box<At>>>) -> Option<Deviation> {
     let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
     let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
     let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
@@ -4159,7 +4327,7 @@ fn deviation_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engin
     // with this event's hours), in the mixture's order
     let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
     for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
-    let ms = members_marg(p, st, raw, &ins, eng, cache)?;
+    let ms = members_marg(p, st, raw, &ins, eng, cache, at)?;
     mixture(mem, &ws, &key, member, ms)
 }
 /// The deviation from the programs' marginals (A_t, E_t, then the other members in the mixture's order), out of the frame the
@@ -4186,7 +4354,17 @@ fn mixture(mem: &ExpectMem, ws: &[(String, f64)], key: &str, member: bool, ms: V
 }
 /// A member's program text from its compile meta (no clamps), in a frame of its own
 #[inline(never)]
-fn member_text(p: &Persona, mm: &Meta) -> Json { emit(p, &mm.field, &mm.rules, &mm.active, (mm.seed, mm.turn), mm.twin, &mm.values, &[]) }
+fn member_text(p: &Persona, mm: &Meta) -> Json { emit(p, &mm.field, &mm.rules, &mm.active, (mm.seed, mm.turn), mm.twin, &mm.values, &[], true) }
+/// T3-c: a member's text without its pairs (`emit`, `with_pairs: false`), in a frame of its own
+#[inline(never)]
+fn member_stub(p: &Persona, mm: &Meta) -> Json { emit(p, &mm.field, &mm.rules, &mm.active, (mm.seed, mm.turn), mm.twin, &mm.values, &[], false) }
+/// T3-c: a member's rules in force lowered to caps as `run::from_json` lowers its text's (its text without the pairs, read),
+/// with the program's variables and values; None: not read
+#[inline(never)]
+fn member_caps(p: &Persona, mm: &Meta) -> Option<(Vec<String>, Vec<String>, Vec<probbit_ir::Cap>)> {
+    let t = member_stub(p, mm);
+    crate::run::from_json_parts(&t).ok().map(crate::run::Parts::into_caps)
+}
 /// A program's exact marginals the reference way: its text built (`program_json`) and run by the engine (`ExpectCache::marg`);
 /// turn_trace: the build and the solve timed apart (`expect_build_us`, `expect_solve_us`)
 #[inline(never)]
@@ -4194,9 +4372,12 @@ fn text_marg(p: &Persona, st: &State, ins: &Json, eng: Engine, cache: &mut Expec
     let t = crate::trace::Stopwatch::start(); let prog = program_json(p, st, ins).ok(); let b = t.us();
     let m = prog.and_then(|prog| cache.marg(p, st, &prog, eng)); crate::trace::expect_split(b, t.us() - b); m
 }
-/// The event's own program's model parts, read once from its text (`run::from_json_parts`), with per variable of the persona
-/// (traits and moods, then the agenda steps) the value index of each of its levels in the program
-struct Skel { parts: crate::run::Parts, idx: Vec<Vec<usize>> }
+/// The event's own program read once from its text (`run::from_json_parts`) into the members' one model (`run::Members`: its
+/// parts moved in, no second copy), its variables, values and own `h`, with per variable of the persona (traits and moods, then
+/// the agenda steps) the value index of each of its levels in the program
+struct Skel { vars: Vec<String>, values: Vec<String>, h0: Vec<f64>, mm: crate::run::Members, idx: Vec<Vec<usize>>,
+    /// T3-c: the key of the skeleton's rules in force, of the rules whose caps the model holds now, and the skeleton's caps
+    base_rk: [u8; 32], cur_rk: [u8; 32], base_caps: Vec<probbit_ir::Cap> }
 /// The expectation's programs -> per program its exact marginals (None: it does not compile or is not solved exactly); None when
 /// A_t or E_t has none (no deviation). With the cache off (`persona::deviation`, the reference) every program's text is built
 /// and run by the engine. With it on, A_t's text is built and read once; every other program is compiled without its text
@@ -4206,24 +4387,34 @@ struct Skel { parts: crate::run::Parts, idx: Vec<Vec<usize>> }
 /// `comment` and the vars' `h` (its skeleton), then the program's field: equal keys, equal texts. Inlined in the deviation's frame
 /// (each member's build runs right under it, as before)
 #[inline(always)]
-fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, cache: &mut ExpectCache) -> Option<Vec<Option<Marg>>> {
+fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, cache: &mut ExpectCache, at: Option<Option<Box<At>>>) -> Option<Vec<Option<Marg>>> {
     let mut out = Vec::with_capacity(ins.len() + 1);
     if !cache.on { out.push(text_marg(p, st, raw, eng, cache)); if out[0].is_none() { return None; }
         for (i, x) in ins.iter().enumerate() { let m = text_marg(p, st, x, eng, cache); if i == 0 && m.is_none() { return None; } out.push(m); }
         return Some(out); }
     let t = crate::trace::Stopwatch::start();
-    let Ok((prog, meta)) = program_meta(p, st, raw, false) else { crate::trace::expect_split(t.us(), 0); return None };
+    // A_t: handed by the turn (its first program: the text written again from its meta, its answer's marginals), or built here
+    let (prog, meta, own) = match at {
+        Some(None) => { cache.reused = 1; if cache.check { assert!(program_json(p, st, raw).ok().and_then(|x| exact_marg(p, st, &x, eng)).is_none(), "A_t: not exact either way"); } return None }
+        Some(Some(a)) => { let At { marg, meta } = *a; cache.reused = 1; (member_text(p, &meta), meta, Some(marg)) }
+        None => { let Ok((prog, meta)) = program_meta(p, st, raw, false) else { crate::trace::expect_split(t.us(), 0); return None }; (prog, meta, None) } };
+    let mut prog = Some(prog);
     let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-    let skel = cache.live.then(|| skel_key(&prog));
+    let skel = cache.live.then(|| skel_key(prog.as_ref().unwrap()));
     let mut sk: Option<Option<Box<Skel>>> = None; // read on the first program the cache does not answer; Some(None): not usable
-    let a = model_marg(p, st, &prog, &meta, skel.as_ref(), &mut sk, true, eng, cache).flatten(); crate::trace::expect_split(b, t.us());
+    let a = match own {
+        Some(m) => { if cache.check { at_check(p, st, raw, prog.as_ref().unwrap(), &m, eng); } if let Some(s) = &skel { cache.put(field_key(s, &meta.field), &m); } Some(m) }
+        None => model_marg(p, st, &mut prog, &meta, skel.as_ref(), &mut sk, &meta, true, None, eng, cache).flatten() };
+    crate::trace::expect_split(b, t.us());
     a.as_ref()?; out.push(a);
     for (i, x) in ins.iter().enumerate() {
+        // A_t's text is read no more once its skeleton is (the members' model holds what they need)
+        if sk.is_some() { prog = None; }
         let t = crate::trace::Stopwatch::start();
         let m = match program_meta(p, st, x, true) {
             Err(_) => { crate::trace::expect_split(t.us(), 0); None }
             Ok((_, mm)) if mm.rules == meta.rules => { let (b, t) = (t.us(), crate::trace::Stopwatch::start());
-                let r = model_marg(p, st, &prog, &mm, skel.as_ref(), &mut sk, false, eng, cache);
+                let r = model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, &meta, false, None, eng, cache);
                 // another tier (or no usable skeleton): its text from its meta, run by the engine
                 let r = match r { Some(r) => r, None => { let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } }; crate::trace::expect_split(b, t.us()); r }
             // other rules in force: its text from its meta (no second build), run by the engine
@@ -4232,41 +4423,208 @@ fn members_marg(p: &Persona, st: &State, raw: &Json, ins: &[Json], eng: Engine, 
         out.push(m); }
     Some(out)
 }
-/// One program of the event as A_t's model with its own `h` (from its compile meta `mm`; `own`: A_t itself, its parsed `h`):
+/// T3-c: one member's exact marginals held through the turn: as a row of f64 in the order of the members' layout (`Held::lay`),
+/// or by name when its layout is another
+enum HeldM { Row(Vec<f64>), Named(Marg) }
+/// T3-c: what the deviation holds through the turn when the members run before it (`deviation_pre`): per member but A_t (E_t,
+/// then the other members in the mixture's order) its marginals or None (it does not compile or is not solved exactly); the
+/// sha256 of the rows' layout (each variable's id and its levels' names, in order); the skeleton's key and the key of its rules
+/// in force (A_t's row goes into the cache under the skeleton when its rules are the skeleton's)
+pub struct Held { ms: Vec<Option<HeldM>>, lay: [u8; 32], skel: Option<[u8; 32]>, rk: [u8; 32] }
+/// The sha256 of a marginals' layout: per variable its id and its levels' names, in order
+#[inline(never)]
+fn lay_key(m: &Marg) -> [u8; 32] {
+    let mut h = Sha256::new(); h.update(&(m.len() as u64).to_le_bytes());
+    for (id, ls) in m { hash_str(&mut h, id); h.update(&(ls.len() as u64).to_le_bytes()); for (l, _) in ls { hash_str(&mut h, l); } }
+    h.finish()
+}
+/// The sha256 of a program's rules in force
+#[inline(never)]
+fn rules_key(rules: &[Vec<Json>]) -> [u8; 32] {
+    let mut h = Sha256::new(); h.update(&(rules.len() as u64).to_le_bytes());
+    for r in rules { hash_json(&mut h, &Json::Arr(r.clone())); }
+    h.finish()
+}
+/// T3-c, the members before the turn (`Live::event` with the cache reusing the turn's program): every member but A_t is solved
+/// from the pre-event state as `deviation_cached` solves it, nothing of the turn held; their marginals are kept as rows (`Held`)
+/// for `deviation_post`, which reads A_t from the turn. The members' one model is read from the first member's own text (its
+/// skeleton); a member with other rules in force takes it with its own caps (its rules lowered, `member_caps`: the pairs and
+/// folds are the skeleton's); a member the model does not answer is built and run by the engine. E_t comes first, the skeleton
+/// is its. None: no deviation (no block, or E_t has no exact marginals: the other members are then not solved);
+/// `deviation_post` runs either way (it closes the cache's event)
+#[inline(never)]
+pub fn deviation_pre(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Box<Held>> {
+    cache.begin(); let h = pre_in(p, st, raw, mem, eng, cache);
+    // only this event's rows are held through the turn (A_t's goes in after it)
+    cache.prune(); h
+}
+#[inline(always)]
+fn pre_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache) -> Option<Box<Held>> {
+    let ex = p.expect.as_ref()?; let kv = raw.as_obj()?;
+    let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0)); let key = combo_key(p, kv);
+    let ws = expect_weights(ex, mem);
+    let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
+    for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
+    drop(ws);
+    let mut out: Vec<Option<Marg>> = (0..ins.len()).map(|_| None).collect();
+    let (mut sk, mut base, mut skel): (Option<Option<Box<Skel>>>, Option<Box<Meta>>, Option<[u8; 32]>) = (None, None, None);
+    let mut prog: Option<Json> = None;
+    for i in 0..ins.len() {
+        if sk.is_some() { prog = None; }
+        let t = crate::trace::Stopwatch::start();
+        let m = match program_meta(p, st, &ins[i], true) {
+            Err(_) => { crate::trace::expect_split(t.us(), 0); None }
+            Ok((_, mm)) => {
+                // the skeleton from the first member: its text without the pairs (read with the persona's couplings), no program text
+                let same = match &base { None => { prog = Some(member_stub(p, &mm));
+                    skel = cache.live.then(|| stub_key(p, prog.as_ref().unwrap())); true } Some(b) => mm.rules == b.rules };
+                let (b, t) = (t.us(), crate::trace::Stopwatch::start());
+                // other rules in force: the same model with the member's caps (its rules lowered)
+                let rk = (!same).then(|| rules_key(&mm.rules));
+                let r = { let am = base.as_deref().unwrap_or(&mm); model_marg(p, st, &mut prog, &mm, skel.as_ref(), &mut sk, am, false, rk.as_ref(), eng, cache) };
+                // another tier, rules not read or no usable skeleton: its text from its meta, run by the engine
+                let r = match r { Some(r) => r, None => { let prog = member_text(p, &mm); cache.marg(p, st, &prog, eng) } };
+                if base.is_none() { base = Some(mm); }
+                crate::trace::expect_split(b, t.us()); r } };
+        // E_t without exact marginals: no deviation (the other members are not solved)
+        if i == 0 && m.is_none() { return None; }
+        out[i] = m; }
+    drop((sk, prog));
+    out[0].as_ref()?;
+    let lay = lay_key(out[0].as_ref().unwrap());
+    let ms = out.into_iter().map(|m| m.map(|m| if lay_key(&m) == lay { HeldM::Row(m.iter().flat_map(|(_, ls)| ls.iter().map(|x| x.1)).collect()) } else { HeldM::Named(m) })).collect();
+    Some(Box::new(Held { ms, lay, skel, rk: base.as_ref().map_or([0; 32], |b| rules_key(&b.rules)) }))
+}
+/// T3-c, after the turn: A_t from the turn (`at`; None: built and solved here), the held members named again from A_t's layout
+/// (the same values, the same names, in the same order), then the mixture as `deviation_cached` computes it. A layout that is
+/// not A_t's (never seen) solves the members again
+#[inline(never)]
+pub fn deviation_post(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, held: Option<Box<Held>>, at: Option<Option<Box<At>>>) -> Option<Deviation> {
+    let d = post_in(p, st, raw, mem, eng, cache, held, at); cache.end(); crate::trace::expect_cache(cache.hits, cache.solves); d
+}
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn post_in(p: &Persona, st: &State, raw: &Json, mem: &ExpectMem, eng: Engine, cache: &mut ExpectCache, held: Option<Box<Held>>, at: Option<Option<Box<At>>>) -> Option<Deviation> {
+    let ex = p.expect.as_ref()?; let kv = raw.as_obj()?; let h = held?;
+    let a = match at {
+        Some(None) => { cache.reused = 1; if cache.check { assert!(program_json(p, st, raw).ok().and_then(|x| exact_marg(p, st, &x, eng)).is_none(), "A_t: not exact either way"); } return None }
+        Some(Some(a)) => { let At { marg, meta } = *a; cache.reused = 1;
+            if cache.check { at_check(p, st, raw, &member_text(p, &meta), &marg, eng); }
+            if let Some(s) = &h.skel { if rules_key(&meta.rules) == h.rk { cache.put(field_key(s, &meta.field), &marg); } }
+            marg }
+        None => text_marg(p, st, raw, eng, cache)? };
+    let key = combo_key(p, kv); let ws = expect_weights(ex, mem); let member = ws.iter().any(|(k, _)| *k == key);
+    let mut ms: Vec<Option<Marg>> = Vec::with_capacity(h.ms.len() + 1);
+    if lay_key(&a) == h.lay {
+        let Held { ms: hm, .. } = *h;
+        for m in hm { ms.push(m.map(|m| match m { HeldM::Named(m) => m, HeldM::Row(r) => { let mut r = r.into_iter();
+            a.iter().map(|(id, ls)| (id.clone(), ls.iter().map(|(l, _)| (l.clone(), r.next().unwrap_or(0.0))).collect())).collect() } })); }
+    } else {
+        drop(h); let e = get(kv, "elapsed_hours").cloned().unwrap_or(Json::Num(0.0));
+        let mut ins = vec![with_elapsed(&Json::Obj(vec![]), &e)];
+        for (k, _) in &ws { if *k == key || k == "{}" { continue; } ins.push(with_elapsed(&mem.combos.iter().find(|x| x.0 == *k).map(|x| x.2.clone()).unwrap_or(Json::Obj(vec![])), &e)); }
+        for x in &ins { ms.push(text_marg(p, st, x, eng, cache)); }
+    }
+    ms.insert(0, Some(a));
+    mixture(mem, &ws, &key, member, ms)
+}
+/// The test instrument (`ExpectCache::with_reuse(_, true)`): the A_t the turn handed is the program the deviation builds for the
+/// event, text for text, and its marginals are that program's run by the engine, bit for bit
+#[inline(never)]
+fn at_check(p: &Persona, st: &State, raw: &Json, prog: &Json, m: &Marg, eng: Engine) {
+    let own = program_json(p, st, raw).expect("A_t builds");
+    assert_eq!(text(&own), text(prog), "A_t: the turn's first program is the deviation's");
+    let r = exact_marg(p, st, &own, eng).expect("A_t exact");
+    assert!(r.len() == m.len() && r.iter().zip(m).all(|(a, b)| a.0 == b.0 && a.1.len() == b.1.len() && a.1.iter().zip(&b.1).all(|(x, y)| x.0 == y.0 && x.1.to_bits() == y.1.to_bits())), "A_t: the turn's marginals are the engine's");
+}
+/// One program of the event as A_t's model with its own `h` (from its compile meta `mm`; A_t's is `am`, its skeleton read with
+/// it; `own`: A_t itself, its parsed `h`):
 /// Some(marginals or None) as the engine would answer; None when the enumeration would not answer it (the caller runs it)
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn model_marg(p: &Persona, st: &State, prog: &Json, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, own: bool, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
-    let key = skel.map(|s| field_key(s, &mm.field));
+fn model_marg(p: &Persona, st: &State, prog: &mut Option<Json>, mm: &Meta, skel: Option<&[u8; 32]>, sk: &mut Option<Option<Box<Skel>>>, am: &Meta, own: bool, rk: Option<&[u8; 32]>, eng: Engine, cache: &mut ExpectCache) -> Option<Option<Marg>> {
+    // T3-c: a member with other rules in force than the skeleton's (`rk`, its rules' key) is keyed with them
+    let key = skel.map(|s| match rk { None => field_key(s, &mm.field), Some(r) => field_key(&rules_skel(s, r), &mm.field) });
     if let Some(k) = &key { if let Some(m) = cache.find(k) { return Some(Some(m)); } }
-    if sk.is_none() { *sk = Some(skel_parts(p, prog, mm)); }
-    let Some(Some(s)) = sk.as_ref() else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
-    let h = if own { s.parts.h().to_vec() } else { field_h(s, &mm.field) };
-    let Ok(mut m) = s.parts.model_with(h) else { cache.keep(key, &None); return Some(None) };
-    let Some(r) = crate::run::enumerated(&mut m, p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(cache.marg(p, st, prog, eng)) } else { None } };
-    let r = r.map(|mg| { let k = m.k; s.parts.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")).map(|(i, id)| (id.clone(), {
-        let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.parts.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
+    // A_t's text is read into its parts and dropped before the members' model is built from them (A_t itself, unhanded, keeps
+    // its text: its own fallback runs it)
+    if sk.is_none() { *sk = Some(if own { prog.as_ref().and_then(|x| skel_parts(p, x, am)) } else { prog.take().and_then(|x| skel_parts_owned(p, x, am)) }); }
+    // T3-c: the model's caps are the member's rules lowered (the skeleton's again for a member with its rules)
+    if let Some(Some(s)) = sk.as_ref() { let want = rk.copied().unwrap_or(s.base_rk); if want != s.cur_rk && !swap_caps(p, sk, mm, want) { return None; } }
+    let own_run = |prog: &Option<Json>, cache: &mut ExpectCache| prog.as_ref().and_then(|x| cache.marg(p, st, x, eng));
+    let Some(Some(s)) = sk.as_mut() else { return if own { Some(own_run(prog, cache)) } else { None } };
+    let h = if own { s.h0.clone() } else { field_h(s, &mm.field) };
+    if s.mm.set_h(h).is_err() { cache.keep(key, &None); return Some(None) }
+    let Some(r) = s.mm.enumerated(p.eng.exact_limit, p.eng.sweeps) else { return if own { Some(own_run(prog, cache)) } else { None } };
+    let r = r.map(|mg| { let m = &s.mm.m; let k = m.k; s.vars.iter().enumerate().filter(|(_, id)| !id.starts_with("free.")).map(|(i, id)| (id.clone(), {
+        let mut l: Vec<(String, f64)> = (0..k).filter(|&q| m.allowed[i * k + q]).map(|q| (s.values[q].clone(), mg[i * k + q])).collect(); l.sort_by(|a, b| a.0.cmp(&b.0)); l })).collect() });
     cache.modeled += 1; cache.keep(key, &r); Some(r)
+}
+/// T3-c: the members' model with the caps of the rules `want` (the skeleton's, or member `mm`'s lowered) -> false when they are
+/// not read (the member takes the engine's path); the skeleton is dropped when `Model::new` refuses them
+#[inline(never)]
+fn swap_caps(p: &Persona, sk: &mut Option<Option<Box<Skel>>>, mm: &Meta, want: [u8; 32]) -> bool {
+    let Some(Some(s)) = sk.as_mut() else { return false };
+    let r = if want == s.base_rk { s.mm.set_caps(s.base_caps.clone(), true) } else {
+        let Some((vs, vals, caps)) = member_caps(p, mm) else { return false }; if vs != s.vars || vals != s.values { return false; } s.mm.set_caps(caps, false) };
+    if r.is_err() { *sk = Some(None); return false; }
+    s.cur_rk = want; true
 }
 /// A_t's text read into its parts, and the value index of every level -> None when the parts do not have the shape the compiler
 /// writes (then every program is run the reference way); checked: A_t's own field mapped to `h` is the `h` its text carries
 #[inline(never)]
-fn skel_parts(p: &Persona, prog: &Json, mm: &Meta) -> Option<Box<Skel>> {
-    let parts = crate::run::from_json_parts(prog).ok()?;
+fn skel_parts(p: &Persona, prog: &Json, mm: &Meta) -> Option<Box<Skel>> { skel_of(p, crate::run::from_json_parts(prog).ok()?, mm) }
+/// `skel_parts`, the text dropped once its parts are read; T3-c: a text written without its pairs (`emit`, `with_pairs: false`)
+/// gets the persona's couplings as `from_json` reads them from the full text (`persona_pairs`)
+#[inline(never)]
+fn skel_parts_owned(p: &Persona, prog: Json, mm: &Meta) -> Option<Box<Skel>> {
+    let bare = prog.get("pairs").is_none(); let mut parts = crate::run::from_json_parts(&prog).ok()?; drop(prog);
+    if bare { let ps = persona_pairs(p, &parts.vars, &parts.values, mm.twin)?; parts.set_pairs(ps); }
+    skel_of(p, parts, mm)
+}
+/// T3-c: the pairs `emit` writes for persona `p` (its couplings, then the twins' when the program has them), read as
+/// `run::from_json_parts` reads them: per pair its variables' indices and its k x k table (r6 of the persona's, at the values'
+/// indices; each weight checked as `json::weight` checks it) -> None when the text's would not read (then no skeleton)
+#[inline(never)]
+fn persona_pairs(p: &Persona, vars: &[String], values: &[String], twin: bool) -> Option<Vec<probbit_ir::Pair>> {
+    let k = values.len(); let pos_vals = p.eng.positional;
+    let name_of = |var: &str, val: &str| -> String { match p.var(var) { Some(v) if pos_vals => format!("l{}", v.levels.iter().position(|l| l == val).unwrap_or(0)), _ => val.to_string() } };
+    let vi = |id: &str| vars.iter().position(|x| x == id); let vpos = |v: &str| values.iter().position(|x| x == v);
+    let mut out = vec![];
+    let mut tabs = vec![];
+    for (a, b, tab) in &p.couplings {
+        let (la, lb) = (&p.var(a)?.levels, &p.var(b)?.levels); let mut t = vec![0.0; k * k];
+        for (x, l1) in la.iter().enumerate() { for (y, l2) in lb.iter().enumerate() { let w = r6(tab[x][y]); if w != 0.0 || !pos_vals { t[vpos(&name_of(a, l1))? * k + vpos(&name_of(b, l2))?] = w; } } }
+        if t.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return None; }
+        let (i, j) = (vi(a)?, vi(b)?); if i == j { return None; }
+        out.push(probbit_ir::Pair { i, j, c: probbit_ir::Coupling::Table(t.clone()) }); tabs.push((a, b, t)); }
+    if twin { for (a, b, t) in tabs { let (i, j) = (vi(&format!("free.{a}"))?, vi(&format!("free.{b}"))?); out.push(probbit_ir::Pair { i, j, c: probbit_ir::Coupling::Table(t) }); } }
+    Some(out)
+}
+/// T3-c: the skeleton's key from a member's text without its pairs: the persona's digest (its couplings) and the text without
+/// `comment` and the vars' `h`, as `skel_key` hashes a full text
+#[inline(never)]
+fn stub_key(p: &Persona, stub: &Json) -> [u8; 32] { let mut h = Sha256::new(); h.update(b"without pairs"); hash_str(&mut h, &p.digest); h.update(&skel_key(stub)); h.finish() }
+/// The skeleton from A_t's parts (`skel_parts`)
+fn skel_of(p: &Persona, parts: crate::run::Parts, mm: &Meta) -> Option<Box<Skel>> {
     let (nv, ns) = (p.vars.len(), p.steps.len());
     if parts.vars.len() != (nv + ns) * if mm.twin { 2 } else { 1 } { return None; }
     let q = |name: &str| parts.values.iter().position(|x| x == name);
     let mut idx = vec![];
     for v in &p.vars { idx.push(v.levels.iter().enumerate().map(|(j, l)| q(&if p.eng.positional { format!("l{j}") } else { l.clone() })).collect::<Option<Vec<usize>>>()?); }
     for _ in &p.steps { idx.push(p.slots.iter().map(|l| q(l)).collect::<Option<Vec<usize>>>()?); }
-    let s = Box::new(Skel { parts, idx });
-    (field_h(&s, &mm.field).iter().zip(s.parts.h()).all(|(a, b)| a.to_bits() == b.to_bits())).then_some(s)
+    let (n, k) = (parts.vars.len(), parts.values.len());
+    if !field_hn(n, k, &idx, &mm.field).iter().zip(parts.h()).all(|(a, b)| a.to_bits() == b.to_bits()) { return None; }
+    let (vars, values, h0, mm2) = parts.into_members()?; let rk = rules_key(&mm.rules);
+    let base_caps = mm2.m.caps.clone();
+    Some(Box::new(Skel { vars, values, h0, mm: mm2, idx, base_rk: rk, cur_rk: rk, base_caps }))
 }
 /// A field (per persona variable, per level) as the program's `h` (n x k): the value index each level gets, 0 where the text
 /// omits a weight, the twins' rows copied
-fn field_h(s: &Skel, field: &[Vec<f64>]) -> Vec<f64> {
-    let (n, k, m) = (s.parts.vars.len(), s.parts.values.len(), s.idx.len()); let mut h = vec![0.0; n * k];
-    for r in 0..n { let i = r % m; for (&q, &w) in s.idx[i].iter().zip(&field[i]) { if w != 0.0 { h[r * k + q] = w; } } }
+fn field_h(s: &Skel, field: &[Vec<f64>]) -> Vec<f64> { field_hn(s.vars.len(), s.values.len(), &s.idx, field) }
+fn field_hn(n: usize, k: usize, idx: &[Vec<usize>], field: &[Vec<f64>]) -> Vec<f64> {
+    let m = idx.len(); let mut h = vec![0.0; n * k];
+    for r in 0..n { let i = r % m; for (&q, &w) in idx[i].iter().zip(&field[i]) { if w != 0.0 { h[r * k + q] = w; } } }
     h
 }
 /// A_t's text without `comment` and without the vars' `h`, hashed as `prog_key` hashes a program
@@ -4280,6 +4638,10 @@ fn skel_key(prog: &Json) -> [u8; 32] {
             _ => hash_json(&mut h, x) } } }
     h.finish()
 }
+/// T3-c: the skeleton's key for a member with other rules in force (`rk`, its rules' key): its text is the skeleton's with its
+/// own rules and `h`, so (skeleton, rules, field) names it
+#[inline(never)]
+fn rules_skel(skel: &[u8; 32], rk: &[u8; 32]) -> [u8; 32] { let mut h = Sha256::new(); h.update(skel); h.update(b"rules"); h.update(rk); h.finish() }
 /// A program's key from A_t's skeleton and its field (each number by its bits, -0 as 0)
 fn field_key(skel: &[u8; 32], field: &[Vec<f64>]) -> [u8; 32] {
     let mut h = Sha256::new(); h.update(skel);
@@ -4297,6 +4659,15 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
     for c in &mut mem.combos { c.1 *= d; }
     match mem.combos.iter_mut().find(|c| c.0 == key) { Some(c) => { c.1 += 1.0; c.2 = rep; } None => mem.combos.push((key.clone(), 1.0, rep)) }
     if key != "{}" { mem.warm = true; }
+    // RFC 0016 (canonical memory): the drive's fold reads the event's z as the deviation computed it (the logged prediction
+    // against the normal before this event), before the normal moves
+    if let (Some(c), true) = (p.cur.as_ref(), mem.canon) {
+        let z = logged_pred.map(|x| ((1.0 + x).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
+        mem.cur.get_or_insert_with(|| curiosity::CurMem::new(c)).step(c, &key, z, kv); }
+    // RFC 0015 (canonical memory): the rest pass's window reads the same z (one-sided: z+), before the normal moves
+    if let (Some(rp), true) = (ex.rest.as_ref(), mem.canon) {
+        let z = logged_pred.map(|x| ((1.0 + x).ln() - mem.mean) / (mem.var + DEV_VAR_FLOOR).sqrt());
+        mem.win.get_or_insert_with(Default::default).step(&key, d, 0.5f64.powf(1.0 / rp.half_life), z.map_or(0.0, |z| r6(z.max(0.0)))); }
     if let Some(x) = logged_pred { let (x, a) = ((1.0 + x).ln(), 1.0 - d); let dx = x - mem.mean;
         mem.mean += a * dx; mem.var = (1.0 - a) * (mem.var + a * dx * dx); mem.n += 1; }
     if mem.canon {
@@ -4308,8 +4679,24 @@ pub fn expect_step(p: &Persona, mem: &mut ExpectMem, raw: &Json, logged_pred: Op
             let Some(i) = (0..mem.combos.len()).filter(|&i| mem.combos[i].0 != "{}").min_by(|&a, &b| { let (x, y) = (&mem.combos[a], &mem.combos[b]);
                 x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal).then(y.0.cmp(&x.0)) }) else { break };
             let c = mem.combos.remove(i); mem.rest = r6(mem.rest + c.1); }
+        if let Some(cm) = mem.cur.as_mut() { cm.prune(&mem.combos); }
+        if let Some(w) = mem.win.as_mut() { w.settle(&mem.combos); }
         mem.mean = r6(mem.mean); mem.var = r6(mem.var);
     }
+}
+/// RFC 0016: the curiosity drive's level the next event's turn reads, from the expectation's memory (None without the block or
+/// before the canonical fold, engine 0.14.0); a memory with no event yet reads the fold's start (level 0 from quiet)
+pub fn cur_level(p: &Persona, mem: &ExpectMem) -> Option<f64> {
+    let c = p.cur.as_ref().filter(|_| mem.canon)?; Some(mem.cur.as_ref().map_or_else(|| curiosity::CurMem::new(c).level(c), |m| m.level(c)))
+}
+/// RFC 0016: the stance's `drives.curiosity` (the level and its two inputs, as the turn read them) from the memory before the event
+pub fn cur_doc(p: &Persona, mem: &ExpectMem) -> Option<Json> {
+    let c = p.cur.as_ref().filter(|_| mem.canon)?; Some(mem.cur.as_ref().map_or_else(|| curiosity::CurMem::new(c).doc(c), |m| m.doc(c)))
+}
+/// RFC 0016: is a self-started idle event due `idle_hours` after the last event (`curiosity::stir_due` on the memory's fold)
+pub fn stir_due(p: &Persona, mem: &ExpectMem, idle_hours: f64) -> Option<curiosity::Stir> {
+    let c = p.cur.as_ref().filter(|_| mem.canon)?; let start; let m = match mem.cur.as_ref() { Some(m) => m, None => { start = curiosity::CurMem::new(c); &start } };
+    curiosity::stir_due(c, m, idle_hours)
 }
 /// `j` with every object's keys sorted (by code point) at every level: the value canonical JSON writes, as a value
 fn key_sorted(j: &Json) -> Json {
@@ -4355,11 +4742,15 @@ pub fn trajectory_program(prog: &Json, k: usize, beta0: f64, limit: u64) -> Opti
 pub fn trajectory(p: &Persona, st: &State, raw: &Json) -> Option<Json> {
     let t = p.traj.as_ref()?; trajectory_program(&program_json(p, st, raw).ok()?, t.k, t.beta0, p.eng.exact_limit)
 }
-/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009) and without `glyph` and `glyph_why` (§2.18);
-/// both have effects {}: the blocks on or off, one digest
+/// A stance document's sha256 as strand lines log it: without `deviation` (RFC 0009), without `glyph` and `glyph_why` (§2.18) and
+/// without `integrity` (RFC 0014); all have effects {}: the blocks on or off, one digest
 pub fn stance_sha(doc: &Json) -> String {
-    const OUT: [&str; 3] = ["deviation", "glyph", "glyph_why"];
-    match doc { Json::Obj(v) if v.iter().any(|(k, _)| OUT.contains(&k.as_str())) => sha(&Json::Obj(v.iter().filter(|(k, _)| !OUT.contains(&k.as_str())).cloned().collect())), _ => sha(doc) }
+    const OUT: [&str; 4] = ["deviation", "glyph", "glyph_why", "integrity"];
+    // RFC 0016: `drives.curiosity` is the live writer's (from the expectation's memory), outside the digest as `deviation` is
+    let cur = |x: &Json| x.get("curiosity").is_some();
+    match doc { Json::Obj(v) if v.iter().any(|(k, x)| OUT.contains(&k.as_str()) || (k == "drives" && cur(x))) => sha(&Json::Obj(v.iter().filter(|(k, _)| !OUT.contains(&k.as_str()))
+            .filter_map(|(k, x)| match x { Json::Obj(d) if k == "drives" && cur(x) => { let r: Vec<(String, Json)> = d.iter().filter(|(j, _)| j != "curiosity").cloned().collect();
+                (!r.is_empty()).then(|| (k.clone(), Json::Obj(r))) } _ => Some((k.clone(), x.clone())) }).collect())), _ => sha(doc) }
 }
 
 /// §2.18 `display.glyphs`: one glyph per stance, computed from the stance document. `moods`: the two mood ids (rows, then
