@@ -1,0 +1,41 @@
+# probbit
+
+> probbit is a personality, mood and memory layer for AI agents, on an exact p-bit decision engine. A persona file plus a seed makes one individual; every turn, simulated p-bits on a CPU settle the agent's stance under its habits (hard rules), give exact odds, and append to a replayable strand that `probbit live verify` checks byte for byte. The same engine plans under hard rules (tasks to workers, tickets to agents), gives the odds for every part, and refuses when it cannot vouch. One zero-dependency Rust binary: CLI, MCP server (`probbit mcp`), OpenClaw plugin, npm, a Python wrapper, wasm. Offline, no API key.
+
+Install on Linux or macOS: `curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh` (installs to `~/.local/bin`, SHA-256 checked). The full agent quickstart, with expected output for every step, is in AGENTS.md.
+
+## Start here
+
+- [Website](https://bitmapasset.github.io/probbit/): the one-page front door: what it is for, the install lines, the harness table, the FAQ, and the name (probbit, not probit)
+- [AGENTS.md](https://raw.githubusercontent.com/BitmapAsset/probbit/main/AGENTS.md): the agent quickstart as copy-paste commands with expected output and exit codes, how to verify a strand, how to report a bug
+- [README](https://raw.githubusercontent.com/BitmapAsset/probbit/main/README.md): what it is for, install, the harness table, the FAQ, every measured claim
+- [Cheat sheet](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/CHEATSHEET.md): every command, verdict, tier and exit code on one page
+
+## Agents and personas
+
+- [Persona format](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/persona.md): the persona file (traits, moods, habits), the stance and state documents, bounded learning, `probbit live`, `probbit monitor`, what a persona can not do
+- [Calling probbit from agents](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/agents.md): shell, Python, Node, PowerShell, the MCP server and its tools, a browser
+- [Agent SDK adapters](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/adapters.md): a live individual beside Claude Code hooks, the OpenAI Agents SDK, LangChain and the Vercel AI SDK
+- [Receipts](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/receipts.md): one receipt per decision from any strand
+- [OpenClaw plugin](https://raw.githubusercontent.com/BitmapAsset/probbit/main/plugins/openclaw/README.md): `probbit-stance`, the stance in every turn of the sessions you list
+- [Example personas](https://github.com/BitmapAsset/probbit/tree/main/examples/persona): tutor, ops engineer, trader assistant, with golden outputs
+- [Tutor persona (raw)](https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml): the file the quickstart fetches
+- [Python wrapper](https://raw.githubusercontent.com/BitmapAsset/probbit/main/python/probbit.py): stdlib-only, one subprocess per call, typed errors
+
+## The decision engine
+
+- [probbit-ir JSON](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/probbit-ir-json.md): the wire format: variables, scores, couplings, hard caps, resource controls, limits
+- [probbit-ir JSON Schema](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/probbit-ir.schema.json): a JSON Schema of that wire format
+- [Use cases](https://raw.githubusercontent.com/BitmapAsset/probbit/main/USE-CASES.md): what the measurements support, by problem shape
+
+## Evidence
+
+- [Benchmarks](https://raw.githubusercontent.com/BitmapAsset/probbit/main/BENCHMARKS.md): every number with machine, load and N, and the known failure modes
+- [Reproduce](https://raw.githubusercontent.com/BitmapAsset/probbit/main/REPRODUCE.md): rerun the published tables, with sha256s to compare
+- [Changelog](https://raw.githubusercontent.com/BitmapAsset/probbit/main/CHANGELOG.md): every release
+
+## Optional
+
+- [llms-full.txt](https://raw.githubusercontent.com/BitmapAsset/probbit/main/llms-full.txt): the README, the persona format, the agents page and REPRODUCE.md in one file
+- [Releases](https://github.com/BitmapAsset/probbit/releases): prebuilt binaries for Linux, macOS and Windows, each with a .sha256
+- [Issues](https://github.com/BitmapAsset/probbit/issues): bug reports
