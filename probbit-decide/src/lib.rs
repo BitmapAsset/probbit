@@ -6,10 +6,22 @@
 //! Router: exact enumeration when the feasible set is small, else constraint-preserving
 //! Gibbs (site heat-bath restricted to feasible values + Metropolis swap moves) with
 //! multi-chain split-R-hat gate -> "UNMIXED: escalate" refusal.
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate probbit_nostd as std;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate alloc;
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use probbit_core::Philox4x32;
 use std::collections::HashMap;
 pub mod oracle;
 pub mod ir;
+pub mod amp;
 
 /// Tasks up to which `Problem::logw` uses the pairwise loop. R19.8 re-measured (`examples/logw_threshold.rs`, 6 workers, groups
 /// of 4 / 8, median of 7 alternating rounds, load ~8.6): linear / pairwise ns per call = 1.52 / 1.25 at 96 tasks, 0.96 / 0.92 at

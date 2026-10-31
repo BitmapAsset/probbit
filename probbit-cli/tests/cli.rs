@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 // The crate's own zero-dependency JSON reader: error documents must re-parse with it (P0.1 / P0.2 contract tests)
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 
 fn probbit(args: &[&str], stdin: &str) -> (i32, String, String) {

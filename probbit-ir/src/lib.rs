@@ -8,6 +8,17 @@
 //! updates restricted to feasible values + Metropolis swap moves, multi-chain), `gate_stats` (the certification gate
 //! over generic marginals), `Model::with_clamp` (what-if). Front-ends lower to this form: the assignment router in
 //! probbit-decide is one (`Problem::lower`), and its results through the lowering are bit-identical to its own engine.
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate probbit_nostd as std;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate alloc;
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use probbit_core::Philox4x32;
 use std::collections::HashMap;
 
@@ -627,7 +638,26 @@ pub fn exact_components_until(m: &Model, limit: u64, max_states: usize, hard: Op
     if past(hard) { return None; }
     deep(m.n, || components(m, limit, max_states, hard))
 }
+/// T3-c: `exact_components_until` with the split of a model that differs from the split's only in `h` (RFC 0009's members):
+/// the components, their kinds and the sub-models of the components with caps or cycles (their pairs and caps) are the
+/// split's, each sub-model's `h` copied from `m`; the same tiers on the same numbers, so the same answer bit for bit. The
+/// split is built on the first call (`Split::default()`) and is the caller's to drop when the pairs, caps, allowed values or
+/// clamps change
+pub fn exact_components_split(m: &Model, s: &mut Split, limit: u64, max_states: usize, hard: Option<probbit_core::rt::Instant>) -> Option<CompExact> {
+    if past(hard) { return None; }
+    deep(m.n, || { if s.mems.is_empty() { *s = split(m); s.keep = true; } solve_split(m, s, limit, max_states, hard) })
+}
+/// The components tier's split of a model, what does not read `h` (`exact_components_split`)
+#[derive(Default)]
+pub struct Split { mems: Vec<Vec<usize>>, comp_of: Vec<usize>, tree: Vec<bool>, counted: Vec<Option<CountSpec>>, ccaps: Vec<Vec<usize>>, fwork: f64,
+    /// per component with caps or cycles its sub-model, built on its first use (Some(None): `Model::new` refused it), kept for the
+    /// next call with `keep` (else dropped once solved, as before)
+    subs: Vec<Option<Option<Model>>>, keep: bool }
 fn components(m: &Model, limit: u64, max_states: usize, hard: Option<probbit_core::rt::Instant>) -> Option<CompExact> {
+    let mut s = split(m); solve_split(m, &mut s, limit, max_states, hard)
+}
+#[inline(never)]
+fn split(m: &Model) -> Split {
     let (n, k) = (m.n, m.k); let mut par: Vec<usize> = (0..n).collect();
     fn find(par: &mut [usize], mut x: usize) -> usize { while par[x] != x { par[x] = par[par[x]]; x = par[x]; } x }
     fn join(par: &mut [usize], a: usize, b: usize) { let (a, b) = (find(par, a), find(par, b)); if a != b { par[a.max(b)] = a.min(b); } }
@@ -641,28 +671,41 @@ fn components(m: &Model, limit: u64, max_states: usize, hard: Option<probbit_cor
     let tree = |c: usize| ccaps[c].is_empty() && npairs[c] + 1 == mems[c].len();
     let mut cpairs: Vec<Vec<usize>> = vec![vec![]; mems.len()]; for (q, p) in m.pairs.iter().enumerate() { cpairs[comp_of[p.i]].push(q); }
     let counted: Vec<Option<CountSpec>> = (0..mems.len()).map(|c| if tree(c) { None } else { count_spec(m, &mems[c], &ccaps[c], &cpairs[c]) }).collect();
-    if mems.len() == 1 && !tree(0) && counted[0].is_none() { return None; }
     let vals = |i: usize| -> Vec<usize> { m.cand[i].iter().copied().filter(|&v| m.ok(i, v)).collect() };
     let fwork: f64 = m.pairs.iter().filter(|p| tree(comp_of[p.i])).map(|p| (vals(p.i).len() * vals(p.j).len()) as f64).sum::<f64>()
         + (0..n).filter(|&i| tree(comp_of[i])).count() as f64 * k as f64;
-    if fwork > FOREST_MAX_WORK { return None; }
+    let tree: Vec<bool> = (0..mems.len()).map(tree).collect(); let subs = (0..mems.len()).map(|_| None).collect();
+    Split { mems, comp_of, tree, counted, ccaps, fwork, subs, keep: false }
+}
+fn solve_split(m: &Model, s: &mut Split, limit: u64, max_states: usize, hard: Option<probbit_core::rt::Instant>) -> Option<CompExact> {
+    let (n, k) = (m.n, m.k);
+    let Split { mems, comp_of, tree, counted, ccaps, fwork, subs, keep } = s;
+    if mems.len() == 1 && !tree[0] && counted[0].is_none() { return None; }
+    let vals = |i: usize| -> Vec<usize> { m.cand[i].iter().copied().filter(|&v| m.ok(i, v)).collect() };
+    if *fwork > FOREST_MAX_WORK { return None; }
     let mut out = CompExact { marg: vec![0.0; n * k], map: vec![0; n], map_logw: 0.0, logz: 0.0, components: mems.len(), forest: 0, enumerated: 0, frontier: 0, occupancy: 0, infeasible: false };
     let mut enum_left = limit as f64;
     for (c, mem) in mems.iter().enumerate() {
         if past(hard) { return None; }
-        if tree(c) { out.forest += 1;
+        if tree[c] { out.forest += 1;
             let z = tree_bp(m, mem, &vals, &mut out.marg, &mut out.map); if z == f64::NEG_INFINITY { out.infeasible = true; return Some(out); }
             out.logz += z; continue; }
         if let Some(sp) = &counted[c] { out.occupancy += 1;
             let z = count_dp(m, mem, sp, &mut out.marg, &mut out.map); if z == f64::NEG_INFINITY { out.infeasible = true; return Some(out); }
             out.logz += z; continue; }
         // a component with caps or cycles: a sub-model of its own variables, pairs and caps, solved by the whole-program tiers
-        let mut loc = vec![usize::MAX; n]; for (q, &i) in mem.iter().enumerate() { loc[i] = q; }
-        let nn = mem.len(); let mut h = Vec::with_capacity(nn * k); let mut al = Vec::with_capacity(nn * k);
-        for &i in mem { h.extend_from_slice(&m.h[i * k..i * k + k]); al.extend_from_slice(&m.allowed[i * k..i * k + k]); }
-        let pairs: Vec<Pair> = m.pairs.iter().filter(|p| comp_of[p.i] == c).map(|p| Pair { i: loc[p.i], j: loc[p.j], c: p.c.clone() }).collect();
-        let caps: Vec<Cap> = ccaps[c].iter().map(|&q| Cap { members: m.caps[q].members.iter().map(|&(i, v)| (loc[i], v)).collect(), limit: m.caps[q].limit, weights: m.caps[q].weights.clone() }).collect();
-        let sub = Model::new(nn, k, h, al, mem.iter().map(|&i| m.clamp[i]).collect(), pairs, caps).ok()?;
+        // (built once per split; a later call copies its variables' `h` in)
+        let nn = mem.len();
+        if let Some(Some(sub)) = &mut subs[c] { for (q, &i) in mem.iter().enumerate() { sub.h[q * k..q * k + k].copy_from_slice(&m.h[i * k..i * k + k]); }
+            if sub.h.iter().any(|x| !x.is_finite()) { return None; } }
+        else if subs[c].is_none() {
+                let mut loc = vec![usize::MAX; n]; for (q, &i) in mem.iter().enumerate() { loc[i] = q; }
+                let mut h = Vec::with_capacity(nn * k); let mut al = Vec::with_capacity(nn * k);
+                for &i in mem.iter() { h.extend_from_slice(&m.h[i * k..i * k + k]); al.extend_from_slice(&m.allowed[i * k..i * k + k]); }
+                let pairs: Vec<Pair> = m.pairs.iter().filter(|p| comp_of[p.i] == c).map(|p| Pair { i: loc[p.i], j: loc[p.j], c: p.c.clone() }).collect();
+                let caps: Vec<Cap> = ccaps[c].iter().map(|&q| Cap { members: m.caps[q].members.iter().map(|&(i, v)| (loc[i], v)).collect(), limit: m.caps[q].limit, weights: m.caps[q].weights.clone() }).collect();
+                subs[c] = Some(Model::new(nn, k, h, al, mem.iter().map(|&i| m.clamp[i]).collect(), pairs, caps).ok()); }
+        let Some(Some(sub)) = &subs[c] else { return None };
         // Enumeration only where the component's RAW space fits what is left of one shared budget of `limit` (so the tier
         // never spends more than one whole-program enumeration: per-component node budgets on many hard components would
         // add up); larger components go to the frontier DP (bounded by `max_states`) or the tier declines.
@@ -673,6 +716,7 @@ fn components(m: &Model, limit: u64, max_states: usize, hard: Option<probbit_cor
                 if e.n_feasible == 0 { out.infeasible = true; return Some(out); } out.enumerated += 1; got = Some((e.marg, e.top[0].1.clone(), e.logz)); } }
         if got.is_none() && max_states > 0 { got = exact_frontier_until(&sub, max_states, hard).map(|f| (f.marg, f.map, f.logz)); if got.is_some() { out.frontier += 1; } }
         let (mg, mp, z) = got?;
+        if !*keep { subs[c] = None; }
         for (q, &i) in mem.iter().enumerate() { out.map[i] = mp[q]; out.marg[i * k..i * k + k].copy_from_slice(&mg[q * k..q * k + k]); }
         out.logz += z;
     }
@@ -2367,6 +2411,39 @@ mod tests {
         let m = toy(); let a = sample(&m, 5, 1500, None, 9, true, true).unwrap();
         for t in 1..=5 { let b = sample_on(&m, 5, t, 1500, None, 9, true, if t == 3 { 40 } else { 100 }, 0).unwrap();
             assert!(a.marg.iter().zip(&b.marg).all(|(x, y)| x.to_bits() == y.to_bits()), "threads {t}"); assert_eq!(a.traj, b.traj); assert_eq!(a.plans, b.plans); }
+    }
+
+    /// T3-c: one split answers models that differ only in `h` as each one's own call does, bit for bit (marginals, log Z, the MAP
+    /// and its log w, infeasibility, the tier counts): the random programs of the test below (forests, cycles, caps, clamps,
+    /// forbidden values), each split reused over five `h`
+    #[test]
+    fn one_split_over_many_h_is_bit_identical() {
+        let (mut compared, mut declined) = (0, 0);
+        for seed in 0..400u64 {
+            let mut r = Philox4x32::new(seed, 23); let (n, k) = (5 + r.below(6), 2 + r.below(2));
+            let h0: Vec<f64> = (0..n * k).map(|_| r.f64() * 3.0 - 1.5).collect();
+            let mut allowed: Vec<bool> = (0..n * k).map(|_| r.f64() < 0.8).collect(); for i in 0..n { allowed[i * k + r.below(k)] = true; }
+            let clamp: Vec<Option<usize>> = (0..n).map(|i| if r.f64() < 0.1 { (0..k).find(|&v| allowed[i * k + v]) } else { None }).collect();
+            let coup = |r: &mut Philox4x32| if r.f64() < 0.5 { Coupling::Potts(r.f64() * 3.0 - 1.5) } else { Coupling::Table((0..k * k).map(|_| r.f64() * 2.0 - 1.0).collect()) };
+            let mut pairs = vec![]; for i in 1..n { if r.f64() < 0.75 { let j = r.below(i); pairs.push(Pair { i, j, c: coup(&mut r) }); } }
+            if r.f64() < 0.3 { let (i, j) = (r.below(n), r.below(n)); if i != j { pairs.push(Pair { i, j, c: coup(&mut r) }); } }
+            let caps: Vec<Cap> = if r.f64() < 0.4 { let mut mem: Vec<(usize, usize)> = (0..n * k).filter(|_| r.f64() < 0.25).map(|q| (q / k, q % k)).collect(); mem.dedup();
+                if mem.is_empty() { vec![] } else { vec![Cap { weights: vec![], limit: r.below(mem.len()), members: mem }] } } else { vec![] };
+            let mut m = Model::new(n, k, h0, allowed, clamp, pairs, caps).unwrap(); let mut s = Split::default();
+            for v in 0..5 {
+                if v > 0 { m.h = (0..n * k).map(|_| r.f64() * 4.0 - 2.0).collect(); }
+                let a = exact_components_split(&m, &mut s, 1 << 22, FRONTIER_MAX_STATES, None);
+                let fresh = Model::new(n, k, m.h.clone(), m.allowed.clone(), m.clamp.clone(), m.pairs.clone(), m.caps.clone()).unwrap();
+                let b = exact_components_until(&fresh, 1 << 22, FRONTIER_MAX_STATES, None);
+                let (Some(a), Some(b)) = (a.as_ref(), b.as_ref()) else { assert_eq!(a.is_none(), b.is_none(), "seed {seed} h {v}: one declined"); declined += 1; continue };
+                let bits = |x: &[f64]| x.iter().map(|y| y.to_bits()).collect::<Vec<u64>>();
+                assert_eq!(a.infeasible, b.infeasible, "seed {seed} h {v}"); assert_eq!(bits(&a.marg), bits(&b.marg), "seed {seed} h {v}: marginals");
+                assert_eq!(a.logz.to_bits(), b.logz.to_bits(), "seed {seed} h {v}: log Z"); assert_eq!(a.map, b.map, "seed {seed} h {v}: MAP");
+                assert_eq!(a.map_logw.to_bits(), b.map_logw.to_bits(), "seed {seed} h {v}: MAP log w");
+                assert_eq!((a.components, a.forest, a.enumerated, a.frontier, a.occupancy), (b.components, b.forest, b.enumerated, b.frontier, b.occupancy), "seed {seed} h {v}: tiers");
+                compared += 1; }
+        }
+        assert!(compared > 1000, "compared {compared}, declined {declined}");
     }
 
     /// R19 P1.3(b, c): the components + forest tier agrees with whole-program enumeration (log Z, every odds value, the MAP's

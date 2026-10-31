@@ -8,7 +8,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 use json::Json;
 
@@ -652,4 +652,145 @@ fn verify_names_the_writer_and_the_verifier() {
     let v = parse(&out);
     assert_eq!((s(&v, &["ok"]), s(&v, &["events"])), (&Json::Bool(true), &Json::Num(1.0)), "{out}");
     assert_eq!((s(&v, &["engine"]), s(&v, &["verified_by"])), (&Json::Str("probbit 0.11.0".into()), &Json::Str(THIS.into())), "{out}");
+}
+
+/// A stored strand with checkpoint lines resumes, with and without an expectation block (RFC 0009): the chain check validates
+/// each checkpoint line (its state read, its count, its link to the event before) without opening it as a replay start, which a
+/// persona with the block cannot do. 42 events with a checkpoint after every 10th, then one more event in a second run: exit 0,
+/// `verify` passes, and the strand, the state and the stances are those of the 43 events in one run, byte for byte.
+#[test]
+fn a_strand_with_checkpoints_resumes_with_and_without_an_expectation_block() {
+    let evs: Vec<String> = (0..43).map(|t| match t % 4 { 0 => r#"{"elapsed_hours":1,"praise":true}"#, 1 => r#"{"elapsed_hours":0.5}"#,
+        2 => r#"{"elapsed_hours":2,"error":true}"#, _ => r#"{"elapsed_hours":1,"loss":true}"# }.to_string()).collect();
+    for (persona, tag) in [(TUTOR, "plain"), ("probbit-cli/tests/fixtures/monitor/tutor-expect.yaml", "expect")] {
+        let all = events_file(&format!("cp-{tag}-all.jsonl"), &evs);
+        let (head, last) = (events_file(&format!("cp-{tag}-a.jsonl"), &evs[..42]), events_file(&format!("cp-{tag}-b.jsonl"), &evs[42..]));
+        let st1 = init(persona, 2, &format!("cp-{tag}-one.json")); let one = tmp(&format!("cp-{tag}-one.strand")); clean(&[&one]);
+        let (c, out1, e) = live(persona, &st1, &all, &one, "10"); assert_eq!(c, 0, "{tag}: {e}");
+        let st2 = init(persona, 2, &format!("cp-{tag}-two.json")); let two = tmp(&format!("cp-{tag}-two.strand")); clean(&[&two]);
+        let (c, o1, e) = live(persona, &st2, &head, &two, "10"); assert_eq!(c, 0, "{tag}: {e}");
+        assert_eq!(read(&two).lines().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), 4, "{tag}: 4 checkpoint lines");
+        let (c, o2, e) = live(persona, &st2, &last, &two, "10"); assert_eq!(c, 0, "{tag}: resume after a checkpoint: {e}");
+        assert_eq!(read(&two), read(&one), "{tag}: the strand"); assert_eq!(read(&st2), read(&st1), "{tag}: the state");
+        assert_eq!(format!("{o1}{o2}"), out1, "{tag}: the stances");
+        let (c, v, e) = probbit(&["live", "verify", &two]); assert_eq!(c, 0, "{tag}: {e}"); assert!(v.contains(r#""checkpoints":4"#), "{tag}: {v}");
+        // a checkpoint line that is not valid still stops the resume, at that line: its count edited (the line stays canonical)
+        let text = read(&two); let k = text.lines().position(|l| l.starts_with(r#"{"checkpoint":20,"#)).unwrap();
+        std::fs::write(&two, text.replacen(r#"{"checkpoint":20,"#, r#"{"checkpoint":21,"#, 1)).unwrap();
+        let (c, o, _) = live(persona, &st2, &last, &two, "10"); assert_eq!(c, 2, "{tag}: {o}");
+        assert!(o.contains(&format!("line {}: the line before is not event 21", k + 1)), "{tag}: {o}");
+        clean(&[&all, &head, &last, &st1, &one, &st2, &two]);
+    }
+}
+
+/// Segments (docs/persona.md §5.7): a life logged with `--segment-every 50` over two runs (70 events, then 50) is three files whose
+/// lines, each segment's header and repeated sealed line set aside, are the life logged to one file with a checkpoint after every
+/// 50th event; the stances and the state are the same; each segment verifies on its own (from its header's link) and
+/// `verify --chain` walks back through all three; a previous segment whose last line is not the sealed line exits 1 naming that
+/// file, a missing one exits 6 naming it; a persona with an expectation block segments too (this engine writes 0.14.0-on strands)
+#[test]
+fn a_segmented_life_equals_one_file_and_verify_chain_walks_back() {
+    let evs: Vec<String> = (0..120).map(|t| match t % 3 { 0 => r#"{"elapsed_hours":1,"praise":true}"#, 1 => r#"{"elapsed_hours":0.5,"error":true}"#, _ => r#"{"elapsed_hours":2}"# }.to_string()).collect();
+    let all = events_file("seg-all.jsonl", &evs); let (a, b) = (events_file("seg-a.jsonl", &evs[..70]), events_file("seg-b.jsonl", &evs[70..]));
+    let st1 = init(TUTOR, 3, "seg-one.json"); let one = tmp("seg-one.strand"); clean(&[&one]);
+    let (c, out1, e) = live(TUTOR, &st1, &all, &one, "50"); assert_eq!(c, 0, "{e}");
+    let dir = tmp("seg-dir"); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let base = format!("{dir}/life.strand"); let seg = |k: usize| if k == 0 { base.clone() } else { format!("{dir}/life.{k:04}.strand") };
+    let st2 = init(TUTOR, 3, "seg-two.json");
+    let run = |ev: &str| probbit(&["live", TUTOR, "--state", &st2, "--clock", "fixed", "--events", ev, "--strand", &base, "--checkpoint-every", "50", "--segment-every", "50"]);
+    let (c, o1, e) = run(&a); assert_eq!(c, 0, "{e}"); let (c, o2, e) = run(&b); assert_eq!(c, 0, "{e}");
+    assert_eq!(format!("{o1}{o2}"), out1, "the stances"); assert_eq!(read(&st2), read(&st1), "the state");
+    assert!(std::path::Path::new(&seg(2)).exists() && !std::path::Path::new(&seg(3)).exists(), "three segments");
+    let texts: Vec<String> = (0..3).map(|k| read(&seg(k))).collect();
+    let mut joined: Vec<&str> = texts[0].lines().collect(); for t in &texts[1..] { joined.extend(t.lines().skip(2)); }
+    assert_eq!(joined, read(&one).lines().collect::<Vec<_>>(), "the segments are the one-file strand");
+    for k in 1..3 { let h = parse(texts[k].lines().next().unwrap()); let sg = s(&h, &["segment"]);
+        assert_eq!(s(sg, &["index"]), &Json::Num(k as f64)); assert_eq!(s(sg, &["previous"]).as_str(), Some(if k == 1 { "life.strand".to_string() } else { format!("life.{:04}.strand", k - 1) }.as_str()));
+        assert_eq!(texts[k].lines().nth(1), texts[k - 1].lines().last(), "segment {k} repeats the sealed line"); }
+    let (_, vone, _) = probbit(&["live", "verify", &one]); let vone = parse(&vone);
+    for k in 0..3 { let (c, v, e) = probbit(&["live", "verify", &seg(k)]); assert_eq!(c, 0, "segment {k}: {e}"); if k > 0 { assert!(v.contains(&format!(r#""segment":{k}"#)) && v.contains("trusted_link"), "{v}"); } }
+    // `monitor --once` draws a segment from its last checkpoint, or from its sealed line when it has no later one
+    for k in 1..3 { let (c, o, e) = probbit(&["monitor", &seg(k), "--once", "--plain"]); assert_eq!(c, 0, "segment {k}: {e}{o}"); assert!(o.contains(if k == 1 { "event 100" } else { "event 120" }), "segment {k}: {o}"); }
+    let (c, v, e) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 0, "{e}"); let v = parse(&v);
+    assert_eq!(s(&v, &["segments"]), &Json::Num(3.0)); assert_eq!(s(&v, &["final_state"]), s(&vone, &["final_state"])); assert_eq!(s(&v, &["last_line"]), s(&vone, &["last_line"]));
+    // the link broken: the first segment's sealed line edited (kept canonical): the chain breaks there, named
+    std::fs::write(seg(1), texts[1].replacen(r#"{"checkpoint":100,"#, r#"{"checkpoint":100,"x":1,"#, 1)).unwrap();
+    let (c, v, _) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 1, "{v}"); assert!(v.contains(r#""segment_file":"life.0001.strand""#), "{v}");
+    std::fs::remove_file(seg(1)).unwrap();
+    let (c, v, _) = probbit(&["live", "verify", &seg(2), "--chain"]); assert_eq!(c, 6, "{v}");
+    assert!(v.contains(r#""missing":"life.0001.strand""#) && v.contains(r#""segment_file":"life.0002.strand""#), "{v}");
+    // this engine (0.14.0 on) segments an expectation persona: each checkpoint carries the memory, so each segment verifies
+    // from its sealed line and the chain walks back
+    let x = "probbit-cli/tests/fixtures/monitor/tutor-expect.yaml";
+    let xev: Vec<String> = (0..60).map(|t| format!(r#"{{"elapsed_hours":1,"praise":{}}}"#, t % 3 == 0)).collect(); let xa = events_file("seg-x.jsonl", &xev);
+    let (st3, f3) = (init(x, 2, "seg-x.json"), format!("{dir}/x.strand"));
+    let (c, _, e) = probbit(&["live", x, "--state", &st3, "--clock", "fixed", "--events", &xa, "--strand", &f3, "--segment-every", "25"]); assert_eq!(c, 0, "{e}");
+    let h = parse(read(&f3).lines().next().unwrap()); assert_eq!(s(&h, &["engine"]), &Json::Str(THIS.into()), "the header names this engine");
+    assert!(read(&format!("{dir}/x.0001.strand")).lines().nth(1).is_some_and(|l| l.contains(r#""expect":{"#)), "the sealed line carries the memory");
+    let (c, v, e) = probbit(&["live", "verify", &format!("{dir}/x.0002.strand"), "--chain"]); assert_eq!(c, 0, "{e}{v}"); assert_eq!(s(&parse(&v), &["segments"]), &Json::Num(3.0));
+    let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2, &st3, &xa]);
+}
+
+/// `live control STRAND seal` (§5.7): a host seals when it decides. A life of 10 events sealed, 5 more (the run continues the
+/// newest segment), sealed again: three files whose chain verifies to the one-file life's final state; a seal right after a seal
+/// (the last line a checkpoint) is refused and writes nothing; a seal takes no --by
+#[test]
+fn a_host_seals_a_strand_and_the_chain_verifies() {
+    let evs: Vec<String> = (0..15).map(|t| format!(r#"{{"elapsed_hours":1,"praise":{}}}"#, t % 2 == 0)).collect();
+    let (all, a, b) = (events_file("seal-all.jsonl", &evs), events_file("seal-a.jsonl", &evs[..10]), events_file("seal-b.jsonl", &evs[10..]));
+    let (st1, one) = (init(TUTOR, 4, "seal-one.json"), tmp("seal-one.strand")); clean(&[&one]);
+    let (c, out1, e) = live(TUTOR, &st1, &all, &one, "4"); assert_eq!(c, 0, "{e}");
+    let dir = tmp("seal-dir"); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let base = format!("{dir}/life.strand"); let st2 = init(TUTOR, 4, "seal-two.json");
+    let (c, o1, e) = live(TUTOR, &st2, &a, &base, "4"); assert_eq!(c, 0, "{e}");
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 0, "{e}{o}"); let v = parse(&o);
+    assert_eq!((s(&v, &["segment"]), s(&v, &["file"]).as_str()), (&Json::Num(1.0), Some(format!("{dir}/life.0001.strand").as_str())));
+    assert_eq!(read(&base).lines().last(), read(&format!("{dir}/life.0001.strand")).lines().nth(1), "the sealed line ends one file and follows the next header");
+    let before = read(&format!("{dir}/life.0001.strand"));
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 2, "{o}"); assert!(e.contains("not an event line"), "{e}");
+    assert_eq!(read(&format!("{dir}/life.0001.strand")), before, "nothing written"); assert!(!std::path::Path::new(&format!("{dir}/life.0002.strand")).exists());
+    let (c, _, e) = probbit(&["live", "control", &base, "seal", "--by", "human:owner"]); assert_eq!(c, 2, "{e}");
+    let (c, o2, e) = live(TUTOR, &st2, &b, &base, "4"); assert_eq!(c, 0, "{e}"); assert_eq!(format!("{o1}{o2}"), out1, "the stances");
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 0, "{e}{o}"); assert_eq!(s(&parse(&o), &["segment"]), &Json::Num(2.0));
+    let (c, v, e) = probbit(&["live", "verify", &format!("{dir}/life.0002.strand"), "--chain"]); assert_eq!(c, 0, "{e}{v}"); let v = parse(&v);
+    let (_, vone, _) = probbit(&["live", "verify", &one]);
+    assert_eq!((s(&v, &["segments"]), s(&v, &["events"]), s(&v, &["final_state"])), (&Json::Num(3.0), &Json::Num(15.0), s(&parse(&vone), &["final_state"])));
+    let _ = std::fs::remove_dir_all(&dir); clean(&[&all, &a, &b, &st1, &one, &st2]);
+}
+
+/// RFC 0013: `probbit reflect` prints the canonical document (or its sentences); `live control STRAND reflect` appends it as a
+/// line that `live verify` recomputes (ok, the events unchanged); a changed number, a changed sentence or a moved window is
+/// refused naming the line (exit 1); `live` continues a strand that ends on a reflection line; a strand of 0.13.0 is refused
+#[test]
+fn reflection_lines_verify_and_forgeries_are_refused() {
+    let dir = std::env::temp_dir().join(format!("probbit-reflect-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("r.strand").to_string_lossy().into_owned();
+    let run = |args: &[&str], stdin: &str| { let mut c = Command::new(env!("CARGO_BIN_EXE_probbit")).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        c.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap(); let o = c.wait_with_output().unwrap();
+        (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()) };
+    let ev: String = (0..12).map(|k| format!("{{\"elapsed_hours\":1{}}}\n", if k % 3 == 0 { ",\"praise\":true" } else { "" })).collect();
+    let st = dir.join("r.json").to_string_lossy().into_owned();
+    assert_eq!(run(&["persona", "init", "../examples/persona/tutor.yaml", "--seed", "2", "--out", &st], "").0, 0);
+    let live = |stdin: &str| run(&["live", "../examples/persona/tutor.yaml", "--state", &st, "--clock", "fixed", "--strand", &f, "--checkpoint-every", "4"], stdin);
+    assert_eq!(live(&ev).0, 0);
+    let before = std::fs::read_to_string(&f).unwrap();
+    let (c, doc, _) = run(&["reflect", &f, "--last", "6"], ""); assert_eq!(c, 0);
+    assert!(doc.starts_with("{\"controls\":") && doc.contains("\"digest\":\"sha256:") && doc.contains("\"summary\":[\"This account covers events 7 to 12"), "{doc}");
+    let (c, text, _) = run(&["reflect", &f, "--last", "6", "--text"], ""); assert_eq!(c, 0); let n = text.lines().count(); assert!((6..=12).contains(&n), "{text}");
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), before, "reflect writes nothing");
+    let (c, out, err) = run(&["live", "control", &f, "reflect", "--last", "6"], ""); assert_eq!(c, 0, "{out}{err}");
+    let (c, v, _) = run(&["live", "verify", &f], ""); assert_eq!(c, 0, "{v}"); assert!(v.contains("\"events\":12"), "{v}");
+    let text = std::fs::read_to_string(&f).unwrap(); let last = text.lines().last().unwrap().to_string(); let at = text.lines().count();
+    for (what, from, to) in [("a number", "\"events\":6", "\"events\":7"), ("a sentence", "This account covers", "This account spans"), ("the window", "\"last_n\":6", "\"last_n\":5")] {
+        let forged = text.replacen(&last, &last.replacen(from, to, 1), 1); assert_ne!(forged, text, "{what}");
+        let g = dir.join("forged.strand"); std::fs::write(&g, &forged).unwrap();
+        let (c, v, _) = run(&["live", "verify", &g.to_string_lossy()], ""); assert_eq!(c, 1, "{what}: {v}"); assert!(v.contains(&format!("\"line\":{at}")), "{what}: {v}");
+    }
+    // the life goes on after a reflection line, and the strand still verifies
+    assert_eq!(live("{\"elapsed_hours\":1}\n").0, 0); assert_eq!(run(&["live", "verify", &f], "").0, 0);
+    // engine-gated: a strand written by 0.13.0 takes no reflection line
+    let old = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join("strands").join("expectation-0.13.0.strand"); let g = dir.join("old.strand"); std::fs::copy(&old, &g).unwrap();
+    let (c, out, _) = run(&["live", "control", &g.to_string_lossy(), "reflect"], ""); assert_eq!(c, 2, "{out}"); assert!(out.contains("0.14.0"), "{out}");
+    assert_eq!(run(&["reflect", &g.to_string_lossy()], "").0, 0, "an older strand is read");
+    let _ = std::fs::remove_dir_all(&dir);
 }

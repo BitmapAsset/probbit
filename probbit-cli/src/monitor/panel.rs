@@ -49,6 +49,9 @@ pub enum Field {
     Undeclared,
     /// Room left in the learning bound (RFC 0004): not computed until the engine has it
     Room,
+    /// RFC 0014 integrity: the summed drift as a share of the summed allowance (`used`), the summed drift, the traits past
+    /// `identity.warn` and the traits measured
+    Integrity { used: f64, drift: f64, crossed: usize, traits: usize },
 }
 /// A field at an event: its stable key (`stance:verbosity`, `mood:pace`, `pace`, …), its label and its reading
 #[derive(Clone, Debug, PartialEq)]
@@ -85,6 +88,7 @@ fn gene_level(gene: &str, x: f64) -> &'static str {
         ("patience", true) => "longer credit memory", ("patience", false) => "shorter credit memory",
         (_, true) => "surprise gate opens later", (_, false) => "surprise gate opens sooner" }
 }
+fn integrity_level(crossed: usize, traits: usize) -> String { if crossed == 0 { "within warn".into() } else { format!("past warn on {crossed} of {traits}") } }
 fn count_level(n: usize) -> String { if n == 0 { "none open".into() } else { format!("{n} open") } }
 fn learned_level(levels: &[String], ds: &[f64]) -> String {
     if ds.iter().all(|d| d.abs() < LEARN_STEP) { return "none yet".into(); }
@@ -157,6 +161,11 @@ pub fn word(now: &Reading, prev: Option<&Reading>) -> Word {
         },
         Field::Undeclared => (UNDECLARED.to_string(), "", String::new(), None, String::new()),
         Field::Room => (ROOM.to_string(), "", String::new(), None, String::new()),
+        Field::Integrity { used, drift, crossed, traits } => {
+            let m = used.clamp(0.0, 1.0);
+            let d = match before { Some(Field::Integrity { used: x, .. }) => trend(used - x, NUM_STEP).to_string(), _ => FIRST.to_string() };
+            (integrity_level(*crossed, *traits), if *used <= 0.0 { "" } else { size_of(m) }, d, Some(m), format!("used {used:.6} drift {drift:.6}"))
+        }
     };
     let text = line(&now.label, &level, size, &dir);
     Word { key: now.key.clone(), label: now.label.clone(), level, size, dir, text, dial, value }
@@ -186,6 +195,7 @@ pub fn space(field: &Field) -> (Vec<String>, Vec<&'static str>, Vec<String>) {
         Field::Sense { .. } => (vec!["read".into(), "not read".into()], { let mut s = s3(); s.push(""); s }, vec![String::new(), "above its normal".into(), "below its normal".into(), "at its normal".into()]),
         Field::Undeclared => (vec![UNDECLARED.into()], vec![""], vec![String::new()]),
         Field::Room => (vec![ROOM.into()], vec![""], vec![String::new()]),
+        Field::Integrity { traits, .. } => ((0..=*traits).map(|c| integrity_level(c, *traits)).collect(), { let mut s = s3(); s.push(""); s }, num_dirs()),
     }
 }
 #[cfg(test)]
@@ -194,7 +204,8 @@ pub fn vocabulary() -> Vec<String> {
     let mut v: Vec<String> = SIZES.iter().map(|s| s.to_string()).collect();
     v.extend([FIRST, HOLDING, "rising", "falling", "leaning toward", "fixed", "above its normal", "below its normal", "at its normal", "not released", "not reported",
         "pressing", "not pressing", "gate open", "gate closed", "even", "none yet", "toward", "none open", "open", "in force and", "bound", "read", "not read", UNDECLARED, ROOM,
-        "deficit", "g", "rbar", "p", "z", "needs", "surprise gate", "pace", "dispositions", "credit", "habits", "room left in the bound", "learned", "need", "sense", "mood", "stance", "average reward"].map(String::from));
+        "deficit", "g", "rbar", "p", "z", "needs", "surprise gate", "pace", "dispositions", "credit", "habits", "room left in the bound", "learned", "need", "sense", "mood", "stance", "average reward",
+        "within warn", "past warn on", "of", "used", "drift", "integrity (drift from the declared self)"].map(String::from));
     for g in ["optimism", "patience", "volatility"] { for x in [1.0, -1.0, 0.0] { v.push(gene_level(g, x).to_string()); } v.push(g.to_string()); }
     v
 }
@@ -225,7 +236,8 @@ mod tests {
             v.push(Field::Learned { levels: ls.iter().map(|s| s.to_string()).collect(), deltas: vec![], cap: 0.25 });
         }
         v.extend([Field::Need { deficit: 0.0, cap: 1.0, term: 0.0 }, Field::Gate { g: 1.0, g_max: 3.0 }, Field::Pace { level: "steady".into(), rbar: 0.0, cap: 4.0 },
-            Field::Credit { open: 0, max: 8 }, Field::Habits { active: 0, bound: 0, declared: 11 }, Field::Sense { z: None }, Field::Undeclared, Field::Room]);
+            Field::Credit { open: 0, max: 8 }, Field::Habits { active: 0, bound: 0, declared: 11 }, Field::Sense { z: None }, Field::Undeclared, Field::Room,
+            Field::Integrity { used: 0.0, drift: 0.0, crossed: 0, traits: 2 }]);
         for g in ["optimism", "patience", "volatility"] { v.push(Field::Gene { gene: g.into(), x: 0.0 }); }
         v
     }
@@ -282,7 +294,7 @@ mod tests {
         for w in vocabulary() { assert!(law_hits(&w).is_empty(), "{w}"); }
         let mut n = 0;
         for f in kinds() { let (ls, ss, ds) = space(&f); for l in &ls { for s in &ss { for d in &ds { let t = line("x", l, s, d); assert!(law_hits(&t).is_empty(), "{t}"); n += 1; } } } }
-        for label in ["needs", "surprise gate", "pace", "dispositions", "credit", "habits", "room left in the bound"] { assert!(law_hits(label).is_empty()); }
+        for label in ["needs", "surprise gate", "pace", "dispositions", "credit", "habits", "room left in the bound", "integrity (drift from the declared self)"] { assert!(law_hits(label).is_empty()); }
         assert!(n > 1000);
     }
     /// Words are a function of the buckets: a small move inside a bucket changes the dial, never the words

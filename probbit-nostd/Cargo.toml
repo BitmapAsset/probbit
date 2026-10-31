@@ -1,0 +1,20 @@
+[package]
+name = "probbit-nostd"
+description = "The subset of std that probbit's crates use, from core + alloc, for targets without an operating system (no_std builds only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../README.md"
+keywords = ["p-bit", "no-std", "embedded", "probabilistic"]
+categories = ["no-std", "embedded"]
+
+[lib]
+test = false
+doctest = false
+
+[dependencies]
+hashbrown = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }
+libm = "0.2"
+portable-atomic = { version = "1", default-features = false, features = ["fallback", "critical-section"] }

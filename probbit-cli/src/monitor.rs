@@ -121,17 +121,30 @@ impl Frame {
     }
 }
 /// A strand being watched: the replay, the layout, the latest frame, the moods' recent positions, the line that diverged (if any)
-struct Watch { rep: Replay, meta: Meta, last: Option<Frame>, spark: Vec<VecDeque<f64>>, bad: Option<(usize, String)> }
+struct Watch { rep: Replay, meta: Meta, last: Option<Frame>, spark: Vec<VecDeque<f64>>, bad: Option<(usize, String)>,
+    /// RFC 0015: the last consolidation line replayed (its line number and the line), drawn as "last rest"
+    rest: Option<(usize, Json)> }
 impl Watch {
     fn open(head: &str) -> Result<Watch, (usize, String)> {
         let rep = Replay::open(head)?; let meta = Meta::of(&rep); let n = meta.moods.len();
-        Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None })
+        Ok(Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None, rest: None })
+    }
+    /// Where the replay of `lines` (the header first) starts: the last checkpoint line (index), or None for the header. RFC 0009:
+    /// before 0.14.0 a persona with an expectation block folds every event line into its memory, which no checkpoint carries, so
+    /// its strand replays from the header (every line, slower; `open_at` refuses that shortcut); from 0.14.0 the checkpoint carries
+    /// the memory, and every strand starts at the last one
+    /// A segment (§5.7) starts at its sealed line (line 2) when it has no later checkpoint.
+    fn start(lines: &[&str]) -> Option<usize> {
+        let k = crate::live::last_checkpoint(lines, 0)?; let r = Replay::open(lines[0]);
+        if k < 2 && !r.as_ref().is_ok_and(|r| r.header.get("segment").is_some()) { return None; }
+        (!r.is_ok_and(|r| r.live.p.expect.is_some() && r.live.dev_full)).then_some(k)
     }
     /// The replay from a checkpoint line (`live::Replay::open_at`; `before` = the event line before it): the lines before it are
     /// not replayed, and the board starts at the checkpoint's event (its stance, the inputs `before` logs, its learned deltas)
     fn open_at(head: &str, before: &str, cp: &str, at: usize) -> Result<Watch, (usize, String)> {
-        let rep = Replay::open_at(head, before, cp, at)?; let meta = Meta::of(&rep); let n = meta.moods.len();
-        let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None };
+        // a segment's sealed line (line 2, after the header) opens on the header's link
+        let rep = if at == 2 { Replay::open_lines(&[head, cp])?.0 } else { Replay::open_at(head, before, cp, at)? }; let meta = Meta::of(&rep); let n = meta.moods.len();
+        let mut w = Watch { rep, meta, last: None, spark: vec![VecDeque::new(); n], bad: None, rest: None };
         if let Some(doc) = w.rep.last_stance().cloned() {
             let given = json::parse(before).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
             for (m, s) in w.meta.moods.iter().zip(w.spark.iter_mut()) { s.push_back(position(&odds(&doc, "mood", m))); }
@@ -142,7 +155,8 @@ impl Watch {
     fn feed(&mut self, l: &str, eng: Engine) {
         if self.bad.is_some() { return; }
         match self.rep.step(l, eng) {
-            Ok(None) => {} // a control or checkpoint line: no stance to draw
+            // a control or checkpoint line: no stance to draw; RFC 0015: a consolidation line is kept for the "last rest" row
+            Ok(None) => if let Some(j) = json::parse(l).ok().filter(|j| j.get("consolidation").is_some()) { self.rest = Some((self.rep.line, j)); }
             Ok(Some(doc)) => {
                 let given = json::parse(l).ok().and_then(|j| j.get("inputs").cloned()).unwrap_or(Json::Null);
                 for (m, s) in self.meta.moods.iter().zip(self.spark.iter_mut()) { if s.len() == SPARK { s.pop_front(); } s.push_back(position(&odds(&doc, "mood", m))); }
@@ -233,7 +247,12 @@ fn readings(m: &Meta, doc: &Json, learned: &Json, disp: Option<&Json>, open: Opt
     out.push(r("habits".into(), "habits", Field::Habits { active: n("active"), bound: n("bound"), declared: m.n_habits }));
     for x in &m.senses { let z = doc.get("senses").and_then(|s| s.get(&x.id)).and_then(|s| s.get("z")).and_then(Json::as_f64);
         out.push(r(format!("sense:{}", x.id), &format!("sense {}", x.id), Field::Sense { z })); }
-    out.push(r("room".into(), "room left in the bound", Field::Room));
+    // RFC 0014: with the identity self keys the stance carries `integrity`: its dial replaces the room placeholder
+    match doc.get("integrity").filter(|x| x.as_obj().is_some()) {
+        Some(ig) => { let g = |k: &str| ig.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+            out.push(r("integrity".into(), "integrity (drift from the declared self)", Field::Integrity { used: g("used"), drift: g("drift"),
+                crossed: ig.get("crossed").and_then(Json::as_arr).map_or(0, <[Json]>::len), traits: ig.get("traits").and_then(Json::as_obj).map_or(0, <[(String, Json)]>::len) })); }
+        None => out.push(r("room".into(), "room left in the bound", Field::Room)) }
     out
 }
 
@@ -444,6 +463,12 @@ fn frame(w: Option<&Watch>, bad_head: Option<&(usize, String)>, path: &str, note
         let z = dv.get("z").and_then(Json::as_f64).map_or("z -".to_string(), |z| format!("z {z:+.2}"));
         let txt = format!("pred {:.4} {dot} self {:.4} {dot} input {:.2} {dot} {}{}", g("pred"), g("self"), g("input"), if cold { "cold".to_string() } else { z }, if reg { "  registers deviation" } else { "" });
         out.push(format!("{}  {}", s.bold(MAGENTA, "DEVIATION"), if reg { s.bold(AMBER, &txt) } else { s.paint(CYAN, &txt) })); }
+    // RFC 0015: the last rest pass replayed (only once the strand has one): its clock, the contexts merged, the weights moved
+    if let Some((line, j)) = w.rest.as_ref() { let c = j.get("consolidation"); let g = |k: &str| c.and_then(|c| c.get(k)).and_then(Json::as_f64).unwrap_or(0.0);
+        let merged = c.and_then(|c| c.get("merged")).and_then(|m| m.get("count")).and_then(Json::as_f64).unwrap_or(0.0);
+        let txt = format!("last rest {} {dot} event {} {dot} line {line} {dot} {} merged {dot} moved {:.6} {dot} decay {:.6} {dot} {} events",
+            j.get("at").and_then(Json::as_str).unwrap_or("-"), j.get("n").and_then(Json::as_f64).unwrap_or(0.0) as u64, merged as u64, g("moved"), g("decay"), g("events") as u64);
+        out.push(format!("{}  {}", s.bold(MAGENTA, "REST"), s.paint(CYAN, &txt))); }
     if let Some(tj) = w.rep.live.traj.as_ref() { let st = tj.get("steps").and_then(Json::as_arr).map_or(vec![], |a| a.to_vec());
         let hs: Vec<String> = st.iter().map(|x| format!("{:.2}", x.get("h").and_then(Json::as_f64).unwrap_or(0.0))).collect();
         let b0 = st.first().and_then(|x| x.get("beta")).and_then(Json::as_f64).unwrap_or(1.0);
@@ -519,7 +544,7 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
     let mut out = vec![];
     // the goals: pursue's odds (canonical order), else the goals a drive object names
     let mut goals: Vec<String> = pz.and_then(|p| p.get("odds")).and_then(Json::as_obj).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default();
-    if goals.is_empty() { goals = dv.and_then(Json::as_obj).and_then(|o| o.iter().find_map(|(_, v)| v.as_obj())).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default(); }
+    if goals.is_empty() { goals = dv.and_then(Json::as_obj).and_then(|o| o.iter().filter(|(k, _)| k != "curiosity").find_map(|(_, v)| v.as_obj())).map(|o| o.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default(); }
     if let Some(p) = pz {
         let v = Var { id: "pursue".into(), levels: goals.clone(), say: vec![] };
         let ps: Vec<f64> = goals.iter().map(|g| p.get("odds").and_then(|o| o.get(g)).and_then(Json::as_f64).unwrap_or(0.0)).collect();
@@ -536,6 +561,14 @@ fn drives(doc: &Json, m: &Meta, s: &Style, idw: usize, lab: &dyn Fn(&str) -> Str
             if let Some(x) = want[i] { row += &format!(" wanting {} {x:.2}", nbar(s, x, m.caps.0, ORANGE)); }
             if let Some(x) = glow[i] { row += &format!("  afterglow {} {x:.2}", nbar(s, x, m.caps.1, GREEN)); }
             if let Some(x) = err[i].filter(|x| *x != 0.0) { row += &format!("  {}", s.bold(if x < 0.0 { RED } else { GREEN }, &format!("{x:+.2} {} expectation", if x < 0.0 { "below" } else { "above" }))); }
+            out.push(row);
+        }
+        // RFC 0016: the curiosity drive, its level and its two inputs (and the stir's class on a self-started event)
+        if let Some(c) = d.get("curiosity").filter(|c| c.as_obj().is_some()) {
+            let f = |k: &str| c.get(k).and_then(Json::as_f64).unwrap_or(0.0);
+            let mut row = format!("{}{:<idw$}  level {} {:.2}  surprise_recent {:.2}  failed_contexts {}", lab(if pz.is_none() && goals.is_empty() { "DRIVES" } else { "" }), "curiosity",
+                nbar(s, f("level"), 2.0, ORANGE), f("level"), f("surprise_recent"), f("failed_contexts") as u64);
+            if let Some(cl) = c.get("stir").and_then(Json::as_str) { row += &format!("  {}", s.bold(GREEN, &format!("stir: {cl}"))); }
             out.push(row);
         }
     }
@@ -585,6 +618,9 @@ fn frame_json(w: Option<&Watch>, bad_head: Option<&(usize, String)>, note: Optio
         ("diverges", bad.map_or(Json::Null, |(l, why)| json::obj(vec![("line", Json::Num(*l as f64)), ("why", json::str(why))]))), ("note", note.map_or(Json::Null, json::str)),
         ("from_checkpoint", w.and_then(|w| w.rep.from).map_or(Json::Null, |n| json::num(n as f64))),
         ("status", w.map_or(Json::Null, |w| json::str(w.rep.live.status.name())))];
+    // RFC 0015: the last rest pass (its line number and line), only once the strand has one
+    if let Some((line, j)) = w.and_then(|w| w.rest.as_ref()) { kv.push(("last_rest", json::obj(vec![("line", Json::Num(*line as f64)), ("at", j.get("at").cloned().unwrap_or(Json::Null)),
+        ("n", j.get("n").cloned().unwrap_or(Json::Null)), ("consolidation", j.get("consolidation").cloned().unwrap_or(Json::Null))]))); }
     // the senses' normals now (§2.11), only when the persona declares them: mean, count and the largest move within 50 events
     if let Some(w) = w.filter(|w| !w.meta.senses.is_empty()) {
         let moved = &w.rep.normals().moved;
@@ -644,10 +680,11 @@ impl Followed {
     fn poll(&mut self, eng: Engine, each: &mut dyn FnMut(&Watch)) -> Option<bool> {
         match self.tail.poll() {
             Got::Lines(ls) => {
-                // the first read of a strand with checkpoint lines starts at the last one: its event is drawn at once
+                // the first read of a strand with checkpoint lines starts at the last one (`Watch::start`): its event is drawn at
+                // once; after that, appended lines replay from the state in memory
                 let mut skip = 0;
                 if self.w.is_none() && self.bad_head.is_none() { let refs: Vec<&str> = ls.iter().map(String::as_str).collect();
-                    if let Some(k) = crate::live::last_checkpoint(&refs, 0).filter(|k| *k >= 2) {
+                    if let Some(k) = Watch::start(&refs) {
                         if let Ok(x) = Watch::open_at(refs[0], refs[k - 1], refs[k], k + 1) { each(&x); self.w = Some(x); skip = k + 1; } } }
                 for l in ls.into_iter().skip(skip) { if let Some(x) = &mut self.w { let n = x.rep.live.n; x.feed(&l, eng); if x.rep.live.n != n && x.bad.is_none() { each(x); } continue; }
                     if self.bad_head.is_none() { match Watch::open(&l) { Ok(x) => self.w = Some(x), Err(e) => self.bad_head = Some(e) } } }
@@ -746,8 +783,9 @@ pub fn cmd(args: &[String]) {
     if head.is_empty() { crate::fail(&format!("monitor: {path} is empty: not a strand")) }
     if !strand(head) { crate::fail(&format!("monitor: {path} is not a probbit strand (format 1)")) }
     let note = (!rest.is_empty() && !lines.is_empty()).then(|| format!("line {} is incomplete (no newline at its end): not replayed", lines.len() + 1));
-    // a strand with checkpoint lines replays from the last one (the board starts at its event and draws the latest one)
-    let start = crate::live::last_checkpoint(&lines, 0);
+    // a strand with checkpoint lines replays from the last one (the board starts at its event and draws the latest one), unless
+    // its persona has an expectation block: then from the header (`Watch::start`)
+    let start = Watch::start(&lines);
     let opened = match start { Some(k) => Watch::open_at(head, lines[k - 1], lines[k], k + 1), None => Watch::open(head) };
     let (w, bad_head) = match opened { Ok(mut w) => { for l in lines.iter().skip(start.map_or(1, |k| k + 1)) { w.feed(l, eng); } (Some(w), None) } Err(e) => (None, Some(e)) };
     let fr = frame(w.as_ref(), bad_head.as_ref(), &path, note.as_deref(), &s);
@@ -869,7 +907,8 @@ fn publish(hub: &Hub, meta: &Json, frame: &Json, docs: Vec<(u64, String)>, over:
     let (meta, frame) = (persona::canon(meta), persona::canon(frame));
     let mut b = board(hub); b.name = name; b.glyph = glyph;
     if over { b.docs.clear(); b.last = 0; }
-    for (n, d) in docs { b.docs.push_back(d); b.last = n; if b.docs.len() > KEEP { b.docs.pop_front(); } }
+    // an event already kept (a segment opens at its sealed line, the last event of the file before) is not kept twice
+    for (n, d) in docs { if n <= b.last { continue; } b.docs.push_back(d); b.last = n; if b.docs.len() > KEEP { b.docs.pop_front(); } }
     if b.meta != meta || b.layout == 0 { b.meta = meta; b.layout += 1; }
     b.frame = frame; b.seq += 1;
     hub.1.notify_all();
@@ -899,11 +938,22 @@ fn add(site: &Site, path: String, over: Labels) {
     { let mut l = entries(site); if l.iter().any(|e| e.path == path) { return; } let id = id_of(&path, &l); l.push(Arc::new(Entry { id, path: path.clone(), over, hub: hub.clone() })); }
     std::thread::spawn(move || { let engine = crate::persona_engine(); feed_strand(&path, &hub, &engine); });
 }
-/// The `*.strand` files in `dir`, by name
+/// The `*.strand` files in `dir`, by name; a life's segments (§5.7: `NAME.0001.strand`, `NAME.0002.strand`, ... after
+/// `NAME.strand`, without a gap) are one strand, `NAME.strand`
 fn scan(dir: &str) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "strand") && p.is_file()).map(|p| p.to_string_lossy().into_owned()).collect();
-    v.sort(); v
+    v.sort();
+    let segs: Vec<String> = v.iter().flat_map(|f| (1..).map(|k| crate::live::segment_name(f, k)).take_while(|s| v.contains(s)).collect::<Vec<_>>()).collect();
+    v.retain(|f| !segs.contains(f)); v
+}
+/// The newest segment of the strand `base` from index `k` on (§5.7): the next one counts once its header and sealed line are
+/// both in (a seal writes them together; a reader can see the header first)
+fn newest(base: &str, mut k: u64) -> u64 {
+    let ready = |f: &str| { let Ok(mut h) = std::fs::File::open(f) else { return false }; let (mut n, mut b) = (0, [0u8; 8192]);
+        loop { match h.read(&mut b) { Ok(0) | Err(_) => return false, Ok(m) => { n += b[..m].iter().filter(|&&c| c == b'\n').count(); if n >= 2 { return true } } } } };
+    while ready(&crate::live::segment_name(base, k + 1)) { k += 1; }
+    k
 }
 /// With --dir, every second: the strands added to it since are served too (a strand removed stays listed, as gone); without, nothing
 fn watch_dir(site: &Site) -> ! {
@@ -918,10 +968,13 @@ fn strands_json(site: &Site) -> String {
     let rows: Vec<Json> = entries(site).iter().map(|e| {
         let (mut l, mut err) = match labels::read(&e.path) { Ok(l) => (l, None), Err(x) => (Labels::new(), Some(x.replace(&labels::sidecar(&e.path), &name(&labels::sidecar(&e.path))))) };
         for (k, v) in &e.over { if let Err(x) = labels::set(&mut l, k.clone(), v.clone()) { err = Some(format!("{k}: {x}")); } }
-        let age = std::fs::metadata(&e.path).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).map_or(Json::Null, |d| json::num(d.as_secs() as f64));
+        // a life in segments: its newest file (the one written to)
+        let k = newest(&e.path, 0);
+        let age = std::fs::metadata(crate::live::segment_name(&e.path, k)).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).map_or(Json::Null, |d| json::num(d.as_secs() as f64));
         let b = board(&e.hub); let opt = |x: &str| if x.is_empty() { Json::Null } else { json::str(x) };
         let mut kv = vec![("id", json::str(&e.id)), ("strand", json::str(&name(&e.path))), ("labels", labels::to_json(&l)), ("persona", opt(&b.name)), ("n", json::num(b.last as f64)), ("glyph", opt(&b.glyph)), ("age_s", age)];
         if let Some(x) = err { kv.push(("labels_error", json::str(&x))); }
+        if k > 0 { kv.push(("segment", json::num(k as f64))); }
         json::obj(kv) }).collect();
     persona::canon(&json::obj(vec![("demo", Json::Bool(site.demo.is_some())), ("dir", site.dir.as_deref().map_or(Json::Null, |d| json::str(&name(d)))), ("strands", Json::Arr(rows))])) + "\n"
 }
@@ -951,11 +1004,17 @@ fn serve(port: u16, open: bool, site: &Arc<Site>, feed: &mut dyn FnMut()) -> ! {
     feed();
     loop { std::thread::park(); }
 }
-/// The strand followed for the page: every 100 ms, what was appended is replayed and published
+/// The strand followed for the page: every 100 ms, what was appended is replayed and published. A life in segments (§5.7) is
+/// followed in its newest file: when a seal writes the next one, the rest of the sealed file is replayed, then the page goes
+/// on in the new file (it opens at its sealed line, the event already shown); the layout and the event count carry on
 fn feed_strand(path: &str, hub: &Hub, eng: Engine) -> ! {
-    let mut fl = Followed::new(path);
+    let mut k = newest(path, 0);
+    let mut fl = Followed::new(&crate::live::segment_name(path, k));
     let mut fresh = true;
-    loop { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP); std::thread::sleep(Duration::from_millis(100)); }
+    loop { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP);
+        let n = newest(path, k);
+        if n != k { step(&mut fl, path, hub, eng, &mut fresh, CATCH_UP); k = n; fl = Followed::new(&crate::live::segment_name(path, k)); continue; }
+        std::thread::sleep(Duration::from_millis(100)); }
 }
 /// One poll of the strand for the page: what was appended is replayed and published. A long replay (a large strand read from
 /// its header) is also published every `every` on the way, with a note, so the page draws while it catches up.
@@ -1015,6 +1074,15 @@ fn handle(mut c: TcpStream, site: &Site, port: u16) {
     let (id, path) = match path.strip_prefix("/s/") { Some(r) => r.split_once('/').map_or((Some(r), ""), |(id, _)| (Some(id), &path[3 + id.len()..])), None => (None, path) };
     if id.is_none() && path == "/" { return reply(&mut c, "200 OK", "text/html; charset=utf-8", PAGE.as_bytes()); }
     if id.is_none() && path == "/strands" { return reply(&mut c, "200 OK", "application/json; charset=utf-8", strands_json(site).as_bytes()); }
+    // RFC 0013, the Mirror tab: `/reflection?last=N` (default 50), computed from the strand file as it is now
+    if path == "/reflection" {
+        let file = match id { None => entries(site).first().map(|e| e.path.clone()), Some(id) => entries(site).iter().find(|e| e.id == id).map(|e| e.path.clone()) };
+        let Some(file) = file else { return reply(&mut c, "404 Not Found", "text/plain", b"no strand file: the reflection reads a strand (the demo has none)\n") };
+        let last = target.split_once('?').and_then(|(_, q)| q.split('&').find_map(|kv| kv.strip_prefix("last="))).map_or(Some(50), |v| v.parse::<u64>().ok().filter(|n| *n >= 1));
+        let Some(last) = last else { return reply(&mut c, "400 Bad Request", "text/plain", b"last=N: a whole number >= 1\n") };
+        return match std::fs::read_to_string(&file) { Ok(t) => reply(&mut c, "200 OK", "application/json; charset=utf-8", format!("{}\n", mirror(&t, last)).as_bytes()),
+            Err(_) => reply(&mut c, "404 Not Found", "text/plain", b"the strand file cannot be read\n") };
+    }
     let Some(hub) = hub_for(site, id).filter(|_| path == "/events" || path.starts_with("/doc/")) else {
         return reply(&mut c, "404 Not Found", "text/plain", if id.is_some() { b"not found: /s/ID/events and /s/ID/doc/N serve the strand ID that /strands lists\n" } else { b"not found: / is the page, /events its stream, /doc/N a stance document, /strands the strands served\n" }) };
     let hub = &hub;
@@ -1027,6 +1095,18 @@ fn handle(mut c: TcpStream, site: &Site, port: u16) {
             drop(b);
             match doc { Some(d) => reply(&mut c, "200 OK", "application/json; charset=utf-8", d.as_bytes()), None => reply(&mut c, "404 Not Found", "text/plain", msg.as_bytes()) } }
         _ => {} }
+}
+/// The Mirror's document (RFC 0013): `live`, the reflection of the last `last` events computed now (no solve); `logged`, the
+/// latest reflection line the strand carries (its line number, its document, and whether it is the reflection of the lines
+/// before it: `matches`), or null; `error` when the strand cannot be reflected
+pub fn mirror(text: &str, last: u64) -> String {
+    use probbit_persona::reflect;
+    let ls = crate::live::lines(text); let o = |v: Vec<(&str, Json)>| Json::Obj(v.into_iter().map(|(k, x)| (k.to_string(), x)).collect());
+    let logged = (1..ls.len()).rev().find(|&i| reflect::is_reflection_line(ls[i])).map_or(Json::Null, |i| o(vec![("line", Json::Num((i + 1) as f64)),
+        ("doc", json::parse(ls[i]).ok().and_then(|j| j.get("reflection").cloned()).unwrap_or(Json::Null)), ("matches", Json::Bool(reflect::check_line(&ls[..i], ls[i]).is_ok()))]));
+    persona::canon(&match reflect::reflect_window(&ls, reflect::Window::Last(last)) {
+        Ok(r) => o(vec![("live", r.doc), ("logged", logged)]),
+        Err(e) => o(vec![("error", Json::Str(e.msg)), ("logged", logged)]) })
 }
 /// The headers every answer carries: no caching, no sniffing, and for the page a policy that lets it load nothing and connect
 /// to nothing but its own server
@@ -1156,6 +1236,46 @@ mod tests {
         assert_eq!(page.get("status").and_then(Json::as_str), Some("paused"));
         assert_eq!(page.get("from_checkpoint").and_then(Json::as_f64), Some(20.0));
         let _ = std::fs::remove_file(&f);
+    }
+
+    /// RFC 0009: before 0.14.0 a persona with an expectation block replays a strand with checkpoint lines from its header (the
+    /// checkpoint does not carry the expectation's memory): `--once` and the first poll of `--follow` / `--serve` draw the latest
+    /// event with no checkpoint start, and lines appended after it replay from the state in memory, one by one. From 0.14.0 the
+    /// checkpoint carries the memory and the same life starts at its last checkpoint.
+    #[test]
+    fn an_expectation_persona_replays_from_the_header() {
+        let (p, doc) = persona::load(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/monitor/tutor-expect.yaml")).unwrap();
+        assert!(p.expect.is_some(), "the fixture has an expectation block");
+        {   let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.14.0"); let mut text = format!("{header}\n");
+            for t in 0..17u32 { let (s, line) = lv.event(&json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 3 == 0)).unwrap(), &run).unwrap();
+                text += &line; text.push('\n'); if lv.n % 5 == 0 { text += &lv.checkpoint(&s); text.push('\n'); } }
+            let lines = live::lines(&text); let k = live::last_checkpoint(&lines, 0).unwrap(); assert_eq!(Watch::start(&lines), Some(k), "0.14.0: the checkpoint start");
+            let mut w = Watch::open_at(lines[0], lines[k - 1], lines[k], k + 1).unwrap(); for l in &lines[k + 1..] { w.feed(l, &run); }
+            let mut full = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { full.feed(l, &run); }
+            assert!(w.bad.is_none(), "{:?}", w.bad); assert_eq!(persona::canon(&w.last.as_ref().unwrap().doc), persona::canon(&full.last.as_ref().unwrap().doc)); }
+        let (mut lv, header) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.13.0");
+        let mut text = format!("{header}\n");
+        let add = |lv: &mut Live, text: &mut String, t: u32| { let ev = json::parse(&format!(r#"{{"praise":{},"elapsed_hours":1}}"#, t % 3 == 0)).unwrap();
+            let (s, line) = lv.event(&ev, &run).unwrap(); *text += &line; text.push('\n'); if lv.n % 5 == 0 { *text += &lv.checkpoint(&s); text.push('\n'); } };
+        for t in 0..17u32 { add(&mut lv, &mut text, t); }
+        let lines = live::lines(&text); let k = live::last_checkpoint(&lines, 0).unwrap();
+        assert_eq!((lines.iter().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), Watch::start(&lines)), (3, None), "3 checkpoints, no checkpoint start");
+        assert!(Replay::open_at(lines[0], lines[k - 1], lines[k], k + 1).is_err_and(|e| e.1.contains("expectation block")), "the shortcut itself still refuses it");
+        let f = std::env::temp_dir().join(format!("probbit-monitor-expect-{}.strand", std::process::id())); std::fs::write(&f, &text).unwrap();
+        let mut fl = Followed::new(f.to_str().unwrap()); let mut seen = vec![];
+        assert_eq!(fl.poll(&run, &mut |w: &Watch| seen.push(w.rep.live.n)), Some(false));
+        let w = fl.w.as_ref().unwrap(); assert!(w.bad.is_none(), "{:?}", w.bad);
+        assert_eq!((w.rep.from, w.rep.live.n, seen.first().copied(), seen.len()), (None, 17, Some(1), 17), "every event replayed from the header");
+        let mut full = Watch::open(lines[0]).unwrap(); for l in &lines[1..] { full.feed(l, &run); }
+        assert_eq!(persona::canon(&w.last.as_ref().unwrap().doc), persona::canon(&full.last.as_ref().unwrap().doc));
+        assert_eq!(frame_json(fl.w.as_ref(), None, None).get("from_checkpoint"), Some(&Json::Null));
+        // appended: only the new lines replay, on the state in memory
+        for t in 17..21u32 { add(&mut lv, &mut text, t); } std::fs::write(&f, &text).unwrap();
+        seen.clear(); assert_eq!(fl.poll(&run, &mut |w: &Watch| seen.push(w.rep.live.n)), Some(false));
+        assert_eq!(seen, vec![18, 19, 20, 21]); assert!(fl.w.as_ref().unwrap().bad.is_none());
+        assert_eq!(fl.w.as_ref().unwrap().rep.summary(), live::verify(&text, &run).unwrap(), "ends where verify does");
+        let _ = std::fs::remove_file(&f);
+        // the tutor without the block takes the shortcut: `following_starts_at_the_last_checkpoint`
     }
 
     /// Watch a strand line by line: every document's sha256 is its line's `stance` digest, and the replay ends where `verify` does

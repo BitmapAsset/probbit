@@ -10,4 +10,11 @@ readme = "../README.md"
 keywords = ["p-bit", "ising", "monte-carlo", "philox", "probabilistic"]
 categories = ["algorithms", "science", "simulation"]
 
+[features]
+default = ["std"]
+std = []
+# no_std + alloc (a target without an operating system): the std subset comes from probbit-nostd
+nostd = ["dep:probbit-nostd"]
+
 [dependencies]
+probbit-nostd = { path = "../probbit-nostd", version = "0.14.0-dev", optional = true }

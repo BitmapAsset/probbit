@@ -3,7 +3,7 @@
 //! sampled probbit-ir program and a sampled `evaluate` request. Only timings and `telemetry.threads` (1 vs 4) may differ. The
 //! CLI's own threads-1-vs-N equality is probbit-cli's `run_threads_and_chains_are_resource_controls`; this extends it to no threads.
 #[allow(dead_code)]
-#[path = "../../probbit-cli/src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 use json::Json;
 

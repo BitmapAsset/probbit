@@ -5,11 +5,264 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+0.14.0 makes the persona layer a library crate, `probbit-persona` (std, and `no_std` + `alloc` checked on
+`xtensa-esp32s3-none-elf`), and fits it to a small host: heap-returning setup, turn and resume (one event's stack
+high-water on the host proxy 31,824 → 13,808 bytes), resume from a checkpoint or from a record behind the strand, and sealed
+strand segments. The expectation keeps an exact cache and solves the event's own program once. The self layer arrives off by
+default (RFCs 0013–0016): a reflection computed from a strand's lines alone, an integrity account of the drift from the declared
+self, a rest pass over the expectation's memory and a curiosity drive with an optional stir; a declared, replayable self; it
+does not feel. A persona that declares none of its keys gets none of its fields or lines. The monitor gains the Mirror tab, the
+integrity dial and life-in-segments serving; every CLI output of the library move is byte for byte as 0.13.0.
+
+Engine gate: strands with the new line kinds (`reflection`, `consolidation`) or the new keys (`integrity`, `curiosity`, a
+checkpoint's `expect`, `expectation.rest`, the `identity` self keys) read as unsupported, exit 5, on 0.13.x.
+
+### The persona layer as a library crate (std, no_std)
+
+- **`probbit-persona`, the document layer and the strand writer as a library crate** (docs/embedding.md): `json`, `yaml`,
+  `persona`, `run`, `router` and `evaluate` (feature `decide`), `sys`, and `strand` (the pure half of `probbit live`: `Live`, the
+  line writers, `Replay`, `verify*`, with no file I/O) move out of probbit-cli, which uses them unchanged; every CLI output is
+  byte for byte as 0.13.0. probbit-core, probbit-ir, probbit-decide and probbit-persona gain the features `std` (default) and
+  `nostd` (`no_std` + `alloc`, through the new `probbit-nostd` facade), checked on `xtensa-esp32s3-none-elf`; probbit-wasm
+  depends on the crate instead of including the CLI's files.
+- Development build: the workspace version is `0.14.0-dev` (`probbit --version`, the `engine` of every strand header this
+  build writes, `verified_by`), so the strands it writes get the 0.14.0 behaviours below (the rounded deviation, the
+  canonical fold, `expect` on checkpoints, segments of a persona with an expectation block). Strands of 0.13.0 and earlier
+  replay as their engine wrote them.
+- **Cross-platform parity of the deviation** (docs/persona.md section 2.17, docs/embedding.md): the stance's `deviation`
+  (`self`, `pred`, `input`) is rounded to 6 decimals like every other number of a stance, so a checkpoint line has the same
+  bytes on every libm (a `nostd` build's `libm` crate differed from the host's by 2 ULP, which broke the chain at the second
+  checkpoint). Gated on the strand header's engine: a strand written before 0.14.0 keeps its full-precision deviation, and
+  `live verify` accepts its checkpoint when it equals the replay's at 6 decimals; strands without an expectation block are
+  unchanged.
+- **`turn_trace`** (feature of probbit-persona and probbit-cli, off by default): `persona::trace` records the last event's
+  microseconds and a host probe's value per phase (input, expect, prep, compile, solve, decode, document, line, fold), so a
+  firmware measures the same breakdown on its hardware; `probbit live` in such a build prints it on stderr when
+  `PROBBIT_TURN_TRACE` is set.
+
+### Small hosts: boxed setup, checkpoint resume, strand segments
+
+- **The setup path fits a small stack** (docs/embedding.md "Stack budget"): heap-returning setup calls
+  `persona::build_boxed` (`Box<Persona>`), `persona::init_boxed` (`Box<State>`), `Live::start_boxed` (`Box<Live>` and the header),
+  `Live::start_to` (the header handed to the host in fixed-size pieces, so a firmware can write it to flash piece by piece with
+  yields) and `strand::resume_boxed`; `strand::write_header` writes the header line in pieces and returns its sha256. The persona
+  reader no longer holds a `Persona` by value at each of its layers, and its readers are out of line. On a host proxy of a firmware's setup (a 12 KB persona, `nostd`, x86_64) the stack high-water of parse + build + init + start fell from 39,056 to 12,112 bytes; on Xtensa the reader's frame went from 3,312 to 400 bytes and `Live::start`'s from 1,888 to 160. The by-value
+  calls are unchanged wrappers; every header, line and digest is byte for byte as before. `persona::sha256` hashes without
+  copying its input (`persona::Sha256`, fed in pieces). The YAML reader refuses collections nested deeper than 256 (a `limit`
+  error, as the JSON reader does) instead of recursing without a bound.
+- **The turn and `resume` fit a small stack too** (docs/embedding.md "Stack budget"): the turn's steps run out of line and pass
+  the state boxed (`persona::turn_boxed`, which `Live::event` runs; `turn` is its wrapper), the expectation's programs compile
+  the same way, and `resume` opens the strand's header once (the chain check builds the persona on the heap and compares the
+  header in pieces, without a replay). On the host proxy one event's stack high-water fell from 31,824 to 13,808 bytes and
+  `resume`'s from 30,560 to 15,792; every stance document, strand line and digest is byte for byte as before.
+- **Resume robustness** (docs/embedding.md "Resume on a body", docs/persona.md section 5.7 "Resume from a record"):
+  `strand::Replay::open_boxed` checks the header as the chain check does (the persona built on the heap, the header written
+  again in pieces) and keeps its `Live` boxed, so a replay from the header fits a small stack (proxy: 24,752 → 16,192 B);
+  `Replay::open` is the same call. `strand::resume_from_record(text, &p, state, clock, &engine)` resumes from a state record
+  that is behind the strand (a reboot between a line and its record): the event lines after the record's line are applied
+  (their turn on the logged inputs, digests and bytes checked; not the expectation's member solves) and the individual equals
+  the unbroken one, byte for byte; refused with the line for a record the strand does not log, a line that differs, another
+  persona. `strand::resume_boxed_from(header, checkpoint, line, trailing, &p, state, clock, &engine)` resumes from the header,
+  the last checkpoint line and the lines after it read one at a time, never the whole strand: cost O(lines since the
+  checkpoint). `turn_trace`: `trace::last_resume()` (lines walked, lines applied, their µs). No byte of any strand changes.
+- **Resume after a checkpoint with an expectation block**: the chain check that `resume` (and `probbit live ... --strand`) runs
+  validates each checkpoint line (its state read, its event count, its link to the event before) without opening it as a replay
+  start, which a persona with an `expectation` block cannot do; such a strand resumes after its first checkpoint (it exited 2
+  before). Every line and digest as before.
+- **Checkpoints carry the expectation's memory** (docs/persona.md section 5.7, engine 0.14.0 on): the canonical fold (every count,
+  the mean and the variance at 6 decimals; at most `max_combos - 1` named combos, the one moved out adding its count to `rest`,
+  the empty member's) and one more checkpoint key, `expect`, so `verify --from-checkpoint`, `resume` and `monitor` start at the
+  last checkpoint of a strand with the block and fold only the events after it. The line is O(max_combos) (6,369 B for the
+  test fixture at `max_combos` 16; 14,121 B at 64). Strands whose header names an engine before 0.14.0 keep the four-key
+  checkpoint and the earlier fold, byte for byte; an earlier engine reads `expect` as unsupported (exit 5).
+- **Sealed segments** (docs/persona.md section 5.7, docs/embedding.md "Sizing a strand on flash"): `probbit live ...
+  --segment-every N` seals the strand with a checkpoint line every N events and goes on in `NAME.0001.strand`, ...: a header with
+  `segment` {index, previous, sealed} and the sealed line itself, so the chain continues across files. `live verify SEGMENT`
+  checks one segment on its link (summary `segment`, `trusted_link`); `live verify SEGMENT --chain` walks back to the first file
+  (exit 1 at a break, naming the file; exit 6 when a previous file is missing). `strand::segment_header`,
+  `strand::segment_name`, `strand::write_header_seg`, `strand::Replay::open_lines`.
+- **`probbit live control STRAND seal`** (docs/persona.md section 5.7): a host seals when it decides. Under the writer lock it
+  replays the newest segment, refuses unless its last line is an event line (exit 2, nothing written), appends the sealing
+  checkpoint, writes the next segment file and prints it (`file`). `probbit live ... --strand NAME.strand` now always continues
+  the newest segment that exists, with or without `--segment-every`, so a sealed file is never appended to.
+
+### The expectation cache and the members
+
+- **The expectation's cache** (docs/embedding.md "The expectation's cache"): `Live` keeps the exact marginals of the
+  programs the deviation solved, keyed by the program without its comment, so an event whose members' programs are the
+  previous event's solves none of them again (a life of one repeated event: `expect` 52% → 37% of the turn on the proxy, 95%
+  of its programs from the cache). Every stance, strand line and digest is the same with the cache on or off
+  (`Live::expect_cache`, `persona::ExpectCache::new(false)`); at most `max_combos + 1` rows; a life whose programs move every
+  event (most lives: the state moves) backs off and costs about what it cost before. `turn_trace` gains `expect_cached` and
+  `expect_solved`; `persona::deviation_cached`.
+- **The expectation's members as models** (docs/embedding.md "The expectation's members: one program text per event"): with
+  the cache on, the event's own program is the only text the deviation builds and reads; every other member is compiled
+  without its text and, when the habits in force are the event's, solved as the event's model with its own `h`
+  (`run::from_json_parts`, `run::Parts::model_with`, `run::enumerated`: the tier `run` answers with, the same calls); another
+  tier or other rules: its text, written from its compile meta, run by the engine. Same marginals, so every stance, strand line
+  and digest is the same as the reference path (`ExpectCache::new(false)`); proxy, the body persona's recorded day: `expect`
+  74.6% → 67.7% of the turn. `turn_trace` gains `expect_build_us` and `expect_solve_us` (the members' builds and solves).
+- **The expectation's members, trimmed** (docs/embedding.md "The expectation's members: what the deviation reuses"):
+  `Live::event` runs the turn first and, with the cache on, the turn hands the deviation its first program's meta and exact
+  marginals (`persona::turn_at`, `persona::deviation_at`), so the event's own program is compiled and solved once (when no rest
+  is due, `src` is taken out alike and the op is `decide`; else as before). A member's prep copies only what it steps and
+  reads, its compile writes no source names, and the members share one model (`run::Members`, the compile pass's folds
+  replayed per member). `ExpectCache::with_reuse` keeps the old order or checks the reuse. Every stance, strand line and digest
+  is the same; proxy, the body persona's recorded day: `expect` 67.7% → 63.9% of the turn (-14% per event). The deviation
+  runs after the turn, so the event's heap peak (the body persona, proxy) is 97,583 B (89,990 before); `with_reuse(false, false)`
+  keeps the old order (the deviation before the turn: 89,990 B).
+- **The expectation's members before the turn** (docs/embedding.md "The expectation's members: the order with the reuse, and
+  what is held"): with the cache reusing the turn's program, every member but A_t is solved before the turn (nothing of the
+  turn held; `persona::deviation_pre`), its exact marginals held as f64 rows, and A_t's mixture runs after the turn
+  (`persona::deviation_post`). Every member takes the members' one model, read without any program text (the persona's
+  couplings, a text without its pairs): a member with other rules in force than E_t's takes it with its own caps
+  (`run::Members::set_caps`), and the components tier's split is computed once per caps and reused per member
+  (`probbit_ir::exact_components_split`). Every stance, strand line and digest is the same. Proxy, the body persona: event
+  heap peak 97,583 → 88,844 B, inside `expect` 97,583 → 55,920 B; recorded day: `expect` 64.1% → 57.5% of the turn,
+  0 members on the engine's path (253).
+
+### The self layer (RFCs 0013–0016, off by default)
+
+- **Self-report** (RFC 0013, docs/rfcs/0013-self-report.md, docs/persona.md §5.8 "Self-report"): `probbit reflect STRAND
+  [--last N | --since-checkpoint] [--json | --text]` and `probbit_persona::reflect` (std and `nostd`): a canonical account of a
+  window of a strand's events from its lines alone, no solve: the inputs set, the expectation's surprises (z recomputed from the
+  logged receipts, the 5 largest |z| with predicted vs measured), per trait the levels taken and the odds' drift, the moods'
+  path and turning points, the drives' peaks, the habits bound, the credit settled, the learned weights' net change and the
+  control lines (the stance sections read from the checkpoint lines in the window; `null` without one); every number at 6
+  decimals, a sha256 digest, 6-12 sentences from fixed templates. Off by default: nothing is written unless asked.
+- **Reflection lines** (engine 0.14.0+, docs/persona.md §5.7): `probbit live control STRAND reflect [--last N]` appends the
+  reflection as a line; `live verify` recomputes it from the lines before it and refuses a forged one naming the line; an
+  engine before 0.14.0 reads it as unsupported (exit 5). Every strand without one, and every corpus, is byte for byte unchanged.
+- **Integrity** (RFC 0014, docs/rfcs/0014-integrity.md, docs/persona.md §2.19 and §5.9): four optional self keys in the
+  `identity` block (`keep`, `warn`, `cue`, `traits`; outside the persona digest) turn on, per live event, an exact account of
+  the drift from the declared self: per trait the total variation between the rest-probe odds of the individual rested (the
+  channels of the hour at the fresh values, what persists as it is) and of the seed's fresh individual, `bound_used` against
+  RFC 0004's epsilon at the seed, the dial's `used`, the `keep` habits held or not fired, and the persona's own `cue` past
+  `warn`; every number at 6 decimals. Library `probbit_persona::integrity::{compute, compute_cached, Integrity}` (std and
+  `nostd`); the rest probe is cached by its program without the comment (the members' key; a row only for an exact answer) and,
+  while no row is held, by the rested state's body without `turn`.
+- **Integrity on the event line** (engine 0.14.0+): the stance document and the event line carry `integrity`; `live verify`
+  recomputes it and refuses an edited value naming the line; an engine before 0.14.0 reads such a persona as unsupported
+  (exit 5). A persona without the self keys writes every strand, stance and corpus byte for byte as before.
+- **Integrity's cost** (RFC 0014-b): on a body's recorded day the rest probe is answered from the cache 1,156 of 1,160 times
+  (from 0): +16.1 % of a turn on the host (from +40.1 %), 13,656 B on the `nostd` build per miss (from 20,952 B). Every
+  integrity number is byte for byte as before. Still over the 2 % / 8 KB budget: a hit builds the probe's program, a miss is a
+  turn (docs/embedding.md "Integrity on a body").
+- **Rest pass** (RFC 0015, docs/rfcs/0015-consolidation.md, docs/persona.md §2.17): an optional `rest` key of the
+  `expectation` block (`half_life`, `bucket`, `surprise_gain`, `decay`; every default moves nothing) declares a memory
+  consolidation a host runs at rest with `Live::consolidate(at)` (`consolidate_boxed` on a body) or `probbit live control
+  STRAND rest [--at TIME]`: the window since the last pass (folded in the canonical memory, carried by checkpoints) re-folded
+  with the rest half-life, counts weighed by the contexts' mean z+, near-duplicate contexts merged, the learned deltas
+  decayed; one engine-gated `consolidation` line logs the memory's digests before and after, the contexts merged, the weights
+  moved and the state after. `live verify`, the chain check and both resumes re-run the pass and name the first field of a
+  forged line; the reflection document gains `consolidation` and one sentence when its window holds such a line. Off by
+  default: without the key the pass is refused and every document is unchanged.
+- **Curiosity** (RFC 0016, docs/rfcs/0016-curiosity.md, docs/persona.md §2.20): an optional `curiosity` block (needs an
+  expectation block; in the digest) declares a drive fed by the measured surprise: `surprise_recent` (an average of z+ = max(z, 0) with a
+  half-life in events) and `failed_contexts` (remembered input contexts whose last K visits all missed). Its level, clipped
+  to a cap at 6 decimals, moves the stance through the engine-owned number input `cur_level`; the stance carries
+  `drives.curiosity` and the event line a `curiosity` receipt that `live verify` recomputes; the fold rides in the
+  expectation's checkpoint memory. The optional `stir` gates a self-started idle event: `Live::stir_due(idle_hours)` and
+  `probbit live control STRAND stir? [--idle-hours H]` (threshold, a rate cap, a slower quiet class while a declared flag
+  is on); a stir is an ordinary event with `"stir": "<class>"`. The monitor's drives rows show the drive; with a declared stir
+  the reflection document gains `stirs` and one sentence. Off by default: every document without the block is unchanged.
+
+### Monitor
+
+- **The monitor's Mirror tab**: `/reflection?last=N` and `/s/ID/reflection` serve the reflection computed from the strand file
+  and the latest logged reflection line with whether it recomputes equal; the page shows the sentences, the top surprises, the
+  habits bound and the moods at the checkpoint samples.
+- **The monitor's integrity dial and the Mirror's drift table**: the instrument panel's "room left in the bound" placeholder
+  becomes the integrity dial when the stance carries `integrity`; the Mirror tab shows the per-trait drift, allowance and share
+  of the event on view.
+- **`probbit monitor --dir` serves a life in segments as one strand**: `NAME.strand` and `NAME.0001.strand`, ... (without a gap)
+  are listed once, id `NAME`, with the life's event count, the newest file's `segment` index and the base name's sidecar; the
+  page follows the newest file and goes on in the next one within the 1 s scan after a seal, its event count carrying on.
+
+### Fixes
+
+- The test of the served demo's restart allows 45 s for its paced loop (about 13 s of sleeps): on a virtual machine whose sleeps
+  overshoot up to 2.5 times it failed at 20 s, on this tree and the one before (the replay itself takes about 30 ms).
+- `probbit monitor` opens a strand with checkpoint lines when its persona has an `expectation` block: it replays such a
+  strand from the header (`--once`, `--follow`, `--serve`, and each strand of `--dir` by its own persona) instead of refusing
+  it at the last checkpoint, which does not carry the expectation's memory. Other personas still start at the last
+  checkpoint; `live verify` is unchanged.
+
+### Documentation
+
 - Documentation, from a dress rehearsal of the published v0.13.0 artifacts (the release page's Mac app zip opened as a
   download, the README and REPRODUCE.md commands with the released binary on Linux and macOS, `probbit-stance` 0.2.0 from
   npm): `docs/monitor-app.md` says to remove the quarantine mark before the first open and how to recover after a refused
   one (move the app, or Open Anyway), and that the bundled probbit serves several strands with a switcher; the plugin
   README names the second warning an older probbit gives; REPRODUCE.md no longer says only 0.12.0 replays the strand.
+### Research
+
+- **RFC 0011, round 7: one math path for the register** (research, `engine.tier: amplitude` stays opt-in; docs/rfc/0011-amplitude-register.md,
+  "One math path"). The simulated register evaluates cos, sin, sqrt, asin, acos, atan2 and floor through the `libm` crate on the std and
+  the no_std build alike (a direct dependency of probbit-decide). 100 fresh lives per schedule recorded on the std build re-verify on
+  the no_std build 100/100 for `tf-linear-16x4`, `tf-linear-64x16` (round 5: 0/100) and `qaoa-p2` (98/100), x86_64; the tutor's
+  default-schedule strands are byte-identical to before (100/100) and both demo strands re-record byte for byte (a 52-qubit
+  recorded day's default strands moved in the last bits). Cost on that day: long sweep 1.50x the default. Exact, on a CPU.
+- **RFC 0011, round 7: the amplification lands on the long sweep** (research). `amplify_exact` renormalises the swept state once
+  before the standard iterations: the diffusion about a state of squared norm 1 + eps is not unitary, so the shortfall grew with the
+  iterations and 165 corpus programs declined under the long sweep; now 0 decline under any schedule (median gap 0.151709, agreement
+  0.981671 on the corpus). The receipt's mass before is unchanged; a mass that is not a number declines instead of panicking.
+  Simulated, exact, on a CPU.
+- **RFC 0011, round 7: docs** (research). docs/persona.md's `engine.schedule` paragraph and the demo README state the measured
+  replay on both builds; docs/persona.md section 5.8: the stance digest is the sha256 of `/doc/N`'s JSON without the trailing newline.
+- **RFC 0011, round 6: the demo** (research; `examples/persona/demo/`, docs/rfc/0011-amplitude-register.md, "The demo"). A
+  fictional tutor reduced to its humour component, with praise and criticism pulling humour in opposite directions, in two
+  copies: `register.yaml` (`engine: {tier: amplitude, amplify: true, schedule: tf-linear-64x16}`) and `thermal.yaml` (no engine
+  block). One 17-event life recorded on each (both verify, twice byte for byte, 0 floats past 6 decimals). At event 9 (line 10
+  of both strands, the same program) the thermal odds of the top two humour levels sit 0.007412 apart and the simulated
+  register separates them by 0.494808; the Mood Monitor's two faces at that event are in the RFC. On the corpus's own program
+  `a7fae99b114ea2d2`: thermal gap 0.010516, long sweep 0.951467. The long sweep replays on the recording build only; the
+  default schedule stays for every recorded strand. No engine change. Simulated, exact, on a CPU.
+- **RFC 0011, round 5: schedules and the indifferent set** (research, `engine.schedule`, absent = the default sweep;
+  docs/rfc/0011-amplitude-register.md, "Schedules and the indifferent set"). Three names: `tf-linear-16x4` (default),
+  `tf-linear-64x16` (four times the layers), `qaoa-p2` (two layers, angles fixed on a held-out third of the corpus). On the 10.7 %
+  of the recorded corpus's trait decisions where the thermal tier is indifferent, the simulated register's top-two gap has median
+  0.049 (default), 0.152 (long sweep), 0.094 (qaoa-p2); agreement elsewhere 97.6 / 98.2 / 93.0 %; noise 0.0007. The long sweep
+  is the rule's choice (1.5× the solve per event on a recorded day). A missed amplification landing (165 programs under the long sweep) now declines to the
+  default tiers instead of panicking. Failure, stated: the no_std build re-verifies the long sweep's strands 0/100 (qaoa-p2 98/100;
+  the default 100/100): last-bit math differences, so non-default schedules replay only on the recording build for now. Without
+  the key every stance and strand is byte-identical to round 4. Exact, on a CPU.
+- **RFC 0011, round 4: exact amplitude amplification in place of the projection** (research, `engine.amplify: true`, off by
+  default; docs/rfc/0011-amplitude-register.md, "Amplification"). `amp::amplify_exact`: the rules as the oracle, the diffusion
+  about the swept state, k standard iterations and one phase-matched final one, so the simulated register lands on its
+  feasible plans exactly (mass ≥ 1 − 1e-12, asserted). The plane argument says the result is the projection's distribution;
+  measured: marginals equal to 1.1e-12 on 220 programs, the same plan on 220/220 and on all 339,389 solves of the recorded corpus (B4 unchanged, 96.29 %),
+  287/287 stance lines on a recorded day;
+  cost 1.02× the projected solve. The receipt adds `engine.amplify` and `feasible_mass` becomes 1. Without the key every stance
+  and strand is byte-identical to round 3. Simulated exactly on a CPU; no quantum hardware, no speedup claim.
+- **RFC 0011, round 3: the verdict, KEEP as an optional tier** (research, off by default; docs/rfc/0011-amplitude-register.md,
+  status "accepted as optional tier"). Measured on every program the recorded corpus's 653 outputs solve (338,567 exact solves,
+  0 declined, the corpus byte-identical with the comparison beside it): the exact simulated register picks the same level as the
+  exact default tier in 2,095,627 of 2,176,371 trait decisions (96.29 %, bar 90 %); the differing cases sit where the default
+  tier's own level holds less than half the mass (91 % of them), not where the rules' projection does the work. Three designed
+  two-path programs differ from the thermal odds by 0.25-0.27 at the node (engine vs reference 1.4e-14). The bound harness with
+  the tier: 0 of 4,100 cases above a certificate computed with the tier, 1,598 above one computed without it, so `persona bound`
+  must run with the tier on (docs/persona.md says so). A rule-penalty term was measured and not adopted (it lifts the Born mass
+  on rule-abiding plans and drops agreement to 83 %). No code change in this round. Simulated exactly on a CPU; no quantum
+  hardware, no speedup claim.
+- **RFC 0011, round 2: multi-level traits on the amplitude register** (draft, research; docs/rfc/0011-amplitude-register.md):
+  a variable with d allowed values takes ⌈log2 d⌉ qubits (`amp::Encoding`; a three-level trait two qubits, its fourth code
+  unused), the start is the uniform superposition over the valid codes, the mixer is the complete-graph mixer per variable
+  (`amp::MIXER`, the identity on unused codes; exp(i t X) for two values, round 1's mixer exactly), and the cost is one general
+  diagonal phase layer exp(−iγE), E = −log w per basis state (`Register::phase`), so pair tables between three-level traits
+  need no decomposition (round 1's Walsh transform and its decline are gone). The unused codes keep amplitude 0, checked after
+  every layer, never renormalised. The tier runs one register per connected component of the program (exact: the state is the
+  product of the components' states); `engine.q_max` bounds the largest component's encoded qubits. New receipt fields
+  `engine.components`, `encoding`, `mixer`; `qubits` counts encoded qubits. Measured against an independent mixed-radix
+  reference: max |Δ marginal| 2.7e-13 on 220 programs. Simulated exactly on a CPU; no quantum hardware, no speedup claim.
+- **RFC 0011, round 1: an amplitude register** (draft; docs/rfc/0011-amplitude-register.md): `probbit-decide::amp`, an exact
+  simulated qubit register on a CPU (q ≤ 16 on the host; 16 · 2^q bytes of amplitudes on the heap; std and no_std + alloc):
+  gates H, X, Z, RX, RZ, CNOT, CZ, RZZ, a Trotterised transverse-field sweep, QAOA layers, exact marginals, Born-rule
+  measurement with the engine's RNG, a sha256 digest of the state at 6 decimals. The persona flag `engine.tier: amplitude`
+  (off by default, `engine.q_max` default 12) solves a turn's program on it when every variable has at most two values;
+  otherwise the default tiers answer and the stance document says why. Receipt fields `engine.qubits`, `circuit`,
+  `schedule`, `schedule_name`, `state`, `feasible_mass`. Without the flag no byte of any stance or strand changes. No quantum
+  hardware, no speedup claim; the comparison with the default tier is the next round.
 
 ## 0.13.0 - 2026-10-26
 

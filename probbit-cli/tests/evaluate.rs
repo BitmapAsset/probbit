@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 use json::{num, obj, str as jstr, Json};
 

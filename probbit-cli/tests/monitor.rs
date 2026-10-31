@@ -351,7 +351,10 @@ fn drives_demo_draws_goal_state_and_rejects_unknown_scenarios() {
     }
 }
 
-/// The page makes the reset explicit: a completion cue, then loop 2 with a fresh event counter.
+/// The page makes the reset explicit: a completion cue, then loop 2 with a fresh event counter. The loop is paced by sleeps (8 s
+/// of events, then the 5 s hold: loop 2 about 13 s after the stream opens); the budget is 45 s because a host whose sleeps
+/// overshoot (a virtual machine measured 8 x sleep(1) at 8.9 to 19.8 s) stretches that pacing, not the work (the loop's
+/// replay itself is about 30 ms)
 #[test]
 fn served_demo_labels_its_restart() {
     let mut child = Reap(Command::new(env!("CARGO_BIN_EXE_probbit")).args(["monitor", "--demo", "drives", "--serve"])
@@ -362,7 +365,7 @@ fn served_demo_labels_its_restart() {
     write!(s, "GET /events HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").unwrap();
     let mut buf = String::new(); let mut count = 2; let started = Instant::now();
     loop {
-        assert!(started.elapsed() < Duration::from_secs(20), "the demo did not label its restart");
+        assert!(started.elapsed() < Duration::from_secs(45), "the demo did not label its restart");
         let evs = stream(&mut s, &mut buf, count);
         if evs.iter().any(|(_, d)| d.contains("loop 2")) { break; }
         count = evs.len() + 1;
@@ -462,4 +465,125 @@ fn one_monitor_serves_many_strands() {
     let t = Instant::now(); while !get(port, "/strands", &host).2.contains(r#""id":"zeta""#) { assert!(t.elapsed() < Duration::from_secs(10), "zeta picked up"); std::thread::sleep(Duration::from_millis(200)); }
     assert_eq!(get(port, "/s/zeta/doc/1", &host).2, format!("{}\n", db[0]));
     drop(child); let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// RFC 0009: a strand with checkpoint lines whose persona has an expectation block replays from its header (no checkpoint
+/// carries the expectation's memory). The fixture is the life of `tutor-expect.yaml` (the tutor with an expectation block) over
+/// `tutor-expect.events.jsonl` (22 events, seed 2, the fixed clock, a checkpoint after every 5th: 4 of them), as `probbit live
+/// tests/fixtures/monitor/tutor-expect.yaml --seed 2 --clock fixed --events ... --checkpoint-every 5 --strand` writes it. `--once` draws event 22 and exits 0, `--serve` streams it, `--dir`
+/// lists it with its n; the same events through the tutor (no expectation block) still start at the last checkpoint
+#[test]
+fn checkpointed_strands_of_an_expectation_persona_open() {
+    const F: &str = "tests/fixtures/monitor/tutor-expect.strand";
+    const EV: &str = "tests/fixtures/monitor/tutor-expect.events.jsonl";
+    assert_eq!(std::fs::read_to_string(F).unwrap().lines().filter(|l| l.starts_with(r#"{"checkpoint":"#)).count(), 4);
+    let (c, v, err) = probbit(&["live", "verify", F]); assert_eq!(c, 0, "{v}{err}"); assert!(v.contains(r#""checkpoints":4"#) && v.contains(r#""events":22"#), "{v}");
+    let (c, out, err) = probbit(&["monitor", F, "--once", "--plain"]);
+    assert_eq!(c, 0, "{out}{err}"); let top = out.lines().next().unwrap_or("");
+    assert!(top.contains("| event 22 |") && top.ends_with("replay verified [ok]"), "from the header: {top}");
+    // the page: the latest frame on /events is event 22, replayed from the header
+    let (child, port) = served(&[F]); let host = format!("127.0.0.1:{port}");
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
+    assert_eq!(evs[1].0, "frame"); assert!(evs[1].1.contains(r#""from_checkpoint":null"#) && evs[1].1.contains(r#""n":22,"#) && evs[1].1.contains(r#""diverges":null"#), "{}", evs[1].1);
+    drop(s); drop(child);
+    // --dir: listed with its n
+    let dir = std::env::temp_dir().join(format!("probbit-monitor-expect-dir-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(F, dir.join("tutor-expect.strand")).unwrap();
+    let (child, port) = served(&["--dir", &dir.to_string_lossy()]); let host = format!("127.0.0.1:{port}");
+    let t = Instant::now(); let mut list = String::new();
+    while !list.contains(r#""n":22,"#) { assert!(t.elapsed() < Duration::from_secs(10), "listed with n 22: {list}"); std::thread::sleep(Duration::from_millis(100)); list = get(port, "/strands", &host).2; }
+    assert!(list.contains(r#""id":"tutor-expect""#) && list.contains(r#""persona":"Pip""#), "{list}");
+    drop(child); let _ = std::fs::remove_dir_all(&dir);
+    // a persona without an expectation block: the shortcut (the badge names the checkpoint the replay started from)
+    let tutor = tmp("expect-tutor"); lived(&tutor, "2", &["--checkpoint-every", "5"], &std::fs::read_to_string(EV).unwrap());
+    let (c, out, err) = probbit(&["monitor", &tutor, "--once", "--plain"]); let top = out.lines().next().unwrap_or("");
+    assert_eq!(c, 0, "{out}{err}"); assert!(top.contains("| event 22 |") && top.ends_with("replay verified from checkpoint 20 [ok]"), "{top}");
+    let _ = std::fs::remove_file(&tutor);
+}
+
+/// §5.7 segments on the page: with `--dir`, a life's `NAME.strand` and `NAME.000k.strand` are one strand, id `NAME`, listed with
+/// the life's event count and the base name's sidecar; its stream follows the newest segment and carries on across a seal (the
+/// next file is picked up within the 1 s scan)
+#[test]
+fn a_served_life_in_segments_is_one_strand_that_follows_its_seals() {
+    let dir = std::env::temp_dir().join(format!("probbit-monitor-segments-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    let at = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    let (base, st, ev) = (at("life.strand"), at("st.json"), at("ev.jsonl"));
+    let (c, _, e) = probbit(&["persona", "init", "../examples/persona/tutor.yaml", "--seed", "2", "--out", &st]); assert_eq!(c, 0, "{e}");
+    let run = |n: usize, extra: &[&str]| { std::fs::write(&ev, (0..n).map(|t| format!("{{\"praise\":{},\"elapsed_hours\":1}}\n", t % 2 == 0)).collect::<String>()).unwrap();
+        let (c, o, e) = probbit(&[&["live", "../examples/persona/tutor.yaml", "--state", &st, "--clock", "fixed", "--events", &ev, "--strand", &base][..], extra].concat()); assert_eq!(c, 0, "{e}"); o };
+    run(5, &["--segment-every", "3", "--label", "agent=Nova"]);
+    assert!(std::path::Path::new(&at("life.0001.strand")).exists());
+    let (child, port) = served(&["--dir", &dir.to_string_lossy()]); let host = format!("127.0.0.1:{port}");
+    let t = Instant::now(); let mut list = String::new();
+    while !list.contains(r#""n":5,"#) { assert!(t.elapsed() < Duration::from_secs(10), "listed with n 5: {list}"); std::thread::sleep(Duration::from_millis(100)); list = get(port, "/strands", &host).2; }
+    assert!(list.contains(r#""id":"life","labels":{"agent":"Nova"}"#) && list.contains(r#""segment":1"#) && !list.contains("life.0001") && list.matches(r#""id":"#).count() == 1, "one strand: {list}");
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /s/life/events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2); assert!(evs[1].1.contains(r#""n":5,"#), "{}", evs[1].1);
+    // a host seals; the life goes on in the next file
+    let (c, o, e) = probbit(&["live", "control", &base, "seal"]); assert_eq!(c, 0, "{e}{o}"); assert!(o.contains("life.0002.strand"), "{o}");
+    let docs = run(2, &[]); let six = docs.lines().next().unwrap().to_string();
+    let (t, mut count) = (Instant::now(), 3);
+    loop { let evs = stream(&mut s, &mut buf, count); if evs.iter().any(|(_, d)| d.contains(r#""n":7,"#)) { break; }
+        assert!(t.elapsed() < Duration::from_secs(5), "event 7 streamed after the seal: {buf}"); count = evs.len() + 1; }
+    assert!(!buf.contains(r#""diverges":{"#), "{buf}");
+    assert_eq!(get(port, "/s/life/doc/6", &host).2, format!("{six}\n"));
+    let list = get(port, "/strands", &host).2; assert!(list.contains(r#""n":7,"#) && list.contains(r#""segment":2"#) && list.matches(r#""id":"#).count() == 1, "{list}");
+    drop(s); drop(child); let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// RFC 0013, the Mirror tab through the serve path: `/reflection?last=N` is `probbit reflect STRAND --last N` computed from the
+/// file as it is now (`live`, no reflection line: `logged` null); after `live control STRAND reflect --last N` the logged line
+/// is reported and recomputes equal; `/s/ID/reflection` serves strand ID; a bad `last` is 400; the page carries the tab
+#[test]
+fn the_mirror_serves_the_reflection() {
+    let f = tmp("mirror");
+    let ev: String = (0..30).map(|k| format!("{{\"elapsed_hours\":1{}}}\n", if k % 4 == 0 { ",\"praise\":true" } else if k % 7 == 0 { ",\"loss\":true" } else { "" })).collect();
+    lived(&f, "2", &["--checkpoint-every", "5"], &ev);
+    let (c, want, _) = probbit(&["reflect", &f, "--last", "10"]); assert_eq!(c, 0); let want = want.trim_end().to_string();
+    let (child, port) = served(&[&f]); let host = format!("127.0.0.1:{port}");
+    let (st, h, page) = get(port, "/", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(page.contains("id=\"tab-mirror\"") && page.contains("reflection?last=50"), "{h}");
+    let (st, h, body) = get(port, "/reflection?last=10", &host); assert_eq!(st, "HTTP/1.1 200 OK"); assert!(h.contains("application/json"), "{h}");
+    assert_eq!(body, format!("{{\"live\":{want},\"logged\":null}}\n"));
+    assert_eq!(get(port, "/reflection?last=0", &host).0, "HTTP/1.1 400 Bad Request");
+    let (c, out, err) = probbit(&["live", "control", &f, "reflect", "--last", "10"]); assert_eq!(c, 0, "{out}{err}"); assert!(out.contains("\"control\":\"reflect\""), "{out}");
+    let body = get(port, "/reflection?last=10", &host).2;
+    assert!(body.contains(&format!("\"logged\":{{\"doc\":{want},\"line\":")) && body.contains("\"matches\":true"), "{body}");
+    drop(child);
+    let (child, port) = served(&[&f]); let host = format!("127.0.0.1:{port}");
+    let id = std::path::Path::new(&f).file_stem().unwrap().to_string_lossy().replace(|c: char| !(c.is_ascii_alphanumeric() || "_.-".contains(c)), "-");
+    assert_eq!(get(port, &format!("/s/{id}/reflection?last=10", ), &host).0, "HTTP/1.1 200 OK");
+    drop(child); let _ = std::fs::remove_file(&f);
+}
+
+/// RFC 0014, the integrity dial through the serve path: a life of a persona with the identity self keys; the latest frame's
+/// document carries the last line's `integrity` (canonical, byte for byte), its `integrity` word's dial is that line's `used`,
+/// and the page carries the Mirror's drift table
+#[test]
+fn the_integrity_dial_reads_the_strands_number() {
+    use probbit_persona::json::{self, Json};
+    let f = tmp("integrity"); let _ = std::fs::remove_file(&f);
+    let ev: String = (0..24).map(|k| format!("{{\"elapsed_hours\":0.5,\"src\":\"human\",\"{}\":true}}\n", if k % 5 == 4 { "criticism" } else { "praise" })).collect();
+    let mut live = Command::new(env!("CARGO_BIN_EXE_probbit")).args(["live", "tests/fixtures/monitor/tutor-self.yaml", "--seed", "3", "--clock", "fixed", "--strand", &f])
+        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+    live.stdin.take().unwrap().write_all(ev.as_bytes()).unwrap(); assert!(live.wait().unwrap().success());
+    let (c, out, _) = probbit(&["live", "verify", &f]); assert_eq!(c, 0, "{out}");
+    let text = std::fs::read_to_string(&f).unwrap(); let last = json::parse(text.lines().last().unwrap()).unwrap();
+    let ig = last.get("integrity").expect("the last line carries integrity").clone();
+    let used = ig.get("used").and_then(Json::as_f64).unwrap(); assert!(used > 0.0, "{}", probbit_persona::persona::canon(&ig));
+    let (child, port) = served(&[&f]); let host = format!("127.0.0.1:{port}");
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap(); s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    write!(s, "GET /events HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+    let mut buf = String::new(); let evs = stream(&mut s, &mut buf, 2);
+    let frame = evs.iter().rev().find(|(_, d)| d.contains("\"words\"")).map(|(_, d)| json::parse(d).unwrap()).unwrap_or_else(|| panic!("{buf}"));
+    assert_eq!(frame.get("n").and_then(Json::as_f64), Some(24.0));
+    let canon = probbit_persona::persona::canon;
+    assert_eq!(canon(frame.get("doc").and_then(|d| d.get("integrity")).unwrap()), canon(&ig), "the frame's document carries the line's number");
+    let w = frame.get("words").and_then(Json::as_arr).unwrap().iter().find(|w| w.get("key").and_then(Json::as_str) == Some("integrity")).cloned().expect("the integrity word");
+    assert_eq!(w.get("dial").and_then(Json::as_f64), Some(used.min(1.0)), "{}", canon(&w));
+    assert!(get(port, "/", &host).2.contains("id=\"mirror-integrity\""));
+    drop(s); drop(child); let _ = std::fs::remove_file(&f);
 }

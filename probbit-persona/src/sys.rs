@@ -1,4 +1,6 @@
 //! Process resource usage without crates: getrusage(2) via FFI on 64-bit Unix (macOS and Linux struct layouts); None elsewhere.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 // 64-bit only: the layouts below assume 64-bit time_t / long (32-bit Linux or BSD would read garbage telemetry)
 #[cfg(all(unix, target_pointer_width = "64"))]
 mod imp {

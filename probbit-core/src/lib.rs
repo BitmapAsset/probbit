@@ -5,6 +5,17 @@
 //!   `sweep_prefix` is the PT-in-a-word variant (per-lane betas, shared uniform -> contiguous lane prefix mask).
 //! - `heatbath_f32`: T1 SoA f32 heat-bath on a 2D ±J lattice with LUT sigmoid.
 //! - `rt`: the engine's clock and its no-thread switch (for targets without threads or a std clock: wasm32-unknown-unknown).
+#![cfg_attr(not(feature = "std"), no_std)]
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate probbit_nostd as std;
+#[cfg(not(feature = "std"))]
+#[allow(unused_imports)]
+#[macro_use]
+extern crate alloc;
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 
 #[derive(Clone)]
 pub struct Philox4x32 { key: [u32; 2], ctr: [u32; 4], buf: [u32; 4], idx: usize }
@@ -63,6 +74,8 @@ impl Rng32 for Philox4x32 { #[inline(always)] fn u32(&mut self) -> u32 { self.ne
 /// 2D ±J periodic lattice, bit-sliced: w[i] holds spin i of 64 replicas (bit=1 means -1).
 pub mod multispin {
     use super::Rng32;
+    #[allow(unused_imports)]
+    use std::prelude::rust_2021::*;
     /// The fields are private: `sweep_fast` reads through raw pointers and relies on `w`, `jr` and `jd` holding exactly `l * l`
     /// words. With `pub` fields safe code could break that (`l = 2^32` on empty vectors: `l * l` wrapped to 0 in release, the
     /// length check passed, the sweep read through a dangling pointer). Build one with `random` or `new`.
@@ -170,13 +183,15 @@ pub mod multispin {
         }
     }
     pub fn thresholds(beta: f64) -> (u32, u32) {
-        ((((-4.0 * beta).exp()) * 4294967295.0) as u32, (((-8.0 * beta).exp()) * 4294967295.0) as u32)
+        (((super::exp64(-4.0 * beta)) * 4294967295.0) as u32, ((super::exp64(-8.0 * beta)) * 4294967295.0) as u32)
     }
 }
 
 /// T1: SoA f32 heat-bath on 2D ±J lattice, LUT for tanh(beta*h), h in {-4,-2,0,2,4}.
 pub mod heatbath_f32 {
     use super::Rng32;
+    #[allow(unused_imports)]
+    use std::prelude::rust_2021::*;
     /// The fields are private: besides the `multispin` lengths, `sweep_fast` reads its 9-entry table at h + 4 unchecked, which
     /// is in range only for ±1 spins and couplings (`pub` couplings of 1000.0 read past the table). `random` and `new` build
     /// only such lattices, and the sweeps write only ±1.
@@ -241,8 +256,14 @@ pub mod heatbath_f32 {
             }}
         }
     }
-    pub fn lut(beta: f32) -> [f32; 9] { let mut t = [0f32; 9]; for k in 0..9 { t[k] = (beta * (k as f32 - 4.0)).tanh(); } t }
+    pub fn lut(beta: f32) -> [f32; 9] { let mut t = [0f32; 9]; for k in 0..9 { t[k] = super::tanh32(beta * (k as f32 - 4.0)); } t }
 }
+
+/// `exp` and `tanh` of the kernels: std's (the platform libm) with std, the `libm` crate's on no_std
+#[cfg(feature = "std")] fn exp64(x: f64) -> f64 { x.exp() }
+#[cfg(feature = "std")] fn tanh32(x: f32) -> f32 { x.tanh() }
+#[cfg(not(feature = "std"))] fn exp64(x: f64) -> f64 { std::FloatExt::exp(x) }
+#[cfg(not(feature = "std"))] fn tanh32(x: f32) -> f32 { std::FloatExt::tanh(x) }
 
 /// The runtime probbit-ir and probbit-decide run on: their clock and whether they may spawn threads.
 ///
@@ -257,17 +278,17 @@ pub mod heatbath_f32 {
 /// threads sized for > 2,048-variable programs are not used.
 pub mod rt {
     use std::cell::Cell;
-    thread_local! { static SEQUENTIAL: Cell<bool> = const { Cell::new(cfg!(all(target_family = "wasm", target_os = "unknown"))) }; }
+    thread_local! { static SEQUENTIAL: Cell<bool> = const { Cell::new(cfg!(any(not(feature = "std"), all(target_family = "wasm", target_os = "unknown")))) }; }
     /// No threads on this thread's calls into the engine (see the module doc). Returns the previous setting.
     pub fn set_sequential(on: bool) -> bool { SEQUENTIAL.with(|s| s.replace(on)) }
     /// Whether this thread's engine calls run without threads.
     pub fn sequential() -> bool { SEQUENTIAL.with(|s| s.get()) }
 
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    #[cfg(all(feature = "std", not(all(target_family = "wasm", target_os = "unknown"))))]
     pub use std::time::Instant;
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    #[cfg(any(not(feature = "std"), all(target_family = "wasm", target_os = "unknown")))]
     pub use clock::{set_clock, Instant};
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    #[cfg(any(not(feature = "std"), all(target_family = "wasm", target_os = "unknown")))]
     mod clock {
         use std::cell::Cell;
         use std::time::Duration;

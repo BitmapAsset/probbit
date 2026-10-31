@@ -45,6 +45,9 @@ either kind opens like any app. A copy you build yourself (below) has no quarant
   labels ([persona.md §5.8](persona.md#58-monitor-watch-an-individuals-inner-state)). A probbit that watches one strand at a
   time (0.12.1 and earlier, if you build the app around one) refuses that; the app then shows the first strand you chose
   (for a folder, its most recently changed `*.strand` file) and says so under the window title.
+- **Integrity** (engine 0.14.0+, a persona with the identity self keys, [persona.md §5.9](persona.md#59-integrity-the-drift-from-the-declared-self-rfc-0014)):
+  the instrument panel shows the integrity dial (the drift from the declared self as a share of the certificate's allowance)
+  where "room left in the bound" stood, and the Mirror tab adds the per-trait drift table of the event on view.
 - The window title is the page's title. When the page's title starts with a glyph, the Dock icon shows that glyph as its badge.
 - File → Open Recent lists what you opened; the app reopens the last selection when it starts with nothing else to open.
 - View → Reload (⌘R) reloads the page; **Follow Latest** (⌘L) loads the page's root again, the latest event with no event

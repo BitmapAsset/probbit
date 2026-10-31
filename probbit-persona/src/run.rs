@@ -2,6 +2,8 @@
 //! Instructions (`--op`): `decide` (default: exact enumeration if the feasible set is <= --exact-limit, else the exact
 //! frontier DP if the program allows it (--frontier-states, 0 = off), else 4 gated chains),
 //! `exact` (enumeration only), `sample` (chains + gate, never enumerate). What-if = `"clamp"` on a variable.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 use crate::json::{num, obj, str as jstr, InErr, Json};
 use probbit_ir::*;
 
@@ -20,7 +22,97 @@ pub struct Prog { pub m: Model, pub vars: Vec<String>, pub values: Vec<String>, 
 
 /// JSON (probbit_ir 1) -> Model. See docs/probbit-ir-json.md; strict: every field type-checked, unknown fields, duplicate ids / value
 /// names and empty domains rejected, with a structured error (its "Input contract").
-pub fn from_json(j: &Json) -> Result<Prog, InErr> {
+pub fn from_json(j: &Json) -> Result<Prog, InErr> { from_json_parts(j)?.into_prog() }
+/// A program read and lowered, before the compile pass (`compile_parts`) and the model: what `from_json` builds the model from.
+/// RFC 0009 (the expectation's members): programs that differ only in their vars' `h` share these, so a host reads the text once
+/// and builds each model with its own `h` (`Parts::model_with`).
+#[derive(Clone)]
+pub struct Parts { pub vars: Vec<String>, pub values: Vec<String>, h: Vec<f64>, allowed: Vec<bool>, clamp: Vec<Option<usize>>, pairs: Vec<Pair>, caps: Vec<Cap>, start: Option<Vec<usize>> }
+impl Parts {
+    /// The program's own `h` (n x k), as its text gives it
+    pub fn h(&self) -> &[f64] { &self.h }
+    /// T3-c: the pairs of a text read without its `pairs` (the members' skeleton: the persona's couplings, read as `from_json`
+    /// reads the text's)
+    pub fn set_pairs(&mut self, pairs: Vec<Pair>) { self.pairs = pairs; }
+    /// T3-c: the program's caps as read and lowered (before the compile pass), with its variables and values
+    pub fn into_caps(self) -> (Vec<String>, Vec<String>, Vec<Cap>) { (self.vars, self.values, self.caps) }
+    /// The program's own model: the compile pass and `Model::new` on its `h`, as `from_json`
+    #[inline(always)]
+    pub fn into_prog(self) -> Result<Prog, InErr> {
+        let Parts { vars, values, mut h, allowed, clamp, pairs, caps, start } = self; let (n, k) = (vars.len(), values.len());
+        let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
+        let mut m = Model::new(n, k, h, allowed, clamp, pairs, caps).map_err(|e| crate::json::value("", e))?; m.start = start;
+        Ok(Prog { m, vars, values, compiled })
+    }
+    /// The model of the same program with `h` (n x k, by variable then value index) in place of its own: each weight checked as
+    /// `json::weight` checks a weight of the text (a program whose text carries such a weight is refused), then the compile pass
+    /// and `Model::new` as `from_json` runs them
+    pub fn model_with(&self, mut h: Vec<f64>) -> Result<Model, InErr> {
+        if h.len() != self.h.len() || h.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return Err(crate::json::value("vars", "a weight beyond the finite weight limit")); }
+        let (pairs, caps, _) = compile_parts(self.values.len(), &mut h, self.pairs.clone(), self.caps.clone());
+        let mut m = Model::new(self.vars.len(), self.values.len(), h, self.allowed.clone(), self.clamp.clone(), pairs, caps).map_err(|e| crate::json::value("", e))?; m.start = self.start.clone();
+        Ok(m)
+    }
+}
+/// RFC 0009 (the expectation's members, T3-b): one model for every program of an event that differs from A_t only in `h`. The
+/// compile pass's folds (each separable table, in the pass's order: per value the row term into its first variable, then the
+/// column term into its second) are kept apart, so a member's model is this one with the member's `h`, the folds replayed in
+/// the same order: the same floats `compile_parts` makes, with no copy of the pairs and no second model held
+pub struct Members { pub m: Model, folds: Vec<(usize, usize, Vec<f64>, Vec<f64>)>,
+    /// T3-c: the components tier's split of the model (built on the first member it answers; dropped when the caps change)
+    split: Split }
+impl Members {
+    /// The model with `h` (n x k) in place of its own, as `Parts::model_with` builds it: each weight checked as the text's, the
+    /// folds added in the pass's order, then `Model::new`'s finite check
+    pub fn set_h(&mut self, mut h: Vec<f64>) -> Result<(), InErr> {
+        let bad = || crate::json::value("vars", "a weight beyond the finite weight limit");
+        if h.len() != self.m.h.len() || h.iter().any(|x| !x.is_finite() || x.abs() > crate::json::MAX_WEIGHT) { return Err(bad()); }
+        let k = self.m.k;
+        for (i, j, row, col) in &self.folds { for a in 0..k { h[i * k + a] += row[a]; h[j * k + a] += col[a]; } }
+        if h.iter().any(|x| !x.is_finite()) { return Err(crate::json::value("", "h must contain only finite weights")); }
+        self.m.h = h; Ok(())
+    }
+    /// T3-c: the model with `caps` (a member's rules lowered, `compiled`: already through the compile pass) in place of its
+    /// own: the pass's never-binding caps dropped as `compile_parts` drops them, then `Model::new` on the same parts, moved (no
+    /// copy of the pairs): the model `from_json` builds for the member's text. Err: `Model::new` refused them (the model is
+    /// then gone: the caller reads no member from it again)
+    #[inline(never)]
+    pub fn set_caps(&mut self, caps: Vec<Cap>, compiled: bool) -> Result<(), InErr> {
+        let caps = if compiled { caps } else { compile_parts(self.m.k, &mut [], vec![], caps).1 };
+        let m = &mut self.m; let (start, collective, cluster, cycles) = (m.start.take(), m.collective, m.cluster, m.cycles);
+        use core::mem::take;
+        let mut nm = Model::new(m.n, m.k, take(&mut m.h), take(&mut m.allowed), take(&mut m.clamp), take(&mut m.pairs), caps).map_err(|e| crate::json::value("", e))?;
+        nm.start = start; nm.collective = collective; nm.cluster = cluster; nm.cycles = cycles; self.m = nm; self.split = Split::default(); Ok(())
+    }
+    /// `enumerated` on the model, the components tier with the members' one split (`probbit_ir::exact_components_split`: the
+    /// members differ only in `h` while the caps stay)
+    pub fn enumerated(&mut self, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> { enumerated_in(&mut self.m, Some(&mut self.split), exact_limit, sweeps) }
+}
+impl Parts {
+    /// The members' model (`Members`): this program's model built from its parts (moved, as `into_prog`: no copy of the pairs),
+    /// its folds apart, with its variables, values and own `h` -> None when the folds read here are not the pass's (checked:
+    /// replayed on the program's own `h` they give the model's `h` bit for bit, and the pairs add up)
+    pub fn into_members(self) -> Option<(Vec<String>, Vec<String>, Vec<f64>, Members)> {
+        let k = self.values.len(); let mut folds = vec![]; let mut dropped = 0;
+        for p in &self.pairs { match &p.c {
+            Coupling::Potts(w) if *w == 0.0 => dropped += 1,
+            Coupling::Table(t) if t.iter().all(|&x| x == 0.0) => dropped += 1,
+            Coupling::Table(t) if t.len() == k * k && (0..k).all(|a| (0..k).all(|b| t[a * k + b] == t[a * k] + (t[b] - t[0]))) =>
+                folds.push((p.i, p.j, (0..k).map(|a| t[a * k]).collect(), (0..k).map(|a| t[a] - t[0]).collect())),
+            _ => {} } }
+        let np = self.pairs.len();
+        let Parts { vars, values, h, allowed, clamp, pairs, caps, start } = self; let h0 = h.clone(); let mut h = h;
+        let (pairs, caps, _) = compile_parts(k, &mut h, pairs, caps);
+        let mut m = Model::new(vars.len(), k, h, allowed, clamp, pairs, caps).ok()?; m.start = start;
+        if m.pairs.len() + folds.len() + dropped != np { return None; }
+        let want: Vec<u64> = m.h.iter().map(|x| x.to_bits()).collect(); let mut s = Members { m, folds, split: Split::default() };
+        s.set_h(h0.clone()).ok()?;
+        (s.m.h.iter().map(|x| x.to_bits()).collect::<Vec<u64>>() == want).then_some((vars, values, h0, s))
+    }
+}
+/// `from_json` up to the compile pass (inlined: `from_json` keeps one frame)
+#[inline(always)]
+pub fn from_json_parts(j: &Json) -> Result<Parts, InErr> {
     use crate::json::{arr, at, count, fields, ix, keyed, limit, names, number, opt, req, schema, text, value, weight};
     fields(j, "", &["probbit_ir", "values", "vars", "pairs", "caps", "all_different", "implies", "tables", "precedes", "linear", "start", "comment"])?;
     if let Some(c) = opt(j, "comment") { text(c, "comment")?; }
@@ -183,9 +275,35 @@ pub fn from_json(j: &Json) -> Result<Prog, InErr> {
         for (c, cp) in caps.iter().enumerate() { let load: u128 = cp.members.iter().enumerate().filter(|&(_, &(i, v))| x[i] == v).map(|(t, _)| cp.w(t) as u128).sum();
             if load > cp.limit as u128 { return Err(value("start", format!("infeasible: lowered cap #{c} holds {load} > limit {}", cp.limit))); } }
         Some(x) } };
-    let (pairs, caps, compiled) = compile_parts(k, &mut h, pairs, caps);
-    let mut m = Model::new(n, k, h, allowed, clamp, pairs, caps).map_err(|e| value("", e))?; m.start = start;
-    Ok(Prog { m, vars, values, compiled })
+    drop(vindex); // no_std: hashbrown's map drop is not `may_dangle`, so the borrow of `values` ends here, not at the scope end
+    Ok(Parts { vars, values, h, allowed, clamp, pairs, caps, start })
+}
+
+/// RFC 0009 (the expectation's members): the marginals `run` would put in a `decide` answer of `persona::run_program` (no
+/// deadline, no --exact-ms, frontier states `FRONTIER_MAX_STATES`, `sweeps` of fixed work) when its first exact tier answers it:
+/// over `exact_limit` raw plans the components tier (`exact_components_until(m, limit, FRONTIER_MAX_STATES, None)`), within it
+/// the whole-program enumeration (`exact_within(m, 5, limit, None, None)`). Some(Some(marginals, n x k)) for an exact verdict
+/// whose numbers are all finite (what `run_program`'s finite check reads: the plan's log weight, log Z, the top plans'
+/// probabilities, the marginals of the allowed values); Some(None) for an answer without an exact verdict (infeasible, or a number
+/// not finite); None when `run` would go on to another tier (that one declining), or would stop its exact tiers on the wall
+/// clock (`sweeps` 0 over the limit): the caller runs the program.
+pub fn enumerated(m: &mut Model, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> { enumerated_in(m, None, exact_limit, sweeps) }
+fn enumerated_in(m: &mut Model, split: Option<&mut Split>, exact_limit: u64, sweeps: usize) -> Option<Option<Vec<f64>>> {
+    m.collective = true; m.cluster = true; m.cycles = true; // as `persona::run_program` sets them before `run`
+    let space: f64 = (0..m.n).map(|i| m.cand_count(i) as f64).product();
+    let fin = |m: &Model, marg: &[f64]| (0..m.n * m.k).all(|q| !m.allowed[q] || marg[q].is_finite());
+    if space > exact_limit as f64 {
+        if sweeps == 0 { return None; }
+        let c = match split { Some(s) => exact_components_split(m, s, exact_limit, FRONTIER_MAX_STATES, None)?, None => exact_components_until(m, exact_limit, FRONTIER_MAX_STATES, None)? };
+        if c.infeasible { return Some(None); }
+        let ok = c.map_logw.is_finite() && c.logz.is_finite() && (c.map_logw - c.logz).exp().is_finite() && fin(m, &c.marg);
+        return Some(ok.then_some(c.marg));
+    }
+    let e = exact_within(m, 5, exact_limit, None, None).0?;
+    if e.n_feasible == 0 { return Some(None); }
+    let lw = m.logw(&e.top[0].1);
+    let ok = lw.is_finite() && e.logz.is_finite() && e.top.iter().all(|(p, _)| p.is_finite()) && fin(m, &e.marg);
+    Some(ok.then_some(e.marg))
 }
 
 /// R19.6 (P2.1): `phases` on every `probbit run` answer, `[{"phase": name, "ms": wall}]` in order: parse (stdin JSON), compile
@@ -245,13 +363,14 @@ fn ids(p: &Prog, mask: &[bool], want: bool) -> Json { Json::Arr(p.vars.iter().en
 /// Preserve the legacy full candidate `plan`, but make its release status explicit.
 /// `released_plan` is a projection of that same feasible candidate, not a separately
 /// solved complete plan; escalated variables still require a joint completion.
-pub(crate) fn release_contract(doc: &mut Json) {
+pub fn release_contract(doc: &mut Json) {
     let Some(Json::Obj(plan)) = doc.get("plan") else { return; };
     let verdict = doc.get("verdict").and_then(Json::as_str).unwrap_or("");
     let status = match verdict { "exact" | "diagnostics_passed" => "released", "partial" => "partial", _ => "diagnostic" };
     let released: std::collections::HashSet<&str> = doc.get("released").and_then(Json::as_arr)
         .map_or_else(Default::default, |a| a.iter().filter_map(Json::as_str).collect());
     let projection = Json::Obj(plan.iter().filter(|(id, _)| status != "diagnostic" && released.contains(id.as_str())).cloned().collect());
+    drop(released); // as above: the set borrows `doc`
     if let Json::Obj(v) = doc { v.push(("plan_status".into(), jstr(status))); v.push(("released_plan".into(), projection)); }
 }
 
@@ -336,7 +455,7 @@ fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polis
     // budget, and if a chain finds no start the exact search runs again, past its gap budget, to the end of --budget-ms: its
     // first plan is also the proof of infeasibility. An earlier version gave the exact tier half the budget BEFORE sampling, which
     // cost feasible programs sampler time (200-job schedules at 5 s: 174 -> 97 and 157 -> 0 released). `--sweeps N`: no fallback.
-    let fallback = op == "decide" && sweeps == 0 && !m.is_partition(); crate::tui::tier("sampler");
+    let fallback = op == "decide" && sweeps == 0 && !m.is_partition(); crate::hooks::tier("sampler");
     let s = match sample_on_starting(m, chains, threads, sweeps, if sweeps > 0 { None } else { Some(budget) }, seed, false, cpu_pct, mem.1, if fallback { 0.5 } else { 1.0 }) { Some(s) => s, None => {
         // Matching (quota-shaped programs) proves infeasibility; the bounded search for other programs does not
         if m.is_partition() { out.extend([("verdict", jstr("infeasible")), ("reason", jstr("no assignment satisfies every rule (capacitated matching)")), ("ms", ms(t0))]); return (obj(out), 1); }
@@ -358,9 +477,9 @@ fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polis
         let hint = if op == "decide" { "no feasible start found within the search budget, and the bounded exact search (run again to the end of --budget-ms) found no plan (not a proof of infeasibility); --op exact searches exhaustively and can prove infeasibility, or raise --budget-ms" }
             else { "no feasible start found within the search budget (not a proof of infeasibility); try --op decide" };
         out.extend([("verdict", jstr("refused")), ("reason", jstr(hint)), ("ms", ms(t0))]); return (obj(out), 3); } };
-    let sample_s = ts.elapsed().as_secs_f64(); let tg = probbit_core::rt::Instant::now(); crate::tui::tier("gate");
+    let sample_s = ts.elapsed().as_secs_f64(); let tg = probbit_core::rt::Instant::now(); crate::hooks::tier("gate");
     let g = gate_stats(m, &s); let gate_ms = tg.elapsed().as_secs_f64() * 1e3; let rel = g.released_tasks(&GATE); let whole = g.diagnostics_passed(&GATE);
-    let nrel = rel.iter().filter(|&&r| r).count(); crate::tui::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { m.n } else { nrel }, m.n); crate::tui::tier("polish"); *bars = crate::item_bars(&g); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
+    let nrel = rel.iter().filter(|&&r| r).count(); crate::hooks::gate_seen(g.rhat, g.tv_bound(&GATE), if whole { m.n } else { nrel }, m.n); crate::hooks::tier("polish"); *bars = item_bars(&g); let verdict = if whole { "diagnostics_passed" } else if nrel > 0 { "partial" } else { "refused" };
     let mask: Vec<bool> = if whole { vec![true; m.n] } else { rel };
     // plan polish (as `probbit decide`): anneal the chains' best plan through beta 2 -> 32; never worse than that plan
     // --polish-sweeps N = fixed-work polish (deterministic); --polish-ms is wall-clock, so its plan can vary run to run
@@ -377,9 +496,106 @@ fn run_inner(p: &Prog, op: &str, budget: f64, seed: u64, exact_limit: u64, polis
         ("telemetry", obj([vec![("chains", num(chains as f64)), ("threads", num(threads.clamp(1, chains) as f64)), ("sweeps", num(s.sweeps as f64)), ("site_updates_per_s", num(if sample_s > 0.0 { (s.sweeps as f64 * m.n as f64 / sample_s).round() } else { 0.0 })),
             ("sample_ms", num(sample_s * 1e3)), ("gate_ms", num(gate_ms)), ("polish_ms", num(if polish_sweeps > 0 { 0.0 } else { polish_ms })), ("polish_sweeps", num(polish_sweeps as f64)),
             ("process_cpu_ms", crate::sys::usage().map_or(Json::Null, |u| num(u.0))), ("peak_rss_mb", crate::sys::usage().map_or(Json::Null, |u| num(u.1))), ("nice", crate::sys::nice().map_or(Json::Null, |v| num(v as f64))), ("cpu_limit_pct", num(cpu_pct as f64)),
-            ("mem_limit_mb", num(mem.0 as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / m.n).sum::<usize>() as f64))], crate::exact_cap(exact_ms, reached),
+            ("mem_limit_mb", num(mem.0 as f64)), ("traj_rows", num(s.traj.iter().map(|tr| tr.len() / m.n).sum::<usize>() as f64))], exact_cap(exact_ms, reached),
             if auto && reached { vec![("exact_budget_reached", Json::Bool(true))] } else { vec![] },
-            vec![("exact_phase_ms", num((ts - t0).as_secs_f64() * 1e3)), ("polish_wall_ms", num(polish_wall))], crate::config_echo()].concat())), ("ms", ms(t0))]);
+            vec![("exact_phase_ms", num((ts - t0).as_secs_f64() * 1e3)), ("polish_wall_ms", num(polish_wall))], crate::hooks::config_echo()].concat())), ("ms", ms(t0))]);
     let code = if verdict == "refused" { 3 } else { 0 };
     (obj(out), code)
+}
+/// Telemetry fields of a sampled answer when --exact-ms was given (none otherwise): the cap and whether the exact tiers hit it.
+pub fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
+    xms.map_or(vec![], |x| vec![("exact_ms", num(x)), ("exact_ms_reached", Json::Bool(reached))])
+}
+/// Per item, the error bar the gate compares with `tv_tol`: z x max(MCSE short, MCSE long) (`Gate::released_tasks`).
+pub fn item_bars(g: &Gate) -> Vec<f64> { g.sig_tv.iter().zip(&g.sig_tv_long).map(|(&s, &l)| GATE.z * if s.is_nan() || l.is_nan() { f64::NAN } else { s.max(l) }).collect() }
+
+/// RFC 0011 (research): the `amplitude` tier, an exact simulated qubit register run on a CPU (`probbit_decide::amp`). Round 2:
+/// a variable with d candidate values (allowed and clamp) takes ceil(log2 d) qubits (`amp::Encoding`; the unused codes keep
+/// amplitude 0), and the program's log weight enters as one general diagonal phase layer (E = -log w per basis state), so
+/// pair tables between multi-level variables need no decomposition. The program is split into its connected components
+/// (two variables are linked by a pair or by sharing a capacity rule, as the `components` tier splits it) and each component
+/// runs its own register: the phase is a sum over components and the mixer acts per variable, so the joint state is exactly
+/// the product of the components' states. Eligible when every variable has an allowed value and the largest component has at
+/// most `q_max` encoded qubits; Err(why) otherwise, and the caller runs the existing tiers. Each register runs the default
+/// sweep from the uniform superposition over its valid codes; the rules are a projection: the Born probabilities of the
+/// plans that break one are set to 0 and the rest renormalised (per component; the feasible mass is the product). Plan = per
+/// component its most probable feasible plan (probabilities at 6 decimals, then the lowest basis index); marginals exact. The
+/// receipt: qubits (encoded, summed), the components' qubits, the digests of the encoding, the circuit, the schedule and the
+/// final amplitudes (6 decimals; the components' texts joined), the mixer's and the schedule's names, the feasible mass.
+/// Round 4, `amplify` (`engine.amplify: true`): no projection; each component's swept state is rotated onto its feasible plans
+/// by exact amplitude amplification (`amp::amplify_exact`: the rules as the oracle, the diffusion about the swept state, one
+/// phase-matched final iteration), so the register itself holds feasible mass 1 (up to 1e-12) and the plan and marginals are
+/// read from its Born probabilities; the receipt adds `amplify` (iterations and the final phases per component, the mass
+/// before and after) and `feasible_mass` is the mass after. The relative amplitudes inside the feasible plans are the swept
+/// state's, so the numbers equal the projection's (docs/rfc/0011-amplitude-register.md, "Amplification").
+#[cfg(feature = "decide")]
+pub fn amplitude(prog: &Json, q_max: usize, amplify: bool) -> Result<Json, String> { amplitude_with(prog, q_max, amplify, &probbit_decide::amp::Evolution::Sweep(probbit_decide::amp::DEFAULT_SCHEDULE)) }
+/// Round 5: `amplitude` with the evolution `ev` in place of the default sweep (`engine.schedule`; the receipt names it)
+#[cfg(feature = "decide")]
+pub fn amplitude_with(prog: &Json, q_max: usize, amplify: bool, ev: &probbit_decide::amp::Evolution) -> Result<Json, String> {
+    use probbit_decide::amp;
+    let p = from_json(prog).map_err(|e| format!("program {}: {}", e.path, e.msg))?; let m = &p.m; let (n, k) = (m.n, m.k);
+    let cand: Vec<Vec<usize>> = (0..n).map(|i| (0..k).filter(|&v| m.ok(i, v)).collect()).collect();
+    if let Some(i) = cand.iter().position(Vec::is_empty) { return Err(format!("{} has no allowed value", p.vars[i])); }
+    // the components: pairs and capacity rules link variables
+    let mut par: Vec<usize> = (0..n).collect();
+    fn find(par: &mut [usize], mut x: usize) -> usize { while par[x] != x { par[x] = par[par[x]]; x = par[x]; } x }
+    fn join(par: &mut [usize], a: usize, b: usize) { let (a, b) = (find(par, a), find(par, b)); if a != b { par[a.max(b)] = a.min(b); } }
+    for q in &m.pairs { join(&mut par, q.i, q.j); }
+    for c in &m.caps { if let Some(&(i0, _)) = c.members.first() { for &(i, _) in &c.members { join(&mut par, i0, i); } } }
+    let mut slot = vec![usize::MAX; n]; let mut mems: Vec<Vec<usize>> = vec![];
+    for i in 0..n { let r = find(&mut par, i); if slot[r] == usize::MAX { slot[r] = mems.len(); mems.push(vec![]); } mems[slot[r]].push(i); }
+    let comp_of: Vec<usize> = (0..n).map(|i| slot[find(&mut par, i)]).collect();
+    let encs: Vec<amp::Encoding> = mems.iter().map(|mem| amp::Encoding { levels: mem.iter().map(|&i| cand[i].len()).collect() }).collect();
+    let qs: Vec<usize> = encs.iter().map(amp::Encoding::qubits).collect(); let qtop = qs.iter().copied().max().unwrap_or(0);
+    if qtop > q_max.min(amp::Q_MAX_HOST) { return Err(format!("a component of {qtop} encoded qubits, q_max {q_max}")); }
+    let s = ev; let r6 = |x: f64| (x * 1e6).round() / 1e6;
+    let (mut enc_t, mut circ_t, mut state_t) = (String::new(), String::new(), String::new());
+    let mut bp = vec![0usize; n]; let mut mg = vec![0.0; n * k]; let mut mass_all = 1.0;
+    let (mut am_it, mut am_ph, mut am_before) = (vec![], vec![], 1.0);
+    for (c, mem) in mems.iter().enumerate() {
+        // the component's sub-model: its variables, pairs and capacity rules (local indices), as the components tier builds it
+        let mut loc = vec![usize::MAX; n]; for (q, &i) in mem.iter().enumerate() { loc[i] = q; }
+        let nn = mem.len(); let mut h = Vec::with_capacity(nn * k); let mut al = Vec::with_capacity(nn * k);
+        for &i in mem { h.extend_from_slice(&m.h[i * k..i * k + k]); al.extend_from_slice(&m.allowed[i * k..i * k + k]); }
+        let pairs: Vec<Pair> = m.pairs.iter().filter(|q| comp_of[q.i] == c).map(|q| Pair { i: loc[q.i], j: loc[q.j], c: q.c.clone() }).collect();
+        let caps: Vec<Cap> = m.caps.iter().filter(|q| q.members.first().is_some_and(|&(i, _)| comp_of[i] == c))
+            .map(|q| Cap { members: q.members.iter().map(|&(i, v)| (loc[i], v)).collect(), limit: q.limit, weights: q.weights.clone() }).collect();
+        let sub = Model::new(nn, k, h, al, mem.iter().map(|&i| m.clamp[i]).collect(), pairs, caps).map_err(|e| format!("component {c}: {e}"))?;
+        let enc = &encs[c]; let nb = 1usize << qs[c];
+        let plan_of = |codes: &[usize]| -> Vec<usize> { codes.iter().zip(mem).map(|(&cd, &i)| cand[i][cd]).collect() };
+        let e: Vec<f64> = (0..nb).map(|x| enc.decode(x).map_or(f64::NAN, |cd| -sub.logw(&plan_of(&cd)))).collect();
+        let mut reg = s.run(enc, &e);
+        if amplify {
+            let ok: Vec<bool> = (0..nb).map(|x| enc.decode(x).is_some_and(|cd| sub.violations(&plan_of(&cd)) == 0)).collect();
+            let Some(a) = amp::amplify_exact(&mut reg, |x| ok[x]) else {
+                // round 5: None after a rotation (good mass near 1) = the landing missed its bar: decline, never panic
+                let m: f64 = reg.probabilities().iter().zip(&ok).filter(|(_, &g)| g).map(|(p, _)| p).sum();
+                return Err(if m > 0.5 { format!("component {c}: amplification missed its 1 - 1e-12 landing") } else { format!("component {c}: no feasible plan has weight in the register") }); };
+            let pr = reg.probabilities();
+            let best = (0..nb).fold(usize::MAX, |bx, x| if enc.decode(x).is_some() && pr[x] > 0.0 && (bx == usize::MAX || r6(pr[x]) > r6(pr[bx])) { x } else { bx });
+            for (&i, v) in mem.iter().zip(plan_of(&enc.decode(best).expect("a plan with weight has valid codes"))) { bp[i] = v; }
+            for (x, &w) in pr.iter().enumerate() { if let Some(cd) = enc.decode(x) { for (&i, v) in mem.iter().zip(plan_of(&cd)) { mg[i * k + v] += w; } } }
+            mass_all *= a.mass_after; am_before *= a.mass_before; am_it.push(num(a.iterations as f64));
+            am_ph.push(Json::Arr(if a.iterations == 0 { vec![] } else { vec![num(r6(a.phases.0)), num(r6(a.phases.1))] }));
+            for t in [&mut enc_t, &mut circ_t, &mut state_t] { t.push_str(&format!("component {c}\n")); }
+            enc_t.push_str(&enc.text()); circ_t.push_str(&reg.circuit_text()); state_t.push_str(&reg.canonical());
+            continue;
+        }
+        let pr: Vec<f64> = reg.probabilities().iter().enumerate().map(|(x, &w)| match enc.decode(x) { Some(cd) if sub.violations(&plan_of(&cd)) == 0 => w, _ => 0.0 }).collect();
+        let mass: f64 = pr.iter().sum(); if mass <= 0.0 || !mass.is_finite() { return Err(format!("component {c}: no feasible plan has weight in the register")); }
+        let best = (0..nb).fold(usize::MAX, |bx, x| if pr[x] > 0.0 && (bx == usize::MAX || r6(pr[x] / mass) > r6(pr[bx] / mass)) { x } else { bx });
+        for (&i, v) in mem.iter().zip(plan_of(&enc.decode(best).expect("a feasible plan has valid codes"))) { bp[i] = v; }
+        for (x, &w) in pr.iter().enumerate() { if w > 0.0 { for (&i, v) in mem.iter().zip(plan_of(&enc.decode(x).expect("valid"))) { mg[i * k + v] += w / mass; } } }
+        mass_all *= mass;
+        for t in [&mut enc_t, &mut circ_t, &mut state_t] { t.push_str(&format!("component {c}\n")); }
+        enc_t.push_str(&enc.text()); circ_t.push_str(&reg.circuit_text()); state_t.push_str(&reg.canonical());
+    }
+    let d = |t: &[u8]| jstr(&format!("sha256:{}", amp::hex(&amp::sha256(t))));
+    let amp_r = if amplify { vec![("amplify", obj(vec![("iterations", Json::Arr(am_it)), ("phases", Json::Arr(am_ph)), ("mass_before", num(r6(am_before))), ("mass_after", num(r6(mass_all)))]))] } else { vec![] };
+    Ok(obj(vec![("verdict", jstr("exact")), ("tier", jstr("amplitude")), ("plan", plan(&p, &bp)), ("plan_logw", num(m.logw(&bp))), ("violations", num(m.violations(&bp) as f64)),
+        ("marginals", marginals(&p, &mg)), ("released", ids(&p, &vec![true; n], true)), ("escalated", Json::Arr(vec![])),
+        ("amplitude", obj(vec![("qubits", num(qs.iter().sum::<usize>() as f64)), ("components", Json::Arr(qs.iter().map(|&q| num(q as f64)).collect())),
+            ("encoding", d(enc_t.as_bytes())), ("mixer", jstr(amp::MIXER)), ("circuit", d(circ_t.as_bytes())), ("schedule", d(s.text().as_bytes())), ("schedule_name", jstr(&s.name())),
+            ("state", d(state_t.as_bytes())), ("feasible_mass", num(r6(mass_all)))].into_iter().chain(amp_r).collect()))]))
 }

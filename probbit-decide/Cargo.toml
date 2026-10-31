@@ -10,6 +10,15 @@ readme = "../README.md"
 keywords = ["p-bit", "assignment", "routing", "constraint-solver", "probabilistic"]
 categories = ["algorithms", "science"]
 
+[features]
+default = ["std"]
+std = ["probbit-core/std", "probbit-ir/std"]
+# no_std + alloc (a target without an operating system): the std subset comes from probbit-nostd
+nostd = ["dep:probbit-nostd", "probbit-core/nostd", "probbit-ir/nostd"]
+
 [dependencies]
-probbit-core = { path = "../probbit-core", version = "0.13.0" }
-probbit-ir = { path = "../probbit-ir", version = "0.13.0" }
+# the amplitude register's one math path (cos, sin, sqrt, asin, acos, atan2) on the std and the no_std build alike (pure Rust)
+libm = "0.2"
+probbit-nostd = { path = "../probbit-nostd", version = "0.14.0-dev", optional = true }
+probbit-core = { path = "../probbit-core", default-features = false, version = "0.14.0-dev" }
+probbit-ir = { path = "../probbit-ir", default-features = false, version = "0.14.0-dev" }

@@ -2,7 +2,7 @@
 //! the example personas' goldens (examples/persona/golden/, the `probbit persona` documents) on every workday turn, and the same
 //! bytes through `probbit_call`. Documents are canonical JSON, so equal values are equal bytes.
 #[allow(dead_code)]
-#[path = "../../probbit-cli/src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 use json::Json;
 

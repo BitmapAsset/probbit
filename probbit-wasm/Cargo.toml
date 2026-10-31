@@ -15,3 +15,4 @@ crate-type = ["cdylib", "rlib"]
 probbit-core = { path = "../probbit-core" }
 probbit-ir = { path = "../probbit-ir" }
 probbit-decide = { path = "../probbit-decide" }
+probbit-persona = { path = "../probbit-persona" }

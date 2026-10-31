@@ -8,7 +8,9 @@
 //! `miniyaml.py`; this is a port of it). Differences, both on inputs it got wrong: a quoted scalar as a block-sequence item
 //! (`- "x"`) is read (miniyaml refused it), and a number that is not exact in a double (an integer beyond 2^53, `1e999`) is an
 //! error (miniyaml kept the integer exact, or read infinity).
-use crate::json::Json;
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
+use crate::json::{Json, MAX_DEPTH};
 
 pub struct YamlError { pub line: usize, pub msg: String }
 fn err<T>(line: usize, msg: impl Into<String>) -> Result<T, YamlError> { Err(YamlError { line, msg: msg.into() }) }
@@ -131,7 +133,7 @@ fn scalar(tok: &str, ln: usize) -> Result<Json, YamlError> {
 
 /// One-line flow collection `[...]` / `{...}`
 fn flow(t: &[char], ln: usize) -> Result<Json, YamlError> {
-    struct F<'a> { t: &'a [char], pos: usize, ln: usize }
+    struct F<'a> { t: &'a [char], pos: usize, ln: usize, d: usize }
     impl F<'_> {
         fn ws(&mut self) { while self.pos < self.t.len() && self.t[self.pos] == ' ' { self.pos += 1; } }
         /// (token, quoted)
@@ -145,7 +147,13 @@ fn flow(t: &[char], ln: usize) -> Result<Json, YamlError> {
             let mut j = i; while j < t.len() && !stops.contains(t[j]) { j += 1; }
             self.pos = j; Ok((t[i..j].iter().collect::<String>().trim_matches(space).to_string(), false))
         }
+        /// A value; a collection more than `MAX_DEPTH` deep is an error (the recursion's stack is bounded)
         fn value(&mut self) -> Result<Json, YamlError> {
+            self.ws(); let open = matches!(self.t.get(self.pos), Some('[' | '{'));
+            if open { if self.d >= MAX_DEPTH { return err(self.ln, format!("limit: flow collections nested deeper than {MAX_DEPTH}")); } self.d += 1; }
+            let v = self.item(); if open { self.d -= 1; } v
+        }
+        fn item(&mut self) -> Result<Json, YamlError> {
             self.ws(); let ln = self.ln; if self.pos >= self.t.len() { return err(ln, "flow collection ends early"); }
             match self.t[self.pos] {
                 '[' => { self.pos += 1; let mut out = vec![]; self.ws();
@@ -165,7 +173,7 @@ fn flow(t: &[char], ln: usize) -> Result<Json, YamlError> {
                 _ => { let (tok, quoted) = self.token(",]}")?; if quoted { Ok(Json::Str(tok)) } else { scalar(&tok, ln) } } }
         }
     }
-    let mut f = F { t, pos: 0, ln }; let v = f.value()?; f.ws();
+    let mut f = F { t, pos: 0, ln, d: 0 }; let v = f.value()?; f.ws();
     if f.pos != t.len() { return err(ln, format!("trailing text after flow collection: {:?}", t[f.pos..].iter().collect::<String>())); }
     Ok(v)
 }
@@ -196,17 +204,20 @@ fn split_key(s: &str, ln: usize, item: bool) -> Result<Option<(String, String)>,
 fn is_item(s: &str) -> bool { s == "-" || s.starts_with("- ") }
 
 /// The block whose lines start at rows[i] with exactly `indent` spaces -> (value, next index)
-fn block(rows: &mut Vec<(usize, String, usize)>, mut i: usize, indent: usize) -> Result<(Json, usize), YamlError> {
+/// One block collection at `indent`, `d` collections deep (the document's own is 0): deeper than `MAX_DEPTH` is an error, so the
+/// recursion's stack is bounded (a document indented one more space per line used to recurse once per line)
+fn block(rows: &mut Vec<(usize, String, usize)>, mut i: usize, indent: usize, d: usize) -> Result<(Json, usize), YamlError> {
+    if d >= MAX_DEPTH { return err(rows[i].2, format!("limit: collections nested deeper than {MAX_DEPTH}")); }
     if is_item(&rows[i].1) {
         let mut out = vec![];
         while i < rows.len() && rows[i].0 == indent && is_item(&rows[i].1) {
             let ln = rows[i].2; let rest = rows[i].1[1..].to_string(); let inner = rest.trim_start_matches(' ').to_string();
             if inner.is_empty() {
-                let v = if i + 1 < rows.len() && rows[i + 1].0 > indent { let (v, n) = block(rows, i + 1, rows[i + 1].0)?; i = n; v } else { i += 1; Json::Null };
+                let v = if i + 1 < rows.len() && rows[i + 1].0 > indent { let (v, n) = block(rows, i + 1, rows[i + 1].0, d + 1)?; i = n; v } else { i += 1; Json::Null };
                 out.push(v); continue; }
             let col = indent + 1 + (rest.len() - inner.len());
             let key = if inner.starts_with(['[', '{']) { None } else { split_key(&inner, ln, true)? };
-            if key.is_some() { rows[i] = (col, inner, ln); let (v, n) = block(rows, i, col)?; i = n; out.push(v); }
+            if key.is_some() { rows[i] = (col, inner, ln); let (v, n) = block(rows, i, col, d + 1)?; i = n; out.push(v); }
             else { out.push(scalar(&inner, ln)?); i += 1; }
         }
         if i < rows.len() && rows[i].0 > indent { return err(rows[i].2, "bad indentation"); }
@@ -220,9 +231,9 @@ fn block(rows: &mut Vec<(usize, String, usize)>, mut i: usize, indent: usize) ->
         if out.iter().any(|(x, _)| *x == k) { return err(ln, format!("duplicate key {k:?}")); }
         let rest = rest.trim_matches(space);
         let v = if !rest.is_empty() { i += 1; scalar(rest, ln)? }
-            else if i + 1 < rows.len() && rows[i + 1].0 > indent { let (v, n) = block(rows, i + 1, rows[i + 1].0)?; i = n; v }
+            else if i + 1 < rows.len() && rows[i + 1].0 > indent { let (v, n) = block(rows, i + 1, rows[i + 1].0, d + 1)?; i = n; v }
             // a sequence at the key's own indentation (common YAML style)
-            else if i + 1 < rows.len() && rows[i + 1].0 == indent && is_item(&rows[i + 1].1) { let (v, n) = block(rows, i + 1, indent)?; i = n; v }
+            else if i + 1 < rows.len() && rows[i + 1].0 == indent && is_item(&rows[i + 1].1) { let (v, n) = block(rows, i + 1, indent, d + 1)?; i = n; v }
             else { i += 1; Json::Null };
         out.push((k, v));
     }
@@ -235,7 +246,26 @@ pub fn load(text: &str) -> Result<Json, YamlError> {
     let mut rows = rows(text)?;
     if rows.is_empty() { return Ok(Json::Null); }
     if rows.len() == 1 && !rows[0].1.contains(':') && !rows[0].1.starts_with('-') { return scalar(&rows[0].1.clone(), rows[0].2); }
-    let base = rows[0].0; let (v, i) = block(&mut rows, 0, base)?;
+    let base = rows[0].0; let (v, i) = block(&mut rows, 0, base, 0)?;
     if i != rows.len() { return err(rows[i].2, "unexpected text (indentation?)"); }
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// Block collections: `MAX_DEPTH` deep is read, one more is a `limit` error (the recursion's stack is bounded)
+    #[test]
+    fn block_nesting_is_bounded() {
+        let doc = |n: usize| { let mut t = String::new(); for k in 0..n { t.push_str(&" ".repeat(k)); t.push_str(if k + 1 == n { "k: 1\n" } else { "k:\n" }); } t };
+        let mut v = load(&doc(MAX_DEPTH)).unwrap_or_else(|e| panic!("{}", e.msg)); let mut d = 0; while let Some(x) = v.get("k") { v = x.clone(); d += 1; } assert_eq!(d, MAX_DEPTH);
+        let e = load(&doc(MAX_DEPTH + 1)).err().unwrap(); assert!(e.msg.starts_with("limit: ") && e.msg.contains("256"), "{}", e.msg); assert_eq!(e.line, MAX_DEPTH + 1);
+    }
+    /// Flow collections: `MAX_DEPTH` deep is read, one more is a `limit` error
+    #[test]
+    fn flow_nesting_is_bounded() {
+        let doc = |n: usize| format!("k: {}1{}\n", "[".repeat(n), "]".repeat(n));
+        assert!(load(&doc(MAX_DEPTH)).is_ok());
+        let e = load(&doc(MAX_DEPTH + 1)).err().unwrap(); assert!(e.msg.starts_with("limit: ") && e.msg.contains("256"), "{}", e.msg);
+    }
 }

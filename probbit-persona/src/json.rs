@@ -1,4 +1,6 @@
 //! Minimal JSON reader/writer (no external crates). Enough for the probbit problem/decision documents.
+#[allow(unused_imports)]
+use std::prelude::rust_2021::*;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Json { Null, Bool(bool), Num(f64), Str(String), Arr(Vec<Json>), Obj(Vec<(String, Json)>) }
 

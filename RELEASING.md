@@ -15,7 +15,7 @@ the RFC). `probbit-cli/tests/readme_release.rs` fails when the README's current 
 
 1. **Release PR** (branch `release-X.Y.Z`, squash subject `Release probbit X.Y.Z (#N)`), from a green `main`:
    - `Cargo.toml`'s `version` and the `version` of the internal path dependencies (`probbit-cli`, `probbit-decide`,
-     `probbit-ir`); `cargo update --workspace --offline` for `Cargo.lock` (CI builds `--locked`);
+     `probbit-ir`, `probbit-core`, `probbit-persona`: the `probbit-nostd` entries too); `cargo update --workspace --offline` for `Cargo.lock` (CI builds `--locked`);
    - `cargo build --release --locked -p probbit-cli`, then `target/release/probbit man > docs/probbit.1` (generated,
      never hand-edited: `probbit-cli/tests/cli_man.rs` compares them);
    - `npm/package.json`'s `version`; the example tag in `install.sh`, `install.ps1`, `action.yml`,
@@ -49,8 +49,9 @@ the RFC). `probbit-cli/tests/readme_release.rs` fails when the README's current 
    `package.json`; no tests), then
    `npm publish --access public` with the same userconfig; `npm view probbit-stance version` gives the new version. Its
    `MIN_PROBBIT` (`src/version.ts`) names the oldest probbit it runs.
-6. **crates.io**: `cargo publish --workspace --locked` from the tag (`probbit-core`, `probbit-ir`, `probbit-decide`,
-   `probbit-cli`; `probbit-wasm` has `publish = false`).
+6. **crates.io**: `cargo publish --workspace --locked` from the tag, which publishes in dependency order (`probbit-nostd`,
+   `probbit-core`, `probbit-ir`, `probbit-decide`, `probbit-persona`, `probbit-cli`; `probbit-wasm` has `publish = false`).
+   `probbit-nostd` goes first: the engine crates name it as an optional dependency with a version.
 7. **Back to development**: `main` moves to the next `-dev` version (`Cargo.toml`, the path dependencies, `Cargo.lock`,
    `docs/probbit.1`); the README goes on naming the released version until the next release PR.
 

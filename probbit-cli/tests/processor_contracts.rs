@@ -1,7 +1,7 @@
 //! Public processor responses: released assignments are never confused with the
 //! legacy full diagnostic candidate. Fixed-work behavior is thread invariant.
 #[allow(dead_code)]
-#[path = "../src/json.rs"]
+#[path = "../../probbit-persona/src/json.rs"]
 mod json;
 use json::Json;
 use std::io::Write;

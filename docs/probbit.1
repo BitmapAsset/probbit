@@ -1,4 +1,4 @@
-.TH PROBBIT 1 "" "probbit 0.13.0" "probbit manual"
+.TH PROBBIT 1 "" "probbit 0.14.0-dev" "probbit manual"
 .SH NAME
 probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under hard rules, with gated odds
 .SH SYNOPSIS
@@ -7,13 +7,16 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         (SUB: init turn replay explain diff lint fuzz prove check compile describe)
 \fBprobbit\fR live PERSONA [\-\-seed N | \-\-state FILE]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-events FILE [\-\-watch]]
-        [\-\-clock real|fixed] [\-\-checkpoint\-every K]
+        [\-\-clock real|fixed] [\-\-checkpoint\-every K] [\-\-segment\-every N]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-plain]
-\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-        [\-\-blocks FILE]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-chain]
+        [\-\-actions FILE] [\-\-blocks FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
         TEXT [\-\-at TIME]
+\fBprobbit\fR live control STRAND reflect [\-\-last N | \-\-since\-checkpoint]
+\fBprobbit\fR live control STRAND stir? [\-\-idle\-hours H]
+\fBprobbit\fR live control STRAND rest [\-\-at TIME] [\-\-state FILE]
 \fBprobbit\fR check PERSONA [\-\-props FILE] [\-\-strand FILE]... [\-\-seeds LIST]
         [\-\-depth N] [\-\-hours LIST] [\-\-json]
 \fBprobbit\fR monitor STRAND [\-\-follow] [\-\-once] [\-\-plain] [\-\-fps N] [\-\-serve]
@@ -23,6 +26,7 @@ probbit \- a virtual probabilistic (p\-bit) processor: joint decisions under har
         [\-\-open] [\-\-port N]
 \fBprobbit\fR monitor \-\-demo [week|drives] [\-\-once] [\-\-plain] [\-\-serve]
         [\-\-open] [\-\-port N]
+\fBprobbit\fR reflect STRAND [\-\-last N | \-\-since\-checkpoint] [\-\-json | \-\-text]
 \fBprobbit\fR decide [flags] < router.json
 \fBprobbit\fR run [flags] < program.json
 \fBprobbit\fR evaluate [flags] < request.json
@@ -294,13 +298,16 @@ a resident individual: JSONL events in, one stance per event out
 .nf
 \fBprobbit\fR live PERSONA [\-\-seed N | \-\-state FILE]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-events FILE [\-\-watch]]
-        [\-\-clock real|fixed] [\-\-checkpoint\-every K]
+        [\-\-clock real|fixed] [\-\-checkpoint\-every K] [\-\-segment\-every N]
 \fBprobbit\fR live PERSONA \-\-demo week [\-\-seed N]
         [\-\-strand FILE [\-\-label KEY=VALUE]...] [\-\-plain]
-\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-actions FILE]
-        [\-\-blocks FILE]
+\fBprobbit\fR live verify STRAND [\-\-from\-checkpoint] [\-\-chain]
+        [\-\-actions FILE] [\-\-blocks FILE]
 \fBprobbit\fR live control STRAND pause|resume|retire|erase \-\-by WHO \-\-reason
         TEXT [\-\-at TIME]
+\fBprobbit\fR live control STRAND reflect [\-\-last N | \-\-since\-checkpoint]
+\fBprobbit\fR live control STRAND stir? [\-\-idle\-hours H]
+\fBprobbit\fR live control STRAND rest [\-\-at TIME] [\-\-state FILE]
 .fi
 .PP
 A resident individual (docs/persona.md \[u00A7]5.7): JSONL events (one object of inputs per line) from \-\-events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e\-6 h), so moods decay by their half\-lives between events; feedback moves the learned deltas of a persona with a learning block (\[u00A7]2.8).
@@ -337,6 +344,9 @@ no colour, no animation (as NO_COLOR=1 or PROBBIT_THEME=plain); output otherwise
 \fB\-\-checkpoint\-every\fR \fIK\fR
 with \-\-strand: a checkpoint line (the whole state) after every K\-th event (default 1000; 0: none); `verify \-\-from\-checkpoint` and `monitor` start at the last one
 .TP
+\fB\-\-segment\-every\fR \fIN\fR
+with \-\-strand NAME.strand: seal the strand after every N\-th event (a sealing checkpoint line) and go on in the next segment file NAME.0001.strand, NAME.0002.strand, ...: its header links the previous file (its name, the sealed line's sha256, the index) and its second line is the sealed line, so the chain continues across files; a run continues the newest segment (default 0: one file)
+.TP
 \fB\-\-label\fR \fIKEY=VALUE\fR
 with \-\-strand, repeatable: a presentation label for the monitor (agent, host, lane, session, or a free key; at most 8 keys, values of 1 to 64 printable characters) merged into the strand's sidecar FILE.labels.json (FILE without its extension); the strand itself, its chain and its digests are not touched
 .RE
@@ -344,12 +354,15 @@ with \-\-strand, repeatable: a presentation label for the monitor (agent, host, 
 Subcommands:
 .RS 4
 .TP
-\fBverify\fR STRAND [\-\-from\-checkpoint] [\-\-actions FILE] [\-\-blocks FILE]
+\fBverify\fR STRAND [\-\-from\-checkpoint] [\-\-chain] [\-\-actions FILE] [\-\-blocks FILE]
 replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with \-\-actions, also the earliest turn whose host action differs from the level its stance released
 .RS 4
 .TP
 \fB\-\-from\-checkpoint\fR
 start at the last checkpoint instead of the header
+.TP
+\fB\-\-chain\fR
+a segment (section 5.7): verify it and walk back through the previous segment files to the first, each verified and its last line the sealed line the next one links; exit 1 at the first break (the segment file named), 6 when a previous segment file is missing
 .TP
 \fB\-\-actions\fR \fIFILE\fR
 the host's action log, one {"turn": T, "action": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs
@@ -358,24 +371,36 @@ the host's action log, one {"turn": T, "action": {trait: level}} per line: compa
 write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {"block", "n"} per line; replays from the header
 .RE
 .TP
-\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME]
-pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status
+\fBcontrol\fR STRAND pause|resume|retire|erase \-\-by WHO \-\-reason TEXT [\-\-at TIME] | STRAND seal | STRAND reflect [\-\-last N | \-\-since\-checkpoint] | STRAND stir? [\-\-idle\-hours H] | STRAND rest [\-\-at TIME] [\-\-state FILE]
+pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status. `seal` (section 5.7) seals the newest segment of STRAND: refused unless its last line is an event line, it appends the sealing checkpoint and writes the next segment file (its header links the sealed line, then the sealed line itself), and prints that file in `file`
 .RS 4
 .TP
 \fB\-\-by\fR \fIWHO\fR
-who decided it: human:ID or env:ID (required)
+who decided it: human:ID or env:ID (required, except for seal)
 .TP
 \fB\-\-reason\fR \fITEXT\fR
-why (required)
+why (required, except for seal)
 .TP
 \fB\-\-at\fR \fITIME\fR
 when (default: now, UTC)
+.TP
+\fB\-\-last\fR \fIN\fR
+reflect: the last N events (default: every event)
+.TP
+\fB\-\-since\-checkpoint\fR
+reflect: the events after the last checkpoint line
+.TP
+\fB\-\-idle\-hours\fR \fIH\fR
+stir? (RFC 0016): the hours since the strand's last event (default 0); the answer is {due, stir}, nothing is written
+.TP
+\fB\-\-state\fR \fIFILE\fR
+rest (RFC 0015): the stored individual (the state after the strand's last line), rewritten after the pass
 .RE
 .RE
 .PP
 \fIthe safety kit\fR: (docs/persona.md \[u00A7]5.7) one writer per strand: `\-\-strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (\[u00A7]2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event.
 .PP
-\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {"ok": false, "line", "unsupported": the field, "engine", "strand_engine"}; not verified, and not a divergence).
+\fIexit\fR: 0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with \-\-actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {"error"} object on stdout per bad event when stdout is not a terminal or with \-\-json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {"error"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {"ok": false, "line", "unsupported": the field, "engine", "strand_engine"}; not verified, and not a divergence), 6 verify \-\-chain: a previous segment file is missing ({"ok": false, "missing": its file name, "segment_file": the segment that links it}).
 .PP
 Examples:
 .RS 4
@@ -491,6 +516,40 @@ Examples:
 probbit monitor \-\-demo \-\-open
 probbit monitor pip.strand \-\-follow
 probbit monitor pip.strand \-\-serve \-\-port 8080
+.fi
+.RE
+.SS reflect
+RFC 0013 self\-report: a canonical account of a strand's last N events, from its lines alone
+.PP
+.nf
+\fBprobbit\fR reflect STRAND [\-\-last N | \-\-since\-checkpoint] [\-\-json | \-\-text]
+.fi
+.PP
+The self\-report (docs/persona.md \[u00A7]5.8): a canonical document computed from the strand's lines alone (no turn is run, nothing is solved, nothing is random): over the window, the inputs set, the expectation's surprises (each receipt's z recomputed from the logged receipts; the K = 5 largest |z| with the predicted and measured values), per trait the levels taken and the odds' drift, the moods' path with its turning points, the drives' peaks and the habits that bound (read from the checkpoint lines in the window: a window without one reports them as null), the credit settled, the learned weights' net movement and the control lines; every number at 6 decimals, `digest` = the sha256 of the canonical text, and `summary`: 6 to 12 sentences from fixed templates. `probbit live control STRAND reflect` appends it as a line (0.14.0 strands), which `live verify` recomputes.
+.PP
+Flags:
+.RS 4
+.TP
+\fB\-\-last\fR \fIN\fR
+the last N events (default: every event)
+.TP
+\fB\-\-since\-checkpoint\fR
+the events after the last checkpoint line (that checkpoint is the first sample)
+.TP
+\fB\-\-json\fR
+the canonical document (the default)
+.TP
+\fB\-\-text\fR
+the summary's sentences only, one per line
+.RE
+.PP
+\fIexit\fR: 0 the reflection printed, 2 a bad flag, a file that cannot be read, or a strand with no event line in the window (one {"error"} object on stdout).
+.PP
+Examples:
+.RS 4
+.nf
+probbit reflect pip.strand \-\-last 50 \-\-text
+probbit reflect pip.strand \-\-since\-checkpoint
 .fi
 .RE
 .SS decide

@@ -17,23 +17,18 @@
 //!   probbit <command> --help | -h               # usage, every flag with its default, exit codes
 //!   probbit --help | -h                          # the usage above (stdout, exit 0); at a terminal the hero screen
 //!   --top, --summary (decide, run), --live (demo), --plain: see `probbit <command> --help`; visuals go to stderr (theme.rs)
-mod evaluate;
 mod fuzz;
-mod json;
 mod labels;
 mod live;
 mod mcp;
 mod monitor;
-mod persona;
-mod router;
-mod run;
-mod sys;
 mod theme;
 mod tui;
 mod usage;
-mod yaml;
+// the document layer and the strand writer: the probbit-persona library (the CLI's modules name them as `crate::json` etc.)
+use probbit_persona::{evaluate, json, persona, router, run, sys};
 use json::{num, obj, str as jstr, Json};
-pub(crate) use router::{demo_doc, from_json, item_bars, DEMO_TPL};
+pub(crate) use router::{demo_doc, from_json, DEMO_TPL};
 use probbit_decide::*;
 use std::io::{Read, Write};
 use usage::{Command, Flag, Sub};
@@ -98,10 +93,6 @@ fn polish_ms_arg(args: &[String]) -> f64 {
 fn exact_ms(args: &[String]) -> Option<f64> {
     args.iter().any(|a| a == "--exact-ms").then(|| { let x: f64 = arg(args, "--exact-ms", 0.0);
         if !(x.is_finite() && (0.0..=1e9).contains(&x)) { fail("--exact-ms must be a number of milliseconds from 0 to 1e9") } x })
-}
-/// Telemetry fields of a sampled answer when --exact-ms was given (none otherwise): the cap and whether the exact tiers hit it.
-pub(crate) fn exact_cap(xms: Option<f64>, reached: bool) -> Vec<(&'static str, Json)> {
-    xms.map_or(vec![], |x| vec![("exact_ms", num(x)), ("exact_ms_reached", Json::Bool(reached))])
 }
 /// Every stdout document goes through here. `println!` panicked on a closed pipe (`probbit demo --tasks 3000 | head -c 20`:
 /// "failed printing to stdout: Broken pipe", exit 134 with panic = abort); a reader that went away is not an error, so a broken
@@ -248,7 +239,7 @@ const F_P_SEEDS: Flag = Flag { name: "--seeds", arg: "LIST", help: "the individu
 const F_P_THREADS: Flag = Flag { name: "--threads", arg: "N", help: "search threads, 1 to 1024 (default: the logical CPUs)" };
 const F_P_JSON: Flag = Flag { name: "--json", arg: "", help: "the JSON document instead of the readable report" };
 const EXIT_PERSONA: &str = "0 done (every turn status, refusals and fallbacks included, is an answer; fuzz: no counterexample found; prove: every rule held or proved), 1 lint found an unresolved contradiction or (with rules) a counterexample, fuzz found a counterexample or prove left a rule unknown, 2 bad persona / state / inputs / script / rule (one {\"error\"} object on stdout, code \"persona\", when stdout is not a terminal or with --json) or bad flag (stderr), 3 lint (with rules): a rule the bound leaves unknown and the search cannot break (\"unproven\", not broken).";
-const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with --actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {\"ok\": false, \"line\", \"unsupported\": the field, \"engine\", \"strand_engine\"}; not verified, and not a divergence).";
+const EXIT_LIVE: &str = "0 done (live: every event answered; verify: every line replays; control: the line appended), 1 verify: a line differs (its number and what) or, with --actions, a host action differs from its turn's released level, 2 a bad persona, state, event (one {\"error\"} object on stdout per bad event when stdout is not a terminal or with --json; the run goes on), control line or flag, 4 refused: the strand's writer lock is held by another writer, or the individual is paused or retired (one {\"error\"} object per refused event, as for 2; nothing is written), 5 verify: unsupported, a line has a field or line kind this engine does not know (a newer engine's strand: {\"ok\": false, \"line\", \"unsupported\": the field, \"engine\", \"strand_engine\"}; not verified, and not a divergence), 6 verify --chain: a previous segment file is missing ({\"ok\": false, \"missing\": its file name, \"segment_file\": the segment that links it}).";
 pub(crate) static COMMANDS: &[Command] = &[
     Command { name: "persona", aliases: &[], group: "persona", summary: "the individuality layer: persona + state + inputs -> one stance",
         usage: &["persona SUB PERSONA [flags]   (SUB: init turn replay explain diff lint fuzz prove check compile describe)"],
@@ -303,10 +294,13 @@ pub(crate) static COMMANDS: &[Command] = &[
             "probbit persona lint examples/persona/tutor.yaml"],
         run: persona_cmd },
     Command { name: "live", aliases: &[], group: "live", summary: "a resident individual: JSONL events in, one stance per event out",
-        usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE [--label KEY=VALUE]...] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K]",
+        usage: &["live PERSONA [--seed N | --state FILE] [--strand FILE [--label KEY=VALUE]...] [--events FILE [--watch]] [--clock real|fixed] [--checkpoint-every K] [--segment-every N]",
             "live PERSONA --demo week [--seed N] [--strand FILE [--label KEY=VALUE]...] [--plain]",
-            "live verify STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]",
-            "live control STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]"],
+            "live verify STRAND [--from-checkpoint] [--chain] [--actions FILE] [--blocks FILE]",
+            "live control STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]",
+            "live control STRAND reflect [--last N | --since-checkpoint]",
+            "live control STRAND stir? [--idle-hours H]",
+            "live control STRAND rest [--at TIME] [--state FILE]"],
         about: "A resident individual (docs/persona.md §5.7): JSONL events (one object of inputs per line) from --events FILE or stdin, one stance per event on stdout (canonical JSON). The clock stamps each event's elapsed_hours (quantised to 1e-6 h), so moods decay by their half-lives between events; feedback moves the learned deltas of a persona with a learning block (§2.8).\n--strand FILE logs the life: a header (persona document, initial state, engine version), then per event the inputs as used, the stance and state digests and the sha256 of the line before. `probbit live verify STRAND` replays it.",
         before: &[],
         flags: &[&[
@@ -319,18 +313,24 @@ pub(crate) static COMMANDS: &[Command] = &[
             Flag { name: "--demo", arg: "week", help: "one individual's scripted week on the fixed clock (7 days, events hourly 09:00-15:00): praise for short answers moves the learned verbosity deltas to their cap, a quiet night relaxes the mood to its resting level, a campaign praising jokes raises humour while failure turns stay joke-free; a persona without a learning block gets the demo's (said in the opening line). Bars on stderr at a terminal, paced 1 s per hour (nights fast-forward in 2 s); otherwise one line per event on stdout, no waiting. With --seed, --strand" },
             F_PLAIN,
             Flag { name: "--checkpoint-every", arg: "K", help: "with --strand: a checkpoint line (the whole state) after every K-th event (default 1000; 0: none); `verify --from-checkpoint` and `monitor` start at the last one" },
+            Flag { name: "--segment-every", arg: "N", help: "with --strand NAME.strand: seal the strand after every N-th event (a sealing checkpoint line) and go on in the next segment file NAME.0001.strand, NAME.0002.strand, ...: its header links the previous file (its name, the sealed line's sha256, the index) and its second line is the sealed line, so the chain continues across files; a run continues the newest segment (default 0: one file)" },
             Flag { name: "--label", arg: "KEY=VALUE", help: "with --strand, repeatable: a presentation label for the monitor (agent, host, lane, session, or a free key; at most 8 keys, values of 1 to 64 printable characters) merged into the strand's sidecar FILE.labels.json (FILE without its extension); the strand itself, its chain and its digests are not touched" },
         ]],
         subs: &[
-            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--actions FILE] [--blocks FILE]", help: "replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
+            Sub { name: "verify", args: "STRAND [--from-checkpoint] [--chain] [--actions FILE] [--blocks FILE]", help: "replay a strand: the earliest line that differs (exit 1), or the earliest line with a field or line kind this engine does not know (`unsupported by this engine: FIELD`, exit 5: a newer engine's strand, not a divergence); from the header (every checkpoint checked), or from the last checkpoint; with --actions, also the earliest turn whose host action differs from the level its stance released",
                 flags: &[Flag { name: "--from-checkpoint", arg: "", help: "start at the last checkpoint instead of the header" },
+                    Flag { name: "--chain", arg: "", help: "a segment (section 5.7): verify it and walk back through the previous segment files to the first, each verified and its last line the sealed line the next one links; exit 1 at the first break (the segment file named), 6 when a previous segment file is missing" },
                     Flag { name: "--actions", arg: "FILE", help: "the host's action log, one {\"turn\": T, \"action\": {trait: level}} per line: compared with each turn's released levels (summary `actions`: checked, differs); exit 1 when one differs" },
                     Flag { name: "--blocks", arg: "FILE", help: "write each event's block (the text a host injects, RFC 0008 E: every trait and mood as `name level`, then the viability line) to FILE, one {\"block\", \"n\"} per line; replays from the header" }] },
-            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME]",
-                help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status",
-                flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required)" },
-                    Flag { name: "--reason", arg: "TEXT", help: "why (required)" },
-                    Flag { name: "--at", arg: "TIME", help: "when (default: now, UTC)" }] },
+            Sub { name: "control", args: "STRAND pause|resume|retire|erase --by WHO --reason TEXT [--at TIME] | STRAND seal | STRAND reflect [--last N | --since-checkpoint] | STRAND stir? [--idle-hours H] | STRAND rest [--at TIME] [--state FILE]",
+                help: "pause, resume or retire an individual, or erase its learned weights (RFC 0004: every learned weight back to 0, the status unchanged); appends a control line under the lock: while paused or retired every event is refused (exit 4); no credit crosses a control line; retire is final; `verify` replays them and reports the status. `seal` (section 5.7) seals the newest segment of STRAND: refused unless its last line is an event line, it appends the sealing checkpoint and writes the next segment file (its header links the sealed line, then the sealed line itself), and prints that file in `file`",
+                flags: &[Flag { name: "--by", arg: "WHO", help: "who decided it: human:ID or env:ID (required, except for seal)" },
+                    Flag { name: "--reason", arg: "TEXT", help: "why (required, except for seal)" },
+                    Flag { name: "--at", arg: "TIME", help: "when (default: now, UTC)" },
+                    Flag { name: "--last", arg: "N", help: "reflect: the last N events (default: every event)" },
+                    Flag { name: "--since-checkpoint", arg: "", help: "reflect: the events after the last checkpoint line" },
+                    Flag { name: "--idle-hours", arg: "H", help: "stir? (RFC 0016): the hours since the strand's last event (default 0); the answer is {due, stir}, nothing is written" },
+                    Flag { name: "--state", arg: "FILE", help: "rest (RFC 0015): the stored individual (the state after the strand's last line), rewritten after the pass" }] },
         ],
         list_subs: true, shared: false,
         after: &[("the safety kit", "(docs/persona.md §5.7) one writer per strand: `--strand` takes STRAND.lock (a second writer exits 4 and changes nothing; a lock whose process is gone is taken over). With `reward_from` in the persona (§2.10), a reward from `src: self`, without a src or from an undeclared one is refused like a bad event."),
@@ -379,6 +379,20 @@ pub(crate) static COMMANDS: &[Command] = &[
             ("exit", "0 every line replays, 1 a line differs (the frame names it and shows the event before it), 2 a bad flag, a port that cannot be had, or a file that cannot be read or is not a strand.")],
         examples: &["probbit monitor --demo --open", "probbit monitor pip.strand --follow", "probbit monitor pip.strand --serve --port 8080"],
         run: monitor::cmd },
+    Command { name: "reflect", aliases: &[], group: "live", summary: "RFC 0013 self-report: a canonical account of a strand's last N events, from its lines alone",
+        usage: &["reflect STRAND [--last N | --since-checkpoint] [--json | --text]"],
+        about: "The self-report (docs/persona.md §5.8): a canonical document computed from the strand's lines alone (no turn is run, nothing is solved, nothing is random): over the window, the inputs set, the expectation's surprises (each receipt's z recomputed from the logged receipts; the K = 5 largest |z| with the predicted and measured values), per trait the levels taken and the odds' drift, the moods' path with its turning points, the drives' peaks and the habits that bound (read from the checkpoint lines in the window: a window without one reports them as null), the credit settled, the learned weights' net movement and the control lines; every number at 6 decimals, `digest` = the sha256 of the canonical text, and `summary`: 6 to 12 sentences from fixed templates. `probbit live control STRAND reflect` appends it as a line (0.14.0 strands), which `live verify` recomputes.",
+        before: &[],
+        flags: &[&[
+            Flag { name: "--last", arg: "N", help: "the last N events (default: every event)" },
+            Flag { name: "--since-checkpoint", arg: "", help: "the events after the last checkpoint line (that checkpoint is the first sample)" },
+            Flag { name: "--json", arg: "", help: "the canonical document (the default)" },
+            Flag { name: "--text", arg: "", help: "the summary's sentences only, one per line" },
+        ]],
+        subs: &[], list_subs: false, shared: false,
+        after: &[("exit", "0 the reflection printed, 2 a bad flag, a file that cannot be read, or a strand with no event line in the window (one {\"error\"} object on stdout).")],
+        examples: &["probbit reflect pip.strand --last 50 --text", "probbit reflect pip.strand --since-checkpoint"],
+        run: reflect_cmd },
     Command { name: "decide", aliases: &[], group: "decide/run", summary: "route tasks to workers: a router document in, a JSON decision out",
         usage: &["decide [flags] < router.json"],
         about: "Route tasks to workers: a router document (workers + caps, tasks + allowed + scores, affinity; README) on stdin, a JSON decision on stdout. Exact where structure allows, else sampled with the diagnostics gate.",
@@ -831,6 +845,37 @@ fn live_cmd(args: &[String]) {
                 Err((line, why)) => failed(line, &why) }
             return;
         }
+        // --chain (§5.7, segments): this segment, then each previous one back to the first, linked by the sealed line
+        if args.iter().any(|a| a == "--chain") {
+            if args.iter().any(|a| a == "--from-checkpoint") { fail("live verify: --chain replays every segment from its start: drop --from-checkpoint") }
+            let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+            let name = |p: &str| std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |f| f.to_string_lossy().into_owned());
+            let (mut cur, mut t, mut segs, mut newest) = (name(path), text.clone(), 0u64, None::<Json>);
+            let broke = |file: &str, d: Json, code: i32| -> ! { let mut d = d; if let Json::Obj(v) = &mut d { v.push(("segment_file".into(), Json::Str(file.to_string()))); }
+                emit(&persona::canon(&d)); exit(code) };
+            loop {
+                match live::verify(&t, eng) {
+                    Ok(d) => { if newest.is_none() { newest = Some(d); } segs += 1; }
+                    Err((line, why)) => { err_line(&format!("probbit: live verify --chain: {cur}: line {line}: {why}"));
+                        broke(&cur, live::failure(&t, line, &why), if live::unsupported_field(&why).is_some() { 5 } else { 1 }) } }
+                let h = json::parse(live::lines(&t).first().copied().unwrap_or("")).unwrap_or(Json::Null);
+                let Some(sg) = h.get("segment").cloned() else { break };
+                let (prev, sealed, index) = (sg.get("previous").and_then(Json::as_str).unwrap_or("").to_string(), sg.get("sealed").and_then(Json::as_str).unwrap_or("").to_string(), sg.get("index").and_then(Json::as_f64).unwrap_or(0.0));
+                let pt = match std::fs::read_to_string(dir.join(&prev)) { Ok(x) => x,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => { err_line(&format!("probbit: live verify --chain: {cur} links {prev}, which does not exist: the chain before it is not verified"));
+                        broke(&cur, obj(vec![("ok", Json::Bool(false)), ("missing", Json::Str(prev.clone()))]), 6) }
+                    Err(e) => fail(&format!("live verify --chain: cannot read {prev}: {e}")) };
+                let pls = live::lines(&pt); let last = pls.last().copied().unwrap_or("");
+                let pidx = json::parse(pls.first().copied().unwrap_or("")).ok().and_then(|h| h.get("segment").and_then(|s| s.get("index")).and_then(Json::as_f64)).unwrap_or(0.0);
+                let why = if persona::digest_of(last) != sealed { Some(format!("its last line is not the sealed line {cur} links")) }
+                    else if pidx + 1.0 != index { Some(format!("its segment index is not {} (the one before {cur}'s)", index - 1.0)) } else { None };
+                if let Some(why) = why { err_line(&format!("probbit: live verify --chain: {prev}: line {}: {why}", pls.len()));
+                    broke(&prev, obj(vec![("ok", Json::Bool(false)), ("line", num(pls.len() as f64)), ("diverges", Json::Str(why))]), 1) }
+                cur = prev; t = pt;
+            }
+            let mut d = newest.unwrap_or(Json::Null); if let Json::Obj(v) = &mut d { v.push(("segments".into(), num(segs as f64))); }
+            emit(&persona::canon(&d)); return;
+        }
         let res = if args.iter().any(|a| a == "--from-checkpoint") { live::verify_from_checkpoint(&text, eng) } else { live::verify(&text, eng) };
         match res {
             Ok(doc) => emit(&persona::canon(&doc)),
@@ -839,8 +884,36 @@ fn live_cmd(args: &[String]) {
     }
     if args.get(1).map(String::as_str) == Some("control") {
         let mut a = vec!["live control".to_string()]; a.extend(args.iter().skip(4).cloned()); let (v, w) = sub_flags("live", "control").unwrap(); check_flags(&a, &v, &w);
-        let usage = "live control: probbit live control STRAND pause|resume|retire|erase --by human:ID --reason TEXT";
+        let usage = "live control: probbit live control STRAND pause|resume|retire|erase --by human:ID --reason TEXT (or STRAND seal, STRAND rest)";
         let (Some(path), Some(what)) = (args.get(2).filter(|a| !a.starts_with("--")), args.get(3).filter(|a| !a.starts_with("--"))) else { fail(usage) };
+        // reflect (RFC 0013): the reflection of the lines so far, appended as one line (0.14.0 strands)
+        if what == "reflect" {
+            if let Some(f) = ["--by", "--reason", "--at"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND reflect: {f} does not apply (a reflection is computed, not decided by someone)")) }
+            match live::reflect_cmd(path, reflect_window(args, "live control")) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+            return;
+        }
+        if args.iter().any(|a| a == "--last" || a == "--since-checkpoint") { fail("live control: --last and --since-checkpoint go with reflect") }
+        // stir? (RFC 0016): is a self-started idle event due, exactly from the replayed strand and the idle hours; writes nothing
+        if what == "stir?" {
+            if let Some(f) = ["--by", "--reason", "--at"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND stir?: {f} does not apply (a query writes nothing)")) }
+            let idle = match opt("--idle-hours") { None => 0.0, Some(x) => x.parse::<f64>().ok().filter(|h| h.is_finite() && *h >= 0.0).unwrap_or_else(|| fail("live control STRAND stir?: --idle-hours H, a number >= 0")) };
+            match live::stir_cmd(path, idle, eng) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+            return;
+        }
+        if args.iter().any(|a| a == "--idle-hours") { fail("live control: --idle-hours goes with stir?") }
+        if what != "rest" && args.iter().any(|a| a == "--state") { fail("live control: --state goes with rest") }
+        // rest (RFC 0015): the rest pass on the replayed strand, one consolidation line (0.14.0 strands with expectation.rest)
+        if what == "rest" {
+            if let Some(f) = ["--by", "--reason"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND rest: {f} does not apply (a rest pass is a host's timing, not a control by someone)")) }
+            match live::rest_cmd(path, &opt("--at").unwrap_or_else(live::utc_now), opt("--state").as_deref(), eng) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+            return;
+        }
+        // seal (§5.7): no control line, so no --by, --reason or --at; the sealing checkpoint and the next segment file
+        if what == "seal" {
+            if let Some(f) = ["--by", "--reason", "--at"].iter().find(|f| args.iter().any(|a| a == *f)) { fail(&format!("live control STRAND seal: {f} does not apply (a seal writes a checkpoint line, not a control line)")) }
+            match live::seal_cmd(path, eng) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
+            return;
+        }
         let (Some(by), Some(reason)) = (opt("--by"), opt("--reason")) else { fail(&format!("{usage} (--by and --reason are required)")) };
         match live::control_cmd(path, what, &by, &reason, &opt("--at").unwrap_or_else(live::utc_now)) { Ok(doc) => emit(&persona::canon(&doc)), Err(e) => refuse("live control: ", e) }
         return;
@@ -862,6 +935,8 @@ fn live_cmd(args: &[String]) {
         drop(lock); return;
     }
     let every: u64 = arg(args, "--checkpoint-every", live::CHECKPOINT_EVERY);
+    let seg_every: u64 = arg(args, "--segment-every", 0);
+    if seg_every > 0 && opt("--strand").is_none() { fail("live: --segment-every goes with --strand NAME.strand (the segments are NAME.0001.strand, ...)") }
     let state_file = opt("--state"); if state_file.is_some() && opt("--seed").is_some() { fail("live: give --seed N (a new individual) or --state FILE (a stored one), not both") }
     let st = match &state_file {
         Some(f) => { let t = std::fs::read_to_string(f).unwrap_or_else(|e| bad_input("live: ", persona::perr("state", format!("cannot read {f}: {e} (make one with `probbit persona init`)"))));
@@ -875,16 +950,31 @@ fn live_cmd(args: &[String]) {
     let strand = opt("--strand");
     let lock = strand.as_ref().map(|f| live::Lock::take(f).unwrap_or_else(|e| refuse("live: ", e)));
     if let Some(f) = &strand { if std::path::Path::new(f).exists() && state_file.is_none() { fail(&format!("live: {f} exists: continue it with --state FILE (the state after its last line), or log to a new file")) } }
+    // the run continues the newest segment of the strand (NAME.strand, then NAME.0001.strand, ...), sealed by --segment-every
+    // or by `live control STRAND seal`: a sealed file is never appended to
+    let mut seg = 0u64; if let Some(f) = &strand { while std::path::Path::new(&live::segment_name(f, seg + 1)).exists() { seg += 1; } }
+    let cur = std::cell::RefCell::new(strand.as_ref().map(|f| live::segment_name(f, seg)));
+    // the strand's engine (its header's; a new strand: this one's): the next segment's header names it
+    let strand_engine = cur.borrow().as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| json::parse(live::lines(&t).first().copied().unwrap_or("")).ok())
+        .and_then(|h| h.get("engine").and_then(Json::as_str).map(str::to_string)).unwrap_or_else(live::engine);
     if let Some(f) = strand.as_ref().filter(|_| !labels.is_empty()) { labels::merge_into(f, &labels).unwrap_or_else(|e| fail(&format!("live: {e}"))); }
-    let (mut lv, header) = match &strand { Some(f) => live::open(f, p, &doc, st, clock).unwrap_or_else(|e| bad_input("live: ", e)), None => (live::Live::start(p, &doc, st, clock, &live::engine()).0, None) };
+    let (mut lv, header) = match cur.borrow().as_ref() { Some(f) => live::open(f, p, &doc, st, clock).unwrap_or_else(|e| bad_input("live: ", e)), None => (live::Live::start(p, &doc, st, clock, &live::engine()).0, None) };
+    if seg_every > 0 && lv.expect.as_ref().is_some_and(|m| !m.is_canonical()) { fail("live: --segment-every: before engine 0.14.0 a checkpoint does not carry the expectation's memory, so a segment of a persona with an expectation block could not start from its sealed line") }
     // every append first checks the lock is still this writer's: a lock removed or taken over under it stops the run unwritten
-    let log = |ls: &[&str]| if let Some(f) = &strand {
+    let log = |ls: &[&str]| if let (Some(f), Some(c)) = (&strand, cur.borrow().as_ref()) {
         if !lock.as_ref().is_some_and(live::Lock::held) { refuse("live: ", json::InErr { code: "locked", path: "strand".into(), msg: format!("the writer lock {f}.lock is no longer this run's (removed or taken over): stopped before writing") }) }
-        live::append(f, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
+        live::append(c, ls).unwrap_or_else(|e| fail(&format!("live: {}", e.msg))) };
     if let Some(h) = &header { log(&[h]); }
     let (mut bad, mut refused, mut warned, mut warned_credit, mut warned_needs) = (0, 0, false, false, false);
+    // feature `turn_trace`: with PROBBIT_TURN_TRACE set, each event's phases on stderr (the parse and the append are timed here)
+    #[cfg(feature = "turn_trace")]
+    let trace_on = std::env::var_os("PROBBIT_TURN_TRACE").is_some();
     let mut one = |lv: &mut live::Live, i: usize, t: &str| {
+        #[cfg(feature = "turn_trace")]
+        let (t_parse, parse_us) = (std::time::Instant::now(), std::cell::Cell::new(0u64));
         let res = json::parse(t).map_err(|e| persona::perr("event", format!("not JSON: {}", e.msg))).and_then(|ev| {
+            #[cfg(feature = "turn_trace")]
+            parse_us.set(t_parse.elapsed().as_micros() as u64);
             // readings sent to a persona without a senses block are an undeclared input (listed in `ignored`): say so once
             if !warned && !lv.p.has_senses() && ev.get("senses").is_some() { warned = true;
                 err_line(&format!("probbit: live: events[{i}]: this persona has no senses block: `senses` is an undeclared input (listed in ignored), no reading is judged")); }
@@ -896,8 +986,22 @@ fn live_cmd(args: &[String]) {
                 err_line(&format!("probbit: live: events[{i}]: this persona has no needs block: `needs` is an undeclared input (listed in ignored), no amount is paid")); }
             lv.event(&ev, eng) });
         match res {
-            Ok((stance, line)) => { let cp = (strand.is_some() && every > 0 && lv.n % every == 0).then(|| lv.checkpoint(&stance));
+            Ok((stance, line)) => { let seal = strand.is_some() && seg_every > 0 && lv.n % seg_every == 0;
+                let cp = (strand.is_some() && (seal || (every > 0 && lv.n % every == 0))).then(|| lv.checkpoint(&stance));
+                #[cfg(feature = "turn_trace")]
+                let t_append = std::time::Instant::now();
                 match &cp { Some(c) => log(&[&line, c]), None => log(&[&line]) }
+                // sealed: the next segment file, its header linking this one, then the sealed line itself; the run goes on there
+                if let (true, Some(c), Some(base)) = (seal, &cp, &strand) {
+                    let prev = cur.borrow().clone().unwrap_or_default(); seg += 1; let next = live::segment_name(base, seg);
+                    let pname = std::path::Path::new(&prev).file_name().map_or_else(|| prev.clone(), |f| f.to_string_lossy().into_owned());
+                    let h = live::segment_header(lv, &doc, &strand_engine, seg, &pname, &persona::digest_of(c));
+                    if std::path::Path::new(&next).exists() { fail(&format!("live: {next} exists: the strand's newest segment is not the one this run continued")) }
+                    *cur.borrow_mut() = Some(next); log(&[&h, c]); }
+                #[cfg(feature = "turn_trace")]
+                if trace_on { let tr = probbit_persona::trace::last(); let us = |t: std::time::Instant| Json::Num(t.elapsed().as_micros() as f64);
+                    let mut j = tr.to_json(); if let Json::Obj(v) = &mut j { v.push(("n".into(), Json::Num(lv.n as f64))); v.push(("parse_us".into(), Json::Num(parse_us.get() as f64))); v.push(("append_us".into(), us(t_append))); }
+                    err_line(&format!("probbit: live: trace {}", persona::canon(&j))); }
                 if let Some(f) = &state_file { put(Some(f), &persona::canon(&lv.st.to_json(&lv.p))); } emit(&persona::canon(&stance)); }
             Err(e) => { if ["paused", "retired"].contains(&e.code) { refused += 1 } else { bad += 1 }
                 let e = json::InErr { path: format!("events[{i}].{}", e.path), ..e }; err_line(&format!("probbit: live: {}: {}", e.path, e.msg)); error_object(&e.to_json()); } } };
@@ -961,6 +1065,23 @@ fn lint_report(args: &[String], path: &str, p: &persona::Persona, depth: usize, 
 /// `probbit check PERSONA [--props FILE] [--strand FILE]... [--seeds LIST] [--depth N] [--hours LIST] [--json]`: one gate for CI.
 /// `persona lint`'s pipeline on the rules (`lint_report`), then `live verify` on every strand; exit 1 when a rule is broken, a
 /// contradiction is unresolved or a strand fails, else 3 when a rule is unproven, else 0
+/// The window of `--last N` / `--since-checkpoint` (RFC 0013)
+fn reflect_window(args: &[String], what: &str) -> probbit_persona::reflect::Window {
+    use probbit_persona::reflect::Window;
+    let last = args.iter().position(|x| x == "--last").map(|k| args.get(k + 1).and_then(|v| v.parse::<u64>().ok()).filter(|n| *n >= 1)
+        .unwrap_or_else(|| fail(&format!("{what}: --last N: a whole number >= 1"))));
+    match (last, args.iter().any(|a| a == "--since-checkpoint")) { (Some(_), true) => fail(&format!("{what}: --last and --since-checkpoint: one window")),
+        (Some(n), false) => Window::Last(n), (None, true) => Window::SinceCheckpoint, (None, false) => Window::All }
+}
+/// `probbit reflect STRAND [--last N | --since-checkpoint] [--json | --text]` (RFC 0013)
+fn reflect_cmd(args: &[String]) {
+    let Some(path) = args.get(1).filter(|a| !a.starts_with("--")) else { fail("reflect: the strand file: probbit reflect STRAND [--last N | --since-checkpoint]") };
+    let mut a = vec!["reflect".to_string()]; a.extend(args.iter().skip(2).cloned()); let (v, w) = flags_of("reflect"); check_flags(&a, &v, &w);
+    if args.iter().any(|a| a == "--json") && args.iter().any(|a| a == "--text") { fail("reflect: --json or --text") }
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("reflect: cannot read {path}: {e}")));
+    let r = probbit_persona::reflect::reflect_text(&text, reflect_window(args, "reflect")).unwrap_or_else(|e| bad_input("reflect: ", e));
+    if args.iter().any(|a| a == "--text") { emit(&r.summary().join("\n")) } else { emit(&r.text()) }
+}
 fn check_cmd(args: &[String]) {
     // --strand may be given more than once: take its values out before the flags are checked
     let (mut rest, mut strands) = (vec![], vec![]); let mut i = 0;
@@ -1150,6 +1271,8 @@ fn help_cmd(args: &[String]) {
 }
 
 fn main() {
+    // the library's hooks: the `--top` monitor and the config echo in telemetry
+    probbit_persona::hooks::set_monitor(tui::tier, tui::gate_seen); probbit_persona::hooks::set_config_echo(config_echo);
     // an argument that is not valid Unicode (a file name in a legacy encoding on Linux, an unpaired surrogate on Windows) is
     // refused by name; std::env::args would panic on it
     let args: Vec<String> = std::env::args_os().skip(1).enumerate().map(|(i, a)| a.into_string().unwrap_or_else(|a|
@@ -1216,7 +1339,7 @@ mod table_tests {
         let (v, w) = sub_flags("persona", "fuzz").unwrap(); assert!(v.contains(&"--fixture-src") && w.contains(&"--json") && w.contains(&"--pretty"));
         let (v, w) = flags_of("monitor"); assert!(v.contains(&"--port") && w.contains(&"--demo"), "--demo takes an optional value: parsed as a switch");
         assert!(sub_flags("persona", "lnt").is_none());
-        assert_eq!(sub_flags("live", "verify").unwrap(), (vec!["--actions", "--blocks"], vec!["--from-checkpoint"]), "live's own flags are not verify's");
+        assert_eq!(sub_flags("live", "verify").unwrap(), (vec!["--actions", "--blocks"], vec!["--from-checkpoint", "--chain"]), "live's own flags are not verify's");
         for c in COMMANDS { let (v, w) = flags_of(c.name); assert_eq!(v.len() + w.len(), c.flags().count(), "{}", c.name); }
     }
     #[test]
