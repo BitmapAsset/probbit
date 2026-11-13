@@ -17,7 +17,7 @@ release tag the README shows (the GitHub Action example and its `version` input)
      `probbit-ir`, `probbit-core`, `probbit-persona`: the `probbit-nostd` entries too); `cargo update --workspace --offline` for `Cargo.lock` (CI builds `--locked`);
    - `cargo build --release --locked -p probbit-cli`, then `target/release/probbit man > docs/probbit.1` (generated,
      never hand-edited: `probbit-cli/tests/cli_man.rs` compares them);
-   - `npm/package.json`'s `version`; the example tag in `install.sh`, `install.ps1`, `action.yml`,
+   - `npm/package.json`'s `version` and the version comment after `probbit --version` in `npm/README.md`; the example tag in `install.sh`, `install.ps1`, `action.yml`,
      `.github/workflows/bench.yml`, `scripts/bench/test_install_ps1.ps1` and `scripts/tests/test_install_contract.py`;
      the title of `docs/CHEATSHEET.md`; the strand header example in `docs/persona.md` §5.7;
    - `CHANGELOG.md`: `## X.Y.Z - <date>`, with an upgrade note wherever an exit code or an output changes;
