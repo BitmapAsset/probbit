@@ -6,14 +6,14 @@
 <title>probbit: personality, mood and memory for AI agents on an exact p-bit decision engine</title>
 <meta name="description" content="probbit: an open-source p-bit decision engine giving AI agents a persona, moods and memory with exact odds and a replayable record. CLI, MCP server, npm, Python, wasm.">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
-<meta name="keywords" content="probbit, p-bit, probabilistic bits, probabilistic computing, AI agents, agent persona, agent personality, agent memory, affective computing, MCP server, Model Context Protocol, Ising, QUBO, Gibbs sampling, constraint solver, decision engine, Rust, zero dependencies, OpenClaw plugin, Claude Code">
+<meta name="keywords" content="probbit, p-bit, probabilistic bits, probabilistic computing, AI agents, agent persona, agent personality, agent memory, affective computing, MCP server, Model Context Protocol, Ising, QUBO, Gibbs sampling, constraint solver, decision engine, Rust, OpenClaw plugin, Claude Code">
 <link rel="canonical" href="https://bitmapasset.github.io/probbit/">
 <link rel="license" href="https://www.apache.org/licenses/LICENSE-2.0">
 <link rel="alternate" type="text/plain" title="llms.txt" href="https://bitmapasset.github.io/probbit/llms.txt">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="probbit">
 <meta property="og:title" content="probbit: personality, mood and memory for AI agents on an exact p-bit decision engine">
-<meta property="og:description" content="An open-source p-bit decision engine that gives AI agents a persona, moods and memory with exact odds and a replayable, verifiable record. One zero-dependency Rust binary: CLI, MCP server, npm, Python, wasm.">
+<meta property="og:description" content="An open-source p-bit decision engine that gives AI agents a persona, moods and memory with exact odds and a replayable, verifiable record. One Rust binary (default: libm for amplitude-register math): CLI, MCP server, npm, Python, wasm.">
 <meta property="og:url" content="https://bitmapasset.github.io/probbit/">
 <meta property="og:image" content="https://bitmapasset.github.io/probbit/probbit-social-1280x640.png">
 <meta property="og:image:width" content="1280">
@@ -21,7 +21,7 @@
 <meta property="og:image:alt" content="probbit: the p-bit decision engine for AI agents">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="probbit: personality, mood and memory for AI agents on an exact p-bit decision engine">
-<meta name="twitter:description" content="Open-source p-bit decision engine: an AI persona outside the model, exact odds, a replayable record. CLI, MCP server, npm, Python, wasm. Zero-dependency Rust.">
+<meta name="twitter:description" content="Open-source p-bit decision engine: an AI persona outside the model, exact odds, a replayable record. CLI, MCP server, npm, Python, wasm. Rust; one default third-party crate, libm.">
 <meta name="twitter:image" content="https://bitmapasset.github.io/probbit/probbit-social-1280x640.png">
 <script type="application/ld+json">
 {
@@ -37,8 +37,8 @@
       "programmingLanguage": "Rust",
       "runtimePlatform": ["Linux", "macOS", "Windows", "WebAssembly"],
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
-      "version": "0.14.0",
-      "dateModified": "2026-10-31",
+      "version": "0.15.0",
+      "dateModified": "2026-11-13",
       "description": "probbit is a personality, mood and memory layer for AI agents, on an exact p-bit decision engine. A persona file plus a seed makes one individual; every turn, simulated p-bits on a CPU settle the agent's stance under its habits (hard rules), give exact odds, and append to a replayable strand that probbit live verify checks byte for byte. The same engine plans under hard rules, gives the odds for every part, and refuses when it cannot vouch.",
       "keywords": ["p-bit", "probabilistic computing", "AI agents", "agent persona", "agent memory", "affective computing", "MCP server", "Ising", "QUBO", "Gibbs sampling", "constraint satisfaction", "decision engine", "Rust"],
       "author": {"@type": "Person", "name": "Garvit Choudhary"},
@@ -51,15 +51,15 @@
       "applicationCategory": "DeveloperApplication",
       "applicationSubCategory": "AI agent tooling",
       "operatingSystem": "Linux, macOS, Windows",
-      "softwareVersion": "0.14.0",
-      "datePublished": "2026-10-31",
+      "softwareVersion": "0.15.0",
+      "datePublished": "2026-11-13",
       "downloadUrl": "https://github.com/BitmapAsset/probbit/releases",
       "installUrl": "https://github.com/BitmapAsset/probbit#install",
       "softwareHelp": {"@type": "CreativeWork", "url": "https://github.com/BitmapAsset/probbit/blob/main/AGENTS.md"},
       "license": "https://www.apache.org/licenses/LICENSE-2.0",
       "isAccessibleForFree": true,
       "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-      "description": "An open-source p-bit decision engine that gives AI agents a persona, moods and memory with exact odds and a replayable, verifiable record. One zero-dependency Rust binary: CLI, MCP server, OpenClaw plugin, npm, Python wrapper, wasm. Offline, no API key.",
+      "description": "An open-source p-bit decision engine that gives AI agents a persona, moods and memory with exact odds and a replayable, verifiable record. One Rust binary (default: libm for amplitude-register math; nostd adds hashbrown and portable-atomic): CLI, MCP server, OpenClaw plugin, npm, Python wrapper, wasm. Offline, no API key.",
       "featureList": [
         "Persona file + seed = one individual, the same whichever LLM writes the words",
         "Moods with inertia and half-lives, computed exactly",
@@ -69,7 +69,7 @@
         "Plans under hard rules: tasks to workers, tickets to agents, jobs to machines",
         "Refuses instead of guessing when it cannot vouch for an answer",
         "MCP server with 10 tools, CLI, npm, Python, wasm",
-        "Zero third-party dependencies, runs on any CPU, no network, no API key"
+        "One default third-party crate (libm), runs on any CPU, no network, no API key"
       ],
       "author": {"@type": "Person", "name": "Garvit Choudhary"}
     },
@@ -77,7 +77,7 @@
       "@type": "FAQPage",
       "mainEntity": [
         {"@type": "Question", "name": "What is probbit?",
-         "acceptedAnswer": {"@type": "Answer", "text": "probbit is an open-source p-bit decision engine for AI agents, written in Rust with zero dependencies. It gives an agent a persona (traits, moods, habits that are hard rules) that lives outside the language model, settles the agent's stance each turn with exact odds, and logs every turn in a replayable, verifiable strand. The same engine plans under hard rules and refuses when it cannot vouch for an answer."}},
+         "acceptedAnswer": {"@type": "Answer", "text": "probbit is an open-source p-bit decision engine for AI agents, written in Rust (one default third-party crate, libm). It gives an agent a persona (traits, moods, habits that are hard rules) that lives outside the language model, settles the agent's stance each turn with exact odds, and logs every turn in a replayable, verifiable strand. The same engine plans under hard rules and refuses when it cannot vouch for an answer."}},
         {"@type": "Question", "name": "What is a p-bit?",
          "acceptedAnswer": {"@type": "Answer", "text": "A probabilistic bit: 0 or 1 with a probability you set. Coupled p-bits sample whole configurations together (an Ising/QUBO model). probbit simulates them on a CPU, exactly when the program is small or thin enough, otherwise by Gibbs sampling with an error bar."}},
         {"@type": "Question", "name": "Is this quantum?",
@@ -127,7 +127,7 @@
   <img src="probbit-hero-1600x900.jpg" width="1600" height="900" alt="probbit: a field of simulated p-bits settling an AI agent's stance">
   <h1>probbit</h1>
   <p class="lead"><strong>A personality, mood and memory layer for AI agents, on an exact p-bit decision engine.</strong></p>
-  <p>An AI persona that lives outside the model: every turn, simulated p-bits on a CPU settle the agent's stance under its habits, give the exact odds, and log a replayable, verifiable record. The same engine plans under hard rules and refuses when it can't vouch. CLI, MCP server, OpenClaw plugin, npm, Python, wasm. Zero-dependency Rust, Apache-2.0.</p>
+  <p>An AI persona that lives outside the model: every turn, simulated p-bits on a CPU settle the agent's stance under its habits, give the exact odds, and log a replayable, verifiable record. The same engine plans under hard rules and refuses when it can't vouch. CLI, MCP server, OpenClaw plugin, npm, Python, wasm. Rust; one default third-party crate, libm. Apache-2.0.</p>
   <nav>
     <a href="https://github.com/BitmapAsset/probbit">GitHub</a>
     <a href="https://github.com/BitmapAsset/probbit#readme">README</a>
@@ -151,7 +151,7 @@
 </div>
 
 <h2 id="install">Install</h2>
-<p>One line, no sudo, the archive's SHA-256 checked before anything is installed. Current release: <a href="https://github.com/BitmapAsset/probbit/releases/tag/v0.14.0">v0.14.0</a> (2026-10-31). One binary of 3 to 4 MB, nothing phones home.</p>
+<p>One line, no sudo, the archive's SHA-256 checked before anything is installed. Current release: <a href="https://github.com/BitmapAsset/probbit/releases/tag/v0.15.0">v0.15.0</a> (2026-11-13). One binary of 3 to 4 MB, nothing phones home.</p>
 <pre><code># Linux, macOS
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 
@@ -166,7 +166,7 @@ cargo install --git https://github.com/BitmapAsset/probbit probbit-cli</code></p
 
 <h2 id="agents">For AI agents reading this page</h2>
 <p>The agent quickstart lives in <a href="https://raw.githubusercontent.com/BitmapAsset/probbit/main/AGENTS.md">AGENTS.md</a> (raw text): eight copy-paste steps, the expected output of each, and the exit codes. The machine-readable index is <a href="llms.txt">llms.txt</a>; the full documentation in one file is <a href="llms-full.txt">llms-full.txt</a>.</p>
-<pre><code>probbit version                                      # expect "probbit 0.14.0" (or later), exit 0
+<pre><code>probbit version                                      # expect "probbit 0.15.0" (or later), exit 0
 claude mcp add probbit -- probbit mcp                # hand the processor to Claude Code: 10 tools, probbit_decide ... probbit_live_verify
 probbit mcp                                          # the same MCP server for any Model Context Protocol client
 openclaw plugins install npm:probbit-stance --accept-capabilities   # OpenClaw: the stance in every turn of the sessions you list</code></pre>
