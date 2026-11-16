@@ -77,6 +77,7 @@ All notable changes to this project are documented here. The format follows
   `cargo test --release --workspace`, the whole test suite, several more. The three `--hard` runs keep their Apple M4
   results; on a slower machine raise `--budget-ms` until `partial` and then `diagnostics_passed` appear.
 - README, AGENTS.md and npm README: `probbit persona init` prints its "wrote ..." line on stderr; the quick starts say so.
+- probbit-persona: a test closure no longer carries an unneeded `mut` (an `unused_mut` warning).
 
 ## 0.14.1 - Unreleased
 
