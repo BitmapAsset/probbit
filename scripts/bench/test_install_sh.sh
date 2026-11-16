@@ -87,11 +87,14 @@ after=$("$PY" -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb"
 [ "$before" = "$after" ] || { echo "FAIL: unrunnable candidate replaced working binary"; exit 1; }
 
 echo "== 8. the PATH hint names the rc file of the user's shell"
-case "$(uname -s)" in Darwin) bashrc='~/.bash_profile' ;; *) bashrc='~/.bashrc' ;; esac
-for pair in "/bin/zsh ~/.zshrc" "/usr/local/bin/zsh ~/.zshrc" "/bin/bash $bashrc" "/bin/dash ~/.profile" " ~/.profile"; do
-    shell=${pair% *} want=${pair##* }
+case "$(uname -s)" in Darwin) bashrc='~/.bash_profile' noshell='~/.zshrc' ;; *) bashrc='~/.bashrc' noshell='~/.bashrc (bash) or ~/.profile' ;; esac
+for pair in "/bin/zsh|~/.zshrc" "/usr/local/bin/zsh|~/.zshrc" "/bin/bash|$bashrc" "/bin/dash|~/.profile" "|$noshell"; do
+    shell=${pair%%|*} want=${pair#*|}
     out=$(SHELL="$shell" PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/hint" PROBBIT_MAN_DIR="$WORK/man8" "$SH" install.sh 2>&1)
     case "$out" in *"$WORK/hint is not on your PATH. Add it in $want:"*) ;; *) echo "FAIL: SHELL=$shell: no hint naming $want"; echo "$out"; exit 1 ;; esac
     echo "ok: SHELL=${shell:-(empty)} -> $want"
 done
+out=$(unset SHELL; PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/hint" PROBBIT_MAN_DIR="$WORK/man8" "$SH" install.sh 2>&1)
+case "$out" in *"$WORK/hint is not on your PATH. Add it in $noshell:"*) ;; *) echo "FAIL: SHELL unset: no hint naming $noshell"; echo "$out"; exit 1 ;; esac
+echo "ok: SHELL unset -> $noshell"
 echo "install.sh: all checks passed ($SH, $TARGET)"

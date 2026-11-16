@@ -66,6 +66,8 @@ All notable changes to this project are documented here. The format follows
 - `probbit explain` (new in this release) listed a Boolean sense reading under `flags` only when it was bare
   (`"tool_fail": true`); a wrapped reading (`{"v": true, "src": ...}`, docs/persona.md section 2.11) was left out. Both
   forms are listed now.
+- `install.sh`: with `SHELL` unset or empty, the PATH hint named only `~/.profile`, which an interactive bash does not
+  read. It now names `~/.zshrc` on macOS and `~/.bashrc (bash) or ~/.profile` elsewhere; a set `SHELL` is unchanged.
 
 ## 0.14.1 - Unreleased
 
