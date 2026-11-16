@@ -1,4 +1,4 @@
-//! probbit-ir: the instruction set of the probbit virtual p-bit processor. Zero external crates.
+//! probbit-ir: the instruction set of the probbit virtual p-bit processor. No third-party crate in the default build.
 //!
 //! A program is a constrained categorical field over `n` variables, each taking a value in `0..k`:
 //!   log w(x) = sum_i h[i*k + x_i] + sum_{pairs (i,j)} J_ij(x_i, x_j)

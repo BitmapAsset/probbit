@@ -1,7 +1,7 @@
 //! `probbit` — a virtual probabilistic (p-bit) processor for joint decisions: exact where structure allows, sampled with
 //! published diagnostics otherwise.
 //!
-//! JSON problem in on stdin, JSON decision out on stdout. Zero external crates.
+//! JSON problem in on stdin, JSON decision out on stdout. One third-party crate in the default build: `libm`.
 //!
 //!   probbit decide [--budget-ms N] [--seed N] [--exact-limit N] [--exact-ms N] [--frontier-states N] [--polish-ms N] [--polish-sweeps N] [--mode auto|exact|sample] [--sweeps N] [--collective on|off] [--cluster on|off] [--cycles on|off] [--chains N] [--threads N] [--cpu-limit PCT] [--mem-limit-mb N] [--priority low|normal] [--max-input-mb N] [--pretty]
 //!   probbit demo   [--tasks N] [--seed N] [--hard] # emit an agent-routing problem as JSON; --hard = tight quotas + strong affinity

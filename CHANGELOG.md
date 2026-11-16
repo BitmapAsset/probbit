@@ -68,6 +68,9 @@ All notable changes to this project are documented here. The format follows
   forms are listed now.
 - `install.sh`: with `SHELL` unset or empty, the PATH hint named only `~/.profile`, which an interactive bash does not
   read. It now names `~/.zshrc` on macOS and `~/.bashrc (bash) or ~/.profile` elsewhere; a set `SHELL` is unchanged.
+- The last "no external crates" statements (SECURITY.md, the CLI's and probbit-ir's crate documentation, the pull
+  request checklist) now say that the default build has one third-party crate, `libm`. SECURITY.md says that
+  `probbit monitor` listens on 127.0.0.1 and that probbit opens no outbound connection.
 
 ## 0.14.1 - Unreleased
 
