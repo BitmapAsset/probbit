@@ -68,11 +68,13 @@ All notable changes to this project are documented here. The format follows
   forms are listed now.
 - `install.sh`: with `SHELL` unset or empty, the PATH hint named only `~/.profile`, which an interactive bash does not
   read. It now names `~/.zshrc` on macOS and `~/.bashrc (bash) or ~/.profile` elsewhere; a set `SHELL` is unchanged.
-- The last "no external crates" statements (SECURITY.md, the CLI's and probbit-ir's crate documentation, the pull
-  request checklist) now say that the default build has one third-party crate, `libm`. SECURITY.md says that
-  `probbit monitor` listens on 127.0.0.1 and that probbit opens no outbound connection.
-- README and npm README: the binary is 3 to 5 MB (it said 3 to 4 MB; the 0.14.0 release binaries are 3.7 to 5.0 MB,
-  the Linux x86_64 ones the largest).
+- The last "no external crates" statements are corrected. SECURITY.md, the CLI's crate documentation and the pull
+  request checklist say that the default build has one third-party crate, `libm` (the checklist adds that `nostd` brings
+  `hashbrown` and `portable-atomic`); SECURITY.md also says that `probbit monitor` listens on 127.0.0.1 and that
+  probbit opens no outbound connection. probbit-ir's crate documentation says that its own default build has no
+  third-party crate.
+- README and npm README: the binary is 3 to 6 MB (it said 3 to 4 MB; the 0.14.0 release binaries are 3.7 to 5.0 MB,
+  the Linux x86_64 ones the largest; an outside from-source build on Linux x86_64 measured 5.2 MB).
 - README "60-second tour": the sixty seconds are the demo with a built binary; the first build takes a few minutes and
   `cargo test --release --workspace`, the whole test suite, several more. The three `--hard` runs keep their Apple M4
   results; on a slower machine raise `--budget-ms` until `partial` and then `diagnostics_passed` appear.

@@ -36,7 +36,7 @@
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
 Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
-One binary of 3 to 5 MB; one third-party crate in the default build (`libm`, for amplitude-register math).
+One binary of 3 to 6 MB; one third-party crate in the default build (`libm`, for amplitude-register math).
 The `nostd` build adds `hashbrown` and `portable-atomic`. Nothing phones home. Agents: start at
 [For AI agents reading this](#for-ai-agents-reading-this), [AGENTS.md](AGENTS.md) and [llms.txt](llms.txt).
 

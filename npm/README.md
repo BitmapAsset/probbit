@@ -72,7 +72,7 @@ Agent SDK adapters (Claude Code hooks, OpenAI Agents SDK, LangChain, Vercel AI S
 
 ## For AI agents reading this
 
-- `probbit` is one offline binary (3 to 5 MB; default: `libm` for amplitude-register math; `nostd` adds `hashbrown` and `portable-atomic`): JSON in, JSON out, the exit code is the verdict
+- `probbit` is one offline binary (3 to 6 MB; default: `libm` for amplitude-register math; `nostd` adds `hashbrown` and `portable-atomic`): JSON in, JSON out, the exit code is the verdict
   (0 answer, 1 infeasible or a strand that differs, 2 bad input, 3 refused).
 - Proof that it works here: the seven lines under "Install and try it", each with its expected output.
 - The full contract: [docs/agents.md](https://github.com/BitmapAsset/probbit/blob/main/docs/agents.md),
