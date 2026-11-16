@@ -71,6 +71,12 @@ All notable changes to this project are documented here. The format follows
 - The last "no external crates" statements (SECURITY.md, the CLI's and probbit-ir's crate documentation, the pull
   request checklist) now say that the default build has one third-party crate, `libm`. SECURITY.md says that
   `probbit monitor` listens on 127.0.0.1 and that probbit opens no outbound connection.
+- README and npm README: the binary is 3 to 5 MB (it said 3 to 4 MB; the 0.14.0 release binaries are 3.7 to 5.0 MB,
+  the Linux x86_64 ones the largest).
+- README "60-second tour": the sixty seconds are the demo with a built binary; the first build takes a few minutes and
+  `cargo test --release --workspace`, the whole test suite, several more. The three `--hard` runs keep their Apple M4
+  results; on a slower machine raise `--budget-ms` until `partial` and then `diagnostics_passed` appear.
+- README, AGENTS.md and npm README: `probbit persona init` prints its "wrote ..." line on stderr; the quick starts say so.
 
 ## 0.14.1 - Unreleased
 

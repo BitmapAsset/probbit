@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh
 export PATH="$HOME/.local/bin:$PATH"                                                             # no output
 probbit --version                                                                                # probbit 0.13.0 (or later); exit 0
 curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml   # no output; tutor.yaml
-probbit persona init tutor.yaml --seed 2 --out tutor.state                                       # wrote tutor.state (Pip 1.1.0, seed 2); exit 0
+probbit persona init tutor.yaml --seed 2 --out tutor.state                                       # wrote tutor.state (Pip 1.1.0, seed 2) on stderr; exit 0
 echo '{"sentiment":"negative"}' | probbit live tutor.yaml --state tutor.state --strand tutor.strand --clock fixed 2>/dev/null | grep -o '"line":"[^"]*"'
 #   "line":"Stance: go easy on the jokes; no jokes; gentle; ..."; exit 0
 probbit live verify tutor.strand | grep -o '"ok":[a-z]*'                                         # "ok":true; exit 0

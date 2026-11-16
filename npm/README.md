@@ -35,7 +35,7 @@ expect; every one exits 0.
 probbit --version                                     # probbit 0.13.0 (or later)
 probbit demo --tasks 12 | probbit decide --summary    # one JSON line with "verdict":"exact" and "violations":0
 curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml   # tutor.yaml appears
-probbit persona init tutor.yaml --seed 2 --out tutor.state                                          # wrote tutor.state (Pip 1.1.0, seed 2)
+probbit persona init tutor.yaml --seed 2 --out tutor.state                                          # wrote tutor.state (Pip 1.1.0, seed 2) on stderr
 echo '{"sentiment":"negative"}' | probbit live tutor.yaml --state tutor.state --strand tutor.strand --clock fixed 2>/dev/null | grep -o '"line":"[^"]*"'   # "line":"Stance: go easy on the jokes; no jokes; gentle; ...
 probbit live verify tutor.strand | grep -o '"ok":[a-z]*'                                            # "ok":true
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sh","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | probbit mcp 2>/dev/null | grep -o '"name":"probbit_[a-z_]*"'   # 10 lines, "name":"probbit_decide" ... "name":"probbit_live_verify"
@@ -72,7 +72,7 @@ Agent SDK adapters (Claude Code hooks, OpenAI Agents SDK, LangChain, Vercel AI S
 
 ## For AI agents reading this
 
-- `probbit` is one offline binary (3 to 4 MB; default: `libm` for amplitude-register math; `nostd` adds `hashbrown` and `portable-atomic`): JSON in, JSON out, the exit code is the verdict
+- `probbit` is one offline binary (3 to 5 MB; default: `libm` for amplitude-register math; `nostd` adds `hashbrown` and `portable-atomic`): JSON in, JSON out, the exit code is the verdict
   (0 answer, 1 infeasible or a strand that differs, 2 bad input, 3 refused).
 - Proof that it works here: the seven lines under "Install and try it", each with its expected output.
 - The full contract: [docs/agents.md](https://github.com/BitmapAsset/probbit/blob/main/docs/agents.md),
