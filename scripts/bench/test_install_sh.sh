@@ -94,7 +94,11 @@ for pair in "/bin/zsh|~/.zshrc" "/usr/local/bin/zsh|~/.zshrc" "/bin/bash|$bashrc
     case "$out" in *"$WORK/hint is not on your PATH. Add it in $want:"*) ;; *) echo "FAIL: SHELL=$shell: no hint naming $want"; echo "$out"; exit 1 ;; esac
     echo "ok: SHELL=${shell:-(empty)} -> $want"
 done
+# SHELL unset: bash (and macOS /bin/sh) sets SHELL to the account's login shell at start-up, dash and zsh leave it unset;
+# expect the file for what the shell under test reports
+reported=$(unset SHELL; "$SH" -c 'printf %s "${SHELL-}"')
+case "$reported" in */zsh) want='~/.zshrc' ;; */bash) want=$bashrc ;; '') want=$noshell ;; *) want='~/.profile' ;; esac
 out=$(unset SHELL; PROBBIT_DOWNLOAD_BASE="$BASE/good" PROBBIT_VERSION="$TAG" PROBBIT_INSTALL_DIR="$WORK/hint" PROBBIT_MAN_DIR="$WORK/man8" "$SH" install.sh 2>&1)
-case "$out" in *"$WORK/hint is not on your PATH. Add it in $noshell:"*) ;; *) echo "FAIL: SHELL unset: no hint naming $noshell"; echo "$out"; exit 1 ;; esac
-echo "ok: SHELL unset -> $noshell"
+case "$out" in *"$WORK/hint is not on your PATH. Add it in $want:"*) ;; *) echo "FAIL: SHELL unset ($SH reports SHELL=${reported:-(unset)}): no hint naming $want"; echo "$out"; exit 1 ;; esac
+echo "ok: SHELL unset ($SH reports SHELL=${reported:-(unset)}) -> $want"
 echo "install.sh: all checks passed ($SH, $TARGET)"

@@ -66,7 +66,8 @@ All notable changes to this project are documented here. The format follows
 - `probbit explain` (new in this release) listed a Boolean sense reading under `flags` only when it was bare
   (`"tool_fail": true`); a wrapped reading (`{"v": true, "src": ...}`, docs/persona.md section 2.11) was left out. Both
   forms are listed now.
-- `install.sh`: with `SHELL` unset or empty, the PATH hint named only `~/.profile`, which an interactive bash does not
+- `install.sh`: with `SHELL` empty, or unset under a shell that leaves it unset (dash; bash and macOS `/bin/sh` set it to
+  the login shell, so the hint follows that), the PATH hint named only `~/.profile`, which an interactive bash does not
   read. It now names `~/.zshrc` on macOS and `~/.bashrc (bash) or ~/.profile` elsewhere; a set `SHELL` is unchanged.
 - The last "no external crates" statements are corrected. SECURITY.md, the CLI's crate documentation and the pull
   request checklist say that the default build has one third-party crate, `libm` (the checklist adds that `nostd` brings
