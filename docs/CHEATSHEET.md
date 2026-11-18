@@ -1,4 +1,4 @@
-# probbit cheat sheet (0.14.0)
+# probbit cheat sheet (0.15.0)
 
 The CLI's own help and docs, shortened; `probbit <command> --help` has every flag.
 
@@ -131,7 +131,7 @@ The exact tiers run before the sampler:
 - `check`: 0 every rule held and every strand replays; 1 a rule broken, an unresolved contradiction, a strand that fails or one
   this engine cannot verify (unsupported) (1 wins); 2 a bad persona, rule file or flag; 3 the only problem is an unproven rule.
 - `monitor`: 0 every line replays; 1 a line differs; 2 a bad flag, a port that cannot be had, or a file that is not a strand.
-- `explain` (unreleased): 0 the selected event recomputes; 1 the selected event, or a line before it, does not recompute (as `live verify` reports it: a changed digest, a broken chain, or inputs of an earlier event that the engine rejects); 2 a bad flag or out-of-range `--event`, an unreadable file, a line that is not JSON or an event line without its fields, or inputs of the selected event that the engine rejects; 5 unsupported field or line kind. In a segment file after the first, line 2 is the copy of the sealing line and is checked against the header's link, so a damaged copy is 1.
+- `explain` (since 0.15.0): 0 the selected event recomputes; 1 the selected event, or a line before it, does not recompute (as `live verify` reports it: a changed digest, a broken chain, or inputs of an earlier event that the engine rejects); 2 a bad flag or out-of-range `--event`, an unreadable file, a line that is not JSON or an event line without its fields, or inputs of the selected event that the engine rejects; 5 unsupported field or line kind. In a segment file after the first, line 2 is the copy of the sealing line and is checked against the header's link, so a damaged copy is 1.
 
 ## Errors
 One channel, the same for every command (0.8.2):
@@ -166,11 +166,13 @@ One channel, the same for every command (0.8.2):
 | `live PERSONA [--seed N \| --state FILE] [--strand FILE] [--events FILE]` | JSONL events in, one stance per event out |
 | `live PERSONA --demo week [--seed N] [--plain]` | a scripted week: learning to a cap, a night, rules that hold |
 | `live verify STRAND [--actions FILE]` | replay a strand; the earliest line that differs (and host action, with `--actions`), or the earliest line this engine cannot read: `unsupported by this engine: FIELD`, exit 5 |
-| `explain STRAND --event N [--json]` (unreleased) | one event in words: logged inputs, before/after stance and odds, binding habits, chain, recomputation result |
+| `explain STRAND --event N [--json]` (since 0.15.0) | one event in words: logged inputs, before/after stance and odds, binding habits, chain, recomputation result |
 | `monitor STRAND [--follow] [--once] [--plain] [--serve] [--open] [--port N]` | the strand replayed as live bars in the terminal, or the Activity Monitor page on 127.0.0.1 (channel table, event-history traces, inspector) |
 | `monitor --demo [week\|drives] [--open]` | synthetic data: the tutor's week, paced, in under a minute; `drives`: a short goal-signal scenario |
 
-## `probbit explain STRAND --event N` (unreleased)
+<a id="probbit-explain-strand---event-n-unreleased"></a>
+
+## `probbit explain STRAND --event N`
 
 ```sh
 probbit explain run.strand --event 2

@@ -32,7 +32,7 @@ Then, in an empty directory (POSIX shell, Linux or macOS; no clone, no Rust, no 
 expect; every one exits 0.
 
 ```sh
-probbit --version                                     # probbit 0.13.0 (or later)
+probbit --version                                     # probbit 0.15.0 (or later)
 probbit demo --tasks 12 | probbit decide --summary    # one JSON line with "verdict":"exact" and "violations":0
 curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml   # tutor.yaml appears
 probbit persona init tutor.yaml --seed 2 --out tutor.state                                          # wrote tutor.state (Pip 1.1.0, seed 2) on stderr

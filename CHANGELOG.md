@@ -5,6 +5,33 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.15.0 - 2026-11-18
+
+0.15.0 adds `probbit explain STRAND --event N`, a read-only receipt for one logged event, recomputed through the same
+replay as `live verify`. The OpenClaw plugin `probbit-stance` 0.3.0 has no bundled model provider and no key handling: its
+classifier is the host's configured decision model or local keywords. The plugin reads a strand's tail past checkpoint
+lines, its `tempo` reading counts event lines only, and it pauses a lane whose strand was sealed into segments; `live verify` no longer panics on a malformed header digest. The
+documentation states what `live verify` detects, which MCP hosts made real calls and the build's dependencies. Strands and
+their digests are as 0.14.0 writes them (the P0 corpus: 653 recorded outputs, 0 differ).
+
+Upgrade notes:
+- OpenClaw plugin `probbit-stance` 0.3.0: a configuration with `classifier: "jev"` loads with a warning and classifies by
+  keywords only; `classifierShadow`, `jevModel` and `jevKeyFile` each load with a warning and do nothing (no shadow
+  classifier runs, no key file is read), so an old configuration still passes the host's schema check. Remove those keys
+  to silence the warnings. `classifierTimeoutMs` defaults to 300 ms in both modes. The plugin still needs probbit 0.13.0
+  or later.
+- `probbit-stance` 0.3.0 on a lane whose strand was sealed into segments (`probbit live control STRAND seal`): the lane
+  is paused; for a new message the plugin does not call the engine, so no event is written, and injects no stance; it
+  logs once per lane that the strand was sealed into segments and that this version does not follow them (Fixed, below).
+- `probbit monitor --help`, the man page and the docs say "internal state" where they said "inner state"; a script that
+  matches the help text needs the new words. No output format changes.
+- `probbit explain STRAND --event N [--json]` is new. Its exit codes: 0 the selected event recomputes; 1 the selected event,
+  or a line before it, does not recompute (including a damaged copy of the sealing line in a segment file); 2 a bad flag or
+  out-of-range `--event`, an unreadable file, a line that is not JSON or an event line without its fields, or bad inputs in
+  the selected event; 5 unsupported. `probbit persona explain` is unchanged.
+- `probbit live verify` on a strand whose header state has a non-ASCII `persona.digest` exits 1 and names the mismatch,
+  where 0.14.0 panicked (exit 101).
+
 ### Added
 
 - `probbit explain STRAND --event N [--json]`: a read-only explanation of one strand event, with logged inputs and
@@ -15,13 +42,6 @@ All notable changes to this project are documented here. The format follows
   line that is not JSON or an event line without its fields, or bad inputs in the selected event; 5: unsupported. Existing commands and strand digests are unchanged.
 - [From SOUL.md to stance habits](docs/soul-to-habits.md): the bench-assistant worked example, rules-file mappings
   and the boundaries between stance constraints, model behavior and host action enforcement.
-
-### Removed
-
-- OpenClaw plugin 0.3.0: remove the Jev adapter, its OpenRouter key loading, named-classifier log fields and special
-  timeout default. Legacy `classifier: "jev"` loads with a warning and uses keywords only. `classifierShadow`,
-  `jevModel` and `jevKeyFile` are deprecated no-ops with a load-time warning each, so an old configuration still passes
-  the host's schema check; no shadow classifier runs and the key file is never read.
 
 ### Changed
 
@@ -81,18 +101,20 @@ All notable changes to this project are documented here. The format follows
   results; on a slower machine raise `--budget-ms` until `partial` and then `diagnostics_passed` appear.
 - README, AGENTS.md and npm README: `probbit persona init` prints its "wrote ..." line on stderr; the quick starts say so.
 - probbit-persona: a test closure no longer carries an unneeded `mut` (an `unused_mut` warning).
-
-## 0.14.1 - Unreleased
-
-### Fixed
-
 - Correct current dependency claims: the default build uses `libm` for amplitude-register math; `nostd` adds
   `hashbrown` and `portable-atomic`. Offline source builds require cached dependencies.
 - Give the CI 300-task demo a 1500 ms budget (previously 300 ms) for slow runners; the same pipeline must still succeed.
-- Correct the OpenClaw plugin test count in the adapter guide to 160 (107 direct tests and 53 classifier cases).
+- The adapter guide gives the OpenClaw plugin's current test count (165).
 - Add docs-bundle regeneration to the release PR checklist, with `scripts/generate_llms_full.py` and its `--check` mode;
   add the post-publication Pages front-door version and JSON-LD `softwareVersion` update on `gh-pages`.
 - Match the AgentDojo benchmark reproduction wording to CI: pushes to `main` and pull requests.
+
+### Removed
+
+- OpenClaw plugin 0.3.0: remove the Jev adapter, its OpenRouter key loading, named-classifier log fields and special
+  timeout default. Legacy `classifier: "jev"` loads with a warning and uses keywords only. `classifierShadow`,
+  `jevModel` and `jevKeyFile` are deprecated no-ops with a load-time warning each, so an old configuration still passes
+  the host's schema check; no shadow classifier runs and the key file is never read.
 
 ## 0.14.0 - 2026-10-31
 
