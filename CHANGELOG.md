@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
-## 0.15.0 - 2026-11-13
+## 0.15.0 - 2026-11-18
 
 0.15.0 adds `probbit explain STRAND --event N`, a read-only receipt for one logged event, recomputed through the same
 replay as `live verify`. The OpenClaw plugin `probbit-stance` 0.3.0 has no bundled model provider and no key handling: its
