@@ -169,10 +169,12 @@ main() {
             cmd="$dir/probbit"
             say ""
             # the file the user's shell reads: zsh ~/.zshrc; bash ~/.bash_profile on macOS (Terminal opens login shells),
-            # ~/.bashrc elsewhere; any other shell ~/.profile
+            # ~/.bashrc elsewhere; any other shell ~/.profile; SHELL unset or empty: ~/.zshrc on macOS (its default shell),
+            # elsewhere both bash's file and ~/.profile
             case "${SHELL:-}" in
                 */zsh) profile='~/.zshrc' ;;
                 */bash) if [ "$(uname -s 2> /dev/null)" = Darwin ]; then profile='~/.bash_profile'; else profile='~/.bashrc'; fi ;;
+                '') if [ "$(uname -s 2> /dev/null)" = Darwin ]; then profile='~/.zshrc'; else profile='~/.bashrc (bash) or ~/.profile'; fi ;;
                 *) profile='~/.profile' ;;
             esac
             say "$dir is not on your PATH. Add it in $profile:"

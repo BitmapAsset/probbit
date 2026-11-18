@@ -175,7 +175,7 @@ mod tests {
         let d = doc(CUR); let p = build(&d).unwrap();
         let (mut lv, header) = Live::start(p.clone(), &d, init(&p, Some(2), true, &run), Clock::Fixed, "probbit 0.14.0");
         let mut text = format!("{header}\n"); let mut night = vec![];
-        let mut feed = |lv: &mut Live, e: &Json, text: &mut String| { let (s, l) = lv.event(e, &run).unwrap(); text.push_str(&l); text.push('\n');
+        let feed = |lv: &mut Live, e: &Json, text: &mut String| { let (s, l) = lv.event(e, &run).unwrap(); text.push_str(&l); text.push('\n');
             if with_checkpoints && lv.n % 10 == 0 { text.push_str(&lv.checkpoint(&s)); text.push('\n'); } s };
         for k in 0..24 { let e = match k % 4 { 0 => r#"{"ping":true,"elapsed_hours":0.25}"#.to_string(), 1 => format!(r#"{{"odd":{},"elapsed_hours":0.25}}"#, k % 3 + 1),
             2 => r#"{"elapsed_hours":0.25}"#.to_string(), _ => r#"{"ping":true,"odd":2,"elapsed_hours":0.25}"#.to_string() };

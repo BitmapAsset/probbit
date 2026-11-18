@@ -36,7 +36,7 @@
 curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 ```
 Linux and macOS, no sudo, the archive's SHA-256 checked first. Windows, npm and the from-source build: [Install](#install).
-One binary of 3 to 4 MB; one third-party crate in the default build (`libm`, for amplitude-register math).
+One binary of 3 to 6 MB; one third-party crate in the default build (`libm`, for amplitude-register math).
 The `nostd` build adds `hashbrown` and `portable-atomic`. Nothing phones home. Agents: start at
 [For AI agents reading this](#for-ai-agents-reading-this), [AGENTS.md](AGENTS.md) and [llms.txt](llms.txt).
 
@@ -73,7 +73,7 @@ probbit --version
 # 4. Fetch an example persona (a tutor called Pip). No output; tutor.yaml appears.
 curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/examples/persona/tutor.yaml
 
-# 5. Make an individual: persona + seed 2. Expect "wrote tutor.state (Pip 1.1.0, seed 2)". Exit 0.
+# 5. Make an individual: persona + seed 2. Expect "wrote tutor.state (Pip 1.1.0, seed 2)" on stderr. Exit 0.
 probbit persona init tutor.yaml --seed 2 --out tutor.state
 
 # 6. One live event (an upset user), logged to a strand. Expect one line starting
@@ -224,7 +224,7 @@ One line, no sudo, the archive's SHA-256 checked before anything is installed. T
 | npm (Node 18+) | `npm i -g probbit` |
 | by hand | archives for Linux x86_64 (glibc or static musl), Linux arm64 (static), macOS (Apple silicon and Intel) and Windows x86_64 on the [Releases page](https://github.com/BitmapAsset/probbit/releases), each with a `.sha256` beside it |
 
-npm may print an `allow-scripts` warning: the package's only install script downloads the prebuilt binary for your platform
+npm may print a warning about install scripts: the package's only install script downloads the prebuilt binary for your platform
 and checks its SHA-256. If npm blocks the script, the binary is fetched the first time you run `probbit` instead.
 
 The shell installer defaults to `~/.local/bin`, without replacing a system-wide installation. Set
@@ -254,9 +254,11 @@ gives a command's flags with their defaults, its exit codes and examples. A mist
 
 ## 60-second tour
 
+The sixty seconds are the demo with a built binary; the first build takes a few minutes.
+
 ```
 git clone https://github.com/BitmapAsset/probbit && cd probbit
-cargo test --release --workspace                                   # unit, integration, regression and exact-oracle tests
+cargo test --release --workspace                                   # the whole test suite (unit, integration, regression and exact-oracle tests): several more minutes
 cargo run --release -p probbit-cli -- demo --tasks 12 | cargo run --release -p probbit-cli -- decide --pretty
 cargo run --release --example agent_router                         # the full narrated demo, ~3 s
 ```
@@ -275,7 +277,8 @@ $ probbit demo --tasks 300 --hard | probbit decide --budget-ms 200    # "partial
 $ probbit demo --tasks 300 --hard | probbit decide --budget-ms 1000   # "diagnostics_passed": 300 released, 0 violations
 ```
 (5 runs each on an Apple M4.) Every escalated task's odds are in the output; the decision is left to you. The budget is
-wall-clock, so a slower machine needs a longer one; `--sweeps N --polish-sweeps M` is checked for byte-for-byte replay across the CI matrix, excluding timings
+wall-clock: on a slower machine the same commands refuse or escalate more, so raise `--budget-ms` until `partial` and then
+`diagnostics_passed` appear; `--sweeps N --polish-sweeps M` is checked for byte-for-byte replay across the CI matrix, excluding timings
 and echoed runtime controls ([CONTRIBUTING.md](CONTRIBUTING.md)).
 
 Everything runs with stock stable Rust. The default build uses `libm` for amplitude-register math; `nostd` adds
@@ -766,7 +769,7 @@ rail, and the header above the face says which agent, on which host, in which la
 labels in a sidecar next to each strand (`nova.labels.json`), outside the strand and its digests: `probbit live ... --strand
 nova.strand --label agent=Nova --label lane=support` writes them, the OpenClaw plugin writes them per lane, and `probbit monitor
 old.strand --label agent=Nova --open` labels a strand recorded before them without rewriting it.
-See [the monitor guide](docs/persona.md#58-monitor-watch-an-individuals-inner-state) for the data and replay boundaries.
+See [the monitor guide](docs/persona.md#58-monitor-watch-an-individuals-internal-state) for the data and replay boundaries.
 
 **The monitor as a Mac app.** On a Mac the same page opens in its own window: download `probbit-Monitor-<version>-macos.zip`
 from the [release page](https://github.com/BitmapAsset/probbit/releases), unzip it, move **probbit Monitor** to Applications,

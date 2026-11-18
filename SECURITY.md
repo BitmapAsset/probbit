@@ -22,8 +22,9 @@ notes unless you prefer otherwise.
 ## What counts
 
 probbit is a local command-line processor that reads JSON from standard input and
-writes JSON to standard output. It opens no network connections and has no
-external crates. Reports in these areas are especially welcome:
+writes JSON to standard output. It opens no outbound network connections (only
+`probbit monitor` listens, on 127.0.0.1), and its default build has one
+third-party crate, `libm`. Reports in these areas are especially welcome:
 
 - **Input handling.** A malformed or hostile problem document must exit 2 with a
   message on stderr. A crash (`abort`, stack overflow, panic), a hang, unbounded
