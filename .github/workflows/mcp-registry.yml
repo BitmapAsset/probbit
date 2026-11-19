@@ -2,7 +2,7 @@ name: mcp-registry
 
 # Publishes server.json to the official MCP Registry (registry.modelcontextprotocol.io). Manual only: it never runs on a
 # push or a tag. Run it after the npm package of the same version is published (the registry reads `mcpName` from it).
-# Auth is GitHub OIDC (`mcp-publisher login github-oidc`): no stored token; the run may claim io.github.BitmapAsset/*.
+# Auth is GitHub OIDC (`mcp-publisher login github-oidc`): no stored token; the run may claim names under this repository's owner (io.github.<owner>/*).
 on:
   workflow_dispatch:
     inputs:

@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- `server.json` for the official MCP Registry (the name is the npm package's `mcpName`; the package `probbit`, stdio,
+  `mcp`), and the workflow `mcp-registry`, which publishes it only when started by hand (GitHub OIDC, no stored token;
+  unticked `publish` checks and validates only). It checks that `server.json`, `npm/package.json` and the published npm
+  package name the same version and `mcpName` before it publishes.
+- docs/mcp.md: the MCP server's 10 tools as `tools/list` gives them, setup for Claude Code, Codex CLI, Gemini CLI, Claude
+  Desktop, Cursor, VS Code and OpenClaw (each marked run here or not), two worked examples and troubleshooting. The
+  README's MCP paragraph links to it.
+- cargo-binstall metadata in `probbit-cli/Cargo.toml`, naming the release archives (untested: `cargo binstall` needs the
+  crate on crates.io, and it is not published). The six crates package with `cargo package` as they are.
+
 ### Changed
 
 - `probbit live` (and `persona turn`) on a persona with `reward_from`: a reward without `src` is still refused (exit 2),

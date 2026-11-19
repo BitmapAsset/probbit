@@ -88,6 +88,7 @@ probbit live verify tutor.strand | grep -o '"ok":[a-z]*'
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"sh","version":"0"}}}' '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | probbit mcp 2>/dev/null | grep -o '"name":"probbit_[a-z_]*"'
 ```
 
+The MCP server, client by client (setup, the 10 tools, two worked examples, troubleshooting): [docs/mcp.md](docs/mcp.md).
 Then hand it to your harness: `claude mcp add probbit -- probbit mcp` (Claude Code; Codex, Cursor and other MCP clients in
 [docs/agents.md](docs/agents.md)). OpenClaw: `openclaw plugins install npm:probbit-stance --accept-capabilities` (this
 changes that OpenClaw's configuration; set-up and checks in [plugins/openclaw](plugins/openclaw/README.md)). Put the
