@@ -1521,7 +1521,7 @@ one of the kinds listed for that input; otherwise the event is **refused whole**
 | the event | refused because |
 |---|---|
 | `{"praise": true, "src": "self"}` | a reward never comes from the individual itself |
-| `{"praise": true}` | a reward needs a source |
+| `{"praise": true}` | a reward needs a source (the error names the missing field `src` and shows one accepted line) |
 | `{"goals": {"fun": {"win": 1}}, "src": "clock"}` | a source the persona does not list for it |
 | `{"praise": true, "src": "human:"}` | a malformed source |
 
@@ -2564,6 +2564,16 @@ inputs as given, `goals` included, and `verify` replays them.
 **What learns.** With a learning block, a turn whose reward or correction flag is on moves the learned weights Δ of the levels
 the previous stance took (section 2.8), never past ±total_cap per level. Without a block nothing learns, and every stance and
 state is the one `persona turn` gives.
+
+**Sources.** A persona with `reward_from` (section 2.10) needs `src` on every event whose reward is on. The shipped
+`examples/persona/dispatch-policy.yaml` allows `human` or `env`, and the three `examples/agent-harness/` personas allow `env`:
+
+```sh
+printf '%s\n' '{"error":true}' '{"praise":true,"src":"env"}' | probbit live examples/persona/dispatch-policy.yaml --seed 2 --clock fixed
+printf '%s\n' '{"praise":true,"src":"env"}' | probbit live examples/agent-harness/adaptive.json --seed 2 --clock fixed
+```
+
+Without it the event is refused (exit 2), and the error names the field and shows one line that is accepted.
 
 **What never changes.** Genes, priors, couplings, input effects, history features, habits and every trait's allowed levels. The
 learner's whole output is the Δ table, and habits are rules of every compiled program (section 3, step 6), so every stance obeys

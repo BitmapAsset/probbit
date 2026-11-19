@@ -822,6 +822,19 @@ fn src_without_reward_from_gives_0_8_0_bytes() {
     for f in [&script, &st, &sd, &guarded, &gs] { let _ = std::fs::remove_file(f); }
 }
 
+/// The shipped personas with `reward_from` (the dispatch policy and the three agent-harness personas): a praise without `src`
+/// exits 2 with an error that names the field and shows one accepted line; that line, as shown, exits 0.
+#[test]
+fn reward_without_src_names_the_field() {
+    for p in ["persona/dispatch-policy.yaml", "agent-harness/adaptive.json", "agent-harness/addressed.json", "agent-harness/guarded.json"] {
+        let p = format!("{}/../examples/{p}", env!("CARGO_MANIFEST_DIR"));
+        let (c, _, e) = probbit(&["live", &p, "--seed", "2", "--clock", "fixed"], "{\"praise\":true}\n"); assert_eq!(c, 2, "{p}: {e}");
+        assert!(e.contains("missing the field `src`"), "{p}: {e}");
+        let line = e.split("one line that is accepted: ").nth(1).and_then(|r| r.lines().next()).unwrap_or_else(|| panic!("{p}: {e}"));
+        let (c, _, e) = probbit(&["live", &p, "--seed", "2", "--clock", "fixed"], &format!("{line}\n")); assert_eq!(c, 0, "{p}: {line}: {e}");
+    }
+}
+
 /// The safety kit through the CLI: `--checkpoint-every` writes checkpoint lines that `verify` and `verify --from-checkpoint`
 /// check; `live control` pauses (every event refused, exit 4, nothing written), resumes and retires (final); the individual cannot
 /// control itself; a held lock refuses a second writer and a control line (exit 4) and changes nothing; no lock is left behind

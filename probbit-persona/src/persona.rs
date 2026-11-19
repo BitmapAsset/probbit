@@ -773,7 +773,9 @@ fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)]) -> R
             None => matches!(get(raw, k), Some(Json::Bool(true))) };
         let Some(allowed) = allowed.as_ref().filter(|_| on) else { continue };
         match kind {
-            None => return Err(perr("inputs.src", format!("{k} is a reward: the event needs a src ({} allowed by reward_from)", allowed.join(" or ")))),
+            None => { let eg = match k.strip_prefix("goals.").and_then(|r| r.strip_suffix(".win")) {
+                    Some(g) => format!(r#"{{"goals":{{"{g}":{{"win":1}}}},"src":"{}"}}"#, allowed[0]), None => format!(r#"{{"{k}":true,"src":"{}"}}"#, allowed[0]) };
+                return Err(perr("inputs.src", format!("{k} is a reward: the event is missing the field `src` (reward_from allows {}); one line that is accepted: {eg}", allowed.join(" or ")))) }
             Some("self") => return Err(perr("inputs.src", format!("{k} from the individual itself (src self) is refused: a reward comes from {}", allowed.join(" or ")))),
             Some(kd) if !allowed.iter().any(|a| a == kd) => return Err(perr("inputs.src", format!("{k} from {kd} is refused: reward_from allows {}", allowed.join(" or ")))),
             _ => {} } }
