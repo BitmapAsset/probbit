@@ -34,12 +34,12 @@ when it is given a `strand_path`. Every tool says `openWorldHint: false` (no net
 
 ## Setup
 
-Each block is the whole setup for one client. "Run here" means the maintainers ran it with the build of this commit
-and saw the result named; "not run here" means the client was not available, so the block follows the client's own
-documentation and is untested by us. Replace `probbit` with the binary's full path if the client does not inherit your
+Each block is the whole setup for one client. "Run here" means the maintainers ran it on 2026-11-18 with a 0.15.1-dev
+build and saw the result named; "not run here" means it was not run (the label says why), so the block follows the
+client's own documentation and is untested by us. Replace `probbit` with the binary's full path if the client does not inherit your
 `PATH`.
 
-**Claude Code** (run here: `claude mcp list` showed the server, and `claude -p` called `probbit_demo` and answered
+**Claude Code** (run here with `--scope project`: `claude mcp list` showed the server, and `claude -p` called `probbit_demo` and answered
 "12 tasks and 6 workers")
 
 ```sh
@@ -69,19 +69,19 @@ gemini mcp add probbit probbit mcp                       # .gemini/settings.json
 gemini mcp add --scope user probbit probbit mcp          # every folder
 ```
 
-**Claude Desktop** (not run here). In `claude_desktop_config.json` (Settings, Developer, Edit Config), then restart the app:
+**Claude Desktop** (not run here: not installed on the test machine). In `claude_desktop_config.json` (Settings, Developer, Edit Config), then restart the app:
 
 ```json
 {"mcpServers": {"probbit": {"command": "probbit", "args": ["mcp"]}}}
 ```
 
-**Cursor** (not run here). In `~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project:
+**Cursor** (not run here: not installed on the test machine). In `~/.cursor/mcp.json`, or `.cursor/mcp.json` in a project:
 
 ```json
 {"mcpServers": {"probbit": {"command": "probbit", "args": ["mcp"]}}}
 ```
 
-**VS Code** (not run here). In `.vscode/mcp.json` of the workspace:
+**VS Code** (not run here: not installed on the test machine). In `.vscode/mcp.json` of the workspace:
 
 ```json
 {"servers": {"probbit": {"type": "stdio", "command": "probbit", "args": ["mcp"]}}}
@@ -101,8 +101,8 @@ listed 10 tools): any client above can start `npx -y probbit mcp` instead of `pr
 
 ## Two worked examples
 
-Both ran over stdio against the build of this commit (it reports itself as `probbit 0.15.1-dev`), from the repository
-root, after `initialize`. The responses are the JSON in `result.content[0].text`, shortened where marked.
+Both ran over stdio on 2026-11-18 against a 0.15.1-dev build (the `engine` field below names it, and the hashes are
+that build's), from the repository root, after `initialize`. The responses are the JSON in `result.content[0].text`, shortened where marked.
 
 **1. A resident individual: one event, then its receipt.** The tutor persona, seed 2, one event from an upset learner,
 logged to `pip.strand`:

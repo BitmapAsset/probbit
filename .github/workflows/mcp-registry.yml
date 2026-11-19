@@ -41,7 +41,7 @@ jobs:
           [ "$v" = "$pv" ] && [ "$v" = "$nv" ] || { echo "versions differ"; exit 1; }
           [ "$name" = "$mcp" ] || { echo "server.json name and npm mcpName differ"; exit 1; }
           [ "v$v" = "$REF" ] || { echo "ref $REF is not v$v"; exit 1; }
-          published=$(curl -fsS "https://registry.npmjs.org/probbit/$v" | jq -r .mcpName)
+          published=$(curl -fsS "https://registry.npmjs.org/probbit/$v" | jq -r .mcpName) || { echo "npm has no probbit@$v yet: publish the npm package first"; exit 1; }
           [ "$published" = "$name" ] || { echo "npm probbit@$v is not published with mcpName $name (got: $published)"; exit 1; }
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: download and verify mcp-publisher

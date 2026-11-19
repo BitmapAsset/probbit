@@ -51,8 +51,8 @@ Through npm without a global install: `{"command": "npx", "args": ["-y", "probbi
 ## Registry-specific notes (for whoever submits)
 
 - **Official MCP registry** (registry.modelcontextprotocol.io, `mcp-publisher`): needs a `server.json` and proof of the
-  package. For the npm package the registry checks an `mcpName` field in the published `package.json`
-  (`mcpName`); the published npm package carries it since 0.14.0. The file is `server.json` at the repository root, and
+  package. For the npm package the registry checks an `mcpName` field in the published `package.json`;
+  the published npm package carries it since 0.14.0. The file is `server.json` at the repository root, and
   the workflow `mcp-registry` (started by hand, GitHub OIDC) publishes it after the npm package of the same version.
 - **Smithery**: a local stdio server; the listing takes the description, the client configuration above and the tool list.
 - **mcp.so** and similar directories: name, description, repository URL, categories, the client configuration.
