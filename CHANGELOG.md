@@ -10,7 +10,8 @@ All notable changes to this project are documented here. The format follows
 - `probbit live` (and `persona turn`) on a persona with `reward_from`: a reward without `src` is still refused (exit 2),
   and the error now names the missing field `src`, lists the kinds `reward_from` allows and shows one line that is
   accepted, e.g. `{"praise":true,"src":"env"}`. docs/persona.md §5.7 and the agent-harness README show `live` commands
-  for the shipped dispatch policy and the three agent-harness personas with `src`.
+  with `src` for the shipped dispatch policy and an agent-harness persona; the three declare the same `reward_from`.
+  A goal win's example line shows a win the persona accepts (1, or `drives.expectation.win_max` when that is below 1).
 
 ### Fixed
 
