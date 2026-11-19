@@ -308,6 +308,14 @@ step 2), so the feedback turn's own stance already uses it. What learning can an
 - A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
   as before the block existed.
 
+**One sign for every learned trait.** The reward and the correction flags carry one sign for the whole turn, and each learned
+trait the previous stance released steps with that sign, by its own credit. A host that maps raw task success onto them (a
+passed task = praise, a failed one = criticism) therefore pushes every trait in `traits` toward the levels it happened to take
+on passing turns, whether or not that trait had anything to do with the outcome: one global preference, smeared over every
+trait the block names. This is a caution read from the step above, not a measured result. Scope the credit to what the
+feedback judges: list in `traits` only the traits it is about, and with `learning.credit` (below) pay the decision the
+outcome is about.
+
 **Action-addressed feedback (`learning.credit`, optional).** Without it, feedback pays the previous stance. With it, the host
 can name the decision an outcome is about, so a late or out-of-order outcome credits the stance the host acted on:
 
