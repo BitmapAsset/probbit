@@ -5,6 +5,14 @@
 # PYTHON=<python> experiments/rerun.sh runs an interpreter outside that range with a warning instead of a refusal.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# E5 replays the 726 arm-A strands; without them every replay fails and E5 reads 0/726. Stop before any table is written.
+want=$(tar tzf tables/strands-A.tar.gz | grep -c '\.strand$')
+have=0; [ -d strands/A ] && have=$(find strands/A -name '*.strand' | wc -l | tr -d ' ')
+if [ "$have" != "$want" ]; then
+  echo "stopped: strands/A holds $have of the $want arm-A strands that E5 replays. Extract them first, in $(pwd):" >&2
+  echo "  tar xzf tables/strands-A.tar.gz" >&2
+  exit 2
+fi
 PY="${PYTHON:-${1:-venv011/bin/python}}"
 # numpy 1.26.4 has wheels for CPython 3.9 to 3.12 only; a source build on 3.14 shifted three bars.tsv cells.
 pyv=$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])') || { echo "cannot run $PY" >&2; exit 2; }
