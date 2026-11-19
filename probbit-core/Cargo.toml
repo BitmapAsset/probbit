@@ -17,4 +17,4 @@ std = []
 nostd = ["dep:probbit-nostd"]
 
 [dependencies]
-probbit-nostd = { path = "../probbit-nostd", version = "0.15.1", optional = true }
+probbit-nostd = { path = "../probbit-nostd", version = "0.15.2-dev", optional = true }
