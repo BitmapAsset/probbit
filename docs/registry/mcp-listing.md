@@ -31,7 +31,7 @@ Every claim below matches the README and `probbit mcp`'s own `tools/list` (0.13.
 {"mcpServers": {"probbit": {"command": "probbit", "args": ["mcp"]}}}
 ```
 Claude Code: `claude mcp add probbit -- probbit mcp`. Codex CLI: `codex mcp add probbit -- probbit mcp`.
-Through npm without a global install: `{"command": "npx", "args": ["-y", "probbit", "mcp"]}` (not yet tested in a client).
+Through npm without a global install: `{"command": "npx", "args": ["-y", "probbit", "mcp"]}` (`npx -y probbit@0.15.0 mcp` listed the 10 tools; setup per client in [docs/mcp.md](../mcp.md)).
 
 ## Tools (10)
 
@@ -51,27 +51,9 @@ Through npm without a global install: `{"command": "npx", "args": ["-y", "probbi
 ## Registry-specific notes (for whoever submits)
 
 - **Official MCP registry** (registry.modelcontextprotocol.io, `mcp-publisher`): needs a `server.json` and proof of the
-  package. For the npm package the registry checks an `mcpName` field in the published `package.json`
-  (`"mcpName": "io.github.BitmapAsset/probbit"`); that field is not in 0.13.0, so it needs a package release first.
-  Draft `server.json` (check the current schema URL with `mcp-publisher init` before submitting):
-
-  ```json
-  {
-    "name": "io.github.BitmapAsset/probbit",
-    "description": "A personality, mood and memory layer for AI agents, plus exact plans under hard rules. Offline.",
-    "repository": {"url": "https://github.com/BitmapAsset/probbit", "source": "github"},
-    "version": "0.13.0",
-    "packages": [
-      {
-        "registryType": "npm",
-        "identifier": "probbit",
-        "version": "0.13.0",
-        "transport": {"type": "stdio"},
-        "packageArguments": [{"type": "positional", "value": "mcp"}]
-      }
-    ]
-  }
-  ```
+  package. For the npm package the registry checks an `mcpName` field in the published `package.json`;
+  the published npm package carries it since 0.14.0. The file is `server.json` at the repository root, and
+  the workflow `mcp-registry` (started by hand, GitHub OIDC) publishes it after the npm package of the same version.
 - **Smithery**: a local stdio server; the listing takes the description, the client configuration above and the tool list.
 - **mcp.so** and similar directories: name, description, repository URL, categories, the client configuration.
 - Check before submitting: the step 8 command in the README ("For AI agents reading this") lists the same 10 tools.

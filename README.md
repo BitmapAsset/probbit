@@ -94,6 +94,7 @@ changes that OpenClaw's configuration; set-up and checks in [plugins/openclaw](p
 stance `line` into your model's prompt each turn; the model chooses its words and may ignore the stance. What to read next:
 [AGENTS.md](AGENTS.md) (these commands, plus how to verify a strand and report a bug), [docs/persona.md](docs/persona.md)
 (the persona format), [docs/CHEATSHEET.md](docs/CHEATSHEET.md) (every command and exit code).
+The MCP server client by client (setup, the 10 tools, two worked examples, troubleshooting): [docs/mcp.md](docs/mcp.md).
 
 ## Use it from your harness
 

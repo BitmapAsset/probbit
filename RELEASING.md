@@ -20,6 +20,8 @@ release tag the README shows (the GitHub Action example and its `version` input)
    - `npm/package.json`'s `version` and the version comment after `probbit --version` in `npm/README.md`; the example tag in `install.sh`, `install.ps1`, `action.yml`,
      `.github/workflows/bench.yml`, `scripts/bench/test_install_ps1.ps1` and `scripts/tests/test_install_contract.py`;
      the title of `docs/CHEATSHEET.md`; the strand header example in `docs/persona.md` §5.7;
+   - `server.json`'s `version` and `packages[0].version` (the `mcp-registry` workflow refuses a version that differs from
+     `npm/package.json` or that npm does not have yet);
    - `CHANGELOG.md`: `## X.Y.Z - <date>`, with an upgrade note wherever an exit code or an output changes;
    - the landing page (above);
    - regenerate `llms-full.txt` after all source-page edits: `python3 scripts/generate_llms_full.py`, then
