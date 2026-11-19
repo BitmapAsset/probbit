@@ -2476,6 +2476,17 @@ program leaves the exact tiers is `unknown`. `held by construction` relies on ev
 every rule in force. A rule with raw `rules` (not `then`) is fuzzed but not proved. The bound is per cell with the moods at
 the edges of their box, so a soft rule whose margin is small stays `unknown` even when no script breaks it.
 
+**A habit that yields is not a broken habit.** Under `on_conflict: yield` (section 5.5) a lower-priority habit gives way on
+a turn where it cannot hold together with a higher one. Test such a habit alone as a rule and `prove` can say `unknown` and
+`fuzz` can print a counterexample whose stance has `habits.violations: 0` and the habit in `habits.yielded`. The shipped
+tutor shows it: its `after_error_check` as `--never '{when: {error: true}, then: {caution: {at_least: prev+1}, verbosity:
+{at_most: prev-1}}}'` is `unknown` to `prove` for seeds 0-19 (exit 1), and `fuzz` finds a 2-event counterexample on each of
+those seeds (exit 1): the second event is a confused learner and an error at once, `confused_no_playful` (priority 10) wins,
+and the stance says `"yielded":["after_error_check"]` and `"escalate":"habit conflict resolved by priority: after_error_check
+yielded"`. Read `violations` and `yielded` in the counterexample's stance (`replay` prints it, `fuzz --json` has it under
+`shortest.stance.habits`), not only the verdict: `violations` above 0 is a broken habit, a name in `yielded` is the priority
+the persona declared.
+
 **With a drives block** (section 2.9). A rule may name `pursue` in `then` and, in `when`, the goal conditions the persona's
 habits use (the same goal, signal and range). `fuzz` adds goal signals to its events: per goal a win on `--grid` x `win_max`,
 a cue, a deadline on each `--hours` value. `prove` reads the drives as boxes: the aggregates as number inputs over their whole
