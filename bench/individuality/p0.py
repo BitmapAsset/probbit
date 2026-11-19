@@ -66,17 +66,12 @@ WARNINGS = [(SENSES_WARNING, ("senses",)), (CREDIT_WARNING, ("await", "for", "ca
 # of `adaptive` and `guarded` carry such events), is refused as before (exit 2, the error's `code` and `path` unchanged);
 # its message, in the error object on stdout and in the stderr line, now names the missing field and shows one accepted
 # line. Unlike the warning lines, this message is part of a document (the error object); stances, states and strands stay
-# byte-identical. The pattern matches the two forms the engine writes (a learning flag, a goal win), with plain quotes
-# (stderr) or JSON-escaped ones (stdout), the allowed kinds joined by ` or `; SRC_MESSAGE_RECORDED is the recorded form.
-_Q = rb'\\?"'
-_NAME = rb'[A-Za-z0-9_.-]+'
-_KIND = rb'[a-z]+'
-_FLAG = rb'\{' + _Q + _NAME + _Q + rb':true,' + _Q + rb'src' + _Q + rb':' + _Q + _KIND + _Q + rb'\}'
-_GOAL = (rb'\{' + _Q + rb'goals' + _Q + rb':\{' + _Q + _NAME + _Q + rb':\{' + _Q + rb'win' + _Q + rb':[0-9.]+\}\},' + _Q
-         + rb'src' + _Q + rb':' + _Q + _KIND + _Q + rb'\}')
-SRC_MESSAGE = re.compile(rb'the event is missing the field `src` \(reward_from allows (' + _KIND + rb'(?: or ' + _KIND
-                         + rb')*)\); one line that is accepted: (?:' + _FLAG + rb'|' + _GOAL + rb')')
-SRC_MESSAGE_RECORDED = rb'the event needs a src (\1 allowed by reward_from)'
+# byte-identical. The corpus's scripts produce one such message (a `praise` without `src`; `reward_from` is `["env"]`),
+# and the rule accepts exactly its bytes, as the stderr line has them and as the error object has them (each quote escaped).
+SRC_MESSAGE_RECORDED = b"praise is a reward: the event needs a src (env allowed by reward_from)"
+SRC_MESSAGE = (b'praise is a reward: the event is missing the field `src` (reward_from allows env); one line that is '
+               b'accepted: {"praise":true,"src":"env"}')
+SRC_MESSAGES = (SRC_MESSAGE, SRC_MESSAGE.replace(b'"', b'\\"'))
 
 
 def first_event_with(key, k, names):
@@ -107,8 +102,10 @@ def with_recorded_src_message(name, data):
     such message in the recorded words, else None."""
     if not re.match(r"(replay|live)/[^/]+/s\d+/\d+/(stdout|stderr)$", name):
         return None
-    rest, n = SRC_MESSAGE.subn(SRC_MESSAGE_RECORDED, data)
-    return rest if n else None
+    rest = data
+    for message in SRC_MESSAGES:
+        rest = rest.replace(message, SRC_MESSAGE_RECORDED)
+    return rest if rest != data else None
 
 
 def rel(path):

@@ -228,11 +228,12 @@ relabelled.
   the history: c1, c2, c3 and c4 1.0, 50/50 pairs identical.
 - `p0.py` (0.15.1): `check` also accepts the message 0.15.1 rewords. A reward without `src` on a persona with `reward_from`
   is refused as before (exit 2, the error's `code` and `path` unchanged), and its message, in the error object on stdout and
-  in the stderr line, now names the missing field and shows one accepted line (CHANGELOG, 0.15.1). An output of `replay` or
-  `live` that differs from its record is compared once more with every such message put back into the recorded words (the
-  two forms the engine writes: a learning flag, a goal win) and, when it then equals its record, is reported apart as
-  `src_message_reworded`: 96 outputs with a 0.15.1 build (the `replay` and `live` stdout and stderr of `adaptive` and
-  `guarded`, 3 seeds and 4 scripts each), none with 0.15.0. Unlike the two warning lines, this message is part of a
-  document: the error object on stdout (48 of the 96). Reason: the rewording is part of 0.15.1 (the error names the field
-  and shows an accepted event); the engine's behaviour is unchanged, and every stance, state and strand stays
-  byte-identical. EXPECTED, the scripts and the strands are unchanged; MANIFEST's p0.py line was updated.
+  in the stderr line, now names the missing field and shows one accepted line (CHANGELOG, 0.15.1). The corpus's scripts
+  produce one such message: a `praise` without `src` on `adaptive` and `guarded`, whose `reward_from` is `["env"]`. An
+  output of `replay` or `live` that differs from its record is compared once more with exactly that message put back into
+  the recorded words and, when it then equals its record, is reported apart as `src_message_reworded`: 96 outputs with a
+  0.15.1 build (the `replay` and `live` stdout and stderr of `adaptive` and `guarded`, 3 seeds and 4 scripts each), none
+  with 0.15.0. Unlike the two warning lines, this message is part of a document: the error object on stdout (48 of the
+  96). Reason: the rewording is part of 0.15.1 (the error names the field and shows an accepted event); the engine's
+  behaviour is unchanged, and every stance, state and strand stays byte-identical. EXPECTED, the scripts and the strands
+  are unchanged; MANIFEST's p0.py line was updated.
