@@ -1419,7 +1419,7 @@ mod tests {
     fn rewards_from_the_individual_itself_are_refused() {
         let (p, doc) = kit(Some(r#"["human","env"]"#));
         let (mut lv, _) = Live::start(p.clone(), &doc, persona::init(&p, Some(2), true, &run), Clock::Fixed, "t");
-        for (e, why) in [(r#"{"praise":true,"src":"self"}"#, "from the individual itself"), (r#"{"praise":true}"#, "needs a src"), (r#"{"criticism":true,"src":"clock"}"#, "from clock"),
+        for (e, why) in [(r#"{"praise":true,"src":"self"}"#, "from the individual itself"), (r#"{"praise":true}"#, "missing the field `src`"), (r#"{"criticism":true,"src":"clock"}"#, "from clock"),
             (r#"{"goals":{"fun":{"win":0.5}},"src":"self"}"#, "goals.fun.win from the individual"), (r#"{"praise":true,"src":"human:"}"#, "a source"), (r#"{"src":7}"#, "a source")] {
             let err = lv.event(&json::parse(e).unwrap(), &run).unwrap_err(); assert_eq!(err.path, "inputs.src", "{e}"); assert!(err.msg.contains(why), "{e}: {}", err.msg); }
         assert_eq!(lv.n, 0, "a refused event changes nothing");
