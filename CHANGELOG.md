@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Changed
+
+- `probbit live` (and `persona turn`) on a persona with `reward_from`: a reward without `src` is still refused (exit 2),
+  and the error now names the missing field `src`, lists the kinds `reward_from` allows and shows one line that is
+  accepted, e.g. `{"praise":true,"src":"env"}`. docs/persona.md §5.7 and the agent-harness README show `live` commands
+  with `src` for the shipped dispatch policy and an agent-harness persona; the three declare the same `reward_from`.
+  A goal win's example line shows a win the persona accepts (1, or `drives.expectation.win_max` when that is below 1).
+
+### Fixed
+
+- `bench/agentdojo/experiments/rerun.sh` stops at once (exit 2) with the exact `tar xzf tables/strands-A.tar.gz` command
+  when `strands/A` does not hold all 726 arm-A strands; before, E5 failed 0/726 and the tables differed.
+
+### Documentation
+
+- docs/persona.md §5.6 and the cheatsheet: under `on_conflict: yield`, a habit tested alone can be `unknown` to `prove`
+  and get a `fuzz` counterexample with `habits.violations: 0` and the habit in `habits.yielded` (the shipped tutor's
+  `after_error_check`, seeds 0-19); read `violations` and `yielded`, not only the verdict.
+- docs/persona.md §2.8 and USE-CASES: mapping raw task success onto praise and criticism moves every learned trait with
+  one sign, so one global preference smears over all of them; a caution from the learning step, not a measured result.
+
 ## 0.15.0 - 2026-11-18
 
 0.15.0 adds `probbit explain STRAND --event N`, a read-only receipt for one logged event, recomputed through the same

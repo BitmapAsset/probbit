@@ -28,6 +28,9 @@ Do not use it when:
 - **you need raw search speed on a known puzzle class.** Backtracking counts sudoku solutions 15-102x faster per puzzle than probbit's
   exact tier, and probbit's sampler refuses every generated sudoku (20/20; in the current build a puzzle that naked singles solve passes the gate (`diagnostics_passed`), §4).
 - **you need the best cut or lowest energy.** Simulated annealing found better max-cuts at equal time (§3).
+- **you plan to pay every learned trait with raw task success.** Mapped onto praise and criticism, its one sign moves every trait
+  the learning block names, so one global preference smears over all of them *(inferred)*: learn only the traits the feedback
+  judges ([docs/persona.md](docs/persona.md) §2.8).
 
 ## Catalogue by problem shape
 

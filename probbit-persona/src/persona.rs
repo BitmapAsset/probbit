@@ -763,8 +763,9 @@ pub fn src_kind(s: &str) -> Option<&'static str> {
     match (k, id) { ("human", i) if i.map_or(true, ok) => Some("human"), ("env", i) if i.map_or(true, ok) => Some("env"), ("self", None) => Some("self"), ("clock", None) => Some("clock"), _ => None }
 }
 /// Reward provenance (G1, §2.10): with `reward_from`, a reward-bearing input that is on (a learning flag true, a goal's win > 0)
-/// needs the event's `src` to be one of its allowed kinds; `self`, a missing or an undeclared source refuses the event whole
-fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)]) -> R<()> {
+/// needs the event's `src` to be one of its allowed kinds; `self`, a missing or an undeclared source refuses the event whole.
+/// `win` is the goal win the error's example line shows: min(1, drives.expectation.win_max), so the line is accepted.
+fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)], win: f64) -> R<()> {
     const FORM: &str = "a source: human[:id] | env[:id] | self | clock (id: 1-64 of A-Z a-z 0-9 _ . - @ / :)";
     let kind = match get(raw, "src") { None => None, Some(Json::Str(s)) => Some(src_kind(s).ok_or_else(|| perr("inputs.src", FORM))?), Some(_) => return Err(perr("inputs.src", FORM)) };
     for (k, allowed) in rw {
@@ -773,7 +774,9 @@ fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)]) -> R
             None => matches!(get(raw, k), Some(Json::Bool(true))) };
         let Some(allowed) = allowed.as_ref().filter(|_| on) else { continue };
         match kind {
-            None => return Err(perr("inputs.src", format!("{k} is a reward: the event needs a src ({} allowed by reward_from)", allowed.join(" or ")))),
+            None => { let eg = match k.strip_prefix("goals.").and_then(|r| r.strip_suffix(".win")) {
+                    Some(g) => format!(r#"{{"goals":{{"{g}":{{"win":{}}}}},"src":"{}"}}"#, pyn(win), allowed[0]), None => format!(r#"{{"{k}":true,"src":"{}"}}"#, allowed[0]) };
+                return Err(perr("inputs.src", format!("{k} is a reward: the event is missing the field `src` (reward_from allows {}); one line that is accepted: {eg}", allowed.join(" or ")))) }
             Some("self") => return Err(perr("inputs.src", format!("{k} from the individual itself (src self) is refused: a reward comes from {}", allowed.join(" or ")))),
             Some(kd) if !allowed.iter().any(|a| a == kd) => return Err(perr("inputs.src", format!("{k} from {kd} is refused: reward_from allows {}", allowed.join(" or ")))),
             _ => {} } }
@@ -783,7 +786,7 @@ fn provenance(rw: &[(String, Option<Vec<String>>)], raw: &[(String, Json)]) -> R
 /// Normal turns use this same check; callers cannot use this to authorize production evidence.
 pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
     let raw = raw.as_obj().ok_or_else(|| perr("inputs", "must be an object"))?;
-    if let Some(rw) = &p.reward { provenance(rw, raw)?; }
+    if let Some(rw) = &p.reward { provenance(rw, raw, example_win(p))?; }
     // readings (§2.11, S2): each one's source, its own or the event's, of a kind its sense reads from
     if let Some(sn) = &p.senses { src_form(raw)?; sense_step(sn, &SState::zero(&p.name, sn, p.seed), raw, get(raw, "src"), true)?; }
     // a cancel (§2.8, B-R5) comes from env or a person
@@ -793,6 +796,8 @@ pub fn check_provenance(p: &Persona, raw: &Json) -> R<()> {
         let nd = NState { genes: Json::Null, deficit: vec![0.0; nb.items.len()], success: vec![nb.init; nb.items.len()], misses: vec![0.0; nb.items.len()], beyond: vec![0; nb.items.len()], lost: false, phasic: 0.0 }; needs_step(d, nb, &nd, &[], raw, get(raw, "src"), true)?; }
     Ok(())
 }
+/// The goal win an error's example line shows: 1, or win_max when it is below 1 (a win lies in [0, win_max])
+fn example_win(p: &Persona) -> f64 { p.drives.as_ref().map_or(1.0, |d| d.win_max.min(1.0)) }
 /// A persona whose events need a source: rewards (`reward_from`), readings (a senses block), cancels (a credit block) or needs
 /// amounts (a needs block)
 pub fn has_reward_sources(p: &Persona) -> bool { p.reward.is_some() || p.senses.is_some() || p.credit().is_some() || p.has_needs() }
@@ -1599,7 +1604,7 @@ fn prep_body(p: &Persona, st: &State, raw: &[(String, Json)], src: Option<&Json>
 /// inputs and returned; without any of them it stays an undeclared input
 fn take_src(p: &Persona, raw: Vec<(String, Json)>, check: bool) -> R<(Option<Json>, Vec<(String, Json)>)> {
     if p.reward.is_none() && p.senses.is_none() && p.credit().is_none() && !p.has_needs() { return Ok((None, raw)); }
-    if check { match &p.reward { Some(rw) => provenance(rw, &raw)?, None => src_form(&raw)? } }
+    if check { match &p.reward { Some(rw) => provenance(rw, &raw, example_win(p))?, None => src_form(&raw)? } }
     let src = get(&raw, "src").cloned();
     Ok((src, raw.into_iter().filter(|(k, _)| k != "src").collect()))
 }
@@ -6162,6 +6167,16 @@ mod tests {
     /// stamped hours decay it, the reward flag counts 1 and a correction 0, a burst pins it at the cap with the level and clause, the
     /// host never sends pace_up / pace_down, and the loop host's transient to the fixed points 1.2632, 1.5 and 2.25 at loop gain
     /// G 0.24, 0.60, 0.84 (p6)
+    #[test]
+    fn missing_src_example_win_fits_win_max() {
+        // win_max 0.5: the shown goal line carries 0.5 (a win of 1 would be refused); the default win_max (2): it shows 1
+        for (doc, want) in [(PACE.replace(r#""win_max":4"#, r#""win_max":0.5"#), "0.5"), (PACE.replace(r#","expectation":{"win_max":4}"#, ""), "1")] {
+            let p = build(&json::parse(&doc).unwrap()).unwrap(); let st0 = init(&p, Some(0), true, &run);
+            let e = check_provenance(&p, &json::parse(&format!(r#"{{"goals":{{"task":{{"win":{want}}}}}}}"#)).unwrap()).unwrap_err();
+            let line = e.msg.split("one line that is accepted: ").nth(1).unwrap_or_else(|| panic!("{}", e.msg));
+            assert_eq!(line, format!(r#"{{"goals":{{"task":{{"win":{want}}}}},"src":"env"}}"#), "{}", e.msg);
+            ok_turn(&p, &st0, line); }
+    }
     #[test]
     fn pace_follows_its_closed_forms() {
         let p = build(&json::parse(PACE).unwrap()).unwrap(); let st0 = init(&p, Some(0), true, &run);

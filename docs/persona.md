@@ -308,6 +308,15 @@ step 2), so the feedback turn's own stance already uses it. What learning can an
 - A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
   as before the block existed.
 
+**One sign for every learned trait.** The reward and the correction flags carry one sign for the whole turn, and each learned
+trait the previous stance released steps with that sign, by its own credit. A host that maps raw task success onto them (a
+passed task = praise, a failed one = criticism) therefore pushes every trait in `traits` toward the levels it happened to take
+on passing turns and away from those it took on failing ones, whether or not that trait had anything to do with the
+outcome: one global preference, smeared over every
+trait the block names. This is a caution read from the step above, not a measured result. Scope the credit to what the
+feedback judges: list in `traits` only the traits it is about, and with `learning.credit` (below) pay the decision the
+outcome is about.
+
 **Action-addressed feedback (`learning.credit`, optional).** Without it, feedback pays the previous stance. With it, the host
 can name the decision an outcome is about, so a late or out-of-order outcome credits the stance the host acted on:
 
@@ -486,7 +495,7 @@ one of the kinds listed for that input; otherwise the event is **refused whole**
 | the event | refused because |
 |---|---|
 | `{"praise": true, "src": "self"}` | a reward never comes from the individual itself |
-| `{"praise": true}` | a reward needs a source |
+| `{"praise": true}` | a reward needs a source (the error names the missing field `src` and shows one accepted line) |
 | `{"goals": {"fun": {"win": 1}}, "src": "clock"}` | a source the persona does not list for it |
 | `{"praise": true, "src": "human:"}` | a malformed source |
 
@@ -1441,6 +1450,17 @@ program leaves the exact tiers is `unknown`. `held by construction` relies on ev
 every rule in force. A rule with raw `rules` (not `then`) is fuzzed but not proved. The bound is per cell with the moods at
 the edges of their box, so a soft rule whose margin is small stays `unknown` even when no script breaks it.
 
+**A habit that yields is not a broken habit.** Under `on_conflict: yield` (section 5.5) a lower-priority habit gives way on
+a turn where it cannot hold together with a higher one. Test such a habit alone as a rule and `prove` can say `unknown` and
+`fuzz` can print a counterexample whose stance has `habits.violations: 0` and the habit in `habits.yielded`. The shipped
+tutor shows it: its `after_error_check` as `--never '{when: {error: true}, then: {caution: {at_least: prev+1}, verbosity:
+{at_most: prev-1}}}'` is `unknown` to `prove` for seeds 0-19 (exit 1), and `fuzz` finds a 2-event counterexample on each of
+those seeds (exit 1): the second event is a confused learner and an error at once, `confused_no_playful` (priority 10) wins,
+and the stance says `"yielded":["after_error_check"]` and `"escalate":"habit conflict resolved by priority: after_error_check
+yielded"`. Read `violations` and `yielded` in the counterexample's stance (`replay` prints it, `fuzz --json` has it under
+`shortest.stance.habits`), not only the verdict: `violations` above 0 is a broken habit, a name in `yielded` is the priority
+the persona declared.
+
 **With a drives block** (section 2.9). A rule may name `pursue` in `then` and, in `when`, the goal conditions the persona's
 habits use (the same goal, signal and range). `fuzz` adds goal signals to its events: per goal a win on `--grid` x `win_max`,
 a cue, a deadline on each `--hours` value. `prove` reads the drives as boxes: the aggregates as number inputs over their whole
@@ -1529,6 +1549,16 @@ inputs as given, `goals` included, and `verify` replays them.
 **What learns.** With a learning block, a turn whose reward or correction flag is on moves the learned weights Δ of the levels
 the previous stance took (section 2.8), never past ±total_cap per level. Without a block nothing learns, and every stance and
 state is the one `persona turn` gives.
+
+**Sources.** A persona with `reward_from` (section 2.10) needs `src` on every event whose reward is on. The shipped
+`examples/persona/dispatch-policy.yaml` allows `human` or `env`, and the three `examples/agent-harness/` personas allow `env`:
+
+```sh
+printf '%s\n' '{"error":true}' '{"praise":true,"src":"env"}' | probbit live examples/persona/dispatch-policy.yaml --seed 2 --clock fixed
+printf '%s\n' '{"praise":true,"src":"env"}' | probbit live examples/agent-harness/adaptive.json --seed 2 --clock fixed
+```
+
+Without it the event is refused (exit 2), and the error names the field and shows one line that is accepted.
 
 **What never changes.** Genes, priors, couplings, input effects, history features, habits and every trait's allowed levels. The
 learner's whole output is the Δ table, and habits are rules of every compiled program (section 3, step 6), so every stance obeys

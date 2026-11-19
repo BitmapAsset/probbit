@@ -215,4 +215,6 @@ verdict}`, where `rules` is the `persona lint` document. In GitHub Actions: `use
 - `lint`: contradicting habits; with `--props`, every rule proved or fuzzed;
 - `fuzz`: "none found" is evidence over the scripts searched, not a proof;
 - `prove`: `held by construction` (a habit implies it), `proved for every event sequence` (a sound bound) or `unknown`;
+- with `on_conflict: yield`, a habit tested alone can be `unknown` and get a counterexample with `habits.violations: 0` and
+  the habit in `habits.yielded` (it gave way to a higher priority): read `violations` and `yielded`, not only the verdict;
 - `live verify`: a strand replays byte for byte.

@@ -66,6 +66,10 @@ and Windows.
 
 ## Replaying generated counterexamples
 
+The three personas here declare `reward_from: [env]`, so an event with `praise` on needs `"src":"env"`
+(`echo '{"praise":true,"src":"env"}' | ./target/release/probbit live examples/agent-harness/adaptive.json --clock fixed`);
+without it `probbit live` refuses the event (exit 2) and names the missing field.
+
 When `reward_from` requires a source, fuzz searches an abstract accepted-source history.
 It must not silently label that history as a production observation. Explicitly authorize
 a synthetic fixture source when exporting a runnable counterexample:
