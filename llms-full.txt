@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh
 # 2. Put that directory on PATH for this shell. No output.
 export PATH="$HOME/.local/bin:$PATH"
 
-# 3. Expect "probbit 0.15.0" (or later). Exit 0.
+# 3. Expect "probbit 0.15.1" (or later). Exit 0.
 probbit --version
 
 # 4. Fetch an example persona (a tutor called Pip). No output; tutor.yaml appears.
@@ -106,6 +106,7 @@ changes that OpenClaw's configuration; set-up and checks in [plugins/openclaw](p
 stance `line` into your model's prompt each turn; the model chooses its words and may ignore the stance. What to read next:
 [AGENTS.md](AGENTS.md) (these commands, plus how to verify a strand and report a bug), [docs/persona.md](docs/persona.md)
 (the persona format), [docs/CHEATSHEET.md](docs/CHEATSHEET.md) (every command and exit code).
+The MCP server client by client (setup, the 10 tools, two worked examples, troubleshooting): [docs/mcp.md](docs/mcp.md).
 
 ## Use it from your harness
 
@@ -115,7 +116,7 @@ stance `line` into your model's prompt each turn; the model chooses its words an
 | CLI event receipt | [explain one logged turn](docs/CHEATSHEET.md#probbit-explain-strand---event-n) | `probbit explain run.strand --event 2` → inputs, before/after stance, binding habits, chain and `recomputes` or `differs`; add `--json` |
 | MCP server (Claude Code, Codex, Cursor, mcporter, any MCP client) | `claude mcp add probbit -- probbit mcp` ([docs/agents.md](docs/agents.md)) | step 8 above: 10 tools, `probbit_decide` … `probbit_live_verify` |
 | OpenClaw plugin | `openclaw plugins install npm:probbit-stance --accept-capabilities` | `openclaw plugins inspect probbit-stance --runtime --json` lists both hooks ([plugins/openclaw](plugins/openclaw/README.md)) |
-| npm | `npm i -g probbit` (Node 18+; downloads the prebuilt binary, SHA-256 checked) | `probbit --version` → `probbit 0.15.0` |
+| npm | `npm i -g probbit` (Node 18+; downloads the prebuilt binary, SHA-256 checked) | `probbit --version` → `probbit 0.15.1` |
 | Python | `curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/python/probbit.py`: a stdlib-only wrapper around the CLI (decide, run, evaluate, persona, live; typed errors); not on PyPI | `python3 -c 'import probbit; s=probbit.persona_init("tutor.yaml", seed=2); print(probbit.persona_turn("tutor.yaml", s, {"sentiment":"negative"})["stance"]["line"])'` → `Stance: go easy on the jokes; …` |
 | Agent SDK adapters | Claude Code hooks, OpenAI Agents SDK, LangChain, Vercel AI SDK ([docs/adapters.md](docs/adapters.md)) | in a clone: `python3 python/test_host.py` (Python hosts) or `node --test examples/node/stance-host.test.mjs` |
 | Browser (wasm) | in a clone, with Rust and `rustup target add wasm32-unknown-unknown`: `playground/build.sh` | `ls -l playground/probbit.wasm`, then open `playground/index.html` |
@@ -227,7 +228,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.15.0.
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.15.1.
 
 | how | command |
 |---|---|
@@ -674,7 +675,7 @@ numbers), and uploads the JSON report as an artifact:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: BitmapAsset/probbit@v0.15.0    # the action needs probbit 0.9.0 or later
+- uses: BitmapAsset/probbit@v0.15.1    # the action needs probbit 0.9.0 or later
   with:
     persona: agent/policy.yaml
     props: agent/rules.json
@@ -690,7 +691,7 @@ numbers), and uploads the JSON report as an artifact:
 | `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
 | `seeds` | `0-99` | the individuals |
 | `depth` | probbit's (8) | events per fuzzed script |
-| `version` | `latest` | the release `install.sh` installs (`v0.15.0`, ...) |
+| `version` | `latest` | the release `install.sh` installs (`v0.15.1`, ...) |
 | `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
 | `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
 | `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |
@@ -1343,6 +1344,15 @@ step 2), so the feedback turn's own stance already uses it. What learning can an
 - A persona without the block has no `learned` or `credit` field, and every document it produces is the same, byte for byte,
   as before the block existed.
 
+**One sign for every learned trait.** The reward and the correction flags carry one sign for the whole turn, and each learned
+trait the previous stance released steps with that sign, by its own credit. A host that maps raw task success onto them (a
+passed task = praise, a failed one = criticism) therefore pushes every trait in `traits` toward the levels it happened to take
+on passing turns and away from those it took on failing ones, whether or not that trait had anything to do with the
+outcome: one global preference, smeared over every
+trait the block names. This is a caution read from the step above, not a measured result. Scope the credit to what the
+feedback judges: list in `traits` only the traits it is about, and with `learning.credit` (below) pay the decision the
+outcome is about.
+
 **Action-addressed feedback (`learning.credit`, optional).** Without it, feedback pays the previous stance. With it, the host
 can name the decision an outcome is about, so a late or out-of-order outcome credits the stance the host acted on:
 
@@ -1521,7 +1531,7 @@ one of the kinds listed for that input; otherwise the event is **refused whole**
 | the event | refused because |
 |---|---|
 | `{"praise": true, "src": "self"}` | a reward never comes from the individual itself |
-| `{"praise": true}` | a reward needs a source |
+| `{"praise": true}` | a reward needs a source (the error names the missing field `src` and shows one accepted line) |
 | `{"goals": {"fun": {"win": 1}}, "src": "clock"}` | a source the persona does not list for it |
 | `{"praise": true, "src": "human:"}` | a malformed source |
 
@@ -2476,6 +2486,17 @@ program leaves the exact tiers is `unknown`. `held by construction` relies on ev
 every rule in force. A rule with raw `rules` (not `then`) is fuzzed but not proved. The bound is per cell with the moods at
 the edges of their box, so a soft rule whose margin is small stays `unknown` even when no script breaks it.
 
+**A habit that yields is not a broken habit.** Under `on_conflict: yield` (section 5.5) a lower-priority habit gives way on
+a turn where it cannot hold together with a higher one. Test such a habit alone as a rule and `prove` can say `unknown` and
+`fuzz` can print a counterexample whose stance has `habits.violations: 0` and the habit in `habits.yielded`. The shipped
+tutor shows it: its `after_error_check` as `--never '{when: {error: true}, then: {caution: {at_least: prev+1}, verbosity:
+{at_most: prev-1}}}'` is `unknown` to `prove` for seeds 0-19 (exit 1), and `fuzz` finds a 2-event counterexample on each of
+those seeds (exit 1): the second event is a confused learner and an error at once, `confused_no_playful` (priority 10) wins,
+and the stance says `"yielded":["after_error_check"]` and `"escalate":"habit conflict resolved by priority: after_error_check
+yielded"`. Read `violations` and `yielded` in the counterexample's stance (`replay` prints it, `fuzz --json` has it under
+`shortest.stance.habits`), not only the verdict: `violations` above 0 is a broken habit, a name in `yielded` is the priority
+the persona declared.
+
 **With a drives block** (section 2.9). A rule may name `pursue` in `then` and, in `when`, the goal conditions the persona's
 habits use (the same goal, signal and range). `fuzz` adds goal signals to its events: per goal a win on `--grid` x `win_max`,
 a cue, a deadline on each `--hours` value. `prove` reads the drives as boxes: the aggregates as number inputs over their whole
@@ -2565,6 +2586,16 @@ inputs as given, `goals` included, and `verify` replays them.
 the previous stance took (section 2.8), never past ±total_cap per level. Without a block nothing learns, and every stance and
 state is the one `persona turn` gives.
 
+**Sources.** A persona with `reward_from` (section 2.10) needs `src` on every event whose reward is on. The shipped
+`examples/persona/dispatch-policy.yaml` allows `human` or `env`, and the three `examples/agent-harness/` personas allow `env`:
+
+```sh
+printf '%s\n' '{"error":true}' '{"praise":true,"src":"env"}' | probbit live examples/persona/dispatch-policy.yaml --seed 2 --clock fixed
+printf '%s\n' '{"praise":true,"src":"env"}' | probbit live examples/agent-harness/adaptive.json --seed 2 --clock fixed
+```
+
+Without it the event is refused (exit 2), and the error names the field and shows one line that is accepted.
+
 **What never changes.** Genes, priors, couplings, input effects, history features, habits and every trait's allowed levels. The
 learner's whole output is the Δ table, and habits are rules of every compiled program (section 3, step 6), so every stance obeys
 every habit in force whatever Δ is: rule immunity is architectural, not trained or measured into it, and `prove` (section 5.6)
@@ -2581,7 +2612,7 @@ credits every learned trait with the level it took, so a reward aimed at one tra
 demo below, praise for short answers also raised the light joke the tutor was making): learn the traits the feedback judges.
 
 **The strand.** `--strand FILE` logs the life. Line 1 is the header, compact JSON:
-`{"probbit_strand":1,"engine":"probbit 0.15.0","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
+`{"probbit_strand":1,"engine":"probbit 0.15.1","persona":{"name","version","digest"},"seed":N,"state":{...},"document":{...}}`,
 with the initial state as canonical JSON (one individual has one header, whether it comes from `init` or from a state file) and
 the persona document in its own key order (the compiled program, and `engine.program` with it, follows the document's key order).
 Then one line per event, canonical JSON: `{"inputs":{...,"elapsed_hours":h},"n":k,"prev":"sha256:...","stance":"sha256:...",
@@ -3456,7 +3487,7 @@ place to report what you got. An outside reproduction (or a disagreement) is wor
 ```sh
 npm i -g probbit            # or: curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh | sh
 git clone https://github.com/BitmapAsset/probbit && cd probbit
-probbit version                                                   # probbit 0.15.0
+probbit version                                                   # probbit 0.15.1
 
 # a rule held by construction over 100 individuals (README, "Test a character")
 probbit persona prove examples/persona/tutor.yaml --seeds 0-99 --never '{when: {sentiment: negative}, then: {humour: {at_most: light}}}'
