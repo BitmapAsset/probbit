@@ -3,7 +3,8 @@
     python3 p0.py record   # with a released binary: writes fixtures/p0/EXPECTED, the strands and fixtures/MANIFEST
     python3 p0.py check    # with the binary under test: every output equals its recorded sha256 (exit 1 if not); a
                            # `live` stderr may also carry the senses and credit warning lines (WARNINGS) where its script
-                           # sends those keys, and is reported apart
+                           # sends those keys, and is reported apart; a `replay` or `live` output may carry the
+                           # message 0.15.1 rewords (SRC_MESSAGE) and is then reported apart too
 
 The corpus: every persona of fixtures/gen.py's P0 list x seeds 0-2 x its committed random scripts, through `persona replay`
 and `live --clock fixed` (stances, error objects, final state, strand), plus `init`, `check`, `describe`, `compile`, `lint
@@ -61,6 +62,22 @@ CREDIT_WARNING = ("probbit: live: events[%d]: this persona has no credit block: 
                   "inputs (listed in ignored), feedback pays the previous stance\n")
 WARNINGS = [(SENSES_WARNING, ("senses",)), (CREDIT_WARNING, ("await", "for", "cancel"))]
 
+# The message 0.15.1 rewords in a corpus output: a reward without `src`, sent to a persona with `reward_from` (the scripts
+# of `adaptive` and `guarded` carry such events), is refused as before (exit 2, the error's `code` and `path` unchanged);
+# its message, in the error object on stdout and in the stderr line, now names the missing field and shows one accepted
+# line. Unlike the warning lines, this message is part of a document (the error object); stances, states and strands stay
+# byte-identical. The pattern matches the two forms the engine writes (a learning flag, a goal win), with plain quotes
+# (stderr) or JSON-escaped ones (stdout), the allowed kinds joined by ` or `; SRC_MESSAGE_RECORDED is the recorded form.
+_Q = rb'\\?"'
+_NAME = rb'[A-Za-z0-9_.-]+'
+_KIND = rb'[a-z]+'
+_FLAG = rb'\{' + _Q + _NAME + _Q + rb':true,' + _Q + rb'src' + _Q + rb':' + _Q + _KIND + _Q + rb'\}'
+_GOAL = (rb'\{' + _Q + rb'goals' + _Q + rb':\{' + _Q + _NAME + _Q + rb':\{' + _Q + rb'win' + _Q + rb':[0-9.]+\}\},' + _Q
+         + rb'src' + _Q + rb':' + _Q + _KIND + _Q + rb'\}')
+SRC_MESSAGE = re.compile(rb'the event is missing the field `src` \(reward_from allows (' + _KIND + rb'(?: or ' + _KIND
+                         + rb')*)\); one line that is accepted: (?:' + _FLAG + rb'|' + _GOAL + rb')')
+SRC_MESSAGE_RECORDED = rb'the event needs a src (\1 allowed by reward_from)'
+
 
 def first_event_with(key, k, names):
     events = common.read_jsonl(os.path.join(P0, "scripts", "%s-%d.jsonl" % (key, k)))
@@ -83,6 +100,15 @@ def without_warnings(name, data):
             return None
         rest, removed = rest.replace(line, b"", 1), removed + 1
     return rest if removed else None
+
+
+def with_recorded_src_message(name, data):
+    """For a `replay` or `live` stdout or stderr that carries the message 0.15.1 rewords (SRC_MESSAGE): the bytes with every
+    such message in the recorded words, else None."""
+    if not re.match(r"(replay|live)/[^/]+/s\d+/\d+/(stdout|stderr)$", name):
+        return None
+    rest, n = SRC_MESSAGE.subn(SRC_MESSAGE_RECORDED, data)
+    return rest if n else None
 
 
 def rel(path):
@@ -209,8 +235,9 @@ def record():
 
 
 def check(verbose=False):
-    """Returns (outputs checked, differing names, stderr outputs equal but for the warning lines, strands verified, strand
-    failures, seconds)."""
+    """Returns (outputs checked, differing names, stderr outputs equal but for the warning lines, outputs equal once the
+    message 0.15.1 rewords is put back into the recorded words (and, in a `live` stderr, without the warning lines),
+    strands verified, strand failures, seconds)."""
     t0 = time.time()
     expected = {}
     with open(os.path.join(P0, "EXPECTED"), encoding="utf-8") as f:
@@ -221,6 +248,7 @@ def check(verbose=False):
             expected[name] = (sha, int(size), int(code))
     diffs = []
     warned = []
+    reworded = []
     seen = 0
     names = set()
     for name, code, data in outputs():
@@ -233,6 +261,15 @@ def check(verbose=False):
             if rest is not None and e == (common.sha256_bytes(rest), len(rest), code):
                 warned.append(name)
                 continue
+            back = with_recorded_src_message(name, data)
+            if back is not None:
+                if e == (common.sha256_bytes(back), len(back), code):
+                    reworded.append(name)
+                    continue
+                rest = without_warnings(name, back)
+                if rest is not None and e == (common.sha256_bytes(rest), len(rest), code):
+                    reworded.append(name)
+                    continue
             diffs.append(name)
             if verbose:
                 print("DIFF %s: expected %s, got %s" % (name, e, got))
@@ -253,17 +290,17 @@ def check(verbose=False):
         if expected.get(name) != (common.sha256_bytes(data), len(data), code):
             diffs.append(name)
     missing = [n for n in expected if n not in names]
-    return seen, diffs + missing, warned, nverified, vfail, time.time() - t0
+    return seen, diffs + missing, warned, reworded, nverified, vfail, time.time() - t0
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "record":
         record()
     elif len(sys.argv) > 1 and sys.argv[1] == "check":
-        n, diffs, warned, nv, vfail, secs = check(verbose=True)
-        print(json.dumps({"outputs": n, "differ": len(diffs), "identical": n - len(diffs) - len(warned),
-                          "stderr_warnings_only": len(warned), "strands_verified": nv, "verify_failed": vfail,
-                          "seconds": round(secs, 1)}))
+        n, diffs, warned, reworded, nv, vfail, secs = check(verbose=True)
+        print(json.dumps({"outputs": n, "differ": len(diffs), "identical": n - len(diffs) - len(warned) - len(reworded),
+                          "stderr_warnings_only": len(warned), "src_message_reworded": len(reworded),
+                          "strands_verified": nv, "verify_failed": vfail, "seconds": round(secs, 1)}))
         sys.exit(1 if diffs or vfail else 0)
     else:
         print(__doc__)
