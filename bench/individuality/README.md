@@ -166,7 +166,10 @@ personas without the new blocks × seeds 0–2 × 4 committed random scripts of 
 `describe`, `init`, `compile`, `lint --seeds 0-99`, and `lint`, `prove` and `fuzz` documents of the shipped rules. `p0.py
 check` exits 0 when every output equals its record. One line may differ, on stderr only: a script that sends a `senses` key
 to a persona without the block gets `live`'s one line naming it (scripts k=1, at their earliest such event); the check accepts
-exactly that line there and counts those outputs apart.
+exactly that line there and counts those outputs apart. From 0.15.1 one message differs too: the error for a reward without
+`src` (the corpus's two personas with `reward_from`, `adaptive` and `guarded`) has new words, in the error object on stdout and
+in the stderr line; the check puts each such message back into the recorded words, compares, and counts those outputs apart
+(96 of the 653).
 
 ## What this benchmark cannot see
 
@@ -223,3 +226,14 @@ relabelled.
   event is not re-run (without refused events it is the same run, and metric d replays every strand); the reported
   eviction and expiry shares are given per run, with the age of the addressed payments. The numbers of the run before the change stay in
   the history: c1, c2, c3 and c4 1.0, 50/50 pairs identical.
+- `p0.py` (0.15.1): `check` also accepts the message 0.15.1 rewords. A reward without `src` on a persona with `reward_from`
+  is refused as before (exit 2, the error's `code` and `path` unchanged), and its message, in the error object on stdout and
+  in the stderr line, now names the missing field and shows one accepted line (CHANGELOG, 0.15.1). The corpus's scripts
+  produce one such message: a `praise` without `src` on `adaptive` and `guarded`, whose `reward_from` is `["env"]`. An
+  output of `replay` or `live` that differs from its record is compared once more with exactly that message put back into
+  the recorded words and, when it then equals its record, is reported apart as `src_message_reworded`: 96 outputs with a
+  0.15.1 build (the `replay` and `live` stdout and stderr of `adaptive` and `guarded`, 3 seeds and 4 scripts each), none
+  with 0.15.0. Unlike the two warning lines, this message is part of a document: the error object on stdout (48 of the
+  96). Reason: the rewording is part of 0.15.1 (the error names the field and shows an accepted event); the engine's
+  behaviour is unchanged, and every stance, state and strand stays byte-identical. EXPECTED, the scripts and the strands
+  are unchanged; MANIFEST's p0.py line was updated.
