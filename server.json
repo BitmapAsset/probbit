@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.BitmapAsset/probbit",
+  "title": "probbit",
+  "description": "A personality, mood and memory layer for AI agents, plus exact plans under hard rules. Offline.",
+  "repository": {
+    "url": "https://github.com/BitmapAsset/probbit",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/BitmapAsset/probbit/blob/main/docs/mcp.md",
+  "version": "0.15.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "probbit",
+      "version": "0.15.1",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+name: mcp-registry
+
+# Publishes server.json to the official MCP Registry (registry.modelcontextprotocol.io). Manual only: it never runs on a
+# push or a tag. Run it after the npm package of the same version is published (the registry reads `mcpName` from it).
+# Auth is GitHub OIDC (`mcp-publisher login github-oidc`): no stored token; the run may claim io.github.BitmapAsset/*.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "tag to publish from, e.g. v0.15.1"
+        required: true
+      publish:
+        description: "publish (unticked: check and validate only)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: server.json, npm/package.json and the published npm package agree
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          name=$(jq -r .name server.json); v=$(jq -r .version server.json); pv=$(jq -r '.packages[0].version' server.json)
+          nv=$(jq -r .version npm/package.json); mcp=$(jq -r .mcpName npm/package.json)
+          echo "server.json $name $v (package $pv); npm/package.json $nv mcpName $mcp"
+          [ "$v" = "$pv" ] && [ "$v" = "$nv" ] || { echo "versions differ"; exit 1; }
+          [ "$name" = "$mcp" ] || { echo "server.json name and npm mcpName differ"; exit 1; }
+          [ "v$v" = "$REF" ] || { echo "ref $REF is not v$v"; exit 1; }
+          published=$(curl -fsS "https://registry.npmjs.org/probbit/$v" | jq -r .mcpName)
+          [ "$published" = "$name" ] || { echo "npm probbit@$v is not published with mcpName $name (got: $published)"; exit 1; }
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: download and verify mcp-publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl -fsSL -o "$archive" "$base/$archive"
+          curl -fsSL -o "$archive.sigstore.json" "$base/$archive.sigstore.json"
+          cosign verify-blob --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" "$archive"
+          tar xzf "$archive" mcp-publisher
+      - name: validate
+        run: ./mcp-publisher validate
+      - name: log in (GitHub OIDC) and publish
+        if: ${{ inputs.publish }}
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
