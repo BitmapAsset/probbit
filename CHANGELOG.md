@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.15.1 - 2026-11-19
+
+0.15.1 adds release channels for the MCP server: `server.json` for the official MCP Registry with a workflow that
+publishes it only when started by hand, docs/mcp.md with the setup for each MCP client, and cargo-binstall metadata
+(untested: the crates are not on crates.io). A reward without `src` on a persona with `reward_from` is still refused, and
+the error now names the missing field and shows a line that is accepted. `bench/agentdojo/experiments/rerun.sh` stops at
+once when the arm-A strands are not extracted. The documentation covers habits that yield under `on_conflict: yield` and
+what mapping raw task success onto praise and criticism does to learned traits. Apart from the message of the
+missing-`src` error, every document is byte for byte as 0.15.0 writes it (the P0 corpus: 653 recorded outputs; the 96
+that carry the message equal their records once it is put back into the recorded words, and
+`bench/individuality/p0.py check` reports them apart).
+
+Upgrade notes:
+- `probbit live`, `persona turn` and `persona replay` on a persona with `reward_from`: a reward without `src` still exits
+  2, and the error text changes: it names the missing field `src`, lists the kinds `reward_from` allows and shows one
+  accepted line. A script that matches the old error text needs the new words.
+- `bench/agentdojo/experiments/rerun.sh` exits 2 with the exact `tar xzf tables/strands-A.tar.gz` command when
+  `strands/A` does not hold all 726 arm-A strands; before, E5 failed 0/726 and the tables differed.
+
 ### Added
 
 - `server.json` for the official MCP Registry (the name is the npm package's `mcpName`; the package `probbit`, stdio,

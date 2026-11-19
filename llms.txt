@@ -17,6 +17,7 @@ Install on Linux or macOS: `curl -fsSL https://raw.githubusercontent.com/BitmapA
 
 - [Persona format](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/persona.md): the persona file (traits, moods, habits), the stance and state documents, bounded learning, `probbit live`, `probbit monitor`, what a persona can not do
 - [Calling probbit from agents](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/agents.md): shell, Python, Node, PowerShell, the MCP server and its tools, a browser
+- [probbit as an MCP server](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/mcp.md): the 10 tools, setup for Claude Code, Codex CLI, Gemini CLI, Claude Desktop, Cursor, VS Code and OpenClaw, two worked examples, troubleshooting
 - [Agent SDK adapters](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/adapters.md): a live individual beside Claude Code hooks, the OpenAI Agents SDK, LangChain and the Vercel AI SDK
 - [Receipts](https://raw.githubusercontent.com/BitmapAsset/probbit/main/docs/receipts.md): one receipt per decision from any strand
 - [OpenClaw plugin](https://raw.githubusercontent.com/BitmapAsset/probbit/main/plugins/openclaw/README.md): `probbit-stance`, the stance in every turn of the sessions you list

@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/BitmapAsset/probbit/main/install.sh
 # 2. Put that directory on PATH for this shell. No output.
 export PATH="$HOME/.local/bin:$PATH"
 
-# 3. Expect "probbit 0.15.0" (or later). Exit 0.
+# 3. Expect "probbit 0.15.1" (or later). Exit 0.
 probbit --version
 
 # 4. Fetch an example persona (a tutor called Pip). No output; tutor.yaml appears.
@@ -104,7 +104,7 @@ The MCP server client by client (setup, the 10 tools, two worked examples, troub
 | CLI event receipt | [explain one logged turn](docs/CHEATSHEET.md#probbit-explain-strand---event-n) | `probbit explain run.strand --event 2` → inputs, before/after stance, binding habits, chain and `recomputes` or `differs`; add `--json` |
 | MCP server (Claude Code, Codex, Cursor, mcporter, any MCP client) | `claude mcp add probbit -- probbit mcp` ([docs/agents.md](docs/agents.md)) | step 8 above: 10 tools, `probbit_decide` … `probbit_live_verify` |
 | OpenClaw plugin | `openclaw plugins install npm:probbit-stance --accept-capabilities` | `openclaw plugins inspect probbit-stance --runtime --json` lists both hooks ([plugins/openclaw](plugins/openclaw/README.md)) |
-| npm | `npm i -g probbit` (Node 18+; downloads the prebuilt binary, SHA-256 checked) | `probbit --version` → `probbit 0.15.0` |
+| npm | `npm i -g probbit` (Node 18+; downloads the prebuilt binary, SHA-256 checked) | `probbit --version` → `probbit 0.15.1` |
 | Python | `curl -fsSLO https://raw.githubusercontent.com/BitmapAsset/probbit/main/python/probbit.py`: a stdlib-only wrapper around the CLI (decide, run, evaluate, persona, live; typed errors); not on PyPI | `python3 -c 'import probbit; s=probbit.persona_init("tutor.yaml", seed=2); print(probbit.persona_turn("tutor.yaml", s, {"sentiment":"negative"})["stance"]["line"])'` → `Stance: go easy on the jokes; …` |
 | Agent SDK adapters | Claude Code hooks, OpenAI Agents SDK, LangChain, Vercel AI SDK ([docs/adapters.md](docs/adapters.md)) | in a clone: `python3 python/test_host.py` (Python hosts) or `node --test examples/node/stance-host.test.mjs` |
 | Browser (wasm) | in a clone, with Rust and `rustup target add wasm32-unknown-unknown`: `playground/build.sh` | `ls -l playground/probbit.wasm`, then open `playground/index.html` |
@@ -216,7 +216,7 @@ modes"). The tables are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Install
 
-One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.15.0.
+One line, no sudo, the archive's SHA-256 checked before anything is installed. The current release is v0.15.1.
 
 | how | command |
 |---|---|
@@ -663,7 +663,7 @@ numbers), and uploads the JSON report as an artifact:
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: BitmapAsset/probbit@v0.15.0    # the action needs probbit 0.9.0 or later
+- uses: BitmapAsset/probbit@v0.15.1    # the action needs probbit 0.9.0 or later
   with:
     persona: agent/policy.yaml
     props: agent/rules.json
@@ -679,7 +679,7 @@ numbers), and uploads the JSON report as an artifact:
 | `strands` | | strands to replay, one path or glob per line; a glob that matches nothing fails the check |
 | `seeds` | `0-99` | the individuals |
 | `depth` | probbit's (8) | events per fuzzed script |
-| `version` | `latest` | the release `install.sh` installs (`v0.15.0`, ...) |
+| `version` | `latest` | the release `install.sh` installs (`v0.15.1`, ...) |
 | `binary` | | a probbit binary to use instead (one built earlier in the job); overrides `version` |
 | `allow-unproven` | `false` | `true`: exit 3 is a warning and the job passes |
 | `json-artifact` | `true` | upload `probbit-check.json` (`actions/upload-artifact@v4`, the only action it uses) |
