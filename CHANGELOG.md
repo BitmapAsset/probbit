@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Fixed
+
+- `probbit live` on the real clock: each stamp's rounding remainder carries into the next event, so the `elapsed_hours`
+  add up to the wall time at any event rate (it was dropped: above about 556 events/s every stamp was 0).
+
 ## 0.15.1 - 2026-11-19
 
 0.15.1 adds release channels for the MCP server: `server.json` for the official MCP Registry with a workflow that

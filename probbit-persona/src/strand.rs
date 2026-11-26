@@ -23,6 +23,10 @@ pub const FORMAT: f64 = 1.0;
 pub enum Clock { Real(probbit_core::rt::Instant), Fixed }
 /// Hours quantised to 1e-6 h (3.6 ms): the value the turn uses is the value the strand logs
 fn q6(h: f64) -> f64 { persona::r6(h) }
+/// The real clock's stamp for a reading `now` (hours since the run started), `last` being the sum of the stamps so far -> (the
+/// event's elapsed hours, quantised to 1e-6 h; the new `last`). `last` moves by the stamp, not to `now`: the rounding remainder
+/// carries into the next event, so the stamps add up to the clock's reading within half a quantum at any event rate
+fn real_stamp(last: f64, now: f64) -> (f64, f64) { let e = q6((now - last).max(0.0)); (e, last + e) }
 
 /// A strand's life as its control lines leave it: events are answered only while `Active`
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -148,9 +152,9 @@ impl Live {
             _ => None };
         let mut kv: Vec<(String, Json)> = kv.iter().filter(|(k, _)| k != "elapsed_hours").cloned().collect();
         let given = ev.get("elapsed_hours");
-        let (elapsed, now) = match &self.clock {
+        let (elapsed, last) = match &self.clock {
             Clock::Real(t0) => { if given.is_some() { return Err(perr("event.elapsed_hours", "the clock stamps it (--clock fixed reads it from the events)")); }
-                let now = t0.elapsed().as_secs_f64() / 3600.0; (q6((now - self.last).max(0.0)), now) }
+                real_stamp(self.last, t0.elapsed().as_secs_f64() / 3600.0) }
             Clock::Fixed => { let e = match given { None => 0.0, Some(Json::Num(x)) if x.is_finite() && *x >= 0.0 => *x, _ => return Err(perr("event.elapsed_hours", "a number >= 0")) }; (q6(e), self.last) } };
         kv.push(("elapsed_hours".into(), Json::Num(elapsed)));
         let inputs = Json::Obj(kv);
@@ -202,7 +206,7 @@ impl Live {
         if let Some(m) = self.expect.as_mut() { persona::expect_step(&self.p, m, &inputs, dev.as_ref().and_then(persona::Deviation::logged_pred)); }
         self.traj = traj;
         enter(Phase::Line);
-        self.n += 1; self.last = now; self.prev = persona::digest_of(&line); self.st = *ns;
+        self.n += 1; self.last = last; self.prev = persona::digest_of(&line); self.st = *ns;
         let line = match &rest { Some(r) => { self.rests += 1; format!("{r}\n{line}") } None => line };
         crate::trace::end();
         Ok((stance, line))
@@ -1111,4 +1115,25 @@ pub fn bound_audit(text: &str, b: &persona::bound::Bound, eng: Engine) -> Result
     Ok((Json::Obj(vec![("persona".into(), s(&p.name)), ("digest".into(), s(&p.digest)), ("seed".into(), Json::Num(seed as f64)), ("rest_hours".into(), Json::Num(rest)),
         ("events".into(), Json::Num(events as f64)), ("feedback_events".into(), Json::Num(feedback as f64)), ("erasures".into(), Json::Num(erasures as f64)),
         ("traits".into(), Json::Arr(rows)), ("exceedances".into(), Json::Num(exceed as f64)), ("ok".into(), Json::Bool(ok))]), ok))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    /// The real clock at 10 to 10,000 events/s, 2,000 events each, on synthetic readings (even and jittered gaps): every stamp
+    /// >= 0 and a whole number of 1e-6 h, and after every event the stamps' sum within 1e-6 h of the clock's reading
+    #[test]
+    fn real_stamps_keep_the_total_at_any_rate() {
+        for rate in [10.0, 100.0, 225.0, 1_000.0, 2_700.0, 10_000.0] { for jitter in [false, true] {
+            let (mut last, mut sum, mut now, mut x) = (0.0f64, 0.0f64, 0.0f64, 12345u64);
+            for _ in 0..2000 {
+                x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let gap = if jitter { 0.5 + (x >> 11) as f64 / (1u64 << 53) as f64 } else { 1.0 }; now += gap / rate / 3600.0;
+                let (e, l) = real_stamp(last, now); last = l; sum += e;
+                assert!(e >= 0.0 && q6(e) == e && (e * 1e6 - (e * 1e6).round()).abs() < 1e-6, "rate {rate}: stamp {e} is not a whole number of 1e-6 h");
+                assert!((sum - now).abs() <= 1e-6, "rate {rate}, jitter {jitter}: stamped {sum} h, clock {now} h");
+            }
+            assert!((last - now).abs() <= 1e-6 && (sum - last).abs() < 1e-12);
+        } }
+    }
 }
